@@ -41,6 +41,8 @@ struct Snapshot {
     app_states: std::collections::BTreeMap<String, &'static str>,
     app_errors: std::collections::BTreeMap<String, String>,
     kinds: Vec<(&'static str, &'static str)>,
+    /// Parked folders, where new applications can be created.
+    paths: Vec<std::path::PathBuf>,
 }
 
 type Res<T> = Result<T, String>;
@@ -75,6 +77,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
             .iter()
             .map(|k| (*k, anvil::apps::label(k)))
             .collect(),
+        paths: cfg.paths.clone(),
         sites,
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
@@ -369,6 +372,53 @@ fn runtime_uninstall(handle: AppHandle, id: String, version: String) -> Res<()> 
     anvil::runtimes::uninstall(&id, &version).map_err(err)?;
     changed(&handle);
     Ok(())
+}
+
+/// Create a new application from a template, serve it, and start it if it runs
+/// its own server. Returns its name.
+#[tauri::command]
+async fn create_app(
+    handle: AppHandle,
+    kind: String,
+    name: String,
+    parent: std::path::PathBuf,
+) -> Res<String> {
+    let job = (kind.clone(), name.clone(), parent.clone());
+    let dir = tauri::async_runtime::spawn_blocking(move || {
+        let cfg = anvil::load()?;
+        anvil::create::create(&job.0, &job.1, &job.2, cfg.php.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(err)?;
+
+    let app = handle.state::<App>();
+    let mut cfg = anvil::load().map_err(err)?;
+    let parked = cfg
+        .paths
+        .iter()
+        .any(|p| p.canonicalize().ok() == parent.canonicalize().ok());
+    let site = if parked {
+        anvil::site_name(&name)
+    } else {
+        anvil::link(&mut cfg, &name, dir).map_err(err)?
+    };
+    sites_changed(&handle, &app, &cfg);
+    if anvil::apps::runs_process(&kind) {
+        start_app(&app, &cfg, &site);
+    }
+    changed(&handle);
+    Ok(site)
+}
+
+#[tauri::command]
+fn open_create_log(name: String) -> Res<()> {
+    anvil::run(
+        Command::new("open")
+            .args(["-a", "Console"])
+            .arg(anvil::create::log_file(&name)),
+    )
+    .map_err(err)
 }
 
 /// Serve one project folder; its name comes from the folder.
@@ -1002,6 +1052,8 @@ fn main() {
             set_php,
             add_alias,
             link_folder,
+            create_app,
+            open_create_log,
             park_folder,
             remove_site,
             set_group,

@@ -2,6 +2,7 @@
 //! Shared by the `anvil` CLI and the macOS app.
 
 pub mod apps;
+pub mod create;
 pub mod dns;
 pub mod resources;
 pub mod runtimes;
