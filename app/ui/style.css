@@ -402,7 +402,16 @@ button, select, input { font: inherit; color: inherit; }
   padding: 8px 36px 36px;
 }
 
-.site-head { margin-bottom: 20px; }
+/* Header: name and address on the left, run state on the right. */
+.site-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.site-title { min-width: 0; }
 
 .site-name {
   margin: 0 0 4px;
@@ -419,24 +428,108 @@ button, select, input { font: inherit; color: inherit; }
 
 .site-url:hover { text-decoration: underline; }
 
-.actions {
+.run-box {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 28px;
+  flex: none;
+  padding-top: 4px;
 }
 
-.actions button {
-  height: 28px;
+.run-box .state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+  color: var(--muted);
+}
+
+.run-box button {
+  height: 26px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-s);
+  border-radius: 13px;
   background: var(--steel-raised);
 }
 
-.actions button:hover { border-color: var(--cold); }
+/* Quick actions: icon over label, one quiet row. */
+.quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
 
-.actions button:active { transform: translateY(1px); }
+.quick button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 76px;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--steel-hover);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.quick button:hover { color: var(--text); background: var(--steel-raised); }
+
+.quick svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Tabs: text with an underline on the selected one. */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  max-width: 640px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs [role="tab"] {
+  position: relative;
+  padding: 0 0 10px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.tabs [role="tab"]:hover { color: var(--text); }
+
+.tabs [role="tab"][aria-selected="true"] { color: var(--text); }
+
+.tabs [role="tab"][aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--heat);
+}
+
+.tabs .res-reload {
+  margin-left: auto;
+  margin-bottom: 8px;
+  width: 24px;
+  height: 24px;
+}
+
+[role="tabpanel"] { max-width: 640px; }
+
+.muted { color: var(--muted); }
 
 /* Settings read like a macOS grouped list, not a stack of cards. */
 .group {
@@ -476,17 +569,6 @@ button, select, input { font: inherit; color: inherit; }
   border: 1px solid var(--line);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
-}
-
-.group-title {
-  margin: 32px 0 2px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.group-hint {
-  margin: 0 0 10px;
-  color: var(--muted);
 }
 
 .row input,
@@ -754,21 +836,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 @keyframes pulse { 50% { opacity: 0.35; } }
 
-.run-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.run-status .state {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.run-status button,
 .row dd > select {
   height: 26px;
   padding: 0 10px;
@@ -777,27 +844,41 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   background: var(--steel-raised);
 }
 
-.run-error { margin: 10px 0 0; max-width: 640px; }
-
-.group-hint code { font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
+.run-error { margin: 0 0 16px; max-width: 640px; }
 
 [hidden] { display: none !important; }
 
 /* ---------- Resources ---------- */
 
-.resources { margin-top: 32px; max-width: 640px; }
-
-.group-title-row {
+.res-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 10px;
 }
 
-.group-title-row .group-title { margin: 0; }
+.res-total {
+  font: 600 22px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
 
-.res-summary { margin: 8px 0 10px; color: var(--muted); }
+.res-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: -4px 0 14px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 
-.res-summary strong { color: var(--text); font-size: 15px; }
+.res-legend .key { display: inline-flex; align-items: center; gap: 6px; }
+
+.swatch { width: 8px; height: 8px; border-radius: 2px; }
+.swatch.keep { background: var(--cold); }
+.swatch.rebuild { background: var(--heat-deep); }
+.swatch.safe { background: var(--heat-white); }
 
 .res-bar {
   display: flex;
@@ -872,7 +953,13 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .res-cells .del { color: var(--muted); }
 .res-cells .del:hover { color: var(--heat-text); border-color: var(--heat-deep); }
 
-.clean-all { margin: 0 0 12px; color: var(--heat-text); }
+.clean-all { color: var(--heat-text); }
+
+/* Delete appears on the row you point at (or tab into), like Finder's hover actions. */
+.res-cells .del { visibility: hidden; width: 60px; }
+.res-cells .del-space { width: 60px; }
+.res-list .row:hover .del,
+.res-list .row:focus-within .del { visibility: visible; }
 
 .page .size {
   min-width: 64px;

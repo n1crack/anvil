@@ -40,101 +40,102 @@
   </main>
 
   <template id="site-tpl">
-    <div class="site-head">
-      <h1 class="site-name"></h1>
-      <a class="site-url" href="#"></a>
-    </div>
-    <div class="actions">
-      <button data-open="browser">Open in browser</button>
-      <button data-open="finder">Show in Finder</button>
-      <button data-open="terminal">Open Terminal</button>
-      <button data-open="editor" class="editor-btn" hidden></button>
-    </div>
-    <dl class="group">
-      <div class="row">
-        <dt><label for="kind">Type</label></dt>
-        <dd><select id="kind"></select></dd>
+    <header class="site-head">
+      <div class="site-title">
+        <h1 class="site-name"></h1>
+        <a class="site-url" href="#"></a>
       </div>
-      <div class="row php-only">
-        <dt><label for="php">PHP</label></dt>
-        <dd><select id="php"></select></dd>
+      <div class="run-box" hidden>
+        <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text"></span></span>
+        <button data-run="start">Start</button>
+        <button data-run="restart">Restart</button>
+        <button data-run="stop">Stop</button>
       </div>
-      <div class="row php-only">
-        <dt>Web root</dt>
-        <dd class="path" data-field="root"></dd>
-      </div>
-      <div class="row">
-        <dt>Project</dt>
-        <dd class="path" data-field="path"></dd>
-      </div>
-      <div class="row">
-        <dt>Source</dt>
-        <dd data-field="source"></dd>
-      </div>
-    </dl>
+    </header>
+    <p class="run-error error" hidden></p>
 
-    <div class="process-only">
-      <h2 class="group-title">Run</h2>
-      <p class="group-hint">Anvil starts this app on a private port and serves it at its address. The app gets the port in <code>$PORT</code>.</p>
+    <div class="quick">
+      <button data-open="browser" title="Open in browser">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M10.5 5.5 9 9l-3.5 1.5L7 7z"/></svg>Browser
+      </button>
+      <button data-open="finder" title="Show in Finder">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>Finder
+      </button>
+      <button data-open="terminal" title="Open Terminal here">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3"/></svg>Terminal
+      </button>
+      <button data-open="editor" class="editor-btn" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.75 13.25 5.5 6 12.75H3.25V10z"/></svg><span>Editor</span>
+      </button>
+      <button class="show-log" title="Open the app’s log" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.75 1.75h6l2.5 2.5v10h-8.5z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>Log
+      </button>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Application">
+      <button role="tab" data-tab="overview">Overview</button>
+      <button role="tab" data-tab="settings">Settings</button>
+      <button role="tab" data-tab="resources">Resources</button>
+      <button class="icon-btn res-reload" title="Measure again" aria-label="Measure resources again" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <section role="tabpanel" data-panel="overview">
+      <dl class="group">
+        <div class="row"><dt>Type</dt><dd data-field="kind"></dd></div>
+        <div class="row"><dt>Runs on</dt><dd data-field="runtime"></dd></div>
+        <div class="row"><dt>Folder</dt><dd class="path" data-field="path"></dd></div>
+        <div class="row php-only"><dt>Web root</dt><dd class="path" data-field="root"></dd></div>
+        <div class="row"><dt>Disk</dt><dd data-field="disk" class="muted">Measuring…</dd></div>
+        <div class="row"><dt>Services</dt><dd data-field="services" class="muted">Measuring…</dd></div>
+      </dl>
+    </section>
+
+    <section role="tabpanel" data-panel="settings" hidden>
       <dl class="group">
         <div class="row">
-          <dt>Status</dt>
-          <dd class="run-status">
-            <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text"></span></span>
-            <span class="actions-inline">
-              <button data-run="start">Start</button>
-              <button data-run="restart">Restart</button>
-              <button data-run="stop">Stop</button>
-              <button class="show-log">Show log</button>
-            </span>
-          </dd>
+          <dt><label for="kind">Type</label></dt>
+          <dd><select id="kind"></select></dd>
         </div>
-        <div class="row">
-          <dt><label for="app-command">Start command</label></dt>
+        <div class="row php-only">
+          <dt><label for="php">PHP version</label></dt>
+          <dd><select id="php"></select></dd>
+        </div>
+        <div class="row php-only">
+          <dt><label for="ini-memory">Memory limit</label></dt>
+          <dd><input id="ini-memory" data-ini="memory_limit" spellcheck="false"></dd>
+        </div>
+        <div class="row php-only">
+          <dt><label for="ini-upload" title="Largest file a form can upload">Upload limit</label></dt>
+          <dd><input id="ini-upload" data-ini="upload_max_filesize" spellcheck="false"></dd>
+        </div>
+        <div class="row php-only">
+          <dt><label for="ini-time" title="Seconds before a request is stopped">Max execution time</label></dt>
+          <dd><input id="ini-time" data-ini="max_execution_time" spellcheck="false"></dd>
+        </div>
+        <div class="row row-top php-only">
+          <dt><label for="ini-extra" title="Any php.ini setting, one per line">Other PHP settings</label></dt>
+          <dd><textarea id="ini-extra" rows="3" spellcheck="false" placeholder="display_errors = On"></textarea></dd>
+        </div>
+        <div class="row process-only">
+          <dt><label for="app-command" title="Runs in the project folder with $PORT set">Start command</label></dt>
           <dd><input id="app-command" spellcheck="false"></dd>
         </div>
-        <div class="row">
+        <div class="row process-only">
           <dt><label for="app-port">Port</label></dt>
           <dd><input id="app-port" inputmode="numeric" spellcheck="false"></dd>
         </div>
-        <div class="row">
+        <div class="row process-only">
           <dt><label for="app-autostart">Start with Anvil</label></dt>
           <dd><input id="app-autostart" type="checkbox" role="switch"></dd>
         </div>
       </dl>
-      <p class="run-error error" hidden></p>
-    </div>
+    </section>
 
-    <h2 class="group-title php-only">PHP settings for this application</h2>
-    <p class="group-hint php-only">Empty fields use the defaults from Settings.</p>
-    <dl class="group php-only" id="site-ini">
-      <div class="row">
-        <dt><label for="ini-memory">Memory limit</label></dt>
-        <dd><input id="ini-memory" data-ini="memory_limit" spellcheck="false"></dd>
-      </div>
-      <div class="row">
-        <dt><label for="ini-upload">Upload limit</label></dt>
-        <dd><input id="ini-upload" data-ini="upload_max_filesize" spellcheck="false"></dd>
-      </div>
-      <div class="row">
-        <dt><label for="ini-time">Max execution time</label></dt>
-        <dd><input id="ini-time" data-ini="max_execution_time" spellcheck="false"></dd>
-      </div>
-      <div class="row row-top">
-        <dt><label for="ini-extra">Other settings</label></dt>
-        <dd><textarea id="ini-extra" rows="3" spellcheck="false" placeholder="display_errors = On"></textarea></dd>
-      </div>
-    </dl>
-
-    <div class="resources">
-      <div class="group-title-row">
-        <h2 class="group-title">Resources</h2>
-        <button class="icon-btn res-reload" title="Measure again" aria-label="Measure resources again">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-      </div>
-      <div class="res-body"><p class="group-hint">Measuring…</p></div>
-    </div>
+    <section role="tabpanel" data-panel="resources" hidden>
+      <div class="res-body"></div>
+    </section>
   </template>
 
   <script src="app.js"></script>
