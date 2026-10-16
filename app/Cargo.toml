@@ -13,4 +13,6 @@ anvil = { path = ".." }
 anyhow = "1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
-tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"

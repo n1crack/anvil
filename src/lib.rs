@@ -32,11 +32,22 @@ pub struct Config {
     pub hidden: Vec<String>,
     /// User groups in the app's site list: group name -> site names.
     pub groups: BTreeMap<String, Vec<String>>,
+    /// php.ini overrides for every site; a site's own `ini` wins over these.
+    pub ini: BTreeMap<String, String>,
+    /// macOS app used for "Open Terminal", e.g. "iTerm".
+    pub terminal: Option<String>,
+    /// "light" or "dark"; unset follows the system.
+    pub theme: Option<String>,
+    /// Keep the Dock icon while no window is open.
+    pub dock_icon: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct SiteConfig {
     pub php: Option<String>,
+    /// php.ini overrides for this site only, e.g. memory_limit = "1G".
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ini: BTreeMap<String, String>,
 }
 
 impl Default for Config {
@@ -54,6 +65,10 @@ impl Default for Config {
             editor: None,
             hidden: vec![],
             groups: BTreeMap::new(),
+            ini: BTreeMap::new(),
+            terminal: None,
+            theme: None,
+            dock_icon: false,
         }
     }
 }
@@ -69,6 +84,8 @@ pub struct Site {
     pub php: Option<String>,
     /// True when the site has its own PHP version instead of the default.
     pub php_pinned: bool,
+    /// php.ini overrides; a site with overrides gets its own PHP-FPM pool.
+    pub ini: BTreeMap<String, String>,
     pub linked: bool,
     /// The parked directory this site comes from (`None` for linked sites).
     pub parked_in: Option<PathBuf>,
@@ -138,7 +155,9 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             } else {
                 path.clone()
             };
-            let pinned = cfg.sites.get(&name).and_then(|s| s.php.clone());
+            let own = cfg.sites.get(&name);
+            let pinned = own.and_then(|s| s.php.clone());
+            let ini = own.map(|s| s.ini.clone()).unwrap_or_default();
             let modified = fs::metadata(&path)
                 .and_then(|m| m.modified())
                 .ok()
@@ -146,6 +165,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
                 .map_or(0, |d| d.as_secs());
             Site {
                 modified,
+                ini,
                 php_pinned: pinned.is_some(),
                 php: pinned.or_else(|| cfg.php.clone()),
                 name,
@@ -242,6 +262,26 @@ fn fetch_tgz(url: &str, dir: &Path) -> Result<()> {
 
 fn php_dir(v: &str) -> PathBuf {
     home().join("php").join(v)
+}
+
+/// PHP versions Anvil offers to install, newest first.
+pub const PHP_VERSIONS: [&str; 6] = ["8.5", "8.4", "8.3", "8.2", "8.1", "8.0"];
+
+/// Remove an installed PHP version. Refuses the default and versions sites are pinned to.
+pub fn php_uninstall(cfg: &Config, v: &str) -> Result<()> {
+    if cfg.php.as_deref() == Some(v) {
+        bail!("PHP {v} is the default version — choose another default first");
+    }
+    if let Some(site) = cfg.sites.iter().find(|(_, s)| s.php.as_deref() == Some(v)) {
+        bail!(
+            "{} uses PHP {v} — switch it to another version first",
+            site.0
+        );
+    }
+    if !PHP_VERSIONS.contains(&v) {
+        bail!("Unknown PHP version {v}");
+    }
+    fs::remove_dir_all(php_dir(v)).with_context(|| format!("PHP {v} is not installed"))
 }
 
 pub fn installed_php() -> Vec<String> {
@@ -343,8 +383,100 @@ fn caddy_cmd() -> Command {
     c
 }
 
-fn fpm_socket(v: &str) -> PathBuf {
-    home().join("run").join(format!("php-{v}.sock"))
+/// Pool name for a site with its own settings (FPM pool names can't contain dots).
+fn pool(site: &Site) -> String {
+    format!("site-{}", site.name.replace('.', "_"))
+}
+
+/// The socket a site's PHP requests go to: its own pool, or the version's shared pool.
+fn fpm_socket(site: &Site) -> Option<PathBuf> {
+    let v = site.php.as_ref()?;
+    let name = if site.ini.is_empty() {
+        format!("php-{v}")
+    } else {
+        pool(site)
+    };
+    Some(home().join("run").join(format!("{name}.sock")))
+}
+
+/// PHP-FPM config for one version: the shared pool plus one pool per customised site.
+fn fpm_conf(v: &str, global: &BTreeMap<String, String>, sites: &[Site]) -> String {
+    let pool_conf = |name: &str, sock: &Path, max: u8| {
+        format!(
+            "\n[{name}]\nlisten = {}\npm = ondemand\npm.max_children = {max}\ncatch_workers_output = yes\nclear_env = no\n",
+            sock.display()
+        )
+    };
+    let mut s = format!(
+        "[global]\nerror_log = {}\ndaemonize = no\n",
+        home()
+            .join("log")
+            .join(format!("php-{v}-fpm.log"))
+            .display()
+    );
+    let values = |ini: &BTreeMap<String, String>| -> String {
+        ini.iter()
+            .map(|(k, val)| format!("php_value[{k}] = {val}\n"))
+            .collect()
+    };
+    s += &pool_conf("www", &home().join("run").join(format!("php-{v}.sock")), 16);
+    s += &values(global);
+    for site in sites
+        .iter()
+        .filter(|s| s.php.as_deref() == Some(v) && !s.ini.is_empty())
+    {
+        s += &pool_conf(&pool(site), &fpm_socket(site).unwrap(), 8);
+        let mut ini = global.clone();
+        ini.extend(site.ini.clone());
+        s += &values(&ini);
+    }
+    s
+}
+
+/// Reject anything that could break out of a `php_value[key] = value` line.
+fn check_ini(key: &str, value: &str) -> Result<()> {
+    let key_ok = !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+    if !key_ok {
+        bail!("\"{key}\" is not a valid php.ini setting name");
+    }
+    if value.is_empty() || value.chars().any(|c| c.is_control() || c == ';') {
+        bail!("Invalid value for {key}");
+    }
+    Ok(())
+}
+
+/// Set (or with `None`, clear) one php.ini override for every site.
+pub fn set_global_ini(cfg: &mut Config, key: &str, value: Option<&str>) -> Result<()> {
+    let key = key.trim();
+    match value.map(str::trim) {
+        Some(v) => {
+            check_ini(key, v)?;
+            cfg.ini.insert(key.into(), v.into());
+        }
+        None => {
+            cfg.ini.remove(key);
+        }
+    }
+    save(cfg)
+}
+
+/// Set (or with `None`, clear) one php.ini override for a site.
+pub fn set_site_ini(cfg: &mut Config, site: &str, key: &str, value: Option<&str>) -> Result<()> {
+    let key = key.trim();
+    let entry = cfg.sites.entry(site_name(site)).or_default();
+    match value.map(str::trim) {
+        Some(v) => {
+            check_ini(key, v)?;
+            entry.ini.insert(key.into(), v.into());
+        }
+        None => {
+            entry.ini.remove(key);
+        }
+    }
+    save(cfg)
 }
 
 pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
@@ -359,8 +491,8 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             cfg.tld,
             site.root.display()
         );
-        if let Some(v) = &site.php {
-            s += &format!("\tphp_fastcgi unix/{}\n", fpm_socket(v).display());
+        if let Some(sock) = fpm_socket(site) {
+            s += &format!("\tphp_fastcgi unix/{}\n", sock.display());
         }
         s += "\tfile_server {\n\t\thide .*\n\t}\n}\n";
     }
@@ -458,20 +590,14 @@ impl Server {
 
         let mut server = Server { children: vec![] };
         for v in &versions {
-            let sock = fpm_socket(v);
-            let _ = fs::remove_file(&sock);
+            for site in &sites {
+                if let Some(sock) = fpm_socket(site) {
+                    let _ = fs::remove_file(sock);
+                }
+            }
+            let _ = fs::remove_file(home().join("run").join(format!("php-{v}.sock")));
             let conf = home().join("run").join(format!("php-{v}-fpm.conf"));
-            fs::write(
-                &conf,
-                format!(
-                    "[global]\nerror_log = {log}\ndaemonize = no\n\n[www]\nlisten = {sock}\npm = ondemand\npm.max_children = 16\ncatch_workers_output = yes\nclear_env = no\n",
-                    log = home()
-                        .join("log")
-                        .join(format!("php-{v}-fpm.log"))
-                        .display(),
-                    sock = sock.display(),
-                ),
-            )?;
+            fs::write(&conf, fpm_conf(v, &cfg.ini, &sites))?;
             server.children.push(
                 Command::new(php_dir(v).join("php-fpm"))
                     .arg("-y")
@@ -552,6 +678,7 @@ mod tests {
             root: root.into(),
             php: php.map(Into::into),
             php_pinned: false,
+            ini: BTreeMap::new(),
             linked: false,
             parked_in: None,
             modified: 0,
@@ -587,6 +714,39 @@ mod tests {
         assert!(dir.join("shop").is_dir());
         assert!(!cfg.groups.contains_key("Clients"));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn customised_sites_get_their_own_pool() {
+        let mut shop = site("shop.be", "/s/shop/public", Some("8.4"));
+        shop.ini.insert("memory_limit".into(), "1G".into());
+        let sites = [shop, site("blog", "/s/blog", Some("8.4"))];
+
+        let global = BTreeMap::from([
+            ("memory_limit".to_string(), "256M".to_string()),
+            ("max_execution_time".to_string(), "60".to_string()),
+        ]);
+        let conf = fpm_conf("8.4", &global, &sites);
+        // www gets the global values; the site pool merges them with its own.
+        let site_pool = &conf[conf.find("[site-shop_be]").unwrap()..];
+        assert!(site_pool.contains("php_value[max_execution_time] = 60"));
+        assert!(!site_pool.contains("256M"));
+        assert!(
+            conf[..conf.find("[site-shop_be]").unwrap()].contains("php_value[memory_limit] = 256M")
+        );
+        assert!(conf.contains("[www]"));
+        assert!(conf.contains("[site-shop_be]\nlisten = "));
+        assert!(conf.contains("php_value[memory_limit] = 1G"));
+        assert!(!conf.contains("site-blog"));
+
+        let caddy = caddyfile(&Config::default(), &sites);
+        assert!(caddy.contains("site-shop_be.sock"));
+        assert!(caddy.contains("php-8.4.sock"));
+
+        assert!(check_ini("upload_max_filesize", "100M").is_ok());
+        assert!(check_ini("memory_limit", "1G\n[evil]").is_err());
+        assert!(check_ini("memory_limit", "1G ; x").is_err());
+        assert!(check_ini("a]b", "1").is_err());
     }
 
     #[test]

@@ -7,7 +7,10 @@ use std::process::Command;
 use std::sync::Mutex;
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent, Wry};
+use tauri::{
+    AppHandle, Manager, RunEvent, State, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
+    WindowEvent, Wry,
+};
 
 #[derive(Default)]
 struct App {
@@ -24,6 +27,8 @@ struct Snapshot {
     php_installed: Vec<String>,
     editor: Option<String>,
     groups: std::collections::BTreeMap<String, Vec<String>>,
+    /// php.ini defaults for every site.
+    ini: std::collections::BTreeMap<String, String>,
     running: bool,
     error: Option<String>,
 }
@@ -46,6 +51,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         php_installed: anvil::installed_php(),
         editor: cfg.editor.clone(),
         groups: cfg.groups.clone(),
+        ini: cfg.ini.clone(),
         running: running(app),
         error: app.error.lock().unwrap().clone(),
         tld: cfg.tld,
@@ -74,7 +80,7 @@ fn changed(handle: &AppHandle) {
     if let (Some(tray), Ok(menu)) = (handle.tray_by_id("anvil"), menu(handle)) {
         let _ = tray.set_menu(Some(menu));
     }
-    if let Some(w) = handle.get_webview_window("main") {
+    for w in handle.webview_windows().values() {
         let _ = w.eval("window.refresh && window.refresh()");
     }
 }
@@ -154,10 +160,326 @@ fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot
 }
 
 #[tauri::command]
+fn set_site_ini(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    key: String,
+    value: Option<String>,
+) -> Res<Snapshot> {
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::set_site_ini(&mut cfg, &site, &key, value.as_deref()).map_err(err)?;
+    sites_changed(&handle, &app, &cfg);
+    snapshot(&app)
+}
+
+#[tauri::command]
 fn set_group(app: State<App>, site: String, group: Option<String>) -> Res<Snapshot> {
     let mut cfg = anvil::load().map_err(err)?;
     anvil::set_group(&mut cfg, &site, group.as_deref()).map_err(err)?;
     snapshot(&app)
+}
+
+/* ---------- Settings ---------- */
+
+#[derive(Serialize)]
+struct PhpVersion {
+    version: &'static str,
+    installed: bool,
+    default: bool,
+}
+
+#[derive(Serialize)]
+struct Settings {
+    paths: Vec<std::path::PathBuf>,
+    tld: String,
+    http_port: u16,
+    https_port: u16,
+    dns_port: u16,
+    editor: Option<String>,
+    editors: Vec<String>,
+    php: Vec<PhpVersion>,
+    ini: std::collections::BTreeMap<String, String>,
+    terminal: Option<String>,
+    terminals: Vec<String>,
+    theme: Option<String>,
+    dock_icon: bool,
+    login: bool,
+    config_dir: std::path::PathBuf,
+}
+
+const TERMINALS: [&str; 8] = [
+    "Terminal",
+    "iTerm",
+    "Warp",
+    "Ghostty",
+    "WezTerm",
+    "kitty",
+    "Alacritty",
+    "Hyper",
+];
+
+const EDITORS: [&str; 10] = [
+    "PhpStorm",
+    "Visual Studio Code",
+    "Cursor",
+    "Zed",
+    "Sublime Text",
+    "Nova",
+    "WebStorm",
+    "IntelliJ IDEA",
+    "Windsurf",
+    "Fleet",
+];
+
+/// Which of `apps` are installed in the usual macOS app folders.
+fn installed_apps(apps: &[&str]) -> Vec<String> {
+    let user =
+        std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Applications");
+    let dirs = [
+        std::path::Path::new("/Applications"),
+        std::path::Path::new("/Applications/Utilities"),
+        std::path::Path::new("/System/Applications/Utilities"),
+        user.as_path(),
+    ];
+    apps.iter()
+        .filter(|a| dirs.iter().any(|d| d.join(format!("{a}.app")).exists()))
+        .map(|a| a.to_string())
+        .collect()
+}
+
+fn apply_theme(handle: &AppHandle, theme: Option<&str>) {
+    let theme = match theme {
+        Some("light") => Some(tauri::Theme::Light),
+        Some("dark") => Some(tauri::Theme::Dark),
+        _ => None,
+    };
+    for w in handle.webview_windows().values() {
+        let _ = w.set_theme(theme);
+    }
+}
+
+/// With the Dock icon off, Anvil only shows in the Dock while a window is open.
+fn update_dock(handle: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let keep = anvil::load().map(|c| c.dock_icon).unwrap_or(false);
+        let visible = handle
+            .webview_windows()
+            .values()
+            .any(|w| w.is_visible().unwrap_or(false));
+        let _ = handle.set_activation_policy(if keep || visible {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        });
+    }
+}
+
+#[tauri::command]
+fn settings(handle: AppHandle) -> Res<Settings> {
+    use tauri_plugin_autostart::ManagerExt;
+    let cfg = anvil::load().map_err(err)?;
+    let installed = anvil::installed_php();
+    Ok(Settings {
+        php: anvil::PHP_VERSIONS
+            .iter()
+            .map(|v| PhpVersion {
+                version: v,
+                installed: installed.iter().any(|i| i == v),
+                default: cfg.php.as_deref() == Some(*v),
+            })
+            .collect(),
+        editors: installed_apps(&EDITORS),
+        terminals: installed_apps(&TERMINALS),
+        login: handle.autolaunch().is_enabled().unwrap_or(false),
+        config_dir: anvil::home(),
+        terminal: cfg.terminal,
+        theme: cfg.theme,
+        dock_icon: cfg.dock_icon,
+        paths: cfg.paths,
+        tld: cfg.tld,
+        http_port: cfg.http_port,
+        https_port: cfg.https_port,
+        dns_port: cfg.dns_port,
+        editor: cfg.editor,
+        ini: cfg.ini,
+    })
+}
+
+/// Save a config change; re-serve when it affects what is served.
+fn apply(
+    handle: &AppHandle,
+    f: impl FnOnce(&mut Config) -> anyhow::Result<()>,
+    reserve: bool,
+) -> Res<Settings> {
+    let mut cfg = anvil::load().map_err(err)?;
+    f(&mut cfg).map_err(err)?;
+    anvil::save(&cfg).map_err(err)?;
+    let app = handle.state::<App>();
+    if reserve && running(&app) {
+        start(&app, &cfg);
+    }
+    changed(handle);
+    settings(handle.clone())
+}
+
+#[tauri::command]
+fn add_path(handle: AppHandle, path: std::path::PathBuf) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            let path = path.canonicalize()?;
+            if !cfg.paths.contains(&path) {
+                cfg.paths.push(path);
+            }
+            Ok(())
+        },
+        true,
+    )
+}
+
+#[tauri::command]
+fn remove_path(handle: AppHandle, path: std::path::PathBuf) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.paths.retain(|p| p != &path);
+            Ok(())
+        },
+        true,
+    )
+}
+
+#[tauri::command]
+fn set_editor(handle: AppHandle, editor: Option<String>) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.editor = editor;
+            Ok(())
+        },
+        false,
+    )
+}
+
+#[tauri::command]
+fn set_terminal(handle: AppHandle, terminal: Option<String>) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.terminal = terminal;
+            Ok(())
+        },
+        false,
+    )
+}
+
+#[tauri::command]
+fn set_theme(handle: AppHandle, theme: Option<String>) -> Res<Settings> {
+    apply_theme(&handle, theme.as_deref());
+    apply(
+        &handle,
+        |cfg| {
+            cfg.theme = theme;
+            Ok(())
+        },
+        false,
+    )
+}
+
+#[tauri::command]
+fn set_dock_icon(handle: AppHandle, on: bool) -> Res<Settings> {
+    let s = apply(
+        &handle,
+        |cfg| {
+            cfg.dock_icon = on;
+            Ok(())
+        },
+        false,
+    );
+    update_dock(&handle);
+    s
+}
+
+#[tauri::command]
+fn set_login(handle: AppHandle, on: bool) -> Res<Settings> {
+    use tauri_plugin_autostart::ManagerExt;
+    let auto = handle.autolaunch();
+    if on { auto.enable() } else { auto.disable() }.map_err(|e| e.to_string())?;
+    settings(handle)
+}
+
+#[tauri::command]
+fn open_config_dir() -> Res<()> {
+    anvil::run(Command::new("open").arg(anvil::home())).map_err(err)
+}
+
+#[tauri::command]
+fn set_default_php(handle: AppHandle, version: String) -> Res<Settings> {
+    apply(&handle, |cfg| anvil::set_default_php(cfg, &version), true)
+}
+
+/// `site: None` changes the default for every site.
+#[tauri::command]
+fn set_ini(
+    handle: AppHandle,
+    site: Option<String>,
+    key: String,
+    value: Option<String>,
+) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| match &site {
+            Some(site) => anvil::set_site_ini(cfg, site, &key, value.as_deref()),
+            None => anvil::set_global_ini(cfg, &key, value.as_deref()),
+        },
+        true,
+    )
+}
+
+/// Downloads take a while; run them off the main thread.
+#[tauri::command]
+async fn php_install(handle: AppHandle, version: String) -> Res<Settings> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cfg = anvil::load()?;
+        anvil::php_install(&mut cfg, &version)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(err)?;
+    changed(&handle);
+    settings(handle)
+}
+
+#[tauri::command]
+fn php_uninstall(handle: AppHandle, version: String) -> Res<Settings> {
+    apply(&handle, |cfg| anvil::php_uninstall(cfg, &version), false)
+}
+
+fn open_settings(handle: &AppHandle) {
+    if let Some(w) = handle.get_webview_window("settings") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built =
+        WebviewWindowBuilder::new(handle, "settings", WebviewUrl::App("settings.html".into()))
+            .title("Anvil Settings")
+            .inner_size(780.0, 640.0)
+            .min_inner_size(640.0, 480.0)
+            .title_bar_style(TitleBarStyle::Overlay)
+            .hidden_title(true)
+            .build();
+    if built.is_ok() {
+        apply_theme(handle, anvil::load().ok().and_then(|c| c.theme).as_deref());
+        update_dock(handle);
+    }
+}
+
+#[tauri::command]
+fn show_settings(handle: AppHandle) {
+    open_settings(&handle);
 }
 
 #[tauri::command]
@@ -171,7 +493,9 @@ fn open(site: String, target: String) -> Res<()> {
     match target.as_str() {
         "browser" => cmd.arg(format!("https://{}.{}:{}", s.name, cfg.tld, cfg.https_port)),
         "finder" => cmd.arg(&s.path),
-        "terminal" => cmd.args(["-a", "Terminal"]).arg(&s.path),
+        "terminal" => cmd
+            .args(["-a", cfg.terminal.as_deref().unwrap_or("Terminal")])
+            .arg(&s.path),
         "editor" => {
             let editor = cfg.editor.ok_or("No editor set in ~/.anvil/config.toml")?;
             cmd.args(["-a", &editor]).arg(&s.path)
@@ -208,6 +532,7 @@ fn show(handle: &AppHandle) {
         let _ = w.show();
         let _ = w.set_focus();
     }
+    update_dock(handle);
 }
 
 fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
@@ -279,15 +604,7 @@ fn on_menu(handle: &AppHandle, id: &str) {
             let _ = std::fs::create_dir_all(home.join("log"));
             let _ = Command::new("open").arg(home.join("log")).status();
         }
-        "settings" => {
-            if let Ok(cfg) = anvil::load() {
-                let _ = anvil::save(&cfg); // make sure the file exists
-            }
-            let _ = Command::new("open")
-                .arg("-t")
-                .arg(home.join("config.toml"))
-                .status();
-        }
+        "settings" => open_settings(handle),
         "quit" => handle.exit(0),
         _ => {
             if let Some(v) = id.strip_prefix("php:")
@@ -307,6 +624,11 @@ fn on_menu(handle: &AppHandle, id: &str) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(App::default())
         .invoke_handler(tauri::generate_handler![
             state,
@@ -316,16 +638,35 @@ fn main() {
             add_alias,
             remove_site,
             set_group,
+            set_site_ini,
             open,
-            icon
+            icon,
+            settings,
+            show_settings,
+            add_path,
+            remove_path,
+            set_editor,
+            set_default_php,
+            set_ini,
+            php_install,
+            php_uninstall,
+            set_terminal,
+            set_theme,
+            set_dock_icon,
+            set_login,
+            open_config_dir
         ])
         .setup(|app| {
             if let Ok(cfg) = anvil::load() {
                 start(&app.state::<App>(), &cfg);
+                apply_theme(app.handle(), cfg.theme.as_deref());
             }
-            // ponytail: tray reuses the app icon; a monochrome template icon would follow the menu bar theme.
+            // Template image: macOS recolours it for light and dark menu bars.
             TrayIconBuilder::with_id("anvil")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tauri::image::Image::from_bytes(include_bytes!(
+                    "../icons/tray.png"
+                ))?)
+                .icon_as_template(true)
                 .tooltip("Anvil")
                 .menu(&menu(app.handle())?)
                 .on_menu_event(|handle, e| on_menu(handle, e.id.as_ref()))
@@ -333,10 +674,15 @@ fn main() {
             Ok(())
         })
         .on_window_event(|w, e| {
-            // Closing the window keeps Anvil running in the menu bar.
-            if let WindowEvent::CloseRequested { api, .. } = e {
-                api.prevent_close();
-                let _ = w.hide();
+            // Closing the main window keeps Anvil running in the menu bar.
+            match e {
+                WindowEvent::CloseRequested { api, .. } if w.label() == "main" => {
+                    api.prevent_close();
+                    let _ = w.hide();
+                    update_dock(w.app_handle());
+                }
+                WindowEvent::Destroyed => update_dock(w.app_handle()),
+                _ => {}
             }
         })
         .build(tauri::generate_context!())

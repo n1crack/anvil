@@ -34,6 +34,12 @@ enum Cmd {
         #[arg(long)]
         site: Option<String>,
     },
+    /// Set a php.ini value for one site, or clear it by leaving out the value
+    Ini {
+        site: String,
+        key: String,
+        value: Option<String>,
+    },
     /// Download the web server and print one-time system setup commands
     Setup,
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
@@ -136,6 +142,7 @@ fn main() -> Result<()> {
             Some(name) => set_site_php(&mut cfg, &name, Some(version))?,
             None => set_default_php(&mut cfg, &version)?,
         },
+        Cmd::Ini { site, key, value } => set_site_ini(&mut cfg, &site, &key, value.as_deref())?,
         Cmd::Setup => {
             ensure_caddy()?;
             save(&cfg)?;

@@ -56,6 +56,8 @@ html, body {
 body {
   display: grid;
   grid-template-columns: var(--sidebar) 1fr;
+  /* One row exactly the window's height, so the panes scroll instead of growing. */
+  grid-template-rows: minmax(0, 1fr);
 }
 
 button, select, input { font: inherit; color: inherit; }
@@ -156,12 +158,22 @@ button, select, input { font: inherit; color: inherit; }
   padding: 0 16px 16px;
 }
 
+/* Section titles stay pinned while their sites scroll under them. */
 .list h2 {
-  margin: 16px 4px 6px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 -4px;
+  padding: 10px 8px 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
+  background: color-mix(in srgb, var(--steel-pane) 82%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
+
+.list .rows + h2 { margin-top: 8px; }
 
 /* Inset grouped list: one container, hairlines that start at the text column. */
 .rows {
@@ -185,7 +197,7 @@ button, select, input { font: inherit; color: inherit; }
   text-align: left;
 }
 
-.item + .item::before {
+.item::before {
   content: "";
   position: absolute;
   top: 0;
@@ -193,6 +205,22 @@ button, select, input { font: inherit; color: inherit; }
   left: calc(56px + var(--indent));
   border-top: 1px solid var(--line);
 }
+
+.rows > .item:first-child::before { display: none; }
+
+/* Linked domains slide open and closed. */
+.kids {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.kids > div {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kids.closed { grid-template-rows: 0fr; }
 
 .item.child {
   --indent: 26px;
@@ -270,24 +298,27 @@ button, select, input { font: inherit; color: inherit; }
 .item .disclosure {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 4px 2px 7px;
-  border-radius: 10px;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 8px 0 10px;
+  border-radius: 13px;
+  background: var(--steel-hover);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .item .disclosure:hover {
-  background: var(--steel-hover);
+  background: var(--steel-raised);
   color: var(--text);
 }
 
 .item .chevron {
   display: inline-block;
-  font-size: 15px;
+  font-size: 18px;
   line-height: 1;
-  transition: transform 0.15s ease;
+  transition: transform 0.22s ease;
 }
 
 .item[aria-expanded="true"] .chevron { transform: rotate(90deg); }
@@ -314,6 +345,7 @@ button, select, input { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--steel-pane);
 }
 
@@ -446,11 +478,198 @@ button, select, input { font: inherit; color: inherit; }
   background: var(--steel-raised);
 }
 
+.group-title {
+  margin: 32px 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.group-hint {
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+
+.row input,
+.row textarea {
+  width: 100%;
+  max-width: 320px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  font-variant-numeric: tabular-nums;
+}
+
+.row input { height: 26px; }
+
+.row textarea {
+  resize: vertical;
+  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.row input::placeholder,
+.row textarea::placeholder { color: var(--cold); }
+
+.row-top { align-items: start; }
+
+.row-top dt { padding-top: 4px; }
+
+.detail .titlebar { gap: 8px; }
+
 .placeholder {
   display: grid;
   place-items: center;
   height: 100%;
   color: var(--muted);
+}
+
+/* ---------- Switch ---------- */
+
+input[type="checkbox"][role="switch"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  border-radius: 10px;
+  background: var(--steel-raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: background 0.2s ease;
+}
+
+input[type="checkbox"][role="switch"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s ease;
+}
+
+input[type="checkbox"][role="switch"]:checked { background: var(--heat); }
+
+input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14px); }
+
+/* ---------- Settings window ---------- */
+
+.settings { --sidebar: 200px; }
+
+.settings .sidebar { background: color-mix(in srgb, var(--steel-pane) 70%, var(--steel-raised)); }
+
+.nav {
+  display: grid;
+  gap: 2px;
+  padding: 0 10px;
+}
+
+.nav button {
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: none;
+  text-align: left;
+}
+
+.nav button:hover { background: var(--steel-hover); }
+
+.nav button[aria-current="true"] { background: var(--selected); font-weight: 600; }
+
+.page {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 40px 40px;
+}
+
+.page[hidden] { display: none; }
+
+.page h1 {
+  margin: 0 0 8px;
+  font: 600 26px/1.15 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.page h2 {
+  margin: 28px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.page .hint {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.page .group {
+  max-width: 600px;
+  margin-top: 8px;
+}
+
+.page .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page .row > span:first-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.page .row small {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.page .row .path {
+  overflow-wrap: anywhere;
+}
+
+.page .value,
+.page .muted { color: var(--muted); }
+
+.page button,
+.page select,
+.page input:not([type]) {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}
+
+.page input:not([type]) {
+  width: 110px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.page input::placeholder { color: var(--cold); }
+
+.below { margin-top: 8px; }
+
+.actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag {
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--steel-raised);
+  color: var(--heat-text);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {

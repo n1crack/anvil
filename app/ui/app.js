@@ -59,11 +59,16 @@ function mark(s) {
 let sortBy = localStorage.getItem("sortBy") ?? "name";
 const collapsed = new Set(JSON.parse(localStorage.getItem("collapsed") ?? "[]"));
 
+// Fold a site's linked domains in place (no re-render), so the slide can animate.
 function toggle(name, open = collapsed.has(name)) {
   if (open) collapsed.delete(name);
   else collapsed.add(name);
   localStorage.setItem("collapsed", JSON.stringify([...collapsed]));
-  renderList();
+  const parent = $(`.item[data-name="${CSS.escape(name)}"]`);
+  if (!parent) return;
+  parent.setAttribute("aria-expanded", open);
+  $(".disclosure", parent).title = open ? "Hide linked domains" : "Show linked domains";
+  parent.nextElementSibling?.classList.toggle("closed", !open);
 }
 
 function row(s, { child = false, kids = 0 } = {}) {
@@ -148,8 +153,15 @@ function renderList() {
       const shownKids = kids.filter((k) => parentHit || hit(k));
       if (!parentHit && !shownKids.length) continue;
       rows.push(row(s, { kids: kids.length }));
-      // While searching, matching linked domains are always shown.
-      if (q || !collapsed.has(s.name)) rows.push(...shownKids.map((k) => row(k, { child: true })));
+      if (shownKids.length) {
+        // Always rendered so folding can slide; while searching, matches stay open.
+        const wrap = document.createElement("div");
+        wrap.className = q || !collapsed.has(s.name) ? "kids" : "kids closed";
+        const inner = document.createElement("div");
+        inner.append(...shownKids.map((k) => row(k, { child: true })));
+        wrap.append(inner);
+        rows.push(wrap);
+      }
     }
     if (!rows.length) return;
     count += rows.length;
@@ -284,6 +296,38 @@ function renderSite() {
   $('[data-field="root"]', root).textContent = tilde(s.root);
   $('[data-field="path"]', root).textContent = tilde(s.path);
   $('[data-field="source"]', root).textContent = s.linked ? "Linked folder" : "Parked folder";
+
+  // Per-site php.ini overrides. Placeholders show what the site gets without one.
+  const base = { memory_limit: "512M", upload_max_filesize: "100M", max_execution_time: "120" };
+  for (const input of root.querySelectorAll("[data-ini]")) {
+    const key = input.dataset.ini;
+    input.value = s.ini[key] ?? "";
+    input.placeholder = snap.ini[key] ?? base[key];
+    input.onchange = async () => {
+      const value = input.value.trim() || null;
+      await call("set_site_ini", { site: s.name, key, value });
+      if (key === "upload_max_filesize") await call("set_site_ini", { site: s.name, key: "post_max_size", value });
+    };
+  }
+  const known = new Set([...Object.keys(base), "post_max_size"]);
+  const extra = $("#ini-extra", root);
+  extra.value = Object.entries(s.ini)
+    .filter(([k]) => !known.has(k))
+    .map(([k, v]) => `${k} = ${v}`)
+    .join("\n");
+  extra.onchange = async () => {
+    const wanted = new Map();
+    for (const line of extra.value.split("\n")) {
+      const m = line.match(/^\s*([^=\s]+)\s*=\s*(.*?)\s*$/);
+      if (m) wanted.set(m[1], m[2]);
+    }
+    for (const k of Object.keys(s.ini)) {
+      if (!known.has(k) && !wanted.has(k)) await call("set_site_ini", { site: s.name, key: k, value: null });
+    }
+    for (const [k, v] of wanted) {
+      if (s.ini[k] !== v) await call("set_site_ini", { site: s.name, key: k, value: v });
+    }
+  };
 }
 
 function select(name) {
@@ -308,6 +352,8 @@ $("#power").onclick = async (e) => {
   await call("set_running", { on: !snap.running });
   btn.disabled = false;
 };
+
+$("#open-settings").onclick = () => invoke("show_settings");
 
 $("#reload").onclick = async (e) => {
   const btn = e.currentTarget;
@@ -337,13 +383,17 @@ $("#list").onkeydown = (e) => {
   }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
-  const items = [...document.querySelectorAll(".item")];
+  const items = [...document.querySelectorAll(".item")].filter((b) => !b.closest(".kids.closed"));
   const i = items.findIndex((b) => b.dataset.name === selected);
   const next = items[i + (e.key === "ArrowDown" ? 1 : -1)];
   if (next) select(next.dataset.name);
 };
 
 document.addEventListener("keydown", (e) => {
+  if (e.metaKey && e.key === ",") {
+    e.preventDefault();
+    invoke("show_settings");
+  }
   if (e.metaKey && e.key === "r") {
     e.preventDefault();
     $("#reload").click();
