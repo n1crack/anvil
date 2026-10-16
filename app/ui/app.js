@@ -91,6 +91,19 @@ function row(s, { child = false, kids = 0 } = {}) {
 
   const end = document.createElement("span");
   end.className = "end";
+  const state = snap.app_states[s.name];
+  if (state) {
+    const dot = document.createElement("span");
+    dot.className = `dot ${state === "running" ? "on" : "warm"}`;
+    dot.title = state === "running" ? "Running" : "Starting";
+    end.append(dot);
+  }
+  if (!child && s.kind !== "static") {
+    const kind = document.createElement("span");
+    kind.className = `kind kind-${s.kind}`;
+    kind.textContent = snap.kinds.find(([id]) => id === s.kind)?.[1] ?? s.kind;
+    end.append(kind);
+  }
   // Only call out sites that differ from the default.
   if (s.php_pinned) {
     const ver = document.createElement("span");
@@ -127,7 +140,7 @@ function renderList() {
   list.replaceChildren();
 
   if (!snap.sites.length) {
-    list.innerHTML = `<p class="empty">No sites yet. Add a folder of projects from Terminal:<code>anvil park ~/Sites</code></p>`;
+    list.innerHTML = `<p class="empty">No applications yet. Add a folder of projects in Settings, or from Terminal:<code>anvil park ~/Sites</code></p>`;
     return;
   }
 
@@ -217,7 +230,7 @@ async function siteMenu(s) {
     const groupItems = await Promise.all(groups.map((g) =>
       M.CheckMenuItem.new({ text: g, checked: g === groupOf, action: () => call("set_group", { site: s.name, group: g === groupOf ? null : g }) })));
     groupItems.push(await sep(), await M.MenuItem.new({ text: "New Group…", action: () => newGroup(s) }));
-    items.push(await M.Submenu.new({ text: "Add Site To", items: groupItems }), await sep());
+    items.push(await M.Submenu.new({ text: "Add to Group", items: groupItems }), await sep());
   }
   items.push(await M.MenuItem.new({
     text: s.linked ? "Remove Link" : "Hide from Anvil",
@@ -270,7 +283,7 @@ function renderSite() {
   const root = $("#site");
   const s = snap.sites.find((x) => x.name === selected);
   if (!s) {
-    root.innerHTML = `<div class="placeholder">Select a site</div>`;
+    root.innerHTML = `<div class="placeholder">Select an application</div>`;
     return;
   }
 
@@ -286,6 +299,20 @@ function renderSite() {
     editor.textContent = `Open in ${snap.editor}`;
   }
   for (const b of root.querySelectorAll("[data-open]")) b.onclick = () => open(b.dataset.open);
+
+  // Type: detected, or chosen by the user.
+  const kindSel = $("#kind", root);
+  const label = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
+  kindSel.add(new Option(`Detected (${label(s.kind_detected)})`, ""));
+  for (const [id, name] of snap.kinds) kindSel.add(new Option(name, id));
+  kindSel.value = s.kind === s.kind_detected ? "" : s.kind;
+  kindSel.onchange = () =>
+    call("set_app", kindSel.value ? { site: s.name, kind: kindSel.value } : { site: s.name, reset: ["kind"] });
+
+  const process = PROCESS_KINDS.has(s.kind);
+  for (const el of root.querySelectorAll(".php-only")) el.hidden = process;
+  for (const el of root.querySelectorAll(".process-only")) el.hidden = !process;
+  if (process) renderRun(s, root);
 
   const php = $("#php", root);
   php.add(new Option(`Default (${snap.php_default ?? "none"})`, ""));
@@ -329,6 +356,48 @@ function renderSite() {
     }
   };
 }
+
+const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet"]);
+
+function renderRun(s, root) {
+  const state = snap.app_states[s.name]; // "running" | "starting" | undefined
+  const error = snap.app_errors[s.name];
+  $(".dot", root).className = `dot ${state === "running" ? "on" : state ? "warm" : ""}`;
+  $(".state-text", root).textContent =
+    state === "running" ? `Running on port ${s.port}` : state ? "Starting… (first builds can take a while)" : "Stopped";
+  $('[data-run="start"]', root).hidden = !!state;
+  $('[data-run="restart"]', root).hidden = !state;
+  $('[data-run="stop"]', root).hidden = !state;
+  for (const b of root.querySelectorAll("[data-run]")) {
+    b.onclick = () => call("app_run", { site: s.name, action: b.dataset.run });
+  }
+  $(".show-log", root).onclick = () => invoke("open_log", { site: s.name }).catch((e) => showError(String(e)));
+  const err = $(".run-error", root);
+  err.textContent = error ?? "";
+  err.hidden = !error;
+
+  const cmd = $("#app-command", root);
+  cmd.value = s.command_custom ? s.command : "";
+  cmd.placeholder = s.command_custom ? "" : s.command ?? "";
+  cmd.onchange = () =>
+    call("set_app", cmd.value.trim() ? { site: s.name, command: cmd.value.trim() } : { site: s.name, reset: ["command"] });
+
+  const port = $("#app-port", root);
+  port.value = s.port ?? "";
+  port.onchange = () => {
+    const n = parseInt(port.value, 10);
+    call("set_app", Number.isNaN(n) ? { site: s.name, reset: ["port"] } : { site: s.name, port: n });
+  };
+
+  const auto = $("#app-autostart", root);
+  auto.checked = s.autostart;
+  auto.onchange = () => call("set_app", { site: s.name, autostart: auto.checked });
+}
+
+// While an app is starting, check back until its port answers.
+setInterval(() => {
+  if (snap && Object.values(snap.app_states).includes("starting")) call("state");
+}, 1500);
 
 function select(name) {
   selected = name;
