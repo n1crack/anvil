@@ -213,6 +213,146 @@ fn rules(kind: &str) -> Vec<Rule> {
     r
 }
 
+/// Folders known from marker files in the project (Flutter, CocoaPods, Gradle,
+/// Python), whatever its kind. A folder that could hold source (`build`) is
+/// only listed when a marker says a tool owns it.
+fn marker_rules(dir: &Path) -> Vec<Rule> {
+    use Safety::*;
+    let has = |p: &str| dir.join(p).exists();
+    let gradle = |d: &str| {
+        [
+            "build.gradle",
+            "build.gradle.kts",
+            "settings.gradle",
+            "settings.gradle.kts",
+        ]
+        .iter()
+        .any(|f| dir.join(d).join(f).exists())
+    };
+    let mut r: Vec<Rule> = vec![];
+    let flutter = has("pubspec.yaml");
+    if flutter {
+        r.push((
+            "build",
+            "Flutter build",
+            "Build",
+            Rebuild,
+            "flutter build recreates it",
+        ));
+        r.push((
+            ".dart_tool",
+            "Dart tool cache",
+            "Build",
+            Rebuild,
+            "flutter pub get recreates it",
+        ));
+    }
+    if has("ios/Podfile") {
+        r.push((
+            "ios/Pods",
+            "CocoaPods",
+            "Dependencies",
+            Rebuild,
+            "pod install brings them back",
+        ));
+        r.push((
+            "ios/build",
+            "iOS build",
+            "Build",
+            Rebuild,
+            "The next iOS build recreates it",
+        ));
+    }
+    if has("Podfile") {
+        r.push((
+            "Pods",
+            "CocoaPods",
+            "Dependencies",
+            Rebuild,
+            "pod install brings them back",
+        ));
+    }
+    if gradle("android") {
+        for (p, label) in [
+            ("android/.gradle", "Gradle cache (Android)"),
+            ("android/app/build", "Android app build"),
+            ("android/build", "Android build"),
+        ] {
+            r.push((p, label, "Build", Rebuild, "Gradle rebuilds it"));
+        }
+    }
+    if gradle("") {
+        r.push((
+            ".gradle",
+            "Gradle cache",
+            "Build",
+            Rebuild,
+            "Gradle rebuilds it",
+        ));
+        if !flutter {
+            r.push((
+                "build",
+                "Gradle build",
+                "Build",
+                Rebuild,
+                "Gradle rebuilds it",
+            ));
+        }
+    }
+    if has("pyproject.toml") || has("requirements.txt") || has("setup.py") {
+        for p in [".venv", "venv"] {
+            r.push((
+                p,
+                "Python virtual environment",
+                "Dependencies",
+                Rebuild,
+                "recreate the virtual environment and reinstall",
+            ));
+        }
+        r.push((
+            "__pycache__",
+            "Python bytecode",
+            "Cache",
+            Safe,
+            "Recompiled on the next run",
+        ));
+        for (p, label) in [
+            (".pytest_cache", "pytest cache"),
+            (".mypy_cache", "mypy cache"),
+            (".ruff_cache", "Ruff cache"),
+        ] {
+            r.push((p, label, "Cache", Safe, "Rebuilt on the next run"));
+        }
+    }
+    r.push((
+        ".cache",
+        "Tool cache",
+        "Cache",
+        Safe,
+        "Rebuilt by the tools that use it",
+    ));
+    r.push((
+        "coverage",
+        "Coverage report",
+        "Cache",
+        Safe,
+        "test coverage output",
+    ));
+    r
+}
+
+/// Every rule for this project: its kind's rules, then marker-based ones for
+/// paths the kind doesn't already cover. `disk`, `clean` and friends all use this.
+fn rules_for(site: &Site) -> Vec<Rule> {
+    let mut r = rules(&site.kind);
+    for m in marker_rules(&site.path) {
+        if !r.iter().any(|k| k.0 == m.0) {
+            r.push(m);
+        }
+    }
+    r
+}
+
 /// Sizes in bytes for several paths with one `du` call (missing paths are skipped).
 fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
     let existing: Vec<&PathBuf> = paths.iter().filter(|p| p.exists()).collect();
@@ -233,7 +373,7 @@ fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
 }
 
 pub fn disk(site: &Site) -> (u64, Vec<DiskItem>) {
-    let rules = rules(&site.kind);
+    let rules = rules_for(site);
     let anvil_log = apps::log_file(&site.name);
     let mut paths: Vec<PathBuf> = rules.iter().map(|r| site.path.join(r.0)).collect();
     paths.push(site.path.clone());
@@ -615,7 +755,7 @@ pub fn all_apps(sites: &[Site]) -> Vec<AppSize> {
         .filter(|s| !s.linked || !sites.iter().any(|o| !o.linked && o.path == s.path))
     {
         paths.push(s.path.clone());
-        paths.extend(rules(&s.kind).iter().map(|r| s.path.join(r.0)));
+        paths.extend(rules_for(s).iter().map(|r| s.path.join(r.0)));
     }
     let sizes = du(&paths);
     let mut seen = std::collections::BTreeSet::new();
@@ -625,7 +765,7 @@ pub fn all_apps(sites: &[Site]) -> Vec<AppSize> {
         .filter_map(|s| {
             let total = *sizes.get(&s.path)?;
             let sum = |want: Safety| -> u64 {
-                rules(&s.kind)
+                rules_for(s)
                     .iter()
                     .filter(|r| r.3 == want)
                     .filter_map(|r| sizes.get(&s.path.join(r.0)))
@@ -651,7 +791,7 @@ pub fn clean_all_safe(sites: &[Site]) -> (u64, Vec<String>) {
     let mut failed = vec![];
     let mut seen = std::collections::BTreeSet::new();
     for s in sites.iter().filter(|s| seen.insert(s.path.clone())) {
-        for r in rules(&s.kind).iter().filter(|r| r.3 == Safety::Safe) {
+        for r in rules_for(s).iter().filter(|r| r.3 == Safety::Safe) {
             match clean(s, r.0, false) {
                 Ok(n) => freed += n,
                 Err(_) => failed.push(s.name.clone()),
@@ -694,7 +834,7 @@ pub fn clean(site: &Site, path: &str, app_running: bool) -> Result<u64> {
         std::fs::write(&anvil_log, "")?;
         return Ok(freed);
     }
-    let Some(rule) = rules(&site.kind).into_iter().find(|r| r.0 == path) else {
+    let Some(rule) = rules_for(site).into_iter().find(|r| r.0 == path) else {
         bail!("Anvil doesn't clean {path} for this app");
     };
     if rule.3 == Safety::Keep {
@@ -799,5 +939,100 @@ mod tests {
         assert_eq!(url_port("redis://127.0.0.1"), None);
         assert!(clean_anvil("/etc").is_err());
         assert!(clean_anvil("/tmp/../etc").is_err());
+    }
+
+    fn project(name: &str, kind: &str, files: &[&str]) -> Site {
+        let dir = std::env::temp_dir().join(format!("anvil-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for f in files {
+            let p = dir.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "x".repeat(5000)).unwrap();
+        }
+        Site {
+            name: name.into(),
+            path: dir.clone(),
+            root: dir,
+            php: None,
+            php_pinned: false,
+            ini: BTreeMap::new(),
+            linked: true,
+            parked_in: None,
+            modified: 0,
+            kind: kind.into(),
+            kind_detected: kind.into(),
+            command: None,
+            command_custom: false,
+            port: None,
+            autostart: false,
+            runtime_version: None,
+            runtime_pinned: false,
+        }
+    }
+
+    fn safety(items: &[DiskItem], path: &str) -> Option<Safety> {
+        items.iter().find(|i| i.path == path).map(|i| i.safety)
+    }
+
+    #[test]
+    fn flutter_markers() {
+        let site = project(
+            "flutter",
+            "static",
+            &[
+                "pubspec.yaml",
+                "lib/main.dart",
+                "build/app.dill",
+                ".dart_tool/cache",
+                "ios/Podfile",
+                "ios/Pods/Firebase/a.h",
+            ],
+        );
+        let (_, items) = disk(&site);
+        assert_eq!(safety(&items, "build"), Some(Safety::Rebuild));
+        assert_eq!(safety(&items, ".dart_tool"), Some(Safety::Rebuild));
+        assert_eq!(safety(&items, "ios/Pods"), Some(Safety::Rebuild));
+        assert_eq!(safety(&items, "lib"), None);
+
+        assert!(clean(&site, "build", false).unwrap() > 0);
+        assert!(!site.path.join("build").exists());
+        assert!(clean(&site, "lib", false).is_err());
+        assert!(clean(&site, "ios", false).is_err());
+        assert!(site.path.join("lib/main.dart").exists());
+        std::fs::remove_dir_all(&site.path).unwrap();
+    }
+
+    #[test]
+    fn python_markers() {
+        let site = project(
+            "python",
+            "static",
+            &[
+                "pyproject.toml",
+                "app/main.py",
+                ".venv/lib/site.py",
+                "__pycache__/main.cpython-312.pyc",
+            ],
+        );
+        let (_, items) = disk(&site);
+        assert_eq!(safety(&items, ".venv"), Some(Safety::Rebuild));
+        assert_eq!(safety(&items, "__pycache__"), Some(Safety::Safe));
+        assert!(all_apps(std::slice::from_ref(&site))[0].safe > 0);
+        let (freed, failed) = clean_all_safe(std::slice::from_ref(&site));
+        assert!(freed > 0 && failed.is_empty());
+        assert!(!site.path.join("__pycache__").exists());
+        assert!(site.path.join(".venv/lib/site.py").exists());
+        assert!(clean(&site, "app", false).is_err());
+        std::fs::remove_dir_all(&site.path).unwrap();
+    }
+
+    #[test]
+    fn build_without_markers_is_kept() {
+        let site = project("plain", "static", &["index.html", "build/index.html"]);
+        let (_, items) = disk(&site);
+        assert_eq!(safety(&items, "build"), None);
+        assert!(clean(&site, "build", false).is_err());
+        assert!(site.path.join("build/index.html").exists());
+        std::fs::remove_dir_all(&site.path).unwrap();
     }
 }
