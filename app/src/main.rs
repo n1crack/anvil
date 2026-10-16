@@ -371,6 +371,33 @@ fn runtime_uninstall(handle: AppHandle, id: String, version: String) -> Res<()> 
     Ok(())
 }
 
+/// Serve one project folder; its name comes from the folder.
+#[tauri::command]
+fn link_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<String> {
+    let path = path.canonicalize().map_err(|e| e.to_string())?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or("Pick a folder")?;
+    let mut cfg = anvil::load().map_err(err)?;
+    let name = anvil::link(&mut cfg, &name, path).map_err(err)?;
+    sites_changed(&handle, &app, &cfg);
+    Ok(name)
+}
+
+/// Serve every project inside a folder.
+#[tauri::command]
+fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<()> {
+    let path = path.canonicalize().map_err(|e| e.to_string())?;
+    let mut cfg = anvil::load().map_err(err)?;
+    if !cfg.paths.contains(&path) {
+        cfg.paths.push(path);
+    }
+    anvil::save(&cfg).map_err(err)?;
+    sites_changed(&handle, &app, &cfg);
+    Ok(())
+}
+
 #[tauri::command]
 fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) -> Res<Snapshot> {
     let mut cfg = anvil::load().map_err(err)?;
@@ -974,6 +1001,8 @@ fn main() {
             set_running,
             set_php,
             add_alias,
+            link_folder,
+            park_folder,
             remove_site,
             set_group,
             set_site_ini,

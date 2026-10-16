@@ -649,6 +649,39 @@ $("#power").onclick = async (e) => {
 
 $("#open-settings").onclick = () => invoke("show_settings");
 
+$("#add").onclick = async () => {
+  const pick = (title) => window.__TAURI__.dialog.open({ directory: true, title });
+  const menu = await M.Menu.new({
+    items: await Promise.all([
+      M.MenuItem.new({
+        text: "Add Folder of Applications…",
+        action: async () => {
+          const path = await pick("Every project inside this folder becomes an application");
+          if (!path) return;
+          await call("park_folder", { path });
+          toast("Folder added");
+        },
+      }),
+      M.MenuItem.new({
+        text: "Add Application Folder…",
+        action: async () => {
+          const path = await pick("Choose a project folder");
+          if (!path) return;
+          try {
+            const name = await invoke("link_folder", { path });
+            await call("state");
+            select(name);
+            toast(`Added ${name}.${snap.tld}`);
+          } catch (e) {
+            showError(String(e));
+          }
+        },
+      }),
+    ]),
+  });
+  menu.popup();
+};
+
 $("#reload").onclick = async (e) => {
   const btn = e.currentTarget;
   btn.classList.add("spinning");
