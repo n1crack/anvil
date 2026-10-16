@@ -174,7 +174,7 @@ fn start_app(app: &App, cfg: &Config, name: &str) {
         .into_iter()
         .find(|s| s.name == name)
         .ok_or_else(|| anyhow::anyhow!("No app named {name}"))
-        .and_then(|site| app.apps.lock().unwrap().start(&site));
+        .and_then(|site| app.apps.lock().unwrap().start(&site, &cfg.tld));
     let mut errors = app.app_errors.lock().unwrap();
     match result {
         Ok(()) => errors.remove(name),
