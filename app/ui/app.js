@@ -18,9 +18,18 @@ async function call(cmd, args) {
 }
 
 function showError(msg) {
-  const el = $("#error");
-  el.textContent = msg ?? "";
-  el.hidden = !msg;
+  $("#error-text").textContent = msg ?? "";
+  $("#error").hidden = !msg;
+}
+
+let toastTimer;
+/** A short confirmation at the bottom of the window. */
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), 2400);
 }
 
 window.refresh = () => call("state");
@@ -30,7 +39,7 @@ function render() {
 
   const power = $("#power");
   power.setAttribute("aria-checked", snap.running);
-  $("#power-label").textContent = snap.running ? "Running" : "Stopped";
+  $("#power-label").textContent = snap.running ? "Serving" : "Stopped";
 
   if (!snap.sites.some((s) => s.name === selected)) selected = snap.sites[0]?.name;
   renderList();
@@ -302,6 +311,7 @@ function renderSite() {
 
   root.replaceChildren($("#site-tpl").content.cloneNode(true));
   $(".site-name", root).textContent = s.name;
+  $(".site-title .mark", root).replaceWith(Object.assign(mark(s), { className: "mark big" }));
   const link = $(".site-url", root);
   link.textContent = url(s).replace("https://", "");
   link.onclick = (e) => { e.preventDefault(); open("browser"); };
@@ -555,14 +565,16 @@ async function cleanItems(name, items) {
     cancelLabel: "Cancel",
   });
   if (!ok) return;
+  let freed = 0;
   for (const i of items) {
     try {
-      await invoke("clean", { site: name, path: i.path });
+      freed += await invoke("clean", { site: name, path: i.path });
     } catch (e) {
       showError(String(e));
       break;
     }
   }
+  if (freed) toast(`Freed ${bytes(freed)}`);
   loadResources(name, true);
 }
 
@@ -622,6 +634,7 @@ function select(name) {
 async function open(target) {
   try {
     await invoke("open", { site: selected, target });
+    toast({ browser: "Opened in your browser", finder: "Shown in Finder", terminal: "Opened in Terminal", editor: `Opened in ${snap.editor}` }[target]);
   } catch (e) {
     showError(String(e));
   }
@@ -670,7 +683,31 @@ $("#list").onkeydown = (e) => {
   if (next) select(next.dataset.name);
 };
 
+$("#error-close").onclick = () => showError(null);
+
+// Keyboard: ⌘1–3 tabs, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘L log.
 document.addEventListener("keydown", (e) => {
+  if (!e.metaKey || e.shiftKey || e.altKey || e.target.closest("input, textarea, select")) {
+    if (!(e.metaKey && ["f", ",", "r"].includes(e.key))) return;
+  }
+  const root = $("#site");
+  const tabKey = { 1: "overview", 2: "settings", 3: "resources" }[e.key];
+  if (tabKey && $(".tabs", root)) {
+    e.preventDefault();
+    showTab(root, tabKey);
+    return;
+  }
+  const action = { o: "browser", e: "editor", t: "terminal" }[e.key];
+  if (action && selected && (action !== "editor" || snap.editor)) {
+    e.preventDefault();
+    open(action);
+    return;
+  }
+  if (e.key === "l" && !$(".show-log", root)?.hidden) {
+    e.preventDefault();
+    $(".show-log", root).click();
+    return;
+  }
   if (e.metaKey && e.key === ",") {
     e.preventDefault();
     invoke("show_settings");

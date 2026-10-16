@@ -30,20 +30,26 @@
       <button id="open-settings" class="icon-btn" title="Settings (⌘,)" aria-label="Settings">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="11" cy="4.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="5" cy="11.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
       </button>
-      <button id="power" class="power" role="switch" aria-checked="false">
+      <button id="power" class="power" role="switch" aria-checked="false" title="Web server and local domains for all your applications">
         <span class="ingot" aria-hidden="true"></span>
         <span id="power-label">Stopped</span>
       </button>
     </header>
-    <p id="error" class="error" role="alert" hidden></p>
+    <div id="error" class="error" role="alert" hidden>
+      <span id="error-text"></span>
+      <button id="error-close" class="icon-btn" aria-label="Dismiss">×</button>
+    </div>
     <section id="site" class="site" aria-live="polite"></section>
   </main>
 
   <template id="site-tpl">
     <header class="site-head">
       <div class="site-title">
-        <h1 class="site-name"></h1>
-        <a class="site-url" href="#"></a>
+        <span class="mark big" aria-hidden="true"></span>
+        <div>
+          <h1 class="site-name"></h1>
+          <a class="site-url" href="#"></a>
+        </div>
       </div>
       <div class="run-box" hidden>
         <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text"></span></span>
@@ -138,6 +144,7 @@
     </section>
   </template>
 
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script src="app.js"></script>
 </body>
 </html>
