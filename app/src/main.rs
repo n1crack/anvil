@@ -273,6 +273,22 @@ async fn resources(handle: AppHandle, site: String) -> Res<anvil::resources::Res
     .map_err(|e| e.to_string())?
 }
 
+/// Delete one cleanable item of an app (see `resources::clean` for the guards).
+#[tauri::command]
+async fn clean(handle: AppHandle, site: String, path: String) -> Res<u64> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = anvil::load().map_err(err)?;
+        let s = anvil::sites(&cfg)
+            .into_iter()
+            .find(|s| s.name == site)
+            .ok_or_else(|| format!("No app named {site}"))?;
+        let running = handle.state::<App>().apps.lock().unwrap().running(&s.name);
+        anvil::resources::clean(&s, &path, running).map_err(err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn open_log(site: String) -> Res<()> {
     let log = anvil::apps::log_file(&site);
@@ -943,6 +959,7 @@ fn main() {
             set_app,
             open_log,
             resources,
+            clean,
             runtimes,
             runtime_install,
             runtime_uninstall

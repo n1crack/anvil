@@ -2,6 +2,7 @@
 //! delete), memory and CPU of its processes, and the services it talks to.
 
 use crate::{Config, Site, apps, home, services};
+use anyhow::{Result, bail};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -469,9 +470,118 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
         .collect()
 }
 
+/// Empty a folder but keep it and its `.gitignore`/`.gitkeep` (Laravel expects
+/// `storage/*` and `bootstrap/cache` to exist).
+fn empty_dir(dir: &Path) -> Result<()> {
+    for e in std::fs::read_dir(dir)?.flatten() {
+        let name = e.file_name();
+        if name == ".gitignore" || name == ".gitkeep" {
+            continue;
+        }
+        remove(&e.path())?;
+    }
+    Ok(())
+}
+
+/// Remove a file or folder; a symlink is removed itself, never what it points to.
+fn remove(path: &Path) -> Result<()> {
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(path)?;
+    } else {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+/// Delete one item from `disk()`. Only paths Anvil knows for this kind of app and
+/// marks safe or rebuildable are accepted. Returns the bytes freed.
+pub fn clean(site: &Site, path: &str, app_running: bool) -> Result<u64> {
+    let anvil_log = apps::log_file(&site.name);
+    if Path::new(path) == anvil_log {
+        let freed = std::fs::metadata(&anvil_log).map_or(0, |m| m.len());
+        std::fs::write(&anvil_log, "")?;
+        return Ok(freed);
+    }
+    let Some(rule) = rules(&site.kind).into_iter().find(|r| r.0 == path) else {
+        bail!("Anvil doesn't clean {path} for this app");
+    };
+    if rule.3 == Safety::Keep {
+        bail!("{} holds your data; Anvil won't delete it", rule.1);
+    }
+    if rule.3 == Safety::Rebuild && app_running {
+        bail!("Stop the app before deleting {}", rule.1.to_lowercase());
+    }
+    let target = site.path.join(path);
+    if std::fs::symlink_metadata(&target).is_err() {
+        return Ok(0);
+    }
+    let freed = du(std::slice::from_ref(&target)).values().sum();
+    let contents_only = path.starts_with("storage/") || path == "bootstrap/cache";
+    if contents_only && !std::fs::symlink_metadata(&target)?.file_type().is_symlink() {
+        empty_dir(&target)?;
+    } else {
+        remove(&target)?;
+    }
+    Ok(freed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clean_keeps_data_and_gitignores() {
+        let dir = std::env::temp_dir().join(format!("anvil-clean-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (f, body) in [
+            ("storage/logs/laravel.log", "x".repeat(5000)),
+            ("storage/logs/.gitignore", "*\n".into()),
+            ("storage/app/upload.png", "keep".into()),
+            ("vendor/pkg/a.php", "<?php".into()),
+            ("outside/secret.txt", "s".into()),
+        ] {
+            let p = dir.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        // node_modules as a symlink to a folder outside: only the link may go.
+        std::os::unix::fs::symlink(dir.join("outside"), dir.join("node_modules")).unwrap();
+        let site = Site {
+            name: "t".into(),
+            path: dir.clone(),
+            root: dir.clone(),
+            php: None,
+            php_pinned: false,
+            ini: BTreeMap::new(),
+            linked: true,
+            parked_in: None,
+            modified: 0,
+            kind: "laravel".into(),
+            kind_detected: "laravel".into(),
+            command: None,
+            command_custom: false,
+            port: None,
+            autostart: false,
+        };
+
+        assert!(clean(&site, "storage/logs", false).unwrap() > 0);
+        assert!(!dir.join("storage/logs/laravel.log").exists());
+        assert!(dir.join("storage/logs/.gitignore").exists());
+
+        assert!(clean(&site, "storage/app", false).is_err());
+        assert!(clean(&site, "../outside", false).is_err());
+        assert!(clean(&site, "/etc", false).is_err());
+        assert!(clean(&site, "vendor", true).is_err()); // running app
+        clean(&site, "vendor", false).unwrap();
+        assert!(!dir.join("vendor").exists());
+
+        clean(&site, "node_modules", false).unwrap();
+        assert!(!dir.join("node_modules").exists());
+        assert!(dir.join("outside/secret.txt").exists());
+        assert!(dir.join("storage/app/upload.png").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn rules_and_env() {
