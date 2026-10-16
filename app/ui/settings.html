@@ -14,6 +14,7 @@
       <button data-page="php">PHP</button>
       <button data-page="languages">Languages</button>
       <button data-page="services">Services</button>
+      <button data-page="storage">Storage</button>
     </nav>
   </aside>
 
@@ -108,6 +109,18 @@
       <h1>Services</h1>
       <p class="hint">Databases, cache and mail run on your Mac, listen only on 127.0.0.1 and keep their data in Anvil’s folder. Turned-on services start with Anvil.</p>
       <div id="service-list"></div>
+    </section>
+    <section id="storage" class="page" hidden>
+      <h1>Storage</h1>
+
+      <h2>Anvil</h2>
+      <p class="hint" id="anvil-total">Measuring…</p>
+      <div id="anvil-items" class="group"></div>
+
+      <h2>Applications</h2>
+      <p class="hint" id="apps-hint">Measures every application. With many projects this takes up to a minute.</p>
+      <div class="below"><button id="scan-apps">Measure applications</button> <button id="clean-all-safe" hidden></button></div>
+      <div id="app-sizes" class="group" hidden></div>
     </section>
   </main>
 

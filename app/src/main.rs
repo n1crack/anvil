@@ -289,6 +289,50 @@ async fn clean(handle: AppHandle, site: String, path: String) -> Res<u64> {
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Serialize)]
+struct AnvilStorage {
+    total: u64,
+    items: Vec<anvil::resources::DiskItem>,
+}
+
+#[tauri::command]
+async fn storage_anvil() -> Res<AnvilStorage> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let (total, items) = anvil::resources::anvil_disk();
+        AnvilStorage { total, items }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Every app's size; slow for many apps (one `du` over all of them).
+#[tauri::command]
+async fn storage_apps() -> Res<Vec<anvil::resources::AppSize>> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let cfg = anvil::load().map_err(err)?;
+        Ok(anvil::resources::all_apps(&anvil::sites(&cfg)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn clean_anvil(path: String) -> Res<u64> {
+    tauri::async_runtime::spawn_blocking(move || anvil::resources::clean_anvil(&path).map_err(err))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn clean_all_safe() -> Res<(u64, Vec<String>)> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let cfg = anvil::load().map_err(err)?;
+        Ok(anvil::resources::clean_all_safe(&anvil::sites(&cfg)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn open_log(site: String) -> Res<()> {
     let log = anvil::apps::log_file(&site);
@@ -960,6 +1004,10 @@ fn main() {
             open_log,
             resources,
             clean,
+            storage_anvil,
+            storage_apps,
+            clean_anvil,
+            clean_all_safe,
             runtimes,
             runtime_install,
             runtime_uninstall

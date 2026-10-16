@@ -874,6 +874,12 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .clean-all { margin: 0 0 12px; color: var(--heat-text); }
 
+.page .size {
+  min-width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .res-sub {
   margin: 20px 0 8px;
   font-size: 12px;
