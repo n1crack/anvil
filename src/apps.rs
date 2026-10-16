@@ -254,6 +254,11 @@ impl Apps {
         Ok(())
     }
 
+    /// Process-group leader of a running app.
+    pub fn pid(&mut self, name: &str) -> Option<u32> {
+        self.running(name).then(|| self.children[name].id())
+    }
+
     pub fn stop(&mut self, name: &str) {
         if let Some(mut c) = self.children.remove(name) {
             terminate_group(&mut c, Duration::from_secs(5));

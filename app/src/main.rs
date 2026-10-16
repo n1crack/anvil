@@ -247,6 +247,32 @@ fn set_app(
     snapshot(&app)
 }
 
+/// Disk, processes and services for one app. Sizing big folders takes a moment,
+/// so it runs off the main thread and only holds locks for the quick parts.
+#[tauri::command]
+async fn resources(handle: AppHandle, site: String) -> Res<anvil::resources::Resources> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = anvil::load().map_err(err)?;
+        let s = anvil::sites(&cfg)
+            .into_iter()
+            .find(|s| s.name == site)
+            .ok_or_else(|| format!("No app named {site}"))?;
+        let (total, items) = anvil::resources::disk(&s);
+        let app = handle.state::<App>();
+        let pid = app.apps.lock().unwrap().pid(&s.name);
+        let processes = anvil::resources::processes(&s, pid);
+        let services = anvil::resources::services_used(&cfg, &s, &mut app.services.lock().unwrap());
+        Ok(anvil::resources::Resources {
+            total,
+            items,
+            processes,
+            services,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn open_log(site: String) -> Res<()> {
     let log = anvil::apps::log_file(&site);
@@ -916,6 +942,7 @@ fn main() {
             app_run,
             set_app,
             open_log,
+            resources,
             runtimes,
             runtime_install,
             runtime_uninstall

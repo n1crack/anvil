@@ -55,6 +55,8 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AppCmd,
     },
+    /// Disk usage of an app, what is safe to delete, and the services it uses
+    Usage { site: String },
     /// Download the web server and print one-time system setup commands
     Setup,
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
@@ -279,6 +281,38 @@ fn main() -> Result<()> {
                 set_site_app(&mut cfg, &site, None, None, None, Some(on))?
             }
         },
+        Cmd::Usage { site } => {
+            let s = sites(&cfg)
+                .into_iter()
+                .find(|s| s.name == site_name(&site))
+                .with_context(|| format!("No app named {site}"))?;
+            let (total, items) = resources::disk(&s);
+            let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
+            println!(
+                "{} ({}): {} on disk",
+                s.name,
+                apps::label(&s.kind),
+                mb(total)
+            );
+            for i in items.iter().filter(|i| i.bytes > 0) {
+                println!(
+                    "  {:<10} {:>10}  {:<28} {}",
+                    format!("{:?}", i.safety),
+                    mb(i.bytes),
+                    i.label,
+                    i.path
+                );
+            }
+            let mut svc = services::Services::default();
+            for u in resources::services_used(&cfg, &s, &mut svc) {
+                println!(
+                    "  uses {:<12} port {:<6} {}",
+                    u.label,
+                    u.port.map_or("-".into(), |p| p.to_string()),
+                    u.anvil.map_or("not an Anvil service", |_| "Anvil service")
+                );
+            }
+        }
         Cmd::Ini { site, key, value } => set_site_ini(&mut cfg, &site, &key, value.as_deref())?,
         Cmd::Setup => {
             ensure_caddy()?;
