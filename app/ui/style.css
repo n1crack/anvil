@@ -859,6 +859,21 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   .safety.safe { color: #8a5a00; }
 }
 
+.res-cells .del,
+.clean-all {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  font-size: 12px;
+}
+
+.res-cells .del { color: var(--muted); }
+.res-cells .del:hover { color: var(--heat-text); border-color: var(--heat-deep); }
+
+.clean-all { margin: 0 0 12px; color: var(--heat-text); }
+
 .res-sub {
   margin: 20px 0 8px;
   font-size: 12px;

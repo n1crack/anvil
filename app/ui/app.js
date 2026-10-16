@@ -414,6 +414,13 @@ function renderResources(name) {
   if (safe) summary.append(document.createTextNode(`${bytes(safe)} can be deleted safely. `));
   if (rebuild) summary.append(document.createTextNode(`${bytes(rebuild)} more can be freed and rebuilt later.`));
   body.append(summary);
+  const safeItems = r.items.filter((i) => i.safety === "safe" && i.bytes > 0);
+  if (safeItems.length) {
+    const all = el("button", "clean-all", `Clean up ${bytes(safe)}`);
+    all.title = safeItems.map((i) => i.label).join(", ");
+    all.onclick = () => cleanItems(name, safeItems);
+    body.append(all);
+  }
 
   // Disk: one bar, segments by safety, then the itemised list.
   const bar = el("div", "res-bar");
@@ -437,6 +444,12 @@ function renderResources(name) {
     const tag = el("span", `safety ${i.safety}`, SAFETY[i.safety][0]);
     tag.title = i.note;
     dd.append(tag, el("span", "size", bytes(i.bytes)));
+    if (i.safety !== "keep") {
+      const del = el("button", "del", "Delete");
+      del.setAttribute("aria-label", `Delete ${i.label}`);
+      del.onclick = () => cleanItems(name, [i]);
+      dd.append(del);
+    }
     row.append(dt, dd);
     list.append(row);
   }
@@ -478,6 +491,29 @@ function renderResources(name) {
     }
     body.append(svcs);
   }
+}
+
+/** Confirm with a native dialog, then delete the items one by one. */
+async function cleanItems(name, items) {
+  const total = items.reduce((a, i) => a + i.bytes, 0);
+  const what = items.length === 1 ? `${items[0].label} (${items[0].path.startsWith("/") ? tilde(items[0].path) : items[0].path})` : `${items.length} items`;
+  const how = items.length === 1 ? items[0].note : items.map((i) => `• ${i.label}: ${i.note}`).join("\n");
+  const ok = await window.__TAURI__.dialog.ask(`${how}\n\nThis frees about ${bytes(total)} and can't be undone.`, {
+    title: `Delete ${what}?`,
+    kind: "warning",
+    okLabel: "Delete",
+    cancelLabel: "Cancel",
+  });
+  if (!ok) return;
+  for (const i of items) {
+    try {
+      await invoke("clean", { site: name, path: i.path });
+    } catch (e) {
+      showError(String(e));
+      break;
+    }
+  }
+  loadResources(name, true);
 }
 
 const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet"]);
