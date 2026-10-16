@@ -288,6 +288,12 @@ function serviceRow(svc) {
     fix.className = "link";
     info.append(fix);
   }
+  if (svc.suggested_web_port && !svc.running) {
+    const fix = button(`Use inbox port ${svc.suggested_web_port}`, () =>
+      serviceCall("set_service_port", { id: svc.id, port: svc.suggested_web_port, web: true }));
+    fix.className = "link";
+    info.append(fix);
+  }
 
   const actions = document.createElement("span");
   actions.className = "actions-inline";
@@ -311,6 +317,20 @@ function serviceRow(svc) {
       const n = parseInt(port.value, 10);
       serviceCall("set_service_port", { id: svc.id, port: Number.isNaN(n) ? null : n });
     };
+    actions.append(port);
+    if (svc.web_port) {
+      const web = document.createElement("input");
+      web.value = svc.web_port;
+      web.placeholder = svc.web_port;
+      web.title = "Inbox port";
+      web.inputMode = "numeric";
+      web.setAttribute("aria-label", `${svc.name} inbox port`);
+      web.onchange = () => {
+        const n = parseInt(web.value, 10);
+        serviceCall("set_service_port", { id: svc.id, port: Number.isNaN(n) ? null : n, web: true });
+      };
+      actions.append(web);
+    }
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
     toggle.setAttribute("role", "switch");
@@ -319,7 +339,7 @@ function serviceRow(svc) {
     toggle.onchange = () => serviceCall("set_service", { id: svc.id, on: toggle.checked });
     const remove = button("Uninstall", () => serviceCall("uninstall_service", { id: svc.id }));
     remove.title = "Removes the program; your data stays in Anvil’s data folder";
-    actions.append(port, toggle, remove);
+    actions.append(toggle, remove);
   }
   row.append(info, actions);
   return row;

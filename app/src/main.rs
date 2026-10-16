@@ -572,9 +572,14 @@ fn set_service_port(
     app: State<App>,
     id: String,
     port: Option<u16>,
+    web: Option<bool>,
 ) -> Res<Vec<ServiceRow>> {
     let mut cfg = anvil::load().map_err(err)?;
-    anvil::services::set_port(&mut cfg, &id, port).map_err(err)?;
+    if web == Some(true) {
+        anvil::services::set_web_port(&mut cfg, &id, port).map_err(err)?;
+    } else {
+        anvil::services::set_port(&mut cfg, &id, port).map_err(err)?;
+    }
     let mut svc = app.services.lock().unwrap();
     let was_running = svc.running(&id);
     svc.stop(&id);
