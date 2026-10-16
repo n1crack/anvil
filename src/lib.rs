@@ -2,6 +2,7 @@
 //! Shared by the `anvil` CLI and the macOS app.
 
 pub mod dns;
+pub mod services;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,8 @@ pub struct Config {
     pub theme: Option<String>,
     /// Keep the Dock icon while no window is open.
     pub dock_icon: bool,
+    /// Database, cache and mail services, by id (see `services::SERVICES`).
+    pub services: BTreeMap<String, services::ServiceConfig>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -69,6 +72,7 @@ impl Default for Config {
             terminal: None,
             theme: None,
             dock_icon: false,
+            services: BTreeMap::new(),
         }
     }
 }
@@ -229,7 +233,7 @@ pub fn icon(site: &Site) -> Option<PathBuf> {
     .find(|p| fs::metadata(p).is_ok_and(|m| m.is_file() && m.len() > 0))
 }
 
-fn platform() -> Result<(&'static str, &'static str)> {
+pub(crate) fn platform() -> Result<(&'static str, &'static str)> {
     // (static-php-cli suffix, caddy suffix)
     Ok(match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => ("macos-aarch64", "mac_arm64"),
@@ -251,11 +255,17 @@ pub fn run(cmd: &mut Command) -> Result<()> {
 }
 
 /// Download a .tar.gz and unpack it into `dir`.
-fn fetch_tgz(url: &str, dir: &Path) -> Result<()> {
+/// With `strip`, the archive's single top-level folder is dropped.
+pub(crate) fn fetch_tgz(url: &str, dir: &Path, strip: bool) -> Result<()> {
     fs::create_dir_all(dir)?;
     let tmp = dir.join(".download.tar.gz");
     run(Command::new("curl").args(["-fL#", "-o"]).arg(&tmp).arg(url))?;
-    run(Command::new("tar").arg("-xzf").arg(&tmp).arg("-C").arg(dir))?;
+    let mut tar = Command::new("tar");
+    tar.arg("-xzf").arg(&tmp).arg("-C").arg(dir);
+    if strip {
+        tar.arg("--strip-components=1");
+    }
+    run(&mut tar)?;
     fs::remove_file(tmp)?;
     Ok(())
 }
@@ -320,7 +330,11 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     let dir = php_dir(minor);
     println!("Installing PHP {full}…");
     for kind in ["fpm", "cli"] {
-        fetch_tgz(&format!("{PHP_INDEX}php-{full}-{kind}-{plat}.tar.gz"), &dir)?;
+        fetch_tgz(
+            &format!("{PHP_INDEX}php-{full}-{kind}-{plat}.tar.gz"),
+            &dir,
+            false,
+        )?;
     }
     let ini = dir.join("php.ini");
     if !ini.exists() {
@@ -372,6 +386,7 @@ pub fn ensure_caddy() -> Result<()> {
             "https://github.com/caddyserver/caddy/releases/download/v{CADDY_VERSION}/caddy_{CADDY_VERSION}_{plat}.tar.gz"
         ),
         &home().join("bin"),
+        false,
     )
 }
 
@@ -526,7 +541,7 @@ fn pid_file() -> PathBuf {
     home().join("run").join("pids")
 }
 
-fn alive(pid: &str) -> bool {
+pub(crate) fn alive(pid: &str) -> bool {
     Command::new("kill")
         .args(["-0", pid])
         .stderr(std::process::Stdio::null())
@@ -537,8 +552,8 @@ fn alive(pid: &str) -> bool {
 /// Clean up after an Anvil that died without stopping its children (crash, SIGKILL).
 /// The pid file is `owner pid` followed by child pids; children are only killed when
 /// the owner is gone and the process still runs one of our binaries.
-fn kill_orphans() {
-    let Ok(file) = fs::read_to_string(pid_file()) else {
+pub(crate) fn kill_orphans(pid_file: &Path) {
+    let Ok(file) = fs::read_to_string(pid_file) else {
         return;
     };
     let mut pids = file.lines();
@@ -556,10 +571,26 @@ fn kill_orphans() {
             killed = true;
         }
     }
-    let _ = fs::remove_file(pid_file());
+    let _ = fs::remove_file(pid_file);
     if killed {
         std::thread::sleep(std::time::Duration::from_millis(500)); // let ports close
     }
+}
+
+/// Ask a process to shut down cleanly (SIGTERM); force it after `grace`.
+pub(crate) fn terminate(child: &mut Child, grace: std::time::Duration) {
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+    let deadline = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < deadline {
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Running PHP-FPM pools and the web server.
@@ -569,7 +600,7 @@ pub struct Server {
 
 impl Server {
     pub fn start(cfg: &Config) -> Result<Server> {
-        kill_orphans();
+        kill_orphans(&pid_file());
         if TcpStream::connect(("127.0.0.1", cfg.https_port)).is_ok() {
             bail!(
                 "Port {} is already in use — is Anvil already running?",
@@ -653,8 +684,7 @@ impl Server {
             return;
         }
         for c in &mut self.children {
-            let _ = c.kill();
-            let _ = c.wait();
+            terminate(c, std::time::Duration::from_secs(3));
         }
         self.children.clear();
         let _ = fs::remove_file(pid_file());
