@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26262b"/>
+      <stop offset="1" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <linearGradient id="hot" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd166"/>
+      <stop offset="0.45" stop-color="#ff8a1f"/>
+      <stop offset="1" stop-color="#e8410c"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.62" r="0.5">
+      <stop offset="0" stop-color="#ff6a00" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ff6a00" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="40" y="40" width="944" height="944" rx="212" fill="url(#bg)"/>
+  <rect x="41.5" y="41.5" width="941" height="941" rx="210.5" fill="none" stroke="#fff" stroke-opacity="0.08" stroke-width="3"/>
+  <rect x="40" y="40" width="944" height="944" rx="212" fill="url(#glow)"/>
+
+  <!-- the A -->
+  <path fill="url(#hot)" fill-rule="evenodd"
+        d="M452 210 H572 L794 820 H679 L632 690 H392 L345 820 H230 Z
+           M512 360 L588 570 H436 Z"/>
+
+  <!-- anvil face: the crossbar extends into a flat strike plate -->
+  <rect x="300" y="842" width="424" height="26" rx="13" fill="#ff8a1f" opacity="0.55"/>
+
+  <!-- spark -->
+  <!-- sparks flying off the strike -->
+  <g stroke-linecap="round" fill="none">
+    <path d="M650 250 L742 170" stroke="#ffe7a3" stroke-width="18"/>
+    <path d="M690 300 L800 262" stroke="#ffd166" stroke-width="14" opacity="0.9"/>
+    <path d="M612 214 L640 128" stroke="#ffd166" stroke-width="11" opacity="0.75"/>
+  </g>
+  <circle cx="790" cy="160" r="9" fill="#ffd166"/>
+</svg>
