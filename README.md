@@ -36,7 +36,7 @@ Anvil turns the folders on your Mac into running sites at local domains like `my
 | PHP 8.0 – 8.5, isolated, per-site version | ✅ Available |
 | Laravel and any PHP app with a `public/` folder | ✅ Available |
 | Static sites | ✅ Available |
-| Native macOS app with menu bar | 🛠 Next |
+| Native macOS app with menu bar | ✅ Available |
 | Standard ports 80/443, URLs without `:8443` | 🛠 Next |
 | Per-site PHP settings (memory, upload size, extensions) | 🛠 Next |
 | Node.js versions, Next.js and other JavaScript apps | 📋 Planned |
@@ -75,6 +75,18 @@ anvil trust                # in another terminal: trust it for HTTPS
 
 Open `https://<folder>.test:8443` in your browser.
 
+## The app
+
+Anvil also comes as a native macOS app with a menu bar icon. It starts your sites on launch, lists them with search, and lets you open a site in the browser, Finder, Terminal or your editor and pick its PHP version.
+
+```sh
+cargo install tauri-cli --version '^2' --locked
+cd app && cargo tauri build
+open ../target/release/bundle/macos/Anvil.app
+```
+
+Closing the window keeps Anvil running in the menu bar; quit from the menu bar icon. To get an "Open in …" button for your editor, set `editor = "PhpStorm"` (or any app name) in `~/.anvil/config.toml`.
+
 ## Usage
 
 | Command | Description |
@@ -103,6 +115,7 @@ http_port = 8080
 https_port = 8443
 dns_port = 5354
 php = "8.4"         # default PHP version
+editor = "PhpStorm" # app used by "Open in editor"
 
 [sites."myapp"]
 php = "8.3"         # per-site override

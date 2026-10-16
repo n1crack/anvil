@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anvil</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="titlebar" data-tauri-drag-region></div>
+    <div class="toolbar">
+      <label class="search">
+        <span class="visually-hidden">Search sites</span>
+        <input id="search" type="search" placeholder="Search" autocomplete="off" spellcheck="false">
+      </label>
+      <button id="reload" class="icon-btn" title="Reload sites (⌘R)" aria-label="Reload sites">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <form id="ask" class="ask" hidden>
+      <label id="ask-label" for="ask-input"></label>
+      <input id="ask-input" autocomplete="off" spellcheck="false">
+    </form>
+    <nav id="list" class="list" aria-label="Sites"></nav>
+  </aside>
+
+  <main class="detail">
+    <header class="titlebar" data-tauri-drag-region>
+      <button id="power" class="power" role="switch" aria-checked="false">
+        <span class="ingot" aria-hidden="true"></span>
+        <span id="power-label">Stopped</span>
+      </button>
+    </header>
+    <p id="error" class="error" role="alert" hidden></p>
+    <section id="site" class="site" aria-live="polite"></section>
+  </main>
+
+  <template id="site-tpl">
+    <div class="site-head">
+      <h1 class="site-name"></h1>
+      <a class="site-url" href="#"></a>
+    </div>
+    <div class="actions">
+      <button data-open="browser">Open in browser</button>
+      <button data-open="finder">Show in Finder</button>
+      <button data-open="terminal">Open Terminal</button>
+      <button data-open="editor" class="editor-btn" hidden></button>
+    </div>
+    <dl class="group">
+      <div class="row">
+        <dt><label for="php">PHP</label></dt>
+        <dd><select id="php"></select></dd>
+      </div>
+      <div class="row">
+        <dt>Web root</dt>
+        <dd class="path" data-field="root"></dd>
+      </div>
+      <div class="row">
+        <dt>Project</dt>
+        <dd class="path" data-field="path"></dd>
+      </div>
+      <div class="row">
+        <dt>Source</dt>
+        <dd data-field="source"></dd>
+      </div>
+    </dl>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
