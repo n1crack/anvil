@@ -220,11 +220,14 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_secs());
+            // "Pinned" only when the pin is in effect (a static site drops PHP it can't use).
+            let pin_set = php_ok && pinned.is_some();
+            let php = site_php(&kind, pinned.or_else(|| cfg.php.clone()), &installed);
             Site {
                 modified,
                 ini,
-                php_pinned: php_ok && pinned.is_some(),
-                php: site_php(&kind, pinned.or_else(|| cfg.php.clone()), &installed),
+                php_pinned: pin_set && php.is_some(),
+                php,
                 kind_detected: detected.into(),
                 kind,
                 command_custom: custom.is_some(),
