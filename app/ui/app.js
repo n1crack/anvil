@@ -279,6 +279,18 @@ async function newGroup(s) {
   if (group) await call("set_group", { site: s.name, group });
 }
 
+let tab = localStorage.getItem("tab") ?? "overview";
+const kindLabel = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
+const RUNTIME = { next: "Node.js", nuxt: "Node.js", vite: "Node.js", node: "Node.js", rust: "Rust", go: "Go", dotnet: ".NET" };
+
+function showTab(root, name) {
+  tab = name;
+  localStorage.setItem("tab", name);
+  for (const b of root.querySelectorAll("[role=tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
+  for (const p of root.querySelectorAll("[role=tabpanel]")) p.hidden = p.dataset.panel !== name;
+  $(".res-reload", root).hidden = name !== "resources";
+}
+
 function renderSite() {
   const root = $("#site");
   const s = snap.sites.find((x) => x.name === selected);
@@ -286,6 +298,7 @@ function renderSite() {
     root.innerHTML = `<div class="placeholder">Select an application</div>`;
     return;
   }
+  const process = PROCESS_KINDS.has(s.kind);
 
   root.replaceChildren($("#site-tpl").content.cloneNode(true));
   $(".site-name", root).textContent = s.name;
@@ -296,26 +309,44 @@ function renderSite() {
   const editor = $(".editor-btn", root);
   if (snap.editor) {
     editor.hidden = false;
-    editor.textContent = `Open in ${snap.editor}`;
+    editor.title = `Open in ${snap.editor}`;
+    $("span", editor).textContent = snap.editor;
   }
   for (const b of root.querySelectorAll("[data-open]")) b.onclick = () => open(b.dataset.open);
+  for (const el of root.querySelectorAll(".php-only")) el.hidden = process;
+  for (const el of root.querySelectorAll(".process-only")) el.hidden = !process;
 
-  // Type: detected, or chosen by the user.
+  for (const b of root.querySelectorAll("[role=tab]")) b.onclick = () => showTab(root, b.dataset.tab);
+  $(".tabs", root).onkeydown = (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const tabs = [...root.querySelectorAll("[role=tab]")];
+    const i = tabs.findIndex((t) => t.dataset.tab === tab);
+    const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+    showTab(root, next.dataset.tab);
+    next.focus();
+  };
+  showTab(root, tab);
+
+  // Overview
+  $('[data-field="kind"]', root).textContent =
+    s.kind === s.kind_detected ? kindLabel(s.kind) : `${kindLabel(s.kind)} (set by you)`;
+  $('[data-field="runtime"]', root).textContent = process
+    ? RUNTIME[s.kind]
+    : s.php
+      ? `PHP ${s.php}${s.php_pinned ? "" : " (default)"}`
+      : "Static files";
+  $('[data-field="path"]', root).textContent = tilde(s.path);
+  $('[data-field="root"]', root).textContent = tilde(s.root);
+
+  if (process) renderRun(s, root);
+
+  // Settings
   const kindSel = $("#kind", root);
-  const label = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
-  kindSel.add(new Option(`Detected (${label(s.kind_detected)})`, ""));
+  kindSel.add(new Option(`Detected (${kindLabel(s.kind_detected)})`, ""));
   for (const [id, name] of snap.kinds) kindSel.add(new Option(name, id));
   kindSel.value = s.kind === s.kind_detected ? "" : s.kind;
   kindSel.onchange = () =>
     call("set_app", kindSel.value ? { site: s.name, kind: kindSel.value } : { site: s.name, reset: ["kind"] });
-
-  const process = PROCESS_KINDS.has(s.kind);
-  for (const el of root.querySelectorAll(".php-only")) el.hidden = process;
-  for (const el of root.querySelectorAll(".process-only")) el.hidden = !process;
-  if (process) renderRun(s, root);
-
-  $(".res-reload", root).onclick = () => loadResources(s.name, true);
-  loadResources(s.name);
 
   const php = $("#php", root);
   php.add(new Option(`Default (${snap.php_default ?? "none"})`, ""));
@@ -323,11 +354,7 @@ function renderSite() {
   php.value = s.php_pinned ? s.php : "";
   php.onchange = () => call("set_php", { site: s.name, version: php.value || null });
 
-  $('[data-field="root"]', root).textContent = tilde(s.root);
-  $('[data-field="path"]', root).textContent = tilde(s.path);
-  $('[data-field="source"]', root).textContent = s.linked ? "Linked folder" : "Parked folder";
-
-  // Per-site php.ini overrides. Placeholders show what the site gets without one.
+  // Per-app php.ini overrides; placeholders show what applies without one.
   const base = { memory_limit: "512M", upload_max_filesize: "100M", max_execution_time: "120" };
   for (const input of root.querySelectorAll("[data-ini]")) {
     const key = input.dataset.ini;
@@ -358,6 +385,10 @@ function renderSite() {
       if (s.ini[k] !== v) await call("set_site_ini", { site: s.name, key: k, value: v });
     }
   };
+
+  // Resources (also feeds the Overview's disk and services rows)
+  $(".res-reload", root).onclick = () => loadResources(s.name, true);
+  loadResources(s.name);
 }
 
 /* ---------- Resources ---------- */
@@ -399,40 +430,57 @@ function el(tag, cls, text) {
   return e;
 }
 
+function renderOverviewResources(r) {
+  const disk = $('#site [data-field="disk"]');
+  const svc = $('#site [data-field="services"]');
+  if (!disk || !r || r.error) return;
+  const safe = r.items.filter((i) => i.safety === "safe").reduce((a, i) => a + i.bytes, 0);
+  disk.textContent = safe ? `${bytes(r.total)}, ${bytes(safe)} can be cleaned up` : bytes(r.total);
+  disk.classList.remove("muted");
+  svc.textContent = r.services.length ? r.services.map((x) => x.label).join(", ") : "None found in .env";
+  svc.classList.toggle("muted", !r.services.length);
+}
+
 function renderResources(name) {
   const body = $("#site .res-body");
   if (!body) return;
   const r = resCache.get(name);
+  renderOverviewResources(r);
   body.replaceChildren();
-  if (!r) return body.append(el("p", "group-hint", "Measuring…"));
+  if (!r) return body.append(el("p", "muted", "Measuring…"));
   if (r.error) return body.append(el("p", "error", r.error));
 
-  const safe = r.items.filter((i) => i.safety === "safe").reduce((a, i) => a + i.bytes, 0);
-  const rebuild = r.items.filter((i) => i.safety === "rebuild").reduce((a, i) => a + i.bytes, 0);
-  const summary = el("p", "res-summary");
-  summary.append(el("strong", null, bytes(r.total)), document.createTextNode(" on disk. "));
-  if (safe) summary.append(document.createTextNode(`${bytes(safe)} can be deleted safely. `));
-  if (rebuild) summary.append(document.createTextNode(`${bytes(rebuild)} more can be freed and rebuilt later.`));
-  body.append(summary);
+  const sumOf = (kind) => r.items.filter((i) => i.safety === kind).reduce((a, i) => a + i.bytes, 0);
+  const safe = sumOf("safe");
+
+  // Total on the left, the one-click clean-up on the right.
+  const head = el("div", "res-head");
+  head.append(el("strong", "res-total", bytes(r.total)));
   const safeItems = r.items.filter((i) => i.safety === "safe" && i.bytes > 0);
   if (safeItems.length) {
     const all = el("button", "clean-all", `Clean up ${bytes(safe)}`);
-    all.title = safeItems.map((i) => i.label).join(", ");
+    all.title = `Deletes ${safeItems.map((i) => i.label.toLowerCase()).join(", ")}`;
     all.onclick = () => cleanItems(name, safeItems);
-    body.append(all);
+    head.append(all);
   }
+  body.append(head);
 
-  // Disk: one bar, segments by safety, then the itemised list.
+  // One bar split by what can be deleted, with a short legend instead of prose.
   const bar = el("div", "res-bar");
   bar.setAttribute("aria-hidden", "true");
+  const legend = el("div", "res-legend");
   for (const kind of ["keep", "rebuild", "safe"]) {
-    const sum = r.items.filter((i) => i.safety === kind).reduce((a, i) => a + i.bytes, 0);
+    const sum = sumOf(kind);
     if (!sum || !r.total) continue;
     const seg = el("span", `seg ${kind}`);
     seg.style.flexGrow = sum;
     bar.append(seg);
+    const key = el("span", "key");
+    key.append(el("i", `swatch ${kind}`), document.createTextNode(`${SAFETY[kind][0]} ${bytes(sum)}`));
+    key.title = SAFETY[kind][1];
+    legend.append(key);
   }
-  body.append(bar);
+  body.append(bar, legend);
 
   const list = el("dl", "group res-list");
   for (const i of r.items.filter((i) => i.bytes > 0)) {
@@ -449,6 +497,8 @@ function renderResources(name) {
       del.setAttribute("aria-label", `Delete ${i.label}`);
       del.onclick = () => cleanItems(name, [i]);
       dd.append(del);
+    } else {
+      dd.append(el("span", "del-space")); // keeps the size column aligned
     }
     row.append(dt, dd);
     list.append(row);
@@ -470,7 +520,7 @@ function renderResources(name) {
 
   body.append(el("h3", "res-sub", "Services"));
   if (!r.services.length) {
-    body.append(el("p", "group-hint", "No database, cache or mail settings found in this app’s .env."));
+    body.append(el("p", "muted", "None found in .env"));
   } else {
     const svcs = el("dl", "group res-list");
     for (const sv of r.services) {
@@ -521,9 +571,12 @@ const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "do
 function renderRun(s, root) {
   const state = snap.app_states[s.name]; // "running" | "starting" | undefined
   const error = snap.app_errors[s.name];
-  $(".dot", root).className = `dot ${state === "running" ? "on" : state ? "warm" : ""}`;
-  $(".state-text", root).textContent =
-    state === "running" ? `Running on port ${s.port}` : state ? "Starting… (first builds can take a while)" : "Stopped";
+  $(".run-box", root).hidden = false;
+  $(".show-log", root).hidden = false;
+  $(".run-box .dot", root).className = `dot ${state === "running" ? "on" : state ? "warm" : ""}`;
+  const text = $(".state-text", root);
+  text.textContent = state === "running" ? "Running" : state ? "Starting…" : "Stopped";
+  text.title = state === "running" ? `Port ${s.port}` : state ? "First builds can take a while" : "";
   $('[data-run="start"]', root).hidden = !!state;
   $('[data-run="restart"]', root).hidden = !state;
   $('[data-run="stop"]', root).hidden = !state;
