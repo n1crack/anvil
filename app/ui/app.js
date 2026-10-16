@@ -602,7 +602,7 @@ function renderRun(s, root) {
 
   // Language version: automatic (project file or newest) or pinned.
   const rtId = { next: "node", nuxt: "node", vite: "node", node: "node", rust: "rust", go: "go", dotnet: "dotnet" }[s.kind];
-  const versions = snap.runtimes[rtId] ?? [];
+  const versions = snap.runtimes?.[rtId] ?? [];
   const rt = $("#app-runtime", root);
   $("#app-runtime-label", root).textContent = `${RUNTIME[s.kind]} version`;
   const autoVersion = s.runtime_pinned ? versions[0] : s.runtime_version;

@@ -847,6 +847,16 @@ pub fn clean(site: &Site, path: &str, app_running: bool) -> Result<u64> {
     if std::fs::symlink_metadata(&target).is_err() {
         return Ok(0);
     }
+    // A folder on the way (e.g. `ios` in `ios/Pods`) may itself be a symlink; never
+    // follow one out of the project.
+    let inside = target
+        .parent()
+        .and_then(|p| p.canonicalize().ok())
+        .zip(site.path.canonicalize().ok())
+        .is_some_and(|(parent, project)| parent.starts_with(project));
+    if !inside {
+        bail!("{path} leads outside the project; Anvil won't delete it");
+    }
     let freed = du(std::slice::from_ref(&target)).values().sum();
     let contents_only = path.starts_with("storage/") || path == "bootstrap/cache";
     if contents_only && !std::fs::symlink_metadata(&target)?.file_type().is_symlink() {
@@ -914,6 +924,42 @@ mod tests {
         assert!(dir.join("outside/secret.txt").exists());
         assert!(dir.join("storage/app/upload.png").exists());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn nested_rule_through_symlink_is_refused() {
+        let base = std::env::temp_dir().join(format!("anvil-nested-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let project = base.join("app");
+        let outside = base.join("elsewhere");
+        std::fs::create_dir_all(outside.join("Pods")).unwrap();
+        std::fs::write(outside.join("Pods/keep.txt"), "x").unwrap();
+        std::fs::write(outside.join("Podfile"), "").unwrap();
+        std::fs::create_dir_all(&project).unwrap();
+        // `ios` points outside the project, so `ios/Pods` must not be deleted.
+        std::os::unix::fs::symlink(&outside, project.join("ios")).unwrap();
+        let site = Site {
+            name: "n".into(),
+            path: project.clone(),
+            root: project.clone(),
+            php: None,
+            php_pinned: false,
+            ini: BTreeMap::new(),
+            linked: true,
+            parked_in: None,
+            modified: 0,
+            kind: "static".into(),
+            kind_detected: "static".into(),
+            command: None,
+            command_custom: false,
+            port: None,
+            autostart: false,
+            runtime_version: None,
+            runtime_pinned: false,
+        };
+        assert!(clean(&site, "ios/Pods", false).is_err());
+        assert!(outside.join("Pods/keep.txt").exists());
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
