@@ -706,7 +706,82 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   color: var(--heat-text);
 }
 
+.runtime .versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px 1px 8px;
+  border-radius: 10px;
+  background: var(--steel-raised);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.page .chip button {
+  height: 18px;
+  padding: 0 5px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+
+.page .chip button:hover { color: var(--text); }
+
 #service-list h2:first-child { margin-top: 20px; }
+
+/* Type tag in the list: quiet, only the label changes. */
+.item .kind {
+  padding: 1px 7px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dot.warm {
+  background: var(--heat-white);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+.run-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.run-status .state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.run-status button,
+.row dd > select {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}
+
+.run-error { margin: 10px 0 0; max-width: 640px; }
+
+.group-hint code { font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
+
+[hidden] { display: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

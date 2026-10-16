@@ -17,6 +17,9 @@ struct App {
     server: Mutex<Option<Server>>,
     error: Mutex<Option<String>>,
     services: Mutex<anvil::services::Services>,
+    apps: Mutex<anvil::apps::Apps>,
+    /// Last start failure per app.
+    app_errors: Mutex<std::collections::BTreeMap<String, String>>,
     /// Last start failure per service id.
     service_errors: Mutex<std::collections::BTreeMap<String, String>>,
 }
@@ -34,6 +37,10 @@ struct Snapshot {
     ini: std::collections::BTreeMap<String, String>,
     running: bool,
     error: Option<String>,
+    /// Apps with their own server: "starting" until the port answers, then "running".
+    app_states: std::collections::BTreeMap<String, &'static str>,
+    app_errors: std::collections::BTreeMap<String, String>,
+    kinds: Vec<(&'static str, &'static str)>,
 }
 
 type Res<T> = Result<T, String>;
@@ -48,8 +55,27 @@ fn running(app: &App) -> bool {
 
 fn snapshot(app: &App) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
+    let sites = anvil::sites(&cfg);
+    let mut apps = app.apps.lock().unwrap();
+    let app_states = sites
+        .iter()
+        .filter(|s| apps.running(&s.name))
+        .map(|s| {
+            let up = s
+                .port
+                .is_some_and(|p| std::net::TcpStream::connect(("127.0.0.1", p)).is_ok());
+            (s.name.clone(), if up { "running" } else { "starting" })
+        })
+        .collect();
+    drop(apps);
     Ok(Snapshot {
-        sites: anvil::sites(&cfg),
+        app_states,
+        app_errors: app.app_errors.lock().unwrap().clone(),
+        kinds: anvil::apps::KINDS
+            .iter()
+            .map(|k| (*k, anvil::apps::label(k)))
+            .collect(),
+        sites,
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
         editor: cfg.editor.clone(),
@@ -138,6 +164,125 @@ fn sites_changed(handle: &AppHandle, app: &App, cfg: &Config) {
         start(app, cfg);
     }
     changed(handle);
+}
+
+fn start_app(app: &App, cfg: &Config, name: &str) {
+    let result = anvil::sites(cfg)
+        .into_iter()
+        .find(|s| s.name == name)
+        .ok_or_else(|| anyhow::anyhow!("No app named {name}"))
+        .and_then(|site| app.apps.lock().unwrap().start(&site));
+    let mut errors = app.app_errors.lock().unwrap();
+    match result {
+        Ok(()) => errors.remove(name),
+        Err(e) => errors.insert(name.into(), err(e)),
+    };
+}
+
+#[tauri::command]
+fn app_run(handle: AppHandle, app: State<App>, site: String, action: String) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    if action != "start" {
+        app.apps.lock().unwrap().stop(&site);
+        app.app_errors.lock().unwrap().remove(&site);
+    }
+    if action != "stop" {
+        start_app(&app, &cfg, &site);
+    }
+    changed(&handle);
+    snapshot(&app)
+}
+
+/// Change an app's kind, start command, port or autostart. Fields left out stay as they are;
+/// `reset` lists fields to put back to their defaults.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn set_app(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    kind: Option<String>,
+    command: Option<String>,
+    port: Option<u16>,
+    autostart: Option<bool>,
+    reset: Option<Vec<String>>,
+) -> Res<Snapshot> {
+    let reset = reset.unwrap_or_default();
+    let pick = |name: &str, v: Option<String>| -> Option<Option<String>> {
+        if reset.iter().any(|r| r == name) {
+            Some(None)
+        } else {
+            v.map(Some)
+        }
+    };
+    let port = if reset.iter().any(|r| r == "port") {
+        Some(None)
+    } else {
+        port.map(Some)
+    };
+    let mut cfg = anvil::load().map_err(err)?;
+    let reroute =
+        kind.is_some() || port.is_some() || reset.iter().any(|r| r == "kind" || r == "port");
+    anvil::set_site_app(
+        &mut cfg,
+        &site,
+        pick("kind", kind),
+        pick("command", command),
+        port,
+        autostart,
+    )
+    .map_err(err)?;
+    // A running app picks up a new command or port by restarting.
+    let was_running = app.apps.lock().unwrap().running(&site);
+    if was_running {
+        app.apps.lock().unwrap().stop(&site);
+    }
+    if reroute {
+        sites_changed(&handle, &app, &cfg);
+    }
+    if was_running {
+        start_app(&app, &cfg, &site);
+    }
+    changed(&handle);
+    snapshot(&app)
+}
+
+#[tauri::command]
+fn open_log(site: String) -> Res<()> {
+    let log = anvil::apps::log_file(&site);
+    if !log.exists() {
+        return Err("No log yet — start the app first".into());
+    }
+    anvil::run(Command::new("open").arg("-a").arg("Console").arg(log)).map_err(err)
+}
+
+#[tauri::command]
+async fn runtimes() -> Res<Vec<anvil::runtimes::RuntimeInfo>> {
+    tauri::async_runtime::spawn_blocking(|| {
+        anvil::runtimes::RUNTIMES
+            .iter()
+            .map(|id| anvil::runtimes::info(id, true))
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn runtime_install(handle: AppHandle, id: String, version: String) -> Res<()> {
+    tauri::async_runtime::spawn_blocking(move || anvil::runtimes::install(&id, &version))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(err)?;
+    changed(&handle);
+    Ok(())
+}
+
+#[tauri::command]
+fn runtime_uninstall(handle: AppHandle, id: String, version: String) -> Res<()> {
+    anvil::runtimes::uninstall(&id, &version).map_err(err)?;
+    changed(&handle);
+    Ok(())
 }
 
 #[tauri::command]
@@ -767,7 +912,13 @@ fn main() {
             set_service_port,
             install_service,
             uninstall_service,
-            open_url
+            open_url,
+            app_run,
+            set_app,
+            open_log,
+            runtimes,
+            runtime_install,
+            runtime_uninstall
         ])
         .setup(|app| {
             if let Ok(cfg) = anvil::load() {
@@ -775,6 +926,9 @@ fn main() {
                 start(&state, &cfg);
                 let failed = state.services.lock().unwrap().start_enabled(&cfg);
                 state.service_errors.lock().unwrap().extend(failed);
+                for site in anvil::sites(&cfg).iter().filter(|s| s.autostart) {
+                    start_app(&state, &cfg, &site.name);
+                }
                 apply_theme(app.handle(), cfg.theme.as_deref());
             }
             // Template image: macOS recolours it for light and dark menu bars.
@@ -806,6 +960,7 @@ fn main() {
         .run(|handle, e| match e {
             RunEvent::Exit => {
                 let app = handle.state::<App>();
+                *app.apps.lock().unwrap() = Default::default();
                 stop(&app);
                 // Databases shut down cleanly before Anvil exits.
                 *app.services.lock().unwrap() = Default::default();

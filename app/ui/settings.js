@@ -24,6 +24,90 @@ window.refresh = () => {
   loadServices();
 };
 
+/* ---------- Languages ---------- */
+
+let runtimes = null;
+const installing = new Set(); // "id@version"
+
+async function loadRuntimes() {
+  try {
+    runtimes = await invoke("runtimes");
+    showError(null);
+  } catch (e) {
+    showError(String(e));
+  }
+  renderRuntimes();
+}
+
+function renderRuntimes() {
+  if (!runtimes) return;
+  const root = $("#runtime-list");
+  root.replaceChildren();
+  for (const rt of runtimes) {
+    const row = document.createElement("div");
+    row.className = "row runtime";
+    const info = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = rt.name;
+    const versions = document.createElement("span");
+    versions.className = "versions";
+    if (!rt.installed.length) {
+      const none = document.createElement("small");
+      none.textContent = "Not installed";
+      versions.append(none);
+    }
+    for (const v of rt.installed) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = v;
+      const x = document.createElement("button");
+      x.textContent = "×";
+      x.title = `Uninstall ${rt.name} ${v}`;
+      x.setAttribute("aria-label", x.title);
+      x.onclick = async () => {
+        try {
+          await invoke("runtime_uninstall", { id: rt.id, version: v });
+        } catch (e) {
+          showError(String(e));
+        }
+        loadRuntimes();
+      };
+      chip.append(x);
+      versions.append(chip);
+    }
+    info.append(title, versions);
+
+    const actions = document.createElement("span");
+    actions.className = "actions-inline";
+    const pick = document.createElement("select");
+    pick.setAttribute("aria-label", `${rt.name} version to install`);
+    for (const v of rt.available.filter((v) => !rt.installed.includes(v))) pick.add(new Option(v, v));
+    const key = () => `${rt.id}@${pick.value}`;
+    const install = button("Install", async () => {
+      const k = key();
+      installing.add(k);
+      renderRuntimes();
+      try {
+        await invoke("runtime_install", { id: rt.id, version: k.split("@")[1] });
+        showError(null);
+      } catch (e) {
+        showError(String(e));
+      }
+      installing.delete(k);
+      loadRuntimes();
+    });
+    const busyHere = [...installing].some((k) => k.startsWith(`${rt.id}@`));
+    if (busyHere) {
+      install.textContent = "Installing…";
+      install.disabled = true;
+      pick.disabled = true;
+    }
+    if (pick.options.length) actions.append(pick, install);
+    row.append(info, actions);
+    root.append(row);
+  }
+}
+
 /* ---------- Services ---------- */
 
 let services = [];
@@ -222,6 +306,7 @@ for (const b of document.querySelectorAll("[data-page]")) {
   b.onclick = () => {
     for (const other of document.querySelectorAll("[data-page]")) other.setAttribute("aria-current", other === b);
     for (const page of document.querySelectorAll(".page")) page.hidden = page.id !== b.dataset.page;
+    if (b.dataset.page === "languages" && !runtimes) loadRuntimes();
   };
 }
 

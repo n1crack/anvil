@@ -12,6 +12,7 @@
     <nav class="nav" aria-label="Settings">
       <button data-page="general" aria-current="true">General</button>
       <button data-page="php">PHP</button>
+      <button data-page="languages">Languages</button>
       <button data-page="services">Services</button>
     </nav>
   </aside>
@@ -97,6 +98,12 @@
         </label>
       </div>
     </section>
+    <section id="languages" class="page" hidden>
+      <h1>Languages</h1>
+      <p class="hint">Toolchains for applications that run their own server. They live in Anvil’s folder and are only used for the apps Anvil runs, so anything installed on your system stays as it is.</p>
+      <div id="runtime-list" class="group"><div class="row"><span class="muted">Loading versions…</span></div></div>
+    </section>
+
     <section id="services" class="page" hidden>
       <h1>Services</h1>
       <p class="hint">Databases, cache and mail run on your Mac, listen only on 127.0.0.1 and keep their data in Anvil’s folder. Turned-on services start with Anvil.</p>

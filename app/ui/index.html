@@ -11,10 +11,10 @@
     <div class="titlebar" data-tauri-drag-region></div>
     <div class="toolbar">
       <label class="search">
-        <span class="visually-hidden">Search sites</span>
-        <input id="search" type="search" placeholder="Search" autocomplete="off" spellcheck="false">
+        <span class="visually-hidden">Search applications</span>
+        <input id="search" type="search" placeholder="Search applications" autocomplete="off" spellcheck="false">
       </label>
-      <button id="reload" class="icon-btn" title="Reload sites (⌘R)" aria-label="Reload sites">
+      <button id="reload" class="icon-btn" title="Reload applications (⌘R)" aria-label="Reload applications">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     </div>
@@ -22,7 +22,7 @@
       <label id="ask-label" for="ask-input"></label>
       <input id="ask-input" autocomplete="off" spellcheck="false">
     </form>
-    <nav id="list" class="list" aria-label="Sites"></nav>
+    <nav id="list" class="list" aria-label="Applications"></nav>
   </aside>
 
   <main class="detail">
@@ -52,10 +52,14 @@
     </div>
     <dl class="group">
       <div class="row">
+        <dt><label for="kind">Type</label></dt>
+        <dd><select id="kind"></select></dd>
+      </div>
+      <div class="row php-only">
         <dt><label for="php">PHP</label></dt>
         <dd><select id="php"></select></dd>
       </div>
-      <div class="row">
+      <div class="row php-only">
         <dt>Web root</dt>
         <dd class="path" data-field="root"></dd>
       </div>
@@ -69,9 +73,41 @@
       </div>
     </dl>
 
-    <h2 class="group-title">PHP settings for this site</h2>
-    <p class="group-hint">Empty fields use the defaults from Settings.</p>
-    <dl class="group" id="site-ini">
+    <div class="process-only">
+      <h2 class="group-title">Run</h2>
+      <p class="group-hint">Anvil starts this app on a private port and serves it at its address. The app gets the port in <code>$PORT</code>.</p>
+      <dl class="group">
+        <div class="row">
+          <dt>Status</dt>
+          <dd class="run-status">
+            <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text"></span></span>
+            <span class="actions-inline">
+              <button data-run="start">Start</button>
+              <button data-run="restart">Restart</button>
+              <button data-run="stop">Stop</button>
+              <button class="show-log">Show log</button>
+            </span>
+          </dd>
+        </div>
+        <div class="row">
+          <dt><label for="app-command">Start command</label></dt>
+          <dd><input id="app-command" spellcheck="false"></dd>
+        </div>
+        <div class="row">
+          <dt><label for="app-port">Port</label></dt>
+          <dd><input id="app-port" inputmode="numeric" spellcheck="false"></dd>
+        </div>
+        <div class="row">
+          <dt><label for="app-autostart">Start with Anvil</label></dt>
+          <dd><input id="app-autostart" type="checkbox" role="switch"></dd>
+        </div>
+      </dl>
+      <p class="run-error error" hidden></p>
+    </div>
+
+    <h2 class="group-title php-only">PHP settings for this application</h2>
+    <p class="group-hint php-only">Empty fields use the defaults from Settings.</p>
+    <dl class="group php-only" id="site-ini">
       <div class="row">
         <dt><label for="ini-memory">Memory limit</label></dt>
         <dd><input id="ini-memory" data-ini="memory_limit" spellcheck="false"></dd>
