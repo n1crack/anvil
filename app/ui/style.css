@@ -672,6 +672,42 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-weight: 600;
 }
 
+.service-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.service-title .muted { font-size: 12px; }
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cold);
+}
+
+.dot.on {
+  background: var(--heat);
+  box-shadow: 0 0 6px rgba(255, 138, 31, 0.7);
+}
+
+.page .row small.bad { color: var(--heat-text); }
+
+.page .service input:not([type]) { width: 72px; }
+
+.page button.link {
+  align-self: flex-start;
+  height: auto;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--heat-text);
+}
+
+#service-list h2:first-child { margin-top: 20px; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }

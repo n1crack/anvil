@@ -40,12 +40,33 @@ enum Cmd {
         key: String,
         value: Option<String>,
     },
+    /// Databases, cache and mail: mysql, postgres, redis, mailpit
+    Service {
+        #[command(subcommand)]
+        cmd: ServiceCmd,
+    },
     /// Download the web server and print one-time system setup commands
     Setup,
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
     Trust,
     /// Run DNS, PHP-FPM and the web server in the foreground
     Start,
+}
+
+#[derive(Subcommand)]
+enum ServiceCmd {
+    /// List services and their state
+    List,
+    /// Download a service (Redis is built from source)
+    Install { id: String },
+    /// Remove a service's program; its data is kept
+    Uninstall { id: String },
+    /// Start the service with Anvil
+    Enable { id: String },
+    /// Don't start the service with Anvil
+    Disable { id: String },
+    /// Set the port, or reset it to the default by leaving it out
+    Port { id: String, port: Option<u16> },
 }
 
 #[derive(Subcommand)]
@@ -63,6 +84,10 @@ fn dir_or_cwd(p: Option<PathBuf>) -> Result<PathBuf> {
 }
 
 fn start(cfg: &Config) -> Result<()> {
+    let mut services = services::Services::default();
+    for (id, e) in services.start_enabled(cfg) {
+        eprintln!("  {id}: {e}");
+    }
     let mut server = Server::start(cfg)?;
     for s in sites(cfg) {
         println!(
@@ -78,13 +103,27 @@ fn start(cfg: &Config) -> Result<()> {
         home().join("log").display()
     );
 
-    // On Ctrl-C / SIGTERM, take PHP-FPM and the web server down with us.
-    let pids: Vec<String> = server.pids().iter().map(u32::to_string).collect();
+    for s in services.info(cfg).iter().filter(|s| s.running) {
+        println!("  {} on 127.0.0.1:{}", s.name, s.port);
+    }
+
+    // On Ctrl-C / SIGTERM, stop everything cleanly (databases get time to flush).
+    let (tx, rx) = std::sync::mpsc::channel();
     ctrlc::set_handler(move || {
-        let _ = Command::new("kill").args(&pids).status();
-        std::process::exit(0);
+        let _ = tx.send(());
     })?;
-    server.wait()
+    let pids = server.pids();
+    std::thread::spawn(move || {
+        let _ = rx.recv();
+        // Stopping the web server ends `server.wait()` below.
+        let _ = Command::new("kill")
+            .arg(pids.last().unwrap().to_string())
+            .status();
+    });
+    server.wait()?;
+    drop(server);
+    drop(services);
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -141,6 +180,26 @@ fn main() -> Result<()> {
         Cmd::Use { version, site } => match site {
             Some(name) => set_site_php(&mut cfg, &name, Some(version))?,
             None => set_default_php(&mut cfg, &version)?,
+        },
+        Cmd::Service { cmd } => match cmd {
+            ServiceCmd::List => {
+                for s in services::Services::default().info(&cfg) {
+                    let state = match (s.installed, s.enabled) {
+                        (false, _) => "not installed",
+                        (true, true) => "enabled",
+                        (true, false) => "installed",
+                    };
+                    println!("{:<12} {:<9} port {:<6} {state}", s.id, s.version, s.port);
+                }
+            }
+            ServiceCmd::Install { id } => {
+                services::install(&id)?;
+                println!("Installed {id}. Enable it with `anvil service enable {id}`.");
+            }
+            ServiceCmd::Uninstall { id } => services::uninstall(&id)?,
+            ServiceCmd::Enable { id } => services::set_enabled(&mut cfg, &id, true)?,
+            ServiceCmd::Disable { id } => services::set_enabled(&mut cfg, &id, false)?,
+            ServiceCmd::Port { id, port } => services::set_port(&mut cfg, &id, port)?,
         },
         Cmd::Ini { site, key, value } => set_site_ini(&mut cfg, &site, &key, value.as_deref())?,
         Cmd::Setup => {

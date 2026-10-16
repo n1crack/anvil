@@ -16,6 +16,9 @@ use tauri::{
 struct App {
     server: Mutex<Option<Server>>,
     error: Mutex<Option<String>>,
+    services: Mutex<anvil::services::Services>,
+    /// Last start failure per service id.
+    service_errors: Mutex<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Serialize)]
@@ -178,6 +181,110 @@ fn set_group(app: State<App>, site: String, group: Option<String>) -> Res<Snapsh
     let mut cfg = anvil::load().map_err(err)?;
     anvil::set_group(&mut cfg, &site, group.as_deref()).map_err(err)?;
     snapshot(&app)
+}
+
+/* ---------- Services ---------- */
+
+#[derive(Serialize)]
+struct ServiceRow {
+    #[serde(flatten)]
+    info: anvil::services::ServiceInfo,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
+    let cfg = anvil::load().map_err(err)?;
+    let errors = app.service_errors.lock().unwrap().clone();
+    Ok(app
+        .services
+        .lock()
+        .unwrap()
+        .info(&cfg)
+        .into_iter()
+        .map(|info| ServiceRow {
+            error: errors.get(info.id).cloned(),
+            info,
+        })
+        .collect())
+}
+
+fn start_service(app: &App, cfg: &Config, id: &str) {
+    let result = app.services.lock().unwrap().start(cfg, id);
+    let mut errors = app.service_errors.lock().unwrap();
+    match result {
+        Ok(()) => errors.remove(id),
+        Err(e) => errors.insert(id.into(), err(e)),
+    };
+}
+
+/// Turning a service on also makes it start with Anvil, and vice versa.
+#[tauri::command]
+fn set_service(handle: AppHandle, app: State<App>, id: String, on: bool) -> Res<Vec<ServiceRow>> {
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::services::set_enabled(&mut cfg, &id, on).map_err(err)?;
+    if on {
+        start_service(&app, &cfg, &id);
+    } else {
+        app.services.lock().unwrap().stop(&id);
+        app.service_errors.lock().unwrap().remove(&id);
+    }
+    changed(&handle);
+    services(app)
+}
+
+#[tauri::command]
+fn set_service_port(
+    handle: AppHandle,
+    app: State<App>,
+    id: String,
+    port: Option<u16>,
+) -> Res<Vec<ServiceRow>> {
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::services::set_port(&mut cfg, &id, port).map_err(err)?;
+    let mut svc = app.services.lock().unwrap();
+    let was_running = svc.running(&id);
+    svc.stop(&id);
+    drop(svc);
+    if was_running || cfg.services.get(&id).is_some_and(|s| s.enabled) {
+        start_service(&app, &cfg, &id);
+    }
+    changed(&handle);
+    services(app)
+}
+
+/// Downloads (and for Redis, compiles) off the main thread, then starts it.
+#[tauri::command]
+async fn install_service(handle: AppHandle, id: String) -> Res<Vec<ServiceRow>> {
+    let job = id.clone();
+    tauri::async_runtime::spawn_blocking(move || anvil::services::install(&job))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(err)?;
+    let app = handle.state::<App>();
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::services::set_enabled(&mut cfg, &id, true).map_err(err)?;
+    start_service(&app, &cfg, &id);
+    changed(&handle);
+    services(app)
+}
+
+#[tauri::command]
+fn uninstall_service(handle: AppHandle, app: State<App>, id: String) -> Res<Vec<ServiceRow>> {
+    app.services.lock().unwrap().stop(&id);
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::services::set_enabled(&mut cfg, &id, false).map_err(err)?;
+    anvil::services::uninstall(&id).map_err(err)?;
+    changed(&handle);
+    services(app)
+}
+
+#[tauri::command]
+fn open_url(url: String) -> Res<()> {
+    if !url.starts_with("http://127.0.0.1:") && !url.starts_with("https://") {
+        return Err("Only local and https links can be opened".into());
+    }
+    anvil::run(Command::new("open").arg(url)).map_err(err)
 }
 
 /* ---------- Settings ---------- */
@@ -654,11 +761,20 @@ fn main() {
             set_theme,
             set_dock_icon,
             set_login,
-            open_config_dir
+            open_config_dir,
+            services,
+            set_service,
+            set_service_port,
+            install_service,
+            uninstall_service,
+            open_url
         ])
         .setup(|app| {
             if let Ok(cfg) = anvil::load() {
-                start(&app.state::<App>(), &cfg);
+                let state = app.state::<App>();
+                start(&state, &cfg);
+                let failed = state.services.lock().unwrap().start_enabled(&cfg);
+                state.service_errors.lock().unwrap().extend(failed);
                 apply_theme(app.handle(), cfg.theme.as_deref());
             }
             // Template image: macOS recolours it for light and dark menu bars.
@@ -688,7 +804,12 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to build Anvil")
         .run(|handle, e| match e {
-            RunEvent::Exit => stop(&handle.state::<App>()),
+            RunEvent::Exit => {
+                let app = handle.state::<App>();
+                stop(&app);
+                // Databases shut down cleanly before Anvil exits.
+                *app.services.lock().unwrap() = Default::default();
+            }
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => show(handle),
             _ => {}
