@@ -211,7 +211,7 @@ impl Apps {
         }
         let runtime = runtime(&site.kind)
             .with_context(|| format!("{} apps are served by Anvil directly", label(&site.kind)))?;
-        let version = runtime_version(runtime, &site.path).with_context(|| {
+        let version = site.runtime_version.clone().with_context(|| {
             format!(
                 "{} isn't installed in Anvil yet — add it in Settings › Languages",
                 runtimes::name(runtime)

@@ -43,6 +43,8 @@ struct Snapshot {
     kinds: Vec<(&'static str, &'static str)>,
     /// Parked folders, where new applications can be created.
     paths: Vec<std::path::PathBuf>,
+    /// Installed language versions by runtime id, newest first.
+    runtimes: std::collections::BTreeMap<&'static str, Vec<String>>,
 }
 
 type Res<T> = Result<T, String>;
@@ -78,6 +80,10 @@ fn snapshot(app: &App) -> Res<Snapshot> {
             .map(|k| (*k, anvil::apps::label(k)))
             .collect(),
         paths: cfg.paths.clone(),
+        runtimes: anvil::runtimes::RUNTIMES
+            .iter()
+            .map(|id| (*id, anvil::runtimes::installed(id)))
+            .collect(),
         sites,
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
@@ -467,6 +473,25 @@ fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot
     let mut cfg = anvil::load().map_err(err)?;
     anvil::remove(&mut cfg, &site).map_err(err)?;
     sites_changed(&handle, &app, &cfg);
+    snapshot(&app)
+}
+
+/// Pin an app to a language version (`None`: from the project, or the newest).
+#[tauri::command]
+fn set_runtime(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    version: Option<String>,
+) -> Res<Snapshot> {
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::set_site_runtime(&mut cfg, &site, version).map_err(err)?;
+    let was_running = app.apps.lock().unwrap().running(&site);
+    if was_running {
+        app.apps.lock().unwrap().stop(&site);
+        start_app(&app, &cfg, &site);
+    }
+    changed(&handle);
     snapshot(&app)
 }
 
@@ -1058,6 +1083,7 @@ fn main() {
             remove_site,
             set_group,
             set_site_ini,
+            set_runtime,
             open,
             icon,
             settings,

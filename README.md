@@ -201,6 +201,7 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil runtime uninstall <id> <version>` | Remove a language version |
 | `anvil app command <site> [command]` | Set an app's start command; leave it out for the default |
 | `anvil app autostart <site> <true\|false>` | Start the app whenever Anvil starts |
+| `anvil app runtime <site> [version]` | Pin the language version (e.g. `24` for Node); leave it out for automatic |
 | `anvil service list` | List services and their state |
 | `anvil service install <id>` | Install `mysql`, `postgres`, `redis` or `mailpit` |
 | `anvil service uninstall <id>` | Remove a service's program; its data is kept |
