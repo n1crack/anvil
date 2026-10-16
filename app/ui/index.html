@@ -27,6 +27,9 @@
 
   <main class="detail">
     <header class="titlebar" data-tauri-drag-region>
+      <button id="open-settings" class="icon-btn" title="Settings (⌘,)" aria-label="Settings">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="11" cy="4.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="5" cy="11.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
       <button id="power" class="power" role="switch" aria-checked="false">
         <span class="ingot" aria-hidden="true"></span>
         <span id="power-label">Stopped</span>
@@ -63,6 +66,27 @@
       <div class="row">
         <dt>Source</dt>
         <dd data-field="source"></dd>
+      </div>
+    </dl>
+
+    <h2 class="group-title">PHP settings for this site</h2>
+    <p class="group-hint">Empty fields use the defaults from Settings.</p>
+    <dl class="group" id="site-ini">
+      <div class="row">
+        <dt><label for="ini-memory">Memory limit</label></dt>
+        <dd><input id="ini-memory" data-ini="memory_limit" spellcheck="false"></dd>
+      </div>
+      <div class="row">
+        <dt><label for="ini-upload">Upload limit</label></dt>
+        <dd><input id="ini-upload" data-ini="upload_max_filesize" spellcheck="false"></dd>
+      </div>
+      <div class="row">
+        <dt><label for="ini-time">Max execution time</label></dt>
+        <dd><input id="ini-time" data-ini="max_execution_time" spellcheck="false"></dd>
+      </div>
+      <div class="row row-top">
+        <dt><label for="ini-extra">Other settings</label></dt>
+        <dd><textarea id="ini-extra" rows="3" spellcheck="false" placeholder="display_errors = On"></textarea></dd>
       </div>
     </dl>
   </template>

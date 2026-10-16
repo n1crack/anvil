@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anvil Settings</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="settings">
+  <aside class="sidebar">
+    <div class="titlebar" data-tauri-drag-region></div>
+    <nav class="nav" aria-label="Settings">
+      <button data-page="general" aria-current="true">General</button>
+      <button data-page="php">PHP</button>
+    </nav>
+  </aside>
+
+  <main class="detail">
+    <header class="titlebar" data-tauri-drag-region></header>
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <section id="general" class="page">
+      <h1>General</h1>
+
+      <h2>Site folders</h2>
+      <p class="hint">Every folder inside these becomes a site.</p>
+      <div id="paths" class="group"></div>
+      <div class="below"><button id="add-path">Add Folder…</button></div>
+
+      <h2>App</h2>
+      <div class="group">
+        <label class="row">
+          <span>Launch at login</span>
+          <input id="login" type="checkbox" role="switch">
+        </label>
+        <label class="row">
+          <span>Always show Dock icon<small>When off, Anvil only shows in the Dock while a window is open.</small></span>
+          <input id="dock" type="checkbox" role="switch">
+        </label>
+        <label class="row">
+          <span>Theme</span>
+          <select id="theme">
+            <option value="">Match system</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+      </div>
+
+      <h2>Tools</h2>
+      <div class="group">
+        <label class="row">
+          <span>Editor<small>Used by “Open in editor”.</small></span>
+          <select id="editor"></select>
+        </label>
+        <label class="row">
+          <span>Terminal<small>Used by “Open Terminal”.</small></span>
+          <select id="terminal"></select>
+        </label>
+      </div>
+
+      <h2>Domains and ports</h2>
+      <div class="group">
+        <div class="row"><span>Domain suffix</span><span id="tld" class="value"></span></div>
+        <div class="row"><span>HTTP port</span><span id="http" class="value"></span></div>
+        <div class="row"><span>HTTPS port</span><span id="https" class="value"></span></div>
+        <div class="row"><span>DNS port</span><span id="dns" class="value"></span></div>
+        <div class="row">
+          <span>Configuration files<small id="config-dir"></small></span>
+          <button id="open-config">Show in Finder</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="php" class="page" hidden>
+      <h1>PHP</h1>
+
+      <h2>Versions</h2>
+      <p class="hint">Each version is installed separately in Anvil’s folder and never touches your system.</p>
+      <div id="versions" class="group"></div>
+
+      <h2>Defaults for all sites</h2>
+      <p class="hint">Empty fields use Anvil’s standard values shown in grey. Each site can override these.</p>
+      <div class="group" id="ini">
+        <label class="row">
+          <span>Memory limit</span>
+          <input data-ini="memory_limit" placeholder="512M" spellcheck="false">
+        </label>
+        <label class="row">
+          <span>Upload limit<small>Largest file a form can upload.</small></span>
+          <input data-ini="upload_max_filesize" placeholder="100M" spellcheck="false">
+        </label>
+        <label class="row">
+          <span>Max execution time<small>Seconds before a request is stopped.</small></span>
+          <input data-ini="max_execution_time" placeholder="120" spellcheck="false">
+        </label>
+      </div>
+    </section>
+  </main>
+
+  <script src="settings.js"></script>
+</body>
+</html>
