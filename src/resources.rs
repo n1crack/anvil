@@ -21,7 +21,7 @@ pub enum Safety {
 
 #[derive(Serialize, Debug)]
 pub struct DiskItem {
-    pub label: &'static str,
+    pub label: String,
     /// Relative to the project, or absolute for files Anvil keeps elsewhere.
     pub path: String,
     pub bytes: u64,
@@ -245,7 +245,7 @@ pub fn disk(site: &Site) -> (u64, Vec<DiskItem>) {
         .filter_map(|(rel, label, category, safety, note)| {
             let bytes = *sizes.get(&site.path.join(rel))?;
             Some(DiskItem {
-                label,
+                label: label.to_string(),
                 path: rel.to_string(),
                 bytes,
                 category,
@@ -256,7 +256,7 @@ pub fn disk(site: &Site) -> (u64, Vec<DiskItem>) {
         .collect();
     if let Some(&bytes) = sizes.get(&anvil_log) {
         items.push(DiskItem {
-            label: "Anvil run log",
+            label: "Anvil run log".into(),
             path: anvil_log.display().to_string(),
             bytes,
             category: "Logs",
@@ -271,7 +271,7 @@ pub fn disk(site: &Site) -> (u64, Vec<DiskItem>) {
         .map(|i| i.bytes)
         .sum();
     items.push(DiskItem {
-        label: "Source and everything else",
+        label: "Source and everything else".into(),
         path: String::new(),
         bytes: total.saturating_sub(known),
         category: "Source",
@@ -470,6 +470,197 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
         .collect()
 }
 
+/// Anvil's own footprint: installed versions, service data, caches and logs.
+pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
+    let h = home();
+    let mut entries: Vec<(String, PathBuf, &'static str, Safety, &'static str)> = vec![];
+    let dirs = |p: PathBuf| -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(p)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    };
+    for v in dirs(h.join("php")) {
+        entries.push((
+            format!("PHP {v}"),
+            h.join("php").join(&v),
+            "PHP",
+            Safety::Keep,
+            "Remove it in Settings › PHP",
+        ));
+    }
+    for id in crate::runtimes::RUNTIMES {
+        let name = crate::runtimes::name(id);
+        entries.push((
+            name.to_string(),
+            h.join("runtimes").join(id),
+            "Languages",
+            Safety::Keep,
+            "Remove versions in Settings › Languages",
+        ));
+    }
+    for id in services::SERVICES {
+        entries.push((
+            format!("{id} program"),
+            h.join("services").join(id),
+            "Services",
+            Safety::Keep,
+            "Uninstall it in Settings › Services",
+        ));
+        entries.push((
+            format!("{id} data"),
+            h.join("data").join(id),
+            "Data",
+            Safety::Keep,
+            "Your databases and mail",
+        ));
+    }
+    entries.push((
+        "Web server".into(),
+        h.join("bin"),
+        "Anvil",
+        Safety::Keep,
+        "Needed to serve your apps",
+    ));
+    entries.push((
+        "Certificates".into(),
+        h.join("data").join("caddy"),
+        "Anvil",
+        Safety::Keep,
+        "Your local HTTPS certificates",
+    ));
+    for c in dirs(h.join("cache")) {
+        entries.push((
+            format!("{c} cache"),
+            h.join("cache").join(&c),
+            "Cache",
+            Safety::Safe,
+            "Downloaded again when a build needs it",
+        ));
+    }
+    entries.push((
+        "Logs".into(),
+        h.join("log"),
+        "Logs",
+        Safety::Safe,
+        "Only history; new lines keep coming",
+    ));
+    entries.push((
+        "Build leftovers".into(),
+        h.join("build"),
+        "Cache",
+        Safety::Safe,
+        "Temporary files from installs",
+    ));
+
+    let sizes = du(&entries.iter().map(|e| e.1.clone()).collect::<Vec<_>>());
+    let mut items: Vec<DiskItem> = entries
+        .into_iter()
+        .filter_map(|(label, path, category, safety, note)| {
+            let bytes = *sizes.get(&path)?;
+            Some(DiskItem {
+                label,
+                path: path.display().to_string(),
+                bytes,
+                category,
+                safety,
+                note,
+            })
+        })
+        .filter(|i| i.bytes > 0)
+        .collect();
+    items.sort_by_key(|i| std::cmp::Reverse(i.bytes));
+    (items.iter().map(|i| i.bytes).sum(), items)
+}
+
+/// Delete one of Anvil's own cleanable items: a cache folder, leftovers, or logs.
+/// Logs are truncated, not deleted, so running programs keep a valid file.
+pub fn clean_anvil(path: &str) -> Result<u64> {
+    let h = home();
+    let p = PathBuf::from(path);
+    let freed: u64 = du(std::slice::from_ref(&p)).values().sum();
+    if p == h.join("log") {
+        for e in std::fs::read_dir(&p)?.flatten() {
+            if e.path().is_file() {
+                std::fs::write(e.path(), "")?;
+            }
+        }
+    } else if p == h.join("build") || p.parent() == Some(h.join("cache").as_path()) {
+        remove(&p)?;
+    } else {
+        bail!("Anvil doesn't clean {path}");
+    }
+    Ok(freed)
+}
+
+#[derive(Serialize)]
+pub struct AppSize {
+    pub name: String,
+    pub kind: String,
+    pub total: u64,
+    pub safe: u64,
+    pub rebuild: u64,
+}
+
+/// Sizes of every app at once (one `du` run), biggest first.
+pub fn all_apps(sites: &[Site]) -> Vec<AppSize> {
+    let mut paths = vec![];
+    for s in sites
+        .iter()
+        .filter(|s| !s.linked || !sites.iter().any(|o| !o.linked && o.path == s.path))
+    {
+        paths.push(s.path.clone());
+        paths.extend(rules(&s.kind).iter().map(|r| s.path.join(r.0)));
+    }
+    let sizes = du(&paths);
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out: Vec<AppSize> = sites
+        .iter()
+        .filter(|s| seen.insert(s.path.clone()))
+        .filter_map(|s| {
+            let total = *sizes.get(&s.path)?;
+            let sum = |want: Safety| -> u64 {
+                rules(&s.kind)
+                    .iter()
+                    .filter(|r| r.3 == want)
+                    .filter_map(|r| sizes.get(&s.path.join(r.0)))
+                    .sum()
+            };
+            Some(AppSize {
+                name: s.name.clone(),
+                kind: s.kind.clone(),
+                total,
+                safe: sum(Safety::Safe),
+                rebuild: sum(Safety::Rebuild),
+            })
+        })
+        .collect();
+    out.sort_by_key(|a| std::cmp::Reverse(a.total));
+    out
+}
+
+/// Delete the "safe" items (logs, caches) of every app. Returns bytes freed and
+/// the apps where something failed.
+pub fn clean_all_safe(sites: &[Site]) -> (u64, Vec<String>) {
+    let mut freed = 0;
+    let mut failed = vec![];
+    let mut seen = std::collections::BTreeSet::new();
+    for s in sites.iter().filter(|s| seen.insert(s.path.clone())) {
+        for r in rules(&s.kind).iter().filter(|r| r.3 == Safety::Safe) {
+            match clean(s, r.0, false) {
+                Ok(n) => freed += n,
+                Err(_) => failed.push(s.name.clone()),
+            }
+        }
+    }
+    (freed, failed)
+}
+
 /// Empty a folder but keep it and its `.gitignore`/`.gitkeep` (Laravel expects
 /// `storage/*` and `bootstrap/cache` to exist).
 fn empty_dir(dir: &Path) -> Result<()> {
@@ -604,5 +795,7 @@ mod tests {
         );
         assert_eq!(url_port("postgres://u:p@127.0.0.1:5433/app"), Some(5433));
         assert_eq!(url_port("redis://127.0.0.1"), None);
+        assert!(clean_anvil("/etc").is_err());
+        assert!(clean_anvil("/tmp/../etc").is_err());
     }
 }

@@ -108,6 +108,130 @@ function renderRuntimes() {
   }
 }
 
+/* ---------- Storage ---------- */
+
+function bytes(n) {
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
+}
+
+const SAFETY_LABEL = { safe: "Safe to delete", rebuild: "Rebuildable", keep: "Keep" };
+
+async function confirmDelete(title, message) {
+  return window.__TAURI__.dialog.ask(message, { title, kind: "warning", okLabel: "Delete", cancelLabel: "Cancel" });
+}
+
+async function loadAnvilStorage() {
+  let st;
+  try {
+    st = await invoke("storage_anvil");
+  } catch (e) {
+    return showError(String(e));
+  }
+  $("#anvil-total").textContent = `Anvil uses ${bytes(st.total)} for PHP, languages, services, data, caches and logs.`;
+  const list = $("#anvil-items");
+  list.replaceChildren();
+  for (const i of st.items) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const info = document.createElement("span");
+    const name = document.createElement("span");
+    name.textContent = i.label;
+    const note = document.createElement("small");
+    note.textContent = i.note;
+    info.append(name, note);
+    const actions = document.createElement("span");
+    actions.className = "actions-inline";
+    const tag = document.createElement("span");
+    tag.className = `safety ${i.safety}`;
+    tag.textContent = SAFETY_LABEL[i.safety];
+    const size = document.createElement("span");
+    size.className = "size";
+    size.textContent = bytes(i.bytes);
+    actions.append(tag, size);
+    if (i.safety === "safe") {
+      actions.append(button("Delete", async () => {
+        if (!(await confirmDelete(`Delete ${i.label}?`, `${i.note}. This frees about ${bytes(i.bytes)}.`))) return;
+        try {
+          await invoke("clean_anvil", { path: i.path });
+        } catch (e) {
+          showError(String(e));
+        }
+        loadAnvilStorage();
+      }));
+    }
+    row.append(info, actions);
+    list.append(row);
+  }
+}
+
+async function scanApps() {
+  const btn = $("#scan-apps");
+  btn.disabled = true;
+  btn.textContent = "Measuring…";
+  let apps;
+  try {
+    apps = await invoke("storage_apps");
+  } catch (e) {
+    showError(String(e));
+  }
+  btn.disabled = false;
+  btn.textContent = "Measure again";
+  if (!apps) return;
+
+  const sum = (k) => apps.reduce((a, x) => a + x[k], 0);
+  $("#apps-hint").textContent =
+    `${apps.length} applications use ${bytes(sum("total"))}. ${bytes(sum("safe"))} is logs and caches that can be deleted safely; ` +
+    `${bytes(sum("rebuild"))} is dependencies and builds that can be recreated. Open an application to clean it item by item.`;
+
+  const all = $("#clean-all-safe");
+  all.hidden = !sum("safe");
+  all.textContent = `Delete logs and caches in all apps (${bytes(sum("safe"))})`;
+  all.onclick = async () => {
+    const ok = await confirmDelete(
+      "Delete logs and caches in all applications?",
+      `Removes application logs, compiled views and caches (sessions too, which logs users out) in every app. Folders and .gitignore files stay. About ${bytes(sum("safe"))}.`,
+    );
+    if (!ok) return;
+    try {
+      const [freed, failed] = await invoke("clean_all_safe");
+      showError(failed.length ? `Freed ${bytes(freed)}. Couldn't clean: ${[...new Set(failed)].join(", ")}` : null);
+    } catch (e) {
+      showError(String(e));
+    }
+    scanApps();
+  };
+
+  const list = $("#app-sizes");
+  list.hidden = false;
+  list.replaceChildren();
+  for (const a of apps.filter((a) => a.total > 0)) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const info = document.createElement("span");
+    const name = document.createElement("span");
+    name.textContent = a.name;
+    const note = document.createElement("small");
+    const parts = [];
+    if (a.rebuild) parts.push(`${bytes(a.rebuild)} rebuildable`);
+    if (a.safe) parts.push(`${bytes(a.safe)} safe to delete`);
+    note.textContent = parts.join(", ") || "Mostly source and data";
+    info.append(name, note);
+    const size = document.createElement("span");
+    size.className = "size";
+    size.textContent = bytes(a.total);
+    row.append(info, size);
+    list.append(row);
+  }
+}
+
+$("#scan-apps").onclick = scanApps;
+
 /* ---------- Services ---------- */
 
 let services = [];
@@ -307,6 +431,7 @@ for (const b of document.querySelectorAll("[data-page]")) {
     for (const other of document.querySelectorAll("[data-page]")) other.setAttribute("aria-current", other === b);
     for (const page of document.querySelectorAll(".page")) page.hidden = page.id !== b.dataset.page;
     if (b.dataset.page === "languages" && !runtimes) loadRuntimes();
+    if (b.dataset.page === "storage") loadAnvilStorage();
   };
 }
 

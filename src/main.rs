@@ -56,7 +56,8 @@ enum Cmd {
         cmd: AppCmd,
     },
     /// Disk usage of an app, what is safe to delete, and the services it uses
-    Usage { site: String },
+    /// Leave out the app for Anvil's own footprint and every app's size
+    Usage { site: Option<String> },
     /// Download the web server and print one-time system setup commands
     Setup,
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
@@ -281,7 +282,36 @@ fn main() -> Result<()> {
                 set_site_app(&mut cfg, &site, None, None, None, Some(on))?
             }
         },
-        Cmd::Usage { site } => {
+        Cmd::Usage { site: None } => {
+            let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
+            let (total, items) = resources::anvil_disk();
+            println!("Anvil: {}", mb(total));
+            for i in &items {
+                println!(
+                    "  {:<6} {:>10}  {}",
+                    format!("{:?}", i.safety),
+                    mb(i.bytes),
+                    i.label
+                );
+            }
+            let all = resources::all_apps(&sites(&cfg));
+            let sum = |f: fn(&resources::AppSize) -> u64| mb(all.iter().map(f).sum());
+            println!(
+                "Applications: {} ({} safe to delete, {} rebuildable)",
+                sum(|a| a.total),
+                sum(|a| a.safe),
+                sum(|a| a.rebuild)
+            );
+            for a in all.iter().take(10) {
+                println!(
+                    "  {:>10}  {:<30} {}",
+                    mb(a.total),
+                    a.name,
+                    apps::label(&a.kind)
+                );
+            }
+        }
+        Cmd::Usage { site: Some(site) } => {
             let s = sites(&cfg)
                 .into_iter()
                 .find(|s| s.name == site_name(&site))
