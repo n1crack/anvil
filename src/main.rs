@@ -45,6 +45,16 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ServiceCmd,
     },
+    /// Language toolchains for apps that run their own server: node, go, rust, dotnet
+    Runtime {
+        #[command(subcommand)]
+        cmd: RuntimeCmd,
+    },
+    /// Apps that run their own server (Node, Rust, Go, .NET)
+    App {
+        #[command(subcommand)]
+        cmd: AppCmd,
+    },
     /// Download the web server and print one-time system setup commands
     Setup,
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
@@ -70,6 +80,36 @@ enum ServiceCmd {
 }
 
 #[derive(Subcommand)]
+enum RuntimeCmd {
+    /// Installed and available versions
+    List,
+    /// e.g. `node 22`, `go 1.27.2`, `rust stable`, `dotnet 10.0`
+    Install {
+        id: String,
+        version: String,
+    },
+    Uninstall {
+        id: String,
+        version: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum AppCmd {
+    /// Set the start command (leave it out to go back to the default)
+    Command {
+        site: String,
+        command: Option<String>,
+    },
+    /// Start the app whenever Anvil starts
+    Autostart {
+        site: String,
+        #[arg(action = clap::ArgAction::Set)]
+        on: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum PhpCmd {
     /// Install the latest patch release of a PHP minor version, e.g. 8.4
     Install { version: String },
@@ -89,6 +129,18 @@ fn start(cfg: &Config) -> Result<()> {
         eprintln!("  {id}: {e}");
     }
     let mut server = Server::start(cfg)?;
+    let mut apps = apps::Apps::default();
+    for site in sites(cfg).iter().filter(|s| s.autostart) {
+        match apps.start(site) {
+            Ok(()) => println!(
+                "  {} ({}) on 127.0.0.1:{}",
+                site.name,
+                apps::label(&site.kind),
+                site.port.unwrap_or(0)
+            ),
+            Err(e) => eprintln!("  {}: {e:#}", site.name),
+        }
+    }
     for s in sites(cfg) {
         println!(
             "  https://{}.{}:{}  (PHP {})",
@@ -121,6 +173,7 @@ fn start(cfg: &Config) -> Result<()> {
             .status();
     });
     server.wait()?;
+    drop(apps);
     drop(server);
     drop(services);
     Ok(())
@@ -157,8 +210,9 @@ fn main() -> Result<()> {
         Cmd::Sites => {
             for s in sites(&cfg) {
                 println!(
-                    "{:<40} {:<5} {}",
+                    "{:<40} {:<9} {:<5} {}",
                     format!("{}.{}", s.name, cfg.tld),
+                    apps::label(&s.kind),
                     s.php.as_deref().unwrap_or("-"),
                     s.root.display()
                 );
@@ -200,6 +254,30 @@ fn main() -> Result<()> {
             ServiceCmd::Enable { id } => services::set_enabled(&mut cfg, &id, true)?,
             ServiceCmd::Disable { id } => services::set_enabled(&mut cfg, &id, false)?,
             ServiceCmd::Port { id, port } => services::set_port(&mut cfg, &id, port)?,
+        },
+        Cmd::Runtime { cmd } => match cmd {
+            RuntimeCmd::List => {
+                for id in runtimes::RUNTIMES {
+                    let info = runtimes::info(id, true);
+                    let avail: Vec<_> = info.available.iter().take(6).cloned().collect();
+                    println!(
+                        "{:<8} installed: {:<20} available: {}",
+                        id,
+                        info.installed.join(", "),
+                        avail.join(", ")
+                    );
+                }
+            }
+            RuntimeCmd::Install { id, version } => runtimes::install(&id, &version)?,
+            RuntimeCmd::Uninstall { id, version } => runtimes::uninstall(&id, &version)?,
+        },
+        Cmd::App { cmd } => match cmd {
+            AppCmd::Command { site, command } => {
+                set_site_app(&mut cfg, &site, None, Some(command), None, None)?
+            }
+            AppCmd::Autostart { site, on } => {
+                set_site_app(&mut cfg, &site, None, None, None, Some(on))?
+            }
         },
         Cmd::Ini { site, key, value } => set_site_ini(&mut cfg, &site, &key, value.as_deref())?,
         Cmd::Setup => {
