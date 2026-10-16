@@ -87,7 +87,13 @@ enum ServiceCmd {
     /// Don't start the service with Anvil
     Disable { id: String },
     /// Set the port, or reset it to the default by leaving it out
-    Port { id: String, port: Option<u16> },
+    Port {
+        id: String,
+        port: Option<u16>,
+        /// Mailpit's web inbox port (leave the value out for the default)
+        #[arg(long, num_args = 0..=1)]
+        web: Option<Option<u16>>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -262,7 +268,15 @@ fn main() -> Result<()> {
             ServiceCmd::Uninstall { id } => services::uninstall(&id)?,
             ServiceCmd::Enable { id } => services::set_enabled(&mut cfg, &id, true)?,
             ServiceCmd::Disable { id } => services::set_enabled(&mut cfg, &id, false)?,
-            ServiceCmd::Port { id, port } => services::set_port(&mut cfg, &id, port)?,
+            ServiceCmd::Port { id, port, web } => {
+                // With --web, the SMTP port only changes when it's given too.
+                if let Some(web) = web {
+                    services::set_web_port(&mut cfg, &id, web)?;
+                }
+                if web.is_none() || port.is_some() {
+                    services::set_port(&mut cfg, &id, port)?;
+                }
+            }
         },
         Cmd::Runtime { cmd } => match cmd {
             RuntimeCmd::List => {

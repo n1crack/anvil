@@ -24,6 +24,9 @@ pub struct ServiceConfig {
     /// Start with Anvil.
     pub enabled: bool,
     pub port: Option<u16>,
+    /// Mailpit's web inbox port.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_port: Option<u16>,
 }
 
 #[derive(Serialize)]
@@ -35,11 +38,14 @@ pub struct ServiceInfo {
     pub port: u16,
     /// Mailpit's web inbox.
     pub web: Option<String>,
+    pub web_port: Option<u16>,
     pub installed: bool,
     pub enabled: bool,
     pub running: bool,
     /// Set when the port is taken by another program: the next free one.
     pub suggested_port: Option<u16>,
+    /// The same for Mailpit's web inbox port.
+    pub suggested_web_port: Option<u16>,
 }
 
 fn name(id: &str) -> &'static str {
@@ -78,6 +84,16 @@ fn default_port(id: &str) -> u16 {
 }
 
 const MAILPIT_WEB: u16 = 8025;
+
+/// Mailpit's web inbox port; only Mailpit has one.
+pub fn web_port(cfg: &Config, id: &str) -> Option<u16> {
+    (id == "mailpit").then(|| {
+        cfg.services
+            .get(id)
+            .and_then(|s| s.web_port)
+            .unwrap_or(MAILPIT_WEB)
+    })
+}
 
 pub fn port(cfg: &Config, id: &str) -> u16 {
     cfg.services
@@ -235,6 +251,18 @@ pub fn set_port(cfg: &mut Config, id: &str, port: Option<u16>) -> Result<()> {
     save(cfg)
 }
 
+pub fn set_web_port(cfg: &mut Config, id: &str, port: Option<u16>) -> Result<()> {
+    check(id)?;
+    if id != "mailpit" {
+        bail!("Only Mailpit has a web port");
+    }
+    if port.is_some_and(|p| p < 1024) {
+        bail!("Use a port of 1024 or higher");
+    }
+    cfg.services.entry(id.into()).or_default().web_port = port;
+    save(cfg)
+}
+
 /// First start: create the data directory the way each server expects.
 fn init(id: &str, log: &fs::File) -> Result<()> {
     let data = data(id);
@@ -303,7 +331,7 @@ fn command(cfg: &Config, id: &str) -> Command {
                 "--smtp",
                 &format!("127.0.0.1:{port}"),
                 "--listen",
-                &format!("127.0.0.1:{MAILPIT_WEB}"),
+                &format!("127.0.0.1:{}", web_port(cfg, id).unwrap_or(MAILPIT_WEB)),
                 "--database",
             ])
             .arg(data.join("mailpit.db"));
@@ -343,12 +371,7 @@ impl Services {
         }
         kill_orphans(&pid_file(id), false);
         let port = port(cfg, id);
-        let ports = if id == "mailpit" {
-            vec![port, MAILPIT_WEB]
-        } else {
-            vec![port]
-        };
-        for p in ports {
+        for p in [Some(port), web_port(cfg, id)].into_iter().flatten() {
             if in_use(p) {
                 bail!(
                     "{}: port {p} is already in use by another program — pick another port",
@@ -419,19 +442,21 @@ impl Services {
             .map(|id| {
                 let running = self.running(id);
                 let port = port(cfg, id);
+                let web_port = web_port(cfg, id);
+                let suggest = |p: u16| (!running && in_use(p)).then(|| next_free(p)).flatten();
                 ServiceInfo {
                     id,
                     name: name(id),
                     category: category(id),
                     version: version_of(id),
                     port,
-                    web: (*id == "mailpit").then(|| format!("http://127.0.0.1:{MAILPIT_WEB}")),
+                    web: web_port.map(|p| format!("http://127.0.0.1:{p}")),
+                    web_port,
                     installed: installed(id),
                     enabled: cfg.services.get(*id).is_some_and(|s| s.enabled),
                     running,
-                    suggested_port: (!running && in_use(port))
-                        .then(|| next_free(port))
-                        .flatten(),
+                    suggested_port: suggest(port),
+                    suggested_web_port: web_port.and_then(suggest),
                 }
             })
             .collect()
@@ -460,6 +485,7 @@ mod tests {
             ServiceConfig {
                 enabled: true,
                 port: Some(6380),
+                web_port: None,
             },
         );
         assert_eq!(port(&cfg, "redis"), 6380);
@@ -472,5 +498,15 @@ mod tests {
             .collect();
         assert!(args.windows(2).any(|w| w == ["--port", "6380"]));
         assert!(args.windows(2).any(|w| w == ["--bind", "127.0.0.1"]));
+
+        assert_eq!(web_port(&cfg, "redis"), None);
+        assert_eq!(web_port(&cfg, "mailpit"), Some(8025));
+        cfg.services.entry("mailpit".into()).or_default().web_port = Some(8026);
+        let args: Vec<String> = command(&cfg, "mailpit")
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.windows(2).any(|w| w == ["--listen", "127.0.0.1:8026"]));
+        assert!(args.windows(2).any(|w| w == ["--smtp", "127.0.0.1:1025"]));
     }
 }

@@ -161,6 +161,15 @@ pub fn site_name(s: &str) -> String {
         .collect()
 }
 
+/// The PHP version a site runs: PHP projects always get one (start fails if it's
+/// missing), static folders only when it's installed, apps with their own server never.
+fn site_php(kind: &str, version: Option<String>, installed: &[String]) -> Option<String> {
+    if apps::runs_process(kind) {
+        return None;
+    }
+    version.filter(|v| kind != "static" || installed.contains(v))
+}
+
 pub fn sites(cfg: &Config) -> Vec<Site> {
     let mut found = BTreeMap::new();
     for dir in &cfg.paths {
@@ -180,6 +189,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     for (name, path) in &cfg.links {
         found.insert(name.clone(), (path.clone(), None));
     }
+    let installed = installed_php();
     let sites = found
         .into_iter()
         .map(|(name, (path, parked_in))| {
@@ -200,8 +210,6 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             let command = custom
                 .clone()
                 .or_else(|| apps::default_command(&kind, &path));
-            // PHP for PHP projects and static folders (harmless there); never for apps
-            // that run their own server.
             let php_ok = !apps::runs_process(&kind);
             let runtime_version = apps::runtime(&kind).and_then(|rt| {
                 own.and_then(|s| s.runtime.clone())
@@ -216,7 +224,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
                 modified,
                 ini,
                 php_pinned: php_ok && pinned.is_some(),
-                php: pinned.or_else(|| cfg.php.clone()).filter(|_| php_ok),
+                php: site_php(&kind, pinned.or_else(|| cfg.php.clone()), &installed),
                 kind_detected: detected.into(),
                 kind,
                 command_custom: custom.is_some(),
@@ -929,5 +937,26 @@ mod tests {
         assert!(out.contains("php-8.3.sock"));
         assert_eq!(out.matches("php_fastcgi").count(), 1);
         assert_eq!(site_name("My Shop.be"), "my-shop.be");
+    }
+
+    #[test]
+    fn static_sites_only_get_php_when_installed() {
+        let v = || Some("8.4".to_string());
+        let installed = ["8.4".to_string()];
+        assert_eq!(site_php("static", v(), &[]), None);
+        assert_eq!(site_php("static", v(), &installed), v());
+        assert_eq!(site_php("laravel", v(), &[]), v());
+        assert_eq!(site_php("php", v(), &[]), v());
+        assert_eq!(site_php("next", v(), &installed), None);
+
+        let mut st = site(
+            "static",
+            "/s/static",
+            site_php("static", v(), &[]).as_deref(),
+        );
+        st.kind = "static".into();
+        let out = caddyfile(&Config::default(), &[st]);
+        assert!(!out.contains("php_fastcgi"));
+        assert!(out.contains("file_server"));
     }
 }
