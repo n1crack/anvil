@@ -754,6 +754,8 @@ mod tests {
             command_custom: false,
             port: None,
             autostart: false,
+            runtime_version: None,
+            runtime_pinned: false,
         };
 
         assert!(clean(&site, "storage/logs", false).unwrap() > 0);

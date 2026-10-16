@@ -1,5 +1,5 @@
 use anvil::*;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::Command;
@@ -63,8 +63,8 @@ enum Cmd {
         #[arg(long = "in")]
         dir: Option<PathBuf>,
     },
-    /// Disk usage of an app, what is safe to delete, and the services it uses
-    /// Leave out the app for Anvil's own footprint and every app's size
+    /// Disk usage of an app, what is safe to delete, and the services it uses.
+    /// Without an app: Anvil's own footprint and every app's size.
     Usage { site: Option<String> },
     /// Download the web server and print one-time system setup commands
     Setup,
@@ -95,14 +95,9 @@ enum RuntimeCmd {
     /// Installed and available versions
     List,
     /// e.g. `node 22`, `go 1.27.2`, `rust stable`, `dotnet 10.0`
-    Install {
-        id: String,
-        version: String,
-    },
-    Uninstall {
-        id: String,
-        version: String,
-    },
+    Install { id: String, version: String },
+    /// Remove an installed version, e.g. `node 22`
+    Uninstall { id: String, version: String },
 }
 
 #[derive(Subcommand)]
@@ -111,6 +106,11 @@ enum AppCmd {
     Command {
         site: String,
         command: Option<String>,
+    },
+    /// Pin the language version (e.g. `24` for Node), or leave it out for automatic
+    Runtime {
+        site: String,
+        version: Option<String>,
     },
     /// Start the app whenever Anvil starts
     Autostart {
@@ -208,11 +208,9 @@ fn main() -> Result<()> {
         }
         Cmd::Link { name } => {
             let p = dir_or_cwd(None)?;
-            let name =
-                site_name(&name.unwrap_or_else(|| p.file_name().unwrap().to_string_lossy().into()));
+            let name = name.unwrap_or_else(|| p.file_name().unwrap().to_string_lossy().into());
+            let name = link(&mut cfg, &name, p.clone())?;
             println!("Linked {name}.{} -> {}", cfg.tld, p.display());
-            cfg.links.insert(name, p);
-            save(&cfg)?;
         }
         Cmd::Unlink { name } => {
             cfg.links.remove(&name);
@@ -286,6 +284,7 @@ fn main() -> Result<()> {
             AppCmd::Command { site, command } => {
                 set_site_app(&mut cfg, &site, None, Some(command), None, None)?
             }
+            AppCmd::Runtime { site, version } => set_site_runtime(&mut cfg, &site, version)?,
             AppCmd::Autostart { site, on } => {
                 set_site_app(&mut cfg, &site, None, None, None, Some(on))?
             }
@@ -299,9 +298,21 @@ fn main() -> Result<()> {
                     .cloned()
                     .context("Park a folder first, or pass --in")?,
             };
+            if !create::TEMPLATES.contains(&kind.as_str()) {
+                bail!(
+                    "Unknown type {kind}; use one of: {}",
+                    create::TEMPLATES.join(", ")
+                );
+            }
+            let parent = dir_or_cwd(Some(parent))?;
             println!("Creating {name} ({})…", apps::label(&kind));
             let path = create::create(&kind, &name, &parent, cfg.php.as_deref())?;
+            // Outside a parked folder the new app needs a link to get its address.
+            if !cfg.paths.contains(&parent) {
+                link(&mut cfg, &name, path.clone())?;
+            }
             println!("Created {}", path.display());
+            println!("Serving at https://{name}.{}:{}", cfg.tld, cfg.https_port);
         }
         Cmd::Usage { site: None } => {
             let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);

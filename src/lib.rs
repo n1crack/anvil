@@ -67,6 +67,9 @@ pub struct SiteConfig {
     /// Start the app together with Anvil.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub autostart: bool,
+    /// Language version for apps with their own server, e.g. Node "24".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
 }
 
 impl Default for Config {
@@ -119,6 +122,9 @@ pub struct Site {
     pub command_custom: bool,
     pub port: Option<u16>,
     pub autostart: bool,
+    /// Language version the app runs with: chosen, from the project, or the newest.
+    pub runtime_version: Option<String>,
+    pub runtime_pinned: bool,
 }
 
 pub fn home() -> PathBuf {
@@ -197,6 +203,10 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             // PHP for PHP projects and static folders (harmless there); never for apps
             // that run their own server.
             let php_ok = !apps::runs_process(&kind);
+            let runtime_version = apps::runtime(&kind).and_then(|rt| {
+                own.and_then(|s| s.runtime.clone())
+                    .or_else(|| apps::runtime_version(rt, &path))
+            });
             let modified = fs::metadata(&path)
                 .and_then(|m| m.modified())
                 .ok()
@@ -213,6 +223,8 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
                 command,
                 port: own.and_then(|s| s.port),
                 autostart: own.is_some_and(|s| s.autostart),
+                runtime_pinned: own.is_some_and(|s| s.runtime.is_some()),
+                runtime_version,
                 name,
                 path,
                 root,
@@ -610,6 +622,23 @@ pub fn set_site_app(
     save(cfg)
 }
 
+/// Pin an app to an installed language version, or back to automatic with `None`.
+pub fn set_site_runtime(cfg: &mut Config, site: &str, version: Option<String>) -> Result<()> {
+    let name = site_name(site);
+    if let Some(v) = &version {
+        let s = sites(cfg).into_iter().find(|s| s.name == name);
+        let rt = s
+            .as_ref()
+            .and_then(|s| apps::runtime(&s.kind))
+            .context("This app doesn't run its own server")?;
+        if !runtimes::installed(rt).contains(v) {
+            bail!("{} {v} isn't installed", runtimes::name(rt));
+        }
+    }
+    cfg.sites.entry(name).or_default().runtime = version;
+    save(cfg)
+}
+
 /// True when the running server was started with a different set of sites.
 pub fn needs_restart(cfg: &Config) -> bool {
     fs::read_to_string(home().join("run").join("Caddyfile"))
@@ -816,6 +845,8 @@ mod tests {
             command_custom: false,
             port: None,
             autostart: false,
+            runtime_version: None,
+            runtime_pinned: false,
         }
     }
 

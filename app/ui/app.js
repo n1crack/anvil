@@ -341,7 +341,7 @@ function renderSite() {
   $('[data-field="kind"]', root).textContent =
     s.kind === s.kind_detected ? kindLabel(s.kind) : `${kindLabel(s.kind)} (set by you)`;
   $('[data-field="runtime"]', root).textContent = process
-    ? RUNTIME[s.kind]
+    ? `${RUNTIME[s.kind]}${s.runtime_version && s.kind !== "dotnet" && s.kind !== "rust" ? ` ${s.runtime_version}` : ""}${s.runtime_version ? "" : " (not installed)"}`
     : s.php
       ? `PHP ${s.php}${s.php_pinned ? "" : " (default)"}`
       : "Static files";
@@ -599,6 +599,19 @@ function renderRun(s, root) {
   const err = $(".run-error", root);
   err.textContent = error ?? "";
   err.hidden = !error;
+
+  // Language version: automatic (project file or newest) or pinned.
+  const rtId = { next: "node", nuxt: "node", vite: "node", node: "node", rust: "rust", go: "go", dotnet: "dotnet" }[s.kind];
+  const versions = snap.runtimes[rtId] ?? [];
+  const rt = $("#app-runtime", root);
+  $("#app-runtime-label", root).textContent = `${RUNTIME[s.kind]} version`;
+  const autoVersion = s.runtime_pinned ? versions[0] : s.runtime_version;
+  rt.add(new Option(autoVersion ? `Automatic (${autoVersion})` : "Automatic", ""));
+  for (const v of versions) rt.add(new Option(v, v));
+  rt.value = s.runtime_pinned ? s.runtime_version : "";
+  rt.title = "Automatic uses .nvmrc or .node-version when the project has one, otherwise the newest installed";
+  rt.disabled = versions.length < 2;
+  rt.onchange = () => call("set_runtime", { site: s.name, version: rt.value || null });
 
   const cmd = $("#app-command", root);
   cmd.value = s.command_custom ? s.command : "";
