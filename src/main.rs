@@ -258,7 +258,14 @@ fn main() -> Result<()> {
                         (true, true) => "enabled",
                         (true, false) => "installed",
                     };
-                    println!("{:<12} {:<9} port {:<6} {state}", s.id, s.version, s.port);
+                    let inbox = s
+                        .web_port
+                        .map(|p| format!(", inbox on {p}"))
+                        .unwrap_or_default();
+                    println!(
+                        "{:<12} {:<9} port {:<6} {state}{inbox}",
+                        s.id, s.version, s.port
+                    );
                 }
             }
             ServiceCmd::Install { id } => {

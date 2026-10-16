@@ -117,7 +117,7 @@ Node.js, Go, Rust (through rustup) and .NET are installed into `~/.anvil/runtime
 | MySQL 8.4 | 3306 |
 | PostgreSQL 18 | 5432 |
 | Redis (built from source) | 6379 |
-| Mailpit | 1025 (SMTP), web inbox on 8025 |
+| Mailpit | 1025 (SMTP), web inbox on 8025 (change it with `anvil service port mailpit --web <port>`) |
 
 Services listen on 127.0.0.1 only and keep their data in `~/.anvil/data/<id>`. Enabled services start with Anvil. When a port is taken by another program, the app suggests the next free one. MySQL starts with a `root` user without a password; PostgreSQL with a `postgres` user and trust authentication. Uninstalling a service keeps its data, so a reinstall finds your databases again.
 
@@ -206,7 +206,7 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil service install <id>` | Install `mysql`, `postgres`, `redis` or `mailpit` |
 | `anvil service uninstall <id>` | Remove a service's program; its data is kept |
 | `anvil service enable <id>` / `disable <id>` | Start the service with Anvil, or not |
-| `anvil service port <id> [port]` | Set the port; leave it out for the default |
+| `anvil service port <id> [port] [--web [port]]` | Set the port; leave it out for the default. `--web` sets Mailpit's inbox port (no value resets it) |
 | `anvil usage [site]` | Disk usage of one application, or of Anvil and all applications |
 | `anvil setup` | Download the web server and print the one-time DNS command |
 | `anvil start` | Run Anvil in the foreground (Ctrl-C to stop) |
