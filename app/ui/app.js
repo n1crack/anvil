@@ -314,6 +314,9 @@ function renderSite() {
   for (const el of root.querySelectorAll(".process-only")) el.hidden = !process;
   if (process) renderRun(s, root);
 
+  $(".res-reload", root).onclick = () => loadResources(s.name, true);
+  loadResources(s.name);
+
   const php = $("#php", root);
   php.add(new Option(`Default (${snap.php_default ?? "none"})`, ""));
   for (const v of snap.php_installed) php.add(new Option(`PHP ${v}`, v));
@@ -355,6 +358,126 @@ function renderSite() {
       if (s.ini[k] !== v) await call("set_site_ini", { site: s.name, key: k, value: v });
     }
   };
+}
+
+/* ---------- Resources ---------- */
+
+const resCache = new Map(); // site name -> resources
+const SAFETY = {
+  safe: ["Safe to delete", "Nothing is lost"],
+  rebuild: ["Rebuildable", "Delete to free space; it can be recreated"],
+  keep: ["Keep", "Your code or data"],
+};
+
+function bytes(n) {
+  if (n == null) return "–";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
+}
+
+async function loadResources(name, force = false) {
+  if (!force && resCache.has(name)) return renderResources(name);
+  if (force) resCache.delete(name);
+  if (selected === name) renderResources(name);
+  try {
+    resCache.set(name, await invoke("resources", { site: name }));
+  } catch (e) {
+    resCache.set(name, { error: String(e) });
+  }
+  if (selected === name) renderResources(name);
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function renderResources(name) {
+  const body = $("#site .res-body");
+  if (!body) return;
+  const r = resCache.get(name);
+  body.replaceChildren();
+  if (!r) return body.append(el("p", "group-hint", "Measuring…"));
+  if (r.error) return body.append(el("p", "error", r.error));
+
+  const safe = r.items.filter((i) => i.safety === "safe").reduce((a, i) => a + i.bytes, 0);
+  const rebuild = r.items.filter((i) => i.safety === "rebuild").reduce((a, i) => a + i.bytes, 0);
+  const summary = el("p", "res-summary");
+  summary.append(el("strong", null, bytes(r.total)), document.createTextNode(" on disk. "));
+  if (safe) summary.append(document.createTextNode(`${bytes(safe)} can be deleted safely. `));
+  if (rebuild) summary.append(document.createTextNode(`${bytes(rebuild)} more can be freed and rebuilt later.`));
+  body.append(summary);
+
+  // Disk: one bar, segments by safety, then the itemised list.
+  const bar = el("div", "res-bar");
+  bar.setAttribute("aria-hidden", "true");
+  for (const kind of ["keep", "rebuild", "safe"]) {
+    const sum = r.items.filter((i) => i.safety === kind).reduce((a, i) => a + i.bytes, 0);
+    if (!sum || !r.total) continue;
+    const seg = el("span", `seg ${kind}`);
+    seg.style.flexGrow = sum;
+    bar.append(seg);
+  }
+  body.append(bar);
+
+  const list = el("dl", "group res-list");
+  for (const i of r.items.filter((i) => i.bytes > 0)) {
+    const row = el("div", "row");
+    const dt = el("dt");
+    dt.append(el("span", null, i.label));
+    if (i.path) dt.append(el("small", "path", i.path.startsWith("/") ? tilde(i.path) : i.path));
+    const dd = el("dd", "res-cells");
+    const tag = el("span", `safety ${i.safety}`, SAFETY[i.safety][0]);
+    tag.title = i.note;
+    dd.append(tag, el("span", "size", bytes(i.bytes)));
+    row.append(dt, dd);
+    list.append(row);
+  }
+  body.append(list);
+
+  if (r.processes.length) {
+    body.append(el("h3", "res-sub", "Running"));
+    const procs = el("dl", "group res-list");
+    for (const p of r.processes) {
+      const row = el("div", "row");
+      const dd = el("dd", "res-cells");
+      dd.append(el("span", "muted", `${p.cpu.toFixed(1)}% CPU`), el("span", "size", bytes(p.memory)));
+      row.append(el("dt", null, p.label), dd);
+      procs.append(row);
+    }
+    body.append(procs);
+  }
+
+  body.append(el("h3", "res-sub", "Services"));
+  if (!r.services.length) {
+    body.append(el("p", "group-hint", "No database, cache or mail settings found in this app’s .env."));
+  } else {
+    const svcs = el("dl", "group res-list");
+    for (const sv of r.services) {
+      const row = el("div", "row");
+      const dt = el("dt");
+      dt.append(el("span", null, sv.label));
+      const where = sv.anvil
+        ? `Anvil, ${sv.running ? "running" : "stopped"}, port ${sv.port}, shared by apps using it`
+        : sv.port
+          ? `Port ${sv.port}, not an Anvil service`
+          : "";
+      if (where) dt.append(el("small", "path", where));
+      const dd = el("dd", "res-cells");
+      if (sv.memory != null) dd.append(el("span", "muted", `${bytes(sv.memory)} memory`));
+      if (sv.data_bytes != null) dd.append(el("span", "size", `${bytes(sv.data_bytes)} data`));
+      row.append(dt, dd);
+      svcs.append(row);
+    }
+    body.append(svcs);
+  }
 }
 
 const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet"]);

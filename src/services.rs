@@ -388,6 +388,10 @@ impl Services {
         Ok(())
     }
 
+    pub fn pid(&mut self, id: &str) -> Option<u32> {
+        self.running(id).then(|| self.children[id].id())
+    }
+
     pub fn stop(&mut self, id: &str) {
         if let Some(mut c) = self.children.remove(id) {
             // Databases get time to flush and shut down cleanly.

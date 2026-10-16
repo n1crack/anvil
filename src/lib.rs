@@ -3,6 +3,7 @@
 
 pub mod apps;
 pub mod dns;
+pub mod resources;
 pub mod runtimes;
 pub mod services;
 
