@@ -341,7 +341,7 @@ impl Services {
         if !installed(id) {
             bail!("{} is not installed", name(id));
         }
-        kill_orphans(&pid_file(id));
+        kill_orphans(&pid_file(id), false);
         let port = port(cfg, id);
         let ports = if id == "mailpit" {
             vec![port, MAILPIT_WEB]

@@ -1,7 +1,9 @@
 //! Anvil core: configuration, sites, runtimes and the server supervisor.
 //! Shared by the `anvil` CLI and the macOS app.
 
+pub mod apps;
 pub mod dns;
+pub mod runtimes;
 pub mod services;
 
 use anyhow::{Context, Result, bail};
@@ -51,6 +53,18 @@ pub struct SiteConfig {
     /// php.ini overrides for this site only, e.g. memory_limit = "1G".
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ini: BTreeMap<String, String>,
+    /// Overrides the detected kind (see `apps::KINDS`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Custom start command for apps that run their own server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Fixed private port for apps that run their own server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// Start the app together with Anvil.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub autostart: bool,
 }
 
 impl Default for Config {
@@ -95,6 +109,14 @@ pub struct Site {
     pub parked_in: Option<PathBuf>,
     /// Project folder modification time, seconds since the Unix epoch.
     pub modified: u64,
+    /// What the project is (see `apps::KINDS`), detected or set by the user.
+    pub kind: String,
+    pub kind_detected: String,
+    /// For apps that run their own server: the command and private port.
+    pub command: Option<String>,
+    pub command_custom: bool,
+    pub port: Option<u16>,
+    pub autostart: bool,
 }
 
 pub fn home() -> PathBuf {
@@ -150,7 +172,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     for (name, path) in &cfg.links {
         found.insert(name.clone(), (path.clone(), None));
     }
-    found
+    let sites = found
         .into_iter()
         .map(|(name, (path, parked_in))| {
             let public = path.join("public");
@@ -162,6 +184,17 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             let own = cfg.sites.get(&name);
             let pinned = own.and_then(|s| s.php.clone());
             let ini = own.map(|s| s.ini.clone()).unwrap_or_default();
+            let detected = apps::detect(&path);
+            let kind = own
+                .and_then(|s| s.kind.clone())
+                .unwrap_or_else(|| detected.to_string());
+            let custom = own.and_then(|s| s.command.clone());
+            let command = custom
+                .clone()
+                .or_else(|| apps::default_command(&kind, &path));
+            // PHP for PHP projects and static folders (harmless there); never for apps
+            // that run their own server.
+            let php_ok = !apps::runs_process(&kind);
             let modified = fs::metadata(&path)
                 .and_then(|m| m.modified())
                 .ok()
@@ -170,8 +203,14 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             Site {
                 modified,
                 ini,
-                php_pinned: pinned.is_some(),
-                php: pinned.or_else(|| cfg.php.clone()),
+                php_pinned: php_ok && pinned.is_some(),
+                php: pinned.or_else(|| cfg.php.clone()).filter(|_| php_ok),
+                kind_detected: detected.into(),
+                kind,
+                command_custom: custom.is_some(),
+                command,
+                port: own.and_then(|s| s.port),
+                autostart: own.is_some_and(|s| s.autostart),
                 name,
                 path,
                 root,
@@ -179,7 +218,10 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
                 parked_in,
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let mut sites = sites;
+    apps::assign_ports(cfg, &mut sites);
+    sites
 }
 
 /// Serve `path` as `<name>.<tld>`; returns the cleaned-up name.
@@ -500,6 +542,15 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         cfg.http_port, cfg.https_port
     );
     for site in sites {
+        if let (true, Some(port)) = (apps::runs_process(&site.kind), site.port) {
+            s += &format!(
+                "\n{0}.{1}, http://{0}.{1} {{\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{2}` 502\n\t}}\n}}\n",
+                site.name,
+                cfg.tld,
+                not_running_page(&site.name),
+            );
+            continue;
+        }
         s += &format!(
             "\n{0}.{1}, http://{0}.{1} {{\n\troot * \"{2}\"\n\tencode\n",
             site.name,
@@ -512,6 +563,49 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         s += "\tfile_server {\n\t\thide .*\n\t}\n}\n";
     }
     s
+}
+
+/// Shown instead of a bare 502 when an app that runs its own server is stopped.
+fn not_running_page(name: &str) -> String {
+    format!(
+        "<!doctype html><title>{name} is not running</title><body style=\"font:15px -apple-system,system-ui;display:grid;place-items:center;height:90vh;color:#444\"><div><h2>{name} is not running</h2><p>Start it in Anvil, then reload this page.</p></div>"
+    )
+}
+
+/// Set the kind, start command, port or autostart of an app. `None` resets to the default.
+pub fn set_site_app(
+    cfg: &mut Config,
+    site: &str,
+    kind: Option<Option<String>>,
+    command: Option<Option<String>>,
+    port: Option<Option<u16>>,
+    autostart: Option<bool>,
+) -> Result<()> {
+    let entry = cfg.sites.entry(site_name(site)).or_default();
+    if let Some(kind) = kind {
+        if let Some(k) = &kind
+            && !apps::KINDS.contains(&k.as_str())
+        {
+            bail!("Unknown kind {k}");
+        }
+        entry.kind = kind;
+    }
+    if let Some(command) = command {
+        if let Some(c) = &command {
+            apps::check_command(c)?;
+        }
+        entry.command = command.map(|c| c.trim().to_string());
+    }
+    if let Some(port) = port {
+        if port.is_some_and(|p| p < 1024) {
+            bail!("Use a port of 1024 or higher");
+        }
+        entry.port = port;
+    }
+    if let Some(a) = autostart {
+        entry.autostart = a;
+    }
+    save(cfg)
 }
 
 /// True when the running server was started with a different set of sites.
@@ -552,7 +646,8 @@ pub(crate) fn alive(pid: &str) -> bool {
 /// Clean up after an Anvil that died without stopping its children (crash, SIGKILL).
 /// The pid file is `owner pid` followed by child pids; children are only killed when
 /// the owner is gone and the process still runs one of our binaries.
-pub(crate) fn kill_orphans(pid_file: &Path) {
+/// With `group`, child pids are process-group leaders and the whole group is killed.
+pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     let Ok(file) = fs::read_to_string(pid_file) else {
         return;
     };
@@ -567,7 +662,8 @@ pub(crate) fn kill_orphans(pid_file: &Path) {
             .args(["-p", pid, "-o", "command="])
             .output();
         if cmd.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&ours)) {
-            let _ = Command::new("kill").arg(pid).status();
+            let target = if group { format!("-{pid}") } else { pid.into() };
+            let _ = Command::new("kill").args(["--", &target]).status();
             killed = true;
         }
     }
@@ -600,7 +696,7 @@ pub struct Server {
 
 impl Server {
     pub fn start(cfg: &Config) -> Result<Server> {
-        kill_orphans(&pid_file());
+        kill_orphans(&pid_file(), false);
         if TcpStream::connect(("127.0.0.1", cfg.https_port)).is_ok() {
             bail!(
                 "Port {} is already in use — is Anvil already running?",
@@ -712,6 +808,12 @@ mod tests {
             linked: false,
             parked_in: None,
             modified: 0,
+            kind: "php".into(),
+            kind_detected: "php".into(),
+            command: None,
+            command_custom: false,
+            port: None,
+            autostart: false,
         }
     }
 
