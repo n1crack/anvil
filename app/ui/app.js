@@ -649,10 +649,101 @@ $("#power").onclick = async (e) => {
 
 $("#open-settings").onclick = () => invoke("show_settings");
 
+/* ---------- New application ---------- */
+
+const TEMPLATES = [
+  ["laravel", "Laravel", "PHP"],
+  ["statamic", "Statamic", "PHP"],
+  ["php", "PHP", "Plain PHP"],
+  ["static", "Static", "HTML"],
+  ["next", "Next.js", "Node.js"],
+  ["nuxt", "Nuxt", "Node.js"],
+  ["vite", "Vite", "React"],
+  ["node", "Node.js", "Server"],
+  ["rust", "Rust", "Cargo"],
+  ["go", "Go", "net/http"],
+  ["dotnet", ".NET", "ASP.NET"],
+];
+let newKind = localStorage.getItem("newKind") ?? "laravel";
+
+function openNewApp() {
+  const dlg = $("#new-app");
+  const grid = $("#new-kinds");
+  grid.replaceChildren();
+  for (const [id, name, sub] of TEMPLATES) {
+    const label = el("label", "kind-card");
+    const radio = el("input");
+    radio.type = "radio";
+    radio.name = "kind";
+    radio.value = id;
+    radio.checked = id === newKind;
+    radio.onchange = () => {
+      newKind = id;
+      localStorage.setItem("newKind", id);
+    };
+    label.append(radio, el("strong", null, name), el("small", null, sub));
+    grid.append(label);
+  }
+  const parent = $("#new-parent");
+  parent.replaceChildren();
+  for (const p of snap.paths) parent.add(new Option(tilde(p), p));
+  parent.add(new Option("Choose a folder…", ""));
+  parent.onchange = async () => {
+    if (parent.value) return;
+    const path = await window.__TAURI__.dialog.open({ directory: true, title: "Create the application in" });
+    if (path) parent.add(new Option(tilde(path), path), 0);
+    parent.selectedIndex = 0;
+  };
+  const name = $("#new-name");
+  name.value = "";
+  const preview = () => ($("#new-url").textContent = name.value ? `${name.value}.${snap.tld}` : "");
+  name.oninput = () => {
+    name.value = name.value.toLowerCase().replace(/[^a-z0-9.-]/g, "-");
+    preview();
+  };
+  preview();
+  $("#new-error").hidden = true;
+  $("#new-log").hidden = true;
+  setBusy(false);
+  dlg.showModal();
+  name.focus();
+}
+
+function setBusy(busy) {
+  $("#new-create").disabled = busy;
+  $("#new-create").textContent = busy ? "Creating…" : "Create";
+  for (const i of $("#new-form").querySelectorAll("input, select")) i.disabled = busy;
+}
+
+$("#new-cancel").onclick = () => $("#new-app").close();
+$("#new-log").onclick = () => invoke("open_create_log", { name: $("#new-name").value });
+$("#new-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const name = $("#new-name").value.trim();
+  const parent = $("#new-parent").value;
+  if (!name || !parent) return;
+  setBusy(true);
+  $("#new-log").hidden = false;
+  $("#new-error").hidden = true;
+  try {
+    const site = await invoke("create_app", { kind: newKind, name, parent });
+    $("#new-app").close();
+    await call("state");
+    select(site);
+    toast(`Created ${site}.${snap.tld}`);
+  } catch (err) {
+    $("#new-error").textContent = String(err);
+    $("#new-error").hidden = false;
+    setBusy(false);
+  }
+};
+
 $("#add").onclick = async () => {
   const pick = (title) => window.__TAURI__.dialog.open({ directory: true, title });
   const menu = await M.Menu.new({
     items: await Promise.all([
+      M.MenuItem.new({ text: "New Application…", accelerator: "CmdOrCtrl+N", action: openNewApp }),
+      M.PredefinedMenuItem.new({ item: "Separator" }),
       M.MenuItem.new({
         text: "Add Folder of Applications…",
         action: async () => {
@@ -739,6 +830,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "l" && !$(".show-log", root)?.hidden) {
     e.preventDefault();
     $(".show-log", root).click();
+    return;
+  }
+  if (e.key === "n") {
+    e.preventDefault();
+    openNewApp();
     return;
   }
   if (e.metaKey && e.key === ",") {

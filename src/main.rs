@@ -55,6 +55,14 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AppCmd,
     },
+    /// Create a new application: laravel, statamic, php, static, next, nuxt, vite, node, rust, go, dotnet
+    New {
+        kind: String,
+        name: String,
+        /// Parent folder (default: the first parked folder)
+        #[arg(long = "in")]
+        dir: Option<PathBuf>,
+    },
     /// Disk usage of an app, what is safe to delete, and the services it uses
     /// Leave out the app for Anvil's own footprint and every app's size
     Usage { site: Option<String> },
@@ -282,6 +290,19 @@ fn main() -> Result<()> {
                 set_site_app(&mut cfg, &site, None, None, None, Some(on))?
             }
         },
+        Cmd::New { kind, name, dir } => {
+            let parent = match dir {
+                Some(d) => d,
+                None => cfg
+                    .paths
+                    .first()
+                    .cloned()
+                    .context("Park a folder first, or pass --in")?,
+            };
+            println!("Creating {name} ({})…", apps::label(&kind));
+            let path = create::create(&kind, &name, &parent, cfg.php.as_deref())?;
+            println!("Created {}", path.display());
+        }
         Cmd::Usage { site: None } => {
             let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
             let (total, items) = resources::anvil_disk();

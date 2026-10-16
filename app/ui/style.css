@@ -1043,6 +1043,102 @@ kbd {
 .page.about .hint { max-width: 420px; margin: 16px 0; }
 .page.about .small { font-size: 11px; margin-top: 24px; }
 
+/* ---------- New application sheet ---------- */
+
+.sheet {
+  width: min(560px, 90vw);
+  padding: 22px 24px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--steel-pane);
+  color: var(--text);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+.sheet::backdrop { background: rgba(0, 0, 0, 0.35); }
+.sheet h2 { margin: 0 0 14px; font-size: 15px; }
+.sheet fieldset { margin: 0 0 14px; padding: 0; border: 0; }
+
+.kind-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.kind-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 10px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--steel-hover);
+  cursor: pointer;
+}
+
+.kind-card input { position: absolute; opacity: 0; pointer-events: none; }
+.kind-card strong { font-size: 13px; font-weight: 600; }
+.kind-card small { color: var(--muted); font-size: 11px; }
+.kind-card:hover { background: var(--steel-raised); }
+
+.kind-card:has(input:checked) {
+  border-color: var(--heat);
+  background: var(--steel-raised);
+  box-shadow: inset 0 0 0 1px var(--heat);
+}
+
+.kind-card:has(input:focus-visible) { outline: 2px solid var(--heat); outline-offset: 2px; }
+
+.field {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 4px 12px;
+  margin-bottom: 10px;
+}
+
+.field > span { color: var(--muted); }
+
+.field input,
+.field select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}
+
+.field small { grid-column: 2; min-height: 16px; color: var(--heat-text); font-size: 12px; }
+.sheet .error { margin: 6px 0 0; }
+
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.sheet-actions .spacer { flex: 1; }
+
+.sheet-actions button {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}
+
+.sheet-actions .primary {
+  border-color: transparent;
+  background: linear-gradient(180deg, var(--heat), var(--heat-deep));
+  color: #2a1204;
+  font-weight: 600;
+}
+
+.sheet-actions .primary:disabled { opacity: 0.6; }
+.sheet-actions .link { padding: 0; border: 0; background: none; color: var(--heat-text); }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
