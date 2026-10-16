@@ -98,7 +98,9 @@ pub fn is_php(kind: &str) -> bool {
 
 /// The command Anvil runs when the app has no custom one. `$PORT` is set.
 pub fn default_command(kind: &str, dir: &Path) -> Option<String> {
-    let npm = |script: &str| format!("[ -d node_modules ] || npm install; npm run {script}");
+    // Stop if the install fails, so its error is the last thing in the log.
+    let npm =
+        |script: &str| format!("{{ [ -d node_modules ] || npm install; }} && npm run {script}");
     Some(match kind {
         "next" | "nuxt" => npm("dev"),
         // Vite ignores $PORT, so pass it explicitly.
@@ -202,7 +204,8 @@ impl Apps {
         self.children.contains_key(name)
     }
 
-    pub fn start(&mut self, site: &Site) -> Result<()> {
+    /// `tld` lets dev servers that check the Host header (Vite, Nuxt) accept `<name>.<tld>`.
+    pub fn start(&mut self, site: &Site, tld: &str) -> Result<()> {
         if self.running(&site.name) {
             return Ok(());
         }
@@ -240,6 +243,8 @@ impl Apps {
             .env("HOST", "127.0.0.1")
             .env("HOSTNAME", "127.0.0.1")
             .env("ASPNETCORE_URLS", format!("http://127.0.0.1:{port}"))
+            // Vite rejects unknown hosts; a leading dot allows every name under the tld.
+            .env("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", format!(".{tld}"))
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
