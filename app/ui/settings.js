@@ -413,6 +413,8 @@ $("#dock").onchange = (e) => call("set_dock_icon", { on: e.target.checked });
 $("#theme").onchange = (e) => call("set_theme", { theme: e.target.value || null });
 $("#editor").onchange = (e) => call("set_editor", { editor: e.target.value || null });
 $("#terminal").onchange = (e) => call("set_terminal", { terminal: e.target.value || null });
+$("#open-config-about").onclick = () => invoke("open_config_dir").catch((e) => showError(String(e)));
+window.__TAURI__.app?.getVersion().then((v) => ($("#version").textContent = `Version ${v}`));
 $("#open-config").onclick = () => invoke("open_config_dir").catch((e) => showError(String(e)));
 
 for (const input of document.querySelectorAll("[data-ini]")) {

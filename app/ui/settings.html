@@ -15,6 +15,8 @@
       <button data-page="languages">Languages</button>
       <button data-page="services">Services</button>
       <button data-page="storage">Storage</button>
+      <button data-page="shortcuts">Shortcuts</button>
+      <button data-page="about">About</button>
     </nav>
   </aside>
 
@@ -121,6 +123,39 @@
       <p class="hint" id="apps-hint">Measures every application. With many projects this takes up to a minute.</p>
       <div class="below"><button id="scan-apps">Measure applications</button> <button id="clean-all-safe" hidden></button></div>
       <div id="app-sizes" class="group" hidden></div>
+    </section>
+    <section id="shortcuts" class="page" hidden>
+      <h1>Shortcuts</h1>
+      <h2>Applications window</h2>
+      <div class="group keys">
+        <div class="row"><span>Search applications</span><kbd>⌘F</kbd></div>
+        <div class="row"><span>Move through the list</span><kbd>↑ ↓</kbd></div>
+        <div class="row"><span>Show or hide linked domains</span><kbd>← →</kbd></div>
+        <div class="row"><span>Overview, Settings, Resources</span><kbd>⌘1 ⌘2 ⌘3</kbd></div>
+        <div class="row"><span>Open in browser</span><kbd>⌘O</kbd></div>
+        <div class="row"><span>Open in editor</span><kbd>⌘E</kbd></div>
+        <div class="row"><span>Open Terminal in the project</span><kbd>⌘T</kbd></div>
+        <div class="row"><span>Show the app’s log</span><kbd>⌘L</kbd></div>
+        <div class="row"><span>Reload applications</span><kbd>⌘R</kbd></div>
+        <div class="row"><span>Settings</span><kbd>⌘,</kbd></div>
+      </div>
+      <h2>Menu bar</h2>
+      <div class="group keys">
+        <div class="row"><span>Use a PHP version (in the menu)</span><kbd>⌘1 … ⌘9</kbd></div>
+        <div class="row"><span>Quit Anvil</span><kbd>⌘Q</kbd></div>
+      </div>
+    </section>
+
+    <section id="about" class="page about" hidden>
+      <img src="icon.png" alt="" width="96" height="96">
+      <h1>Anvil</h1>
+      <p class="tagline">Your tools. Your rules.</p>
+      <p class="muted" id="version"></p>
+      <p class="hint">A free, open-source local development environment for macOS. PHP, Node.js, Rust, Go and .NET applications, databases and mail, all on your Mac without containers.</p>
+      <div class="below">
+        <button id="open-config-about">Show Anvil’s folder</button>
+      </div>
+      <p class="muted small">Licensed under the GNU General Public License v3.0. Built with Rust, Tauri, Caddy and static-php-cli.</p>
     </section>
   </main>
 
