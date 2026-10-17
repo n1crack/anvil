@@ -170,15 +170,16 @@ pub fn default_command(kind: &str, dir: &Path) -> Option<String> {
 
 /// `uv run` with the project's dependencies: a pyproject.toml project gets its
 /// own environment; requirements.txt goes into uv's cache, not the project; a
-/// project declaring neither gets just its framework.
+/// project declaring neither gets just its framework. Without its own [project],
+/// --no-project keeps uv from adopting a pyproject.toml in a parent folder.
 fn uv_run(dir: &Path, framework: &str, cmd: &str) -> String {
     // A pyproject.toml with only tool settings (ruff, poetry) isn't a uv project.
     if read(&dir.join("pyproject.toml")).contains("[project]") {
         format!("uv run {cmd}")
     } else if dir.join("requirements.txt").exists() {
-        format!("uv run --with-requirements requirements.txt {cmd}")
+        format!("uv run --no-project --with-requirements requirements.txt {cmd}")
     } else {
-        format!("uv run --with {framework} {cmd}")
+        format!("uv run --no-project --with {framework} {cmd}")
     }
 }
 
@@ -525,7 +526,7 @@ mod tests {
         let dir = project(&[("requirements.txt", "fastapi"), ("app/main.py", "")]);
         let cmd = default_command("fastapi", &dir).unwrap();
         assert!(
-            cmd.starts_with("uv run --with-requirements requirements.txt "),
+            cmd.starts_with("uv run --no-project --with-requirements requirements.txt "),
             "{cmd}"
         );
         assert!(
@@ -546,7 +547,9 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
         let cmd = default_command("django", Path::new("/nonexistent")).unwrap();
         assert!(
-            cmd.starts_with("uv run --with django python manage.py runserver 127.0.0.1:$PORT"),
+            cmd.starts_with(
+                "uv run --no-project --with django python manage.py runserver 127.0.0.1:$PORT"
+            ),
             "{cmd}"
         );
         assert!(

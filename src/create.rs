@@ -37,7 +37,7 @@ def root():
 /// Anvil's HTTPS proxy at `.<tld>`, and only in debug.
 fn django_settings(tld: &str) -> String {
     format!(
-        "\n\n# Anvil serves this app over HTTPS at its local address.\nif DEBUG:\n    ALLOWED_HOSTS += [\".{tld}\"]\n    SECURE_PROXY_SSL_HEADER = (\"HTTP_X_FORWARDED_PROTO\", \"https\")\n"
+        "\n\n# Anvil serves this app over HTTPS at its local address.\nif DEBUG:\n    ALLOWED_HOSTS += [\".{tld}\", \"localhost\", \"127.0.0.1\"]\n    SECURE_PROXY_SSL_HEADER = (\"HTTP_X_FORWARDED_PROTO\", \"https\")\n"
     )
 }
 
@@ -243,24 +243,32 @@ pub fn create(kind: &str, name: &str, parent: &Path, php: Option<&str>) -> Resul
         }
         "dotnet" => sh(Command::new("dotnet").args(["new", "web", "-o", name])),
         // Python projects through uv; requirements.txt says what they need.
-        "django" => sh(Command::new("uv").args([
-            "run",
-            "--with",
-            "django",
-            "django-admin",
-            "startproject",
-            name,
-        ]))
-        .and_then(|_| {
-            let settings = dir.join(name).join("settings.py");
-            let mut text = fs::read_to_string(&settings)?;
-            let tld = crate::load()
-                .map(|c| c.tld)
-                .unwrap_or_else(|_| "test".into());
-            text.push_str(&django_settings(&tld));
-            fs::write(settings, text)?;
-            Ok(fs::write(dir.join("requirements.txt"), "django\n")?)
-        }),
+        // The settings package is `config`, so the folder may be any name (my-site);
+        // --no-project keeps uv from treating the parent folder as a project.
+        "django" => fs::create_dir_all(&dir)
+            .map_err(Into::into)
+            .and_then(|_| {
+                sh(Command::new("uv").args([
+                    "run",
+                    "--no-project",
+                    "--with",
+                    "django",
+                    "django-admin",
+                    "startproject",
+                    "config",
+                    name,
+                ]))
+            })
+            .and_then(|_| {
+                let settings = dir.join("config").join("settings.py");
+                let mut text = fs::read_to_string(&settings)?;
+                let tld = crate::load()
+                    .map(|c| c.tld)
+                    .unwrap_or_else(|_| "test".into());
+                text.push_str(&django_settings(&tld));
+                fs::write(settings, text)?;
+                Ok(fs::write(dir.join("requirements.txt"), "django\n")?)
+            }),
         "fastapi" => {
             fs::create_dir_all(&dir)?;
             fs::write(dir.join("main.py"), FASTAPI_MAIN)?;
