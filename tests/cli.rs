@@ -263,7 +263,8 @@ fn config_round_trip() {
         kinds(&env),
         want(&[
             ("api.test", "Rust"),
-            ("front.test", "Next.js"),
+            // Next.js opens at .localhost until its config allows .test.
+            ("front.localhost", "Next.js"),
             ("plain.test", "Static"),
             ("shop.test", "Laravel"),
         ])
@@ -481,7 +482,7 @@ fn caddyfile_for_a_few_sites() {
         format!(
             "plain.test, http://plain.test {{\n\troot * \"{sites}/plain\"\n\tencode\n\tphp_fastcgi unix/{home}/run/php-8.4.sock\n"
         ),
-        "front.test, http://front.test {\n\treverse_proxy 127.0.0.1:45123\n".into(),
+        "front.test, http://front.test, front.localhost, http://front.localhost {\n\treverse_proxy 127.0.0.1:45123\n".into(),
     ] {
         assert!(file.contains(&line), "missing {line:?} in:\n{file}");
     }

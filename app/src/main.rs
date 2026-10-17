@@ -772,6 +772,20 @@ fn set_site_ini(
     snapshot(&app)
 }
 
+/// Let a Next.js app answer at `.<tld>` by adding it to `allowedDevOrigins`;
+/// Next restarts itself when its config changes.
+#[tauri::command(async)]
+fn allow_next_origin(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    let s = anvil::sites(&cfg)
+        .into_iter()
+        .find(|s| s.name == site)
+        .ok_or_else(|| format!("No site named {site}"))?;
+    anvil::apps::allow_next_origin(&s.path, &cfg.tld).map_err(err)?;
+    changed(&handle);
+    snapshot(&app)
+}
+
 #[tauri::command(async)]
 fn set_group(app: State<App>, site: String, group: Option<String>) -> Res<Snapshot> {
     let mut cfg = anvil::load().map_err(err)?;
@@ -1459,7 +1473,7 @@ fn open(site: String, target: String) -> Res<()> {
         .ok_or_else(|| format!("No site named {site}"))?;
     let mut cmd = Command::new("open");
     match target.as_str() {
-        "browser" => cmd.arg(format!("https://{}.{}:{}", s.name, cfg.tld, cfg.https_port)),
+        "browser" => cmd.arg(format!("https://{}:{}", s.host, cfg.https_port)),
         "finder" => cmd.arg(&s.path),
         "root" => cmd.arg(&s.root),
         "terminal" => cmd
@@ -1742,6 +1756,7 @@ fn main() {
             setup_fix,
             set_group,
             set_site_ini,
+            allow_next_origin,
             set_runtime,
             open,
             icon,

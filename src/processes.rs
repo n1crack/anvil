@@ -301,6 +301,7 @@ mod tests {
     fn site(dir: &std::path::Path, kind: &str) -> Site {
         Site {
             name: "shop".into(),
+            host: String::new(),
             path: dir.into(),
             root: dir.into(),
             php: Some("8.4".into()),

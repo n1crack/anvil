@@ -128,6 +128,9 @@ impl Default for Config {
 #[derive(Serialize, Clone)]
 pub struct Site {
     pub name: String,
+    /// Where it opens: `<name>.<tld>`, or `<name>.localhost` for a Next.js app
+    /// whose config doesn't accept the tld (see `apps::next_allows`).
+    pub host: String,
     /// Project folder.
     pub path: PathBuf,
     /// Web root: `public/` when present, otherwise the project folder.
@@ -269,7 +272,13 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             // "Pinned" only when the pin is in effect (a static site drops PHP it can't use).
             let pin_set = php_ok && pinned.is_some();
             let php = site_php(&kind, pinned.or_else(|| cfg.php.clone()), &installed);
+            let host = if kind == "next" && !apps::next_allows(&path, &cfg.tld) {
+                format!("{name}.localhost")
+            } else {
+                format!("{name}.{}", cfg.tld)
+            };
             Site {
+                host,
                 modified,
                 ini,
                 php_pinned: pin_set && php.is_some(),
@@ -753,8 +762,14 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
     );
     for site in sites {
         if let (true, Some(port)) = (apps::runs_process(&site.kind), site.port) {
+            // Dev servers that only trust localhost (Next.js) work at <name>.localhost too.
+            let local = if cfg.tld == "localhost" {
+                String::new()
+            } else {
+                format!(", {0}.localhost, http://{0}.localhost", site.name)
+            };
             s += &format!(
-                "\n{0}.{1}, http://{0}.{1} {{\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{2}` 502\n\t}}\n}}\n",
+                "\n{0}.{1}, http://{0}.{1}{local} {{\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{2}` 502\n\t}}\n}}\n",
                 site.name,
                 cfg.tld,
                 not_running_page(&site.name),
@@ -1126,6 +1141,7 @@ mod tests {
     fn site(name: &str, root: &str, php: Option<&str>) -> Site {
         Site {
             name: name.into(),
+            host: format!("{name}.test"),
             path: root.into(),
             root: root.into(),
             php: php.map(Into::into),
@@ -1303,6 +1319,18 @@ mod tests {
         // A folder whose path could close the quoted root is left out, not spliced in.
         let evil = [site("evil", "/s/a\"\n}\nimport /etc", None)];
         assert!(!caddyfile(&cfg, &evil).contains("evil.test"));
+
+        // Apps with their own server also answer at <name>.localhost.
+        let mut app = site("web", "/s/web", None);
+        app.kind = "next".into();
+        app.port = Some(41000);
+        let out = caddyfile(&cfg, &[app.clone()]);
+        assert!(out.contains("web.test, http://web.test, web.localhost, http://web.localhost {\n\treverse_proxy 127.0.0.1:41000"));
+        let local = Config {
+            tld: "localhost".into(),
+            ..Config::default()
+        };
+        assert!(caddyfile(&local, &[app]).contains("web.localhost, http://web.localhost {"));
     }
 
     #[test]

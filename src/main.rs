@@ -243,9 +243,8 @@ fn start(cfg: &Config) -> Result<()> {
     }
     for s in sites(cfg) {
         println!(
-            "  https://{}.{}:{}  (PHP {})",
-            s.name,
-            cfg.tld,
+            "  https://{}:{}  (PHP {})",
+            s.host,
             cfg.https_port,
             s.php.as_deref().unwrap_or("-")
         );
@@ -324,7 +323,7 @@ fn main() -> Result<()> {
             for s in sites(&cfg) {
                 println!(
                     "{:<40} {:<9} {:<5} {}",
-                    format!("{}.{}", s.name, cfg.tld),
+                    s.host,
                     apps::label(&s.kind),
                     s.php.as_deref().unwrap_or("-"),
                     s.root.display()
@@ -565,7 +564,11 @@ fn main() -> Result<()> {
                 link(&mut cfg, &name, path.clone())?;
             }
             println!("Created {}", path.display());
-            println!("Serving at https://{name}.{}:{}", cfg.tld, cfg.https_port);
+            let host = sites(&cfg)
+                .into_iter()
+                .find(|s| s.path == path)
+                .map_or_else(|| format!("{name}.{}", cfg.tld), |s| s.host);
+            println!("Serving at https://{host}:{}", cfg.https_port);
         }
         Cmd::Usage { site: None } => {
             let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);

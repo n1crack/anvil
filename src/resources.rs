@@ -1272,6 +1272,7 @@ mod tests {
         std::os::unix::fs::symlink(dir.join("outside"), dir.join("node_modules")).unwrap();
         let site = Site {
             name: "t".into(),
+            host: String::new(),
             path: dir.clone(),
             root: dir.clone(),
             php: None,
@@ -1321,6 +1322,7 @@ mod tests {
         // `ios` points outside the project, so `ios/Pods` must not be deleted.
         std::os::unix::fs::symlink(&outside, project.join("ios")).unwrap();
         let site = Site {
+            host: String::new(),
             name: "n".into(),
             path: project.clone(),
             root: project.clone(),
@@ -1382,6 +1384,7 @@ mod tests {
             std::fs::write(p, "x".repeat(5000)).unwrap();
         }
         Site {
+            host: String::new(),
             name: name.into(),
             path: dir.clone(),
             root: dir,

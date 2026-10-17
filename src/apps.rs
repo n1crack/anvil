@@ -135,7 +135,9 @@ pub fn default_command(kind: &str, dir: &Path) -> Option<String> {
     let npm =
         |script: &str| format!("{{ [ -d node_modules ] || npm install; }} && npm run {script}");
     Some(match kind {
-        "next" | "nuxt" => npm("dev"),
+        // Next ignores $HOSTNAME and would listen on every interface.
+        "next" => npm("dev -- --hostname 127.0.0.1"),
+        "nuxt" => npm("dev"),
         // Vite ignores $PORT, so pass it explicitly.
         "vite" => npm("dev -- --port $PORT --strictPort --host 127.0.0.1"),
         "node" => {
@@ -181,6 +183,70 @@ fn uv_run(dir: &Path, framework: &str, cmd: &str) -> String {
     } else {
         format!("uv run --no-project --with {framework} {cmd}")
     }
+}
+
+const NEXT_CONFIGS: [&str; 5] = [
+    "next.config.ts",
+    "next.config.mjs",
+    "next.config.js",
+    "next.config.cjs",
+    "next.config.mts",
+];
+
+fn next_config(dir: &Path) -> Option<PathBuf> {
+    NEXT_CONFIGS
+        .iter()
+        .map(|f| dir.join(f))
+        .find(|p| p.exists())
+}
+
+/// Whether a Next.js app accepts `.<tld>`. In development Next only answers
+/// `localhost` and `*.localhost` unless `allowedDevOrigins` lists the address;
+/// anywhere else the page loads but never becomes interactive.
+pub fn next_allows(dir: &Path, tld: &str) -> bool {
+    tld == "localhost"
+        || next_config(dir).is_some_and(|p| {
+            let text = read(&p);
+            text.contains("allowedDevOrigins")
+                && ['\'', '"', '`']
+                    .iter()
+                    .any(|q| text.contains(&format!(".{tld}{q}")))
+        })
+}
+
+/// Add `allowedDevOrigins: ['**.<tld>']` to a Next.js app's config. Only a config
+/// with one plain top-level object is edited; anything else is left to the user.
+pub fn allow_next_origin(dir: &Path, tld: &str) -> Result<()> {
+    let line = format!("  allowedDevOrigins: ['**.{tld}'],");
+    let Some(path) = next_config(dir) else {
+        return Ok(fs::write(
+            dir.join("next.config.mjs"),
+            format!("export default {{\n{line}\n}};\n"),
+        )?);
+    };
+    let text = read(&path);
+    let file = path.file_name().unwrap().to_string_lossy();
+    if text.contains("allowedDevOrigins") {
+        bail!("{file} already sets allowedDevOrigins; add '**.{tld}' to it");
+    }
+    let opens = |l: &str| {
+        let l = l.trim_end();
+        l == "export default {"
+            || l.ends_with("= {")
+                && ["const ", "let ", "var ", "module.exports"]
+                    .iter()
+                    .any(|p| l.starts_with(p))
+    };
+    let mut lines: Vec<&str> = text.lines().collect();
+    let found: Vec<usize> = (0..lines.len()).filter(|&i| opens(lines[i])).collect();
+    let [at] = found[..] else {
+        bail!(
+            "Couldn't find the config object in {file}; add {} to it",
+            line.trim()
+        );
+    };
+    lines.insert(at + 1, &line);
+    Ok(fs::write(&path, lines.join("\n") + "\n")?)
 }
 
 /// Where a FastAPI app's `app` lives: main.py, app/main.py or app.py.
@@ -558,5 +624,51 @@ mod tests {
                 .contains("--port $PORT")
         );
         assert!(default_command("laravel", Path::new("/")).is_none());
+        assert!(
+            default_command("next", Path::new("/"))
+                .unwrap()
+                .ends_with("npm run dev -- --hostname 127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn next_config_gets_the_tld() {
+        // create-next-app's TypeScript config.
+        let dir = project(&[(
+            "next.config.ts",
+            "import type { NextConfig } from \"next\";\n\nconst nextConfig: NextConfig = {\n  /* config options here */\n};\n\nexport default nextConfig;\n",
+        )]);
+        assert!(!next_allows(&dir, "test"));
+        assert!(next_allows(&dir, "localhost"));
+        allow_next_origin(&dir, "test").unwrap();
+        let text = fs::read_to_string(dir.join("next.config.ts")).unwrap();
+        assert!(
+            text.contains("= {\n  allowedDevOrigins: ['**.test'],\n  /* config"),
+            "{text}"
+        );
+        assert!(next_allows(&dir, "test"));
+        assert!(!next_allows(&dir, "anvil"));
+        // Already set: Anvil doesn't merge into the user's list.
+        assert!(allow_next_origin(&dir, "anvil").is_err());
+        fs::remove_dir_all(dir).unwrap();
+
+        // No config yet: one is written.
+        let dir = project(&[("next-env.d.ts", "")]);
+        allow_next_origin(&dir, "test").unwrap();
+        assert!(next_allows(&dir, "test"));
+        fs::remove_dir_all(dir).unwrap();
+
+        // A config built by a function isn't edited.
+        let dir = project(&[(
+            "next.config.mjs",
+            "export default withMDX({\n  reactStrictMode: true,\n});\n",
+        )]);
+        assert!(allow_next_origin(&dir, "test").is_err());
+        assert!(
+            !fs::read_to_string(dir.join("next.config.mjs"))
+                .unwrap()
+                .contains("allowed")
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
 }

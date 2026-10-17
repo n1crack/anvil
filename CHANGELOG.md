@@ -8,6 +8,18 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- Next.js apps open at `<name>.localhost` until their `next.config` allows the
+  domain suffix: in development Next.js only becomes interactive at addresses it
+  trusts. The app's Overview adds `allowedDevOrigins` to `next.config` on request.
+- Apps with their own dev server also answer at `<name>.localhost`.
+
+### Fixed
+
+- Next.js dev servers listened on every network interface; they now listen on
+  127.0.0.1 only.
+
 ## [0.1.0] - 2026-10-17
 
 The first public release of Anvil, a macOS development environment.

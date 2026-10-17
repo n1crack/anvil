@@ -12,7 +12,7 @@ const filterOf = (m) => (filters[m] ??= { kind: null, running: false });
 
 const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 // The standard HTTPS port needs no ":443".
-const url = (s) => `https://${s.name}.${snap.tld}${snap.https_port === 443 ? "" : `:${snap.https_port}`}`;
+const url = (s) => `https://${s.host}${snap.https_port === 443 ? "" : `:${snap.https_port}`}`;
 
 let snapAt = 0; // when the last snapshot arrived
 
@@ -214,7 +214,7 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
   const text = document.createElement("span");
   text.className = "text";
   text.innerHTML = `<span class="name"></span><span class="sub"></span>`;
-  $(".name", text).textContent = `${s.name}.${snap.tld}`;
+  $(".name", text).textContent = s.host;
   // In a folder's section the path only repeats the heading; linked apps and groups keep it.
   if (path && !child) $(".sub", text).textContent = tilde(s.path) + "/";
   else $(".sub", text).remove();
@@ -338,7 +338,7 @@ function renderList() {
     (!f.kind || s.kind === f.kind) &&
     (!f.running || snap.app_states[s.name]) &&
     // Name, folder or type: "django" finds every Django app.
-    (!q || `${s.name}.${snap.tld} ${s.path} ${kindLabel(s.kind)}`.toLowerCase().includes(q));
+    (!q || `${s.host} ${s.path} ${kindLabel(s.kind)}`.toLowerCase().includes(q));
   let count = 0;
 
   // `key` remembers the fold; folders and Linked keep their old keys.
@@ -565,6 +565,7 @@ function renderSite() {
 
   if (process) renderRun(s, root);
   if (s.kind === "django") djangoHint(root);
+  if (s.kind === "next" && s.host !== `${s.name}.${snap.tld}`) nextHint(s, root);
 
   // Settings
   const kindSel = $("#kind", root);
@@ -634,6 +635,19 @@ function djangoHint(root) {
   copyBtn.onclick = () => copy(lines, "Copied the Django settings");
   env.append(el("pre", null, lines), copyBtn);
   box.append(env);
+  $('[data-panel="overview"] .group', root).after(box);
+}
+
+/** Next.js only works at .localhost until its config allows the domain suffix. */
+function nextHint(s, root) {
+  const box = el("div", "next-hint");
+  const use = el("button", null, `Use ${s.name}.${snap.tld}`);
+  use.onclick = () => call("allow_next_origin", { site: s.name });
+  box.append(
+    el("h3", "res-sub", "Address"),
+    el("p", "muted", `Next.js only becomes interactive at .${snap.tld} once next.config allows it, so this app opens at ${s.host}. Anvil can add allowedDevOrigins to next.config for you.`),
+    use,
+  );
   $('[data-panel="overview"] .group', root).after(box);
 }
 
