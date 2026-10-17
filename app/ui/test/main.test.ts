@@ -174,3 +174,60 @@ describe("watch", () => {
     w.mockLogs = null;
   });
 });
+
+describe("audit fixes", () => {
+  test("a folder shows no lock nor 'Runs on', even with an old HTTPS flag", async () => {
+    await select("notes");
+    expect($('#list [data-name="notes"] .lock')).toBeNull();
+    expect($(`#list [data-name="vuefinder"] .lock`)).not.toBeNull();
+    expect($('[data-field="runtime"]')).toBeNull();
+    expect($('[data-field="path"]').textContent).toBe("~/Sites/notes");
+  });
+
+  test("a running command has ■ Stop, which calls once_stop without opening the console", async () => {
+    await select("vuefinder");
+    const row = $$(".proc.cmd").find((r) => r.querySelector(".proc-name")?.textContent === "test")!;
+    const stop = row.querySelector('[aria-label="Stop npm run test"]') as HTMLElement;
+    expect(stop.textContent).toBe("■ Stop");
+    expect(row.querySelector('[aria-label="Run test"]')).toBeNull();
+    stop.click();
+    await wait();
+    expect(calls("once_stop").at(-1)![1]).toEqual({ site: "vuefinder", id: "test" });
+    expect($(".console").hidden).toBe(true);
+  });
+
+  test("adding a folder or creating an app selects it without a toast", async () => {
+    const open = w.__TAURI__.dialog.open;
+    w.__TAURI__.dialog.open = async () => "/Users/x/Sites/notes";
+    await select("shop");
+    ($("#new-existing") as HTMLElement).click();
+    await wait(80);
+    w.__TAURI__.dialog.open = open;
+    expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
+    expect($("#toast").hidden).toBe(true);
+
+    await select("shop");
+    ($("#new-name") as HTMLInputElement).value = "notes";
+    const parent = $("#new-parent") as HTMLSelectElement;
+    parent.append(new w.Option("~/Sites", "/Users/x/Sites"));
+    parent.value = "/Users/x/Sites";
+    $("#new-form").dispatchEvent(new Event("submit", { cancelable: true }));
+    await wait(80);
+    expect(calls("create_app")).toHaveLength(1);
+    expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
+    expect($("#toast").hidden).toBe(true);
+  });
+
+  test("Copy says Copied on the button for a moment, not in a toast", async () => {
+    $('.modes [data-mode="services"]').click();
+    await wait(80);
+    const copy = $(".svc-copy");
+    copy.click();
+    await wait();
+    expect(copy.textContent).toBe("Copied");
+    expect($("#toast").hidden).toBe(true);
+    await wait(1600);
+    expect(copy.textContent).toBe("Copy");
+    $('.modes [data-mode="apps"]').click();
+  });
+});
