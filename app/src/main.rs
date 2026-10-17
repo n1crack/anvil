@@ -212,9 +212,9 @@ fn process_rows(app: &App, site: &Site) -> Vec<ProcessRow> {
     anvil::processes::detect(site)
         .into_iter()
         .map(|p| {
-            let key = anvil::processes::key(&site.name, &p.name);
+            let key = anvil::processes::key(&site.name, &p.id);
             let last = anvil::logs::read(
-                &anvil::processes::log_file(&site.name, &p.name),
+                &anvil::processes::log_file(&site.name, &p.id),
                 None,
                 8 * 1024,
             )
@@ -259,9 +259,9 @@ fn process_run(
     let s = find_site(&site)?;
     for p in anvil::processes::detect(&s)
         .into_iter()
-        .filter(|p| name.as_deref().is_none_or(|n| n == p.name))
+        .filter(|p| name.as_deref().is_none_or(|n| n == p.id))
     {
-        let key = anvil::processes::key(&s.name, &p.name);
+        let key = anvil::processes::key(&s.name, &p.id);
         if action != "start" {
             app.apps.lock().unwrap().stop(&key);
             app.app_errors.lock().unwrap().remove(&key);
@@ -691,7 +691,7 @@ fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot
             app.apps
                 .lock()
                 .unwrap()
-                .stop(&anvil::processes::key(&site, &p.name));
+                .stop(&anvil::processes::key(&site, &p.id));
         }
     }
     let mut cfg = anvil::load().map_err(err)?;

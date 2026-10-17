@@ -49,7 +49,7 @@ function drawProcs(name) {
     last.title = last.textContent;
     const btn = el("button", null, r.running ? "Stop" : "Start");
     btn.setAttribute("aria-label", `${r.running ? "Stop" : "Start"} ${r.name}`);
-    btn.onclick = () => loadProcs(name, "process_run", { name: r.name, action: r.running ? "stop" : "start" });
+    btn.onclick = () => loadProcs(name, "process_run", { name: r.id, action: r.running ? "stop" : "start" });
     row.append(dot, label, last, btn);
     list.append(row);
   }

@@ -175,11 +175,15 @@ pub struct Site {
 /// `run` (sockets, pid files, generated configs) and `log`. `run` is private:
 /// the Postgres socket there accepts anyone who can reach it (`--auth=trust`).
 pub fn state_dirs() -> Result<()> {
+    state_dirs_in(&home())
+}
+
+pub(crate) fn state_dirs_in(home: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let run = home().join("run");
+    let run = home.join("run");
     fs::create_dir_all(&run)?;
     fs::set_permissions(&run, fs::Permissions::from_mode(0o700))?;
-    fs::create_dir_all(home().join("log"))?;
+    fs::create_dir_all(home.join("log"))?;
     Ok(())
 }
 

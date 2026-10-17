@@ -324,11 +324,19 @@ pub fn hashed_port(key: &str, base: u16, taken: &[u16], cfg: &Config) -> u16 {
 }
 
 pub fn log_file(name: &str) -> PathBuf {
-    home().join("log").join(format!("app-{name}.log"))
+    log_in(&home(), name)
+}
+
+fn log_in(home: &Path, name: &str) -> PathBuf {
+    home.join("log").join(format!("app-{name}.log"))
 }
 
 fn pid_file(name: &str) -> PathBuf {
-    home().join("run").join(format!("app-{name}.pids"))
+    pid_in(&home(), name)
+}
+
+fn pid_in(home: &Path, name: &str) -> PathBuf {
+    home.join("run").join(format!("app-{name}.pids"))
 }
 
 /// Whether any Anvil (the app or `anvil start`) is running this app right now.
@@ -353,21 +361,106 @@ fn terminate_group(child: &mut Child, grace: Duration) {
 }
 
 /// Apps started from Anvil, by site name.
-#[derive(Default)]
 pub struct Apps {
+    /// Where pid and log files go (Anvil's home; a temp folder in tests).
+    home: PathBuf,
     children: BTreeMap<String, Child>,
     /// Keys of `children` that are an app's other processes, not apps.
     processes: std::collections::BTreeSet<String>,
+    /// Keys of `processes` started by `run_once`: they are meant to end.
+    once: std::collections::BTreeSet<String>,
+    /// How children that ended without `stop` ended, until stopped or started again.
+    exits: BTreeMap<String, Exit>,
+}
+
+/// How a process ended on its own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Exit {
+    /// `None` when a signal ended it.
+    pub code: Option<i32>,
+    /// Unix seconds.
+    pub at: u64,
+}
+
+impl Default for Apps {
+    fn default() -> Self {
+        Apps::in_home(home())
+    }
 }
 
 impl Apps {
+    fn in_home(home: PathBuf) -> Self {
+        Apps {
+            home,
+            children: BTreeMap::new(),
+            processes: Default::default(),
+            once: Default::default(),
+            exits: BTreeMap::new(),
+        }
+    }
+
     pub fn running(&mut self, name: &str) -> bool {
-        if let Some(c) = self.children.get_mut(name)
-            && !matches!(c.try_wait(), Ok(None))
-        {
+        let ended = self
+            .children
+            .get_mut(name)
+            .and_then(|c| match c.try_wait() {
+                Ok(None) => None,
+                Ok(Some(status)) => Some(status.code()),
+                Err(_) => Some(None),
+            });
+        if let Some(code) = ended {
             self.children.remove(name);
+            let at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            self.exits.insert(name.to_string(), Exit { code, at });
         }
         self.children.contains_key(name)
+    }
+
+    /// Processes that ended on their own (not `run_once` ones), newest record per key.
+    pub fn crashed(&mut self) -> Vec<(String, Exit)> {
+        let keys: Vec<String> = self.children.keys().cloned().collect();
+        for k in keys {
+            self.running(&k);
+        }
+        self.exits
+            .iter()
+            .filter(|(k, _)| !self.once.contains(*k))
+            .map(|(k, e)| (k.clone(), e.clone()))
+            .collect()
+    }
+
+    /// How a `run_once` command ended, once it has.
+    pub fn finished(&mut self, key: &str) -> Option<Exit> {
+        self.running(key);
+        self.exits.get(key).cloned()
+    }
+
+    /// Running keys with their process-group pid; `true` for an app's other processes.
+    pub fn list(&mut self) -> Vec<(String, u32, bool)> {
+        let keys: Vec<String> = self.children.keys().cloned().collect();
+        for k in keys {
+            self.running(&k);
+        }
+        self.children
+            .iter()
+            .map(|(k, c)| (k.clone(), c.id(), self.processes.contains(k)))
+            .collect()
+    }
+
+    /// `npm run <script>` once, as a process of the app (key `<site>#<id>`); its end
+    /// is not a crash.
+    pub fn run_once(&mut self, site: &Site, script: &str) -> Result<()> {
+        let key = format!("{}#{}", site.name, crate::processes::process_id(script));
+        if self.running(&key) {
+            return Ok(());
+        }
+        let command = format!("npm run '{}'", script.replace('\'', r"'\''"));
+        self.spawn(&key, &site.path, &command, crate::processes::env(site))?;
+        self.processes.insert(key.clone());
+        self.once.insert(key);
+        Ok(())
     }
 
     /// `tld` lets dev servers that check the Host header (Vite, Nuxt) accept `<name>.<tld>`.
@@ -408,7 +501,7 @@ impl Apps {
 
     /// One of an app's other processes (queue, Vite…), see `processes`.
     pub fn start_process(&mut self, site: &Site, p: &crate::processes::Process) -> Result<()> {
-        let key = crate::processes::key(&site.name, &p.name);
+        let key = crate::processes::key(&site.name, &p.id);
         if self.running(&key) {
             return Ok(());
         }
@@ -425,15 +518,15 @@ impl Apps {
         command: &str,
         env: Vec<(String, String)>,
     ) -> Result<()> {
-        kill_orphans(&pid_file(key), true);
-        crate::state_dirs()?;
+        kill_orphans(&pid_in(&self.home, key), true);
+        crate::state_dirs_in(&self.home)?;
         let log = fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_file(key))?;
+            .open(log_in(&self.home, key))?;
         // The trailing argument is $0: it tags the shell with Anvil's home so a
         // crashed Anvil's leftovers can be recognised and cleaned up.
-        let tag = format!("anvil:{}:{key}", home().display());
+        let tag = format!("anvil:{}:{key}", self.home.display());
         let child = Command::new("/bin/sh")
             .args(["-c", command, &tag])
             .current_dir(dir)
@@ -445,9 +538,10 @@ impl Apps {
             .spawn()
             .with_context(|| format!("failed to start {key}"))?;
         fs::write(
-            pid_file(key),
+            pid_in(&self.home, key),
             format!("{}\n{}", std::process::id(), child.id()),
         )?;
+        self.exits.remove(key);
         self.children.insert(key.to_string(), child);
         Ok(())
     }
@@ -459,9 +553,11 @@ impl Apps {
 
     pub fn stop(&mut self, name: &str) {
         self.processes.remove(name);
+        self.once.remove(name);
+        self.exits.remove(name);
         if let Some(mut c) = self.children.remove(name) {
             terminate_group(&mut c, Duration::from_secs(5));
-            let _ = fs::remove_file(pid_file(name));
+            let _ = fs::remove_file(pid_in(&self.home, name));
         }
     }
 
@@ -682,5 +778,86 @@ mod tests {
                 .contains("allowed")
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+    fn site_at(dir: &Path) -> Site {
+        Site {
+            name: "shop".into(),
+            host: String::new(),
+            secure: false,
+            path: dir.into(),
+            root: dir.into(),
+            php: None,
+            php_pinned: false,
+            ini: Default::default(),
+            linked: false,
+            parked_in: None,
+            modified: 0,
+            kind: "node".into(),
+            kind_detected: "node".into(),
+            command: None,
+            command_custom: false,
+            port: None,
+            autostart: false,
+            runtime_version: None,
+            runtime_pinned: false,
+        }
+    }
+
+    fn proc(name: &str, command: &str) -> crate::processes::Process {
+        crate::processes::Process {
+            id: crate::processes::process_id(name),
+            name: name.into(),
+            command: command.into(),
+            source: ".anvil.toml",
+            server: false,
+            port: None,
+        }
+    }
+
+    #[test]
+    fn remembers_processes_that_exit_on_their_own() {
+        let dir = project(&[("crash/x", "")]);
+        let mut apps = Apps::in_home(dir.join("home"));
+        let site = site_at(&dir);
+        let (boom, idle) = (proc("boom", "sh -c 'exit 3'"), proc("docs:dev", "sleep 30"));
+        apps.start_process(&site, &idle).unwrap();
+        apps.start_process(&site, &boom).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+
+        let crashed = apps.crashed();
+        assert_eq!(crashed.len(), 1);
+        assert_eq!(crashed[0].0, "shop@boom");
+        assert_eq!(crashed[0].1.code, Some(3));
+        // The id, not the display name, makes the key and the log file.
+        let list = apps.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!((list[0].0.as_str(), list[0].2), ("shop@docs-dev", true));
+        assert_eq!(Some(list[0].1), apps.pid("shop@docs-dev"));
+        assert!(dir.join("home/log/app-shop@docs-dev.log").exists());
+
+        // Starting it again clears the record; crashing again leaves exactly one.
+        apps.start_process(&site, &boom).unwrap();
+        assert!(!apps.exits.contains_key("shop@boom"));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(apps.crashed().len(), 1);
+
+        // A stop is not a crash.
+        apps.stop("shop@docs-dev");
+        apps.stop("shop@boom");
+        assert!(apps.crashed().is_empty());
+        assert!(apps.list().is_empty());
+    }
+
+    #[test]
+    fn run_once_ends_without_a_crash() {
+        let dir = project(&[("once/x", "")]);
+        let mut apps = Apps::in_home(dir.join("home"));
+        let site = site_at(&dir);
+        // No package.json: npm fails (or is missing), which still must not count as a crash.
+        apps.run_once(&site, "build:all").unwrap();
+        assert!(apps.processes.contains("shop#build-all"));
+        std::thread::sleep(Duration::from_millis(2000));
+        assert!(apps.crashed().is_empty());
+        assert!(apps.finished("shop#build-all").is_some());
     }
 }
