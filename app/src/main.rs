@@ -2378,97 +2378,6 @@ fn touched(site: String) -> Res<Option<u64>> {
     Ok(anvil::resources::touched(&s.path))
 }
 
-/// An app name safe to look up as a bundle and use as a file name: "iTerm", "Visual Studio Code".
-fn app_name_ok(name: &str) -> bool {
-    !name.is_empty()
-        && !name.starts_with('.')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '-' | '_'))
-}
-
-/// The .icns a bundle's Info.plist names: "Zed.icns" as is, "Finder" with the extension added.
-fn icns_path(bundle: &std::path::Path, icon: &str) -> std::path::PathBuf {
-    let file = if icon.ends_with(".icns") {
-        icon.to_string()
-    } else {
-        format!("{icon}.icns")
-    };
-    bundle.join("Contents/Resources").join(file)
-}
-
-/// A macOS app's own icon as a 64 px PNG data URL, for the "open with" buttons.
-/// Kept in memory and under ~/.anvil/run/icons, so `sips` runs once per app.
-#[tauri::command(async)]
-fn app_icon(name: String) -> Res<Option<String>> {
-    use base64::Engine;
-    static CACHE: Mutex<std::collections::BTreeMap<String, Option<String>>> =
-        Mutex::new(std::collections::BTreeMap::new());
-    if !app_name_ok(&name) {
-        return Err(format!("Not an app name: {name}"));
-    }
-    if let Some(hit) = CACHE.lock().unwrap().get(&name) {
-        return Ok(hit.clone());
-    }
-    let png = anvil::home().join("run/icons").join(format!("{name}.png"));
-    if !png.exists() {
-        let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-        let bundle = if name == "Finder" {
-            Some(std::path::PathBuf::from(
-                "/System/Library/CoreServices/Finder.app",
-            ))
-        } else {
-            [
-                std::path::Path::new("/Applications"),
-                std::path::Path::new("/Applications/Utilities"),
-                std::path::Path::new("/System/Applications"),
-                std::path::Path::new("/System/Applications/Utilities"),
-                &home.join("Applications"),
-            ]
-            .iter()
-            .map(|d| d.join(format!("{name}.app")))
-            .find(|b| b.exists())
-        };
-        let icns = bundle.and_then(|b| {
-            let plist = b.join("Contents/Info.plist");
-            ["CFBundleIconFile", "CFBundleIconName"]
-                .iter()
-                .find_map(|key| {
-                    let out = Command::new("/usr/bin/plutil")
-                        .args(["-extract", key, "raw", "-o", "-"])
-                        .arg(&plist)
-                        .output()
-                        .ok()
-                        .filter(|o| o.status.success())?;
-                    let icon = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    Some(icns_path(&b, &icon)).filter(|p| !icon.is_empty() && p.exists())
-                })
-        });
-        let made = icns.is_some_and(|icns| {
-            let _ = std::fs::create_dir_all(png.parent().unwrap());
-            Command::new("/usr/bin/sips")
-                .args(["-s", "format", "png", "-Z", "64"])
-                .arg(&icns)
-                .arg("--out")
-                .arg(&png)
-                .output()
-                .is_ok_and(|o| o.status.success())
-        });
-        if !made {
-            CACHE.lock().unwrap().insert(name, None);
-            return Ok(None);
-        }
-    }
-    let url = std::fs::read(&png).ok().map(|bytes| {
-        format!(
-            "data:image/png;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(bytes)
-        )
-    });
-    CACHE.lock().unwrap().insert(name, url.clone());
-    Ok(url)
-}
-
 /// Every window closes; Anvil stays in the menu bar.
 fn hide_windows(handle: &AppHandle) {
     for w in handle.webview_windows().values() {
@@ -2746,7 +2655,6 @@ fn main() {
             set_runtime,
             open,
             icon,
-            app_icon,
             touched,
             settings,
             show_settings,
@@ -2897,33 +2805,6 @@ mod tests {
         assert!(!local_http("file:///etc/passwd", "test"));
     }
     use super::*;
-
-    #[test]
-    fn app_names_are_plain_and_icons_get_icns() {
-        assert!(app_name_ok("iTerm"));
-        assert!(app_name_ok("Visual Studio Code"));
-        assert!(app_name_ok("IntelliJ IDEA-2.0_x"));
-        for bad in [
-            "",
-            "../Finder",
-            "/Applications/Zed",
-            "a/b",
-            ".hidden",
-            "Zed\n",
-            "Zed;rm",
-        ] {
-            assert!(!app_name_ok(bad), "{bad}");
-        }
-        let b = std::path::Path::new("/Applications/Zed.app");
-        assert_eq!(
-            icns_path(b, "Zed.icns"),
-            b.join("Contents/Resources/Zed.icns")
-        );
-        assert_eq!(
-            icns_path(b, "iTerm2 App Icon for Release"),
-            b.join("Contents/Resources/iTerm2 App Icon for Release.icns")
-        );
-    }
 
     #[test]
     fn log_keys_are_parsed_and_paths_rejected() {
