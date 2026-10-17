@@ -101,16 +101,39 @@ describe("versions", () => {
 });
 
 describe("Node.js package managers", () => {
-  test("each one with where it comes from and its version, or Not found", async () => {
+  test("what apps find, and the terminal's only when it differs; paths in the tooltip", async () => {
     await open("node");
     const rows = $$("#pms .pm");
     expect(rows.map((r) => r.querySelector(".pm-name")?.textContent)).toEqual(["npm", "pnpm", "yarn", "bun"]);
-    expect(rows[0].querySelector(".pm-from")?.textContent).toBe("Bundled with Node.js 24");
-    expect(rows[0].querySelector(".pm-version")?.textContent).toBe("11.6.2");
-    expect(rows[1].querySelector(".pm-from")?.textContent).toBe("Homebrew");
+    expect(rows[0].querySelector(".pm-from")?.textContent).toBe("Apps: Bundled with Node.js 24 11.6.2");
+    expect(rows[0].querySelector(".pm-term")?.textContent).toBe("Terminal: Homebrew (Node.js 26) 11.12.1");
+    expect((rows[0].querySelector(".pm-term .pm-src") as HTMLElement).title).toBe("/opt/homebrew/bin/npm");
+    expect(rows[1].querySelector(".pm-from")?.textContent).toBe("Apps: Homebrew 12.14.0");
+    expect(rows[1].querySelector(".pm-term")).toBeNull();
     expect(rows[2].classList.contains("missing")).toBe(true);
-    expect(rows[2].querySelector(".pm-from")?.textContent).toBe("Not found");
-    expect(rows[3].querySelector(".pm-from")?.textContent).toContain("~/.bun/bin/bun");
+    expect(rows[2].querySelector(".pm-from")?.textContent).toBe("Apps: Not found");
+    expect([...rows[2].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Install"]);
+    expect((rows[3].querySelector(".pm-from .pm-src") as HTMLElement).title).toBe("~/.anvil/runtimes/bun/bin/bun");
+    expect(rows[3].querySelector(".on-hover button")?.textContent).toBe("Uninstall");
+    expect(rows[0].querySelectorAll("button").length).toBe(0);
+    expect(rows[1].querySelectorAll("button").length).toBe(0);
+  });
+
+  test("Install shows progress in the row, then an error inline", async () => {
+    w.mockDelay.package_manager_install = 80;
+    w.mockPmError = "npm error network request to https://registry.npmjs.org/yarn failed";
+    $$("#pms .pm")[2].querySelector("button")!.click();
+    await wait(10);
+    let row = $$("#pms .pm")[2];
+    expect(row.querySelector(".spin-dot")).not.toBeNull();
+    expect(row.textContent).toContain("Installing…");
+    expect(w.mockCalls.at(-1)).toEqual(["package_manager_install", { name: "yarn" }]);
+    await wait(150);
+    row = $$("#pms .pm")[2];
+    expect(row.querySelector(".spin-dot")).toBeNull();
+    expect(row.querySelector(".pm-error")?.textContent).toContain("registry.npmjs.org");
+    expect(row.querySelector("button")?.textContent).toBe("Install");
+    w.mockPmError = null;
   });
 });
 

@@ -1058,8 +1058,8 @@ pub fn address(cfg: &crate::Config, site: &Site, id: &str) -> Option<String> {
     ))
 }
 
-/// Anvil's PHP for the app and its newest Node.js, first on PATH, with Node's
-/// caches kept in Anvil's folder.
+/// Anvil's PHP for the app, its Node.js and the package managers installed from
+/// Settings, first on PATH, with Node's caches kept in Anvil's folder.
 pub fn env(site: &Site) -> Vec<(String, String)> {
     let mut env = vec![];
     let mut path = std::env::var("PATH").unwrap_or_default();
@@ -1069,6 +1069,9 @@ pub fn env(site: &Site) -> Vec<(String, String)> {
         if let Some(i) = env.iter().position(|(k, _)| k == "PATH") {
             path = env.remove(i).1;
         }
+    } else {
+        // No Anvil Node.js: bun installed from Settings still works.
+        path = runtimes::with_pms(&path);
     }
     if let Some(v) = &site.php {
         path = format!("{}:{path}", home().join("php").join(v).display());

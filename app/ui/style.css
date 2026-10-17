@@ -1230,25 +1230,50 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-size: 12px;
 }
 
-/* Package managers: name, where it comes from, version. */
+/* Package managers: name; what apps find and, when it differs, the terminal; actions. */
 .page .row.pm {
   display: grid;
   grid-template-columns: 64px 1fr auto;
+  align-items: center;
 }
 
-.pm-from {
+.pm-where {
+  display: grid;
   min-width: 0;
+}
+
+.pm-where > span {
   overflow: hidden;
-  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.page .row .pm-from small { margin: 0; }
+.pm-term {
+  color: var(--muted);
+  font-size: 12px;
+}
 
-.pm-version { font-variant-numeric: tabular-nums; }
+.pm-error {
+  color: var(--danger);
+  font-size: 12px;
+}
 
-.pm.missing .pm-name { color: var(--muted); }
+.pm-version {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pm.missing .pm-name,
+.pm.missing .pm-from { color: var(--muted); }
+
+.pm .actions-inline { min-height: 26px; }
+
+.pm .on-hover { visibility: hidden; }
+
+.pm:hover .on-hover,
+.pm:focus-within .on-hover { visibility: visible; }
+
+.pm .spin-dot { color: var(--muted); }
 
 /* Storage › Applications: refresh, when, and Delete above the list, always there. */
 .storage-bar {
