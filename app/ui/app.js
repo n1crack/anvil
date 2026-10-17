@@ -72,14 +72,11 @@ window.refresh = () => {
 /* ---------- Setup: what still stands between this Mac and working addresses ---------- */
 
 // [step, field in setup_status, label, what it does]
-const SETUP_STEPS = [
-  ["resolver", "resolver", "Local domains", "Lets local addresses reach Anvil (asks for your password)"],
-  ["ports", "ports", "Standard ports", "Lets addresses work without a port number (asks for your password)"],
-  ["trust", "trusted", "HTTPS certificate", "Lets browsers trust Anvil’s local certificates"],
-  ["php", "php", "PHP", "Installs PHP 8.4 for PHP applications"],
-];
+// What setting up this Mac means, beyond PHP: local domains, ports 80/443, the HTTPS
+// certificate and the terminal commands. One button does them all, one password.
+const SETUP_FIELDS = ["resolver", "ports", "trusted", "shims"];
 
-async function loadSetup(fixing) {
+async function loadSetup(busy) {
   let st;
   try {
     st = await invoke("setup_status");
@@ -87,17 +84,21 @@ async function loadSetup(fixing) {
     return;
   }
   const bar = $("#setup");
-  const missing = SETUP_STEPS.filter(([, field]) => !st[field]);
-  bar.hidden = !missing.length;
-  bar.replaceChildren(el("span", null, "Finish setting up"));
-  for (const [id, , label, why] of missing) {
-    const b = el("button", null, fixing === id ? `${label}…` : label);
-    b.title = why;
-    b.disabled = !!fixing;
+  const machine = SETUP_FIELDS.some((f) => !st[f]);
+  bar.hidden = !machine && st.php;
+  bar.replaceChildren();
+  if (machine) {
+    const b = el("button", "setup-go", busy === "all" ? "Setting up…" : "Set up Anvil");
+    if (busy === "all") b.prepend(el("span", "spin-dot"));
+    b.title = "Local .test domains, ports 80 and 443, the HTTPS certificate and php, composer, laravel and node in your terminal. Asks for your password once.";
+    b.disabled = !!busy;
     b.onclick = async () => {
-      loadSetup(id);
+      loadSetup("all");
       try {
-        await invoke("setup_fix", { step: id });
+        const after = await invoke("setup_fix", { step: "all" });
+        // macOS may refuse to trust the certificate system-wide without asking;
+        // the login keychain then takes it, with its own prompt.
+        if (after && !after.trusted) await invoke("setup_fix", { step: "trust" });
       } catch (e) {
         showError(String(e));
       }
@@ -105,18 +106,18 @@ async function loadSetup(fixing) {
     };
     bar.append(b);
   }
-  // The password step has a way around it: .localhost needs no resolver file.
-  if (missing.some(([id]) => id === "resolver")) {
-    const b = el("button", "link", "Use .localhost instead");
-    b.title = "Addresses like shop.localhost reach this Mac without any setup or password";
-    b.disabled = !!fixing;
+  if (!st.php) {
+    const b = el("button", null, busy === "php" ? "Installing PHP…" : "Install PHP 8.4");
+    b.title = "PHP for PHP applications; no password needed";
+    b.disabled = !!busy;
     b.onclick = async () => {
+      loadSetup("php");
       try {
-        await invoke("set_tld", { tld: "localhost" });
+        await invoke("setup_fix", { step: "php" });
       } catch (e) {
         showError(String(e));
       }
-      refresh();
+      loadSetup();
     };
     bar.append(b);
   }

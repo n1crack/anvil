@@ -2076,24 +2076,16 @@ kbd {
 .welcome .link:hover { color: var(--text); text-decoration: underline; }
 
 /* Unfinished setup: one quiet line above the panel, a button per missing step. */
-.setup {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0 36px 8px;
-  padding: 8px 12px;
-  border-radius: var(--radius-m);
-  background: var(--steel-raised);
-  color: var(--muted);
-  font-size: 12px;
-}
-
+/* Setting up this Mac: a button in the titlebar, for the whole app, not one site. */
+.setup { display: flex; align-items: center; gap: 6px; margin-right: auto; -webkit-app-region: no-drag; }
 .setup[hidden] { display: none; }
-.setup span { margin-right: 4px; }
-/* The way around a step, not another step. */
-.setup button.link { border-color: transparent; background: none; color: var(--muted); text-decoration: underline; }
-.setup button.link:hover { color: var(--text); }
+.setup button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; font-size: 12px; }
+.setup .setup-go {
+  border-color: transparent;
+  background: linear-gradient(180deg, var(--heat), var(--heat-deep));
+  color: #2a1204;
+  font-weight: 600;
+}
 
 .setup button {
   height: 24px;
