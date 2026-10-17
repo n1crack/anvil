@@ -168,6 +168,7 @@ async function tail() {
   } catch (e) {
     if (token === logToken) {
       log.textContent = String(e);
+      logFrom = 0; // recovery reads the last page again, not only what came after
       replace = true;
     }
     return;

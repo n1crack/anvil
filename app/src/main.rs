@@ -568,7 +568,7 @@ fn parse_log_key<'a>(key: &'a str, services: &[String]) -> Res<LogKey<'a>> {
 #[tauri::command(async)]
 fn activity_log(key: String, from: u64) -> Res<anvil::logs::Page> {
     let log = anvil::home().join("log");
-    // Only a service key needs the config, so other logs still show when it fails to load.
+    // The service list is read only for a service key; Caddy and PHP logs need no config.
     let services = if key.starts_with("service:") {
         anvil::services::instances(&anvil::load().map_err(err)?)
     } else {
