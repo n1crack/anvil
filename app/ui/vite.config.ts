@@ -17,6 +17,6 @@ export default defineConfig({
       },
     },
   },
-  test: { environment: "happy-dom", include: ["src/**/*.test.ts"] },
+  test: { environment: "happy-dom", include: ["test/**/*.test.ts"] },
   lint: { ignorePatterns: ["dist/**"] },
 });
