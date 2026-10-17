@@ -379,18 +379,27 @@ function setSort(by) {
 }
 
 /** Inline text prompt under the search field. Resolves to the text, or null when cancelled. */
-function ask(label, placeholder) {
+/** Inline text prompt under the search field. `preview` turns the text into what
+ * it will create. Only Return or Esc ends it, so a stray click keeps the typing. */
+function ask(label, placeholder, preview) {
   const form = $("#ask");
   const input = $("#ask-input");
+  const hint = $("#ask-hint");
+  const base = "Return to add, Esc to cancel";
   $("#ask-label").textContent = label;
   input.placeholder = placeholder;
   input.value = "";
+  hint.textContent = base;
   form.hidden = false;
   input.focus();
+  input.oninput = () => {
+    const v = input.value.trim();
+    hint.textContent = v && preview ? `${preview(v)}. ${base}` : base;
+  };
   return new Promise((resolve) => {
     const done = (value) => {
       form.hidden = true;
-      form.onsubmit = input.onkeydown = input.onblur = null;
+      form.onsubmit = input.onkeydown = input.oninput = null;
       resolve(value);
     };
     form.onsubmit = (e) => {
@@ -398,12 +407,12 @@ function ask(label, placeholder) {
       done(input.value.trim() || null);
     };
     input.onkeydown = (e) => e.key === "Escape" && done(null);
-    input.onblur = () => done(null);
   });
 }
 
 async function addAlias(s) {
-  const alias = await ask(`New domain for ${s.name}.${snap.tld}`, `e.g. admin.${s.name}`);
+  const alias = await ask(`New domain for ${s.name}.${snap.tld}`, `e.g. admin.${s.name}`, (v) =>
+    `Opens ${v.replace(new RegExp(`\\.${snap.tld}$`), "")}.${snap.tld}`);
   if (alias) await call("add_alias", { site: s.name, alias });
 }
 
@@ -419,7 +428,11 @@ const RUNTIME = { next: "Node.js", nuxt: "Node.js", vite: "Node.js", node: "Node
 function showTab(root, name) {
   tab = name;
   localStorage.setItem("tab", name);
-  for (const b of root.querySelectorAll("[role=tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
+  // One stop in the Tab order; the arrow keys move between tabs.
+  for (const b of root.querySelectorAll("[role=tab]")) {
+    b.setAttribute("aria-selected", b.dataset.tab === name);
+    b.tabIndex = b.dataset.tab === name ? 0 : -1;
+  }
   for (const p of root.querySelectorAll("[role=tabpanel]")) p.hidden = p.dataset.panel !== name;
   $(".res-reload", root).hidden = name !== "resources";
   window.logsTab?.(root, name === "logs");

@@ -896,8 +896,10 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   white-space: nowrap;
 }
 
+/* Starting: a green ring that is filling in; heat colours stay with the brand. */
 .dot.warm {
-  background: var(--heat-white);
+  background: color-mix(in srgb, var(--ok) 35%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--ok);
   animation: pulse 1.2s ease-in-out infinite;
 }
 
@@ -1191,7 +1193,7 @@ kbd {
 .sheet-actions .link { padding: 0; border: 0; background: none; color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; }
+  * { transition: none !important; animation: none !important; }
 }
 
 /* ---------- Applications | Services switch and service details ---------- */
@@ -1837,3 +1839,5 @@ kbd {
 }
 
 .logs-menu { font-size: 16px; line-height: 1; }
+
+#ask-hint { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
