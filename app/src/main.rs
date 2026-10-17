@@ -1380,7 +1380,15 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let cfg = anvil::load().unwrap_or_default();
 
     let status = if on {
-        format!("Serving {} applications", anvil::sites(&cfg).len())
+        // Aliases share their app's folder; count each app once.
+        let all = anvil::sites(&cfg);
+        let parked: std::collections::HashSet<_> =
+            all.iter().filter(|s| !s.linked).map(|s| &s.path).collect();
+        let n = all
+            .iter()
+            .filter(|s| !s.linked || !parked.contains(&s.path))
+            .count();
+        format!("Serving {n} applications")
     } else if app.error.lock().unwrap().is_some() {
         "Stopped, open Anvil for details".into()
     } else {
@@ -1442,10 +1450,7 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
             })
             .collect()
     };
-    for (title, prefix, list) in [
-        ("Services", "svc", svc),
-        ("Apps with a Server", "app", procs),
-    ] {
+    for (title, prefix, list) in [("Services", "svc", svc), ("Applications", "app", procs)] {
         if list.is_empty() {
             continue;
         }
@@ -1463,20 +1468,34 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     if items.len() > 6 {
         items.push(Box::new(sep()?));
     }
-    for (i, v) in anvil::installed_php().iter().rev().enumerate() {
-        let key = (i < 9).then(|| format!("CmdOrCtrl+{}", i + 1));
-        items.push(Box::new(CheckMenuItem::with_id(
+    // PHP versions in one submenu, so the menu doesn't grow with every install.
+    let php: Vec<CheckMenuItem<Wry>> = anvil::installed_php()
+        .iter()
+        .rev()
+        .map(|v| {
+            CheckMenuItem::with_id(
+                handle,
+                format!("php:{v}"),
+                format!("PHP {v}"),
+                true,
+                cfg.php.as_deref() == Some(v.as_str()),
+                None::<&str>,
+            )
+        })
+        .collect::<tauri::Result<_>>()?;
+    if !php.is_empty() {
+        let refs: Vec<&dyn IsMenuItem<Wry>> =
+            php.iter().map(|c| c as &dyn IsMenuItem<Wry>).collect();
+        items.push(Box::new(Submenu::with_items(
             handle,
-            format!("php:{v}"),
-            format!("Use PHP {v}"),
+            "Default PHP Version",
             true,
-            cfg.php.as_deref() == Some(v.as_str()),
-            key.as_deref(),
+            &refs,
         )?));
     }
     items.extend([
         Box::new(sep()?) as Box<dyn IsMenuItem<Wry>>,
-        Box::new(item("logs", "Logs", true, None)?),
+        Box::new(item("logs", "Show Anvil Logs in Finder", true, None)?),
         Box::new(item("settings", "Settings", true, Some("CmdOrCtrl+,"))?),
         Box::new(sep()?),
         Box::new(item("quit", "Quit Anvil", true, Some("CmdOrCtrl+Q"))?),
