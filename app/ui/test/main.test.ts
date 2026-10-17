@@ -62,6 +62,24 @@ describe("https", () => {
   });
 });
 
+describe("sidebar", () => {
+  test("an app's dot: green while anything of it runs, amber while starting, red after a crash", async () => {
+    w.mockSnap.app_states = { shop: "running", vuefinder: "starting", notes: "crashed" };
+    await wait(550); // refresh reads the state again only half a second after the last read
+    w.refresh();
+    await wait(80);
+    const badge = (name: string) => $(`#list [data-name="${name}"] .run-badge`);
+    expect(badge("shop").className).toBe("run-badge on");
+    expect(badge("vuefinder").className).toBe("run-badge warm");
+    expect([badge("notes").className, badge("notes").title]).toEqual(["run-badge bad", "A process crashed"]);
+    w.mockSnap.app_states = {};
+    await wait(550);
+    w.refresh();
+    await wait(80);
+    expect(badge("shop")).toBeNull();
+  });
+});
+
 describe("overview", () => {
   test("one Dev line with a dot per process, and no process or command lists", async () => {
     await select("vuefinder");

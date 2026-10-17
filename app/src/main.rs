@@ -55,6 +55,77 @@ struct Snapshot {
 
 type Res<T> = Result<T, String>;
 
+/// The sidebar's dot per app: "starting" while its own server's port doesn't answer
+/// yet, "running" when anything of it runs (its server, a dev process `<site>@…`, a
+/// container), "crashed" when one ended on its own and nothing runs. One-off scripts
+/// (`<site>#…`) don't count.
+fn app_states(
+    sites: &[Site],
+    live: &[String],
+    crashed: &[String],
+    containers: &[std::path::PathBuf],
+    answers: impl Fn(u16) -> bool,
+) -> std::collections::BTreeMap<String, &'static str> {
+    let canon: Vec<_> = containers
+        .iter()
+        .filter_map(|d| d.canonicalize().ok())
+        .collect();
+    let mine = |s: &Site, keys: &[String]| {
+        keys.iter().any(|k| {
+            k == &s.name
+                || k.strip_prefix(s.name.as_str())
+                    .is_some_and(|r| r.starts_with('@'))
+        })
+    };
+    sites
+        .iter()
+        .filter_map(|s| {
+            let server = live.contains(&s.name);
+            let state = if server && !s.port.is_some_and(&answers) {
+                "starting"
+            } else if mine(s, live)
+                || (!containers.is_empty()
+                    && (containers.contains(&s.path)
+                        || s.path.canonicalize().is_ok_and(|p| canon.contains(&p))))
+            {
+                "running"
+            } else if mine(s, crashed) {
+                "crashed"
+            } else {
+                return None;
+            };
+            Some((s.name.clone(), state))
+        })
+        .collect()
+}
+
+/// Folders with a running container, from one `docker ps`, and only when an app has a
+/// compose file. Kept a few seconds: the snapshot is asked for often.
+/// ponytail: a container started outside Anvil shows within 5 s, or at the next change.
+static CONTAINERS: Mutex<Option<(std::time::Instant, Vec<std::path::PathBuf>)>> = Mutex::new(None);
+fn running_containers(sites: &[Site]) -> Vec<std::path::PathBuf> {
+    if !sites
+        .iter()
+        .any(|s| anvil::compose::file(&s.path).is_some())
+    {
+        return vec![];
+    }
+    let mut cache = CONTAINERS.lock().unwrap();
+    if let Some((at, dirs)) = cache.as_ref()
+        && at.elapsed() < std::time::Duration::from_secs(5)
+    {
+        return dirs.clone();
+    }
+    let dirs: Vec<_> = anvil::compose::running()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, c)| c.state == "running")
+        .map(|(d, _)| d)
+        .collect();
+    *cache = Some((std::time::Instant::now(), dirs.clone()));
+    dirs
+}
+
 fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
@@ -68,18 +139,15 @@ fn snapshot(app: &App) -> Res<Snapshot> {
     let https_port = anvil::public_https_port(&cfg);
     let http_port = anvil::public_http_port(&cfg);
     let sites = anvil::sites(&cfg);
-    let mut apps = app.apps.lock().unwrap();
-    let app_states = sites
-        .iter()
-        .filter(|s| apps.running(&s.name))
-        .map(|s| {
-            let up = s
-                .port
-                .is_some_and(|p| std::net::TcpStream::connect(("127.0.0.1", p)).is_ok());
-            (s.name.clone(), if up { "running" } else { "starting" })
-        })
-        .collect();
-    drop(apps);
+    let (live, crashed) = {
+        let mut apps = app.apps.lock().unwrap();
+        let live: Vec<String> = apps.list().into_iter().map(|(k, _, _)| k).collect();
+        let crashed: Vec<String> = apps.crashed().into_iter().map(|(k, _)| k).collect();
+        (live, crashed)
+    };
+    let app_states = app_states(&sites, &live, &crashed, &running_containers(&sites), |p| {
+        std::net::TcpStream::connect(("127.0.0.1", p)).is_ok()
+    });
     Ok(Snapshot {
         app_states,
         app_errors: app.app_errors.lock().unwrap().clone(),
@@ -844,6 +912,7 @@ fn container_run(app: State<App>, site: String, service: String, action: String)
         return Err(format!("{site} has no compose file"));
     }
     anvil::compose::action(&s.path, &service, &action).map_err(err)?;
+    *CONTAINERS.lock().unwrap() = None;
     Ok(overview(&app, &cfg, &s))
 }
 
@@ -856,6 +925,7 @@ fn containers_run(app: State<App>, site: String, action: String) -> Res<Overview
         return Err(format!("{site} has no compose file"));
     }
     anvil::compose::project_action(&s.path, &action).map_err(err)?;
+    *CONTAINERS.lock().unwrap() = None;
     Ok(overview(&app, &cfg, &s))
 }
 
@@ -2989,6 +3059,46 @@ mod tests {
             runtime_version: None,
             runtime_pinned: false,
         }
+    }
+
+    #[test]
+    fn sidebar_dot_says_whether_anything_of_the_app_runs() {
+        let dir = std::env::temp_dir().join(format!("anvil-states-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut vite = site("vuefinder", "vite", std::path::Path::new("/x/vuefinder"));
+        vite.port = Some(41001);
+        let sites = [
+            site(
+                "ozdemir.be",
+                "laravel",
+                std::path::Path::new("/x/ozdemir.be"),
+            ),
+            vite.clone(),
+            site("elpida", "compose", &dir),
+            site("shop", "laravel", std::path::Path::new("/x/shop")),
+            site("notes", "folder", std::path::Path::new("/x/notes")),
+            site("blog", "laravel", std::path::Path::new("/x/blog")),
+        ];
+        let keys = |k: &[&str]| k.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let up = |p: u16| p == 41001;
+        let states = app_states(
+            &sites,
+            // A Laravel app's queue, vuefinder's own server, a one-off script.
+            &keys(&["ozdemir.be@queue", "vuefinder", "notes#lint"]),
+            &keys(&["shop@logs", "ozdemir.be@vite"]),
+            std::slice::from_ref(&dir),
+            up,
+        );
+        assert_eq!(states.get("ozdemir.be"), Some(&"running"));
+        assert_eq!(states.get("vuefinder"), Some(&"running"));
+        assert_eq!(states.get("elpida"), Some(&"running"));
+        assert_eq!(states.get("shop"), Some(&"crashed"));
+        assert_eq!(states.get("notes"), None);
+        assert_eq!(states.get("blog"), None);
+        // Its own server whose port doesn't answer yet: starting.
+        let states = app_states(&[vite], &keys(&["vuefinder"]), &[], &[], |_| false);
+        assert_eq!(states.get("vuefinder"), Some(&"starting"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -311,7 +311,10 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   if (child) b.append(text, end);
   else {
     const state = snap.app_states[s.name];
-    b.append(markBox(mark(s), state && (state === "running" ? "on" : "warm")), text, end);
+    // Green while anything of the app runs, amber while its server starts, red after a crash.
+    const box = markBox(mark(s), state && { running: "on", starting: "warm", crashed: "bad" }[state]);
+    if (state === "crashed") $(".run-badge", box).title = "A process crashed";
+    b.append(box, text, end);
   }
   b.onclick = () => select(s.name);
   b.oncontextmenu = (e) => {
@@ -367,7 +370,7 @@ export function showCard(s, row) {
       : [];
     const state = snap.app_states[s.name];
     if (up.length) lines.push(el("span", "hc-run", `${up.length} running: ${up.join(", ")}`));
-    else if (state) lines.push(el("span", "hc-run", state === "running" ? "Running" : "Starting"));
+    else if (state) lines.push(el("span", "hc-run", { running: "Running", starting: "Starting", crashed: "A process crashed" }[state]));
     const g = late.gitCache ? late.gitCache.get(s.name) : null;
     if (g && !g.error && g.branch) lines.push(el("span", "branch", g.branch));
     const secs = touchedOf(s, () => card.isConnected && draw());
@@ -458,7 +461,7 @@ export function renderList() {
   const f = filterOf("apps");
   const hit = (s) =>
     (!f.kind || s.kind === f.kind) &&
-    (!f.running || snap.app_states[s.name]) &&
+    (!f.running || ["running", "starting"].includes(snap.app_states[s.name])) &&
     // Name, folder or type: "django" finds every Django app.
     (!q || `${s.host} ${s.path} ${kindLabel(s.kind)}`.toLowerCase().includes(q));
   let count = 0;

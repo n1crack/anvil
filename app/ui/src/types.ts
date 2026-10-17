@@ -37,8 +37,9 @@ export interface Snapshot {
   ini: Record<string, string>;
   running: boolean;
   error: string | null;
-  /** Apps with their own server: "starting" until the port answers, then "running". */
-  app_states: Record<string, "starting" | "running">;
+  /** "starting" until the app's own server answers, "running" while anything of it runs
+   * (server, dev process, container), "crashed" when one crashed and none runs. */
+  app_states: Record<string, "starting" | "running" | "crashed">;
   app_errors: Record<string, string>;
   /** [id, label] */
   kinds: [string, string][];
