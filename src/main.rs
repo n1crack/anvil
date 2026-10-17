@@ -87,7 +87,12 @@ enum ServiceCmd {
         name: Option<String>,
         #[arg(long)]
         port: Option<u16>,
+        /// e.g. 8.0.46; `anvil service versions` lists them
+        #[arg(long)]
+        version: Option<String>,
     },
+    /// Versions each service offers, and which are installed
+    Versions,
     /// Remove a service; its data is kept unless --delete-data
     Remove {
         id: String,
@@ -98,8 +103,8 @@ enum ServiceCmd {
     Tag { id: String, tags: Vec<String> },
     /// Set the applications that use a service (none clears them)
     Link { id: String, apps: Vec<String> },
-    /// Remove a program no service uses anymore, e.g. `uninstall redis`
-    Uninstall { kind: String },
+    /// Remove a program version no service uses anymore, e.g. `uninstall redis 7.2.16`
+    Uninstall { kind: String, version: String },
     /// Start the service with Anvil
     Enable { id: String },
     /// Don't start the service with Anvil
@@ -290,14 +295,20 @@ fn main() -> Result<()> {
                     );
                 }
             }
-            ServiceCmd::Add { kind, name, port } => {
-                let id = services::add(&mut cfg, &kind, name.as_deref(), port)?;
-                if !services::installed(&kind) {
-                    println!("Downloading {kind}…");
-                    if let Err(e) = services::install(&kind) {
-                        services::remove(&mut cfg, &id, false)?;
-                        return Err(e);
-                    }
+            ServiceCmd::Add {
+                kind,
+                name,
+                port,
+                version,
+            } => {
+                let id = services::add(&mut cfg, &kind, name.as_deref(), port, version.as_deref())?;
+                let v = services::version(&cfg, &id);
+                if !services::installed(&kind, &v) {
+                    println!("Downloading {kind} {v}…");
+                }
+                if let Err(e) = services::ensure_installed(&cfg, &id) {
+                    services::remove(&mut cfg, &id, false)?;
+                    return Err(e);
                 }
                 services::set_enabled(&mut cfg, &id, true)?;
                 println!(
@@ -308,14 +319,33 @@ fn main() -> Result<()> {
             ServiceCmd::Remove { id, delete_data } => services::remove(&mut cfg, &id, delete_data)?,
             ServiceCmd::Tag { id, tags } => services::set_tags(&mut cfg, &id, &tags)?,
             ServiceCmd::Link { id, apps } => services::set_apps(&mut cfg, &id, &apps)?,
-            ServiceCmd::Uninstall { kind } => {
-                if let Some(id) = services::instances(&cfg)
-                    .into_iter()
-                    .find(|i| services::kind_of(&cfg, i).ok() == Some(kind.as_str()))
-                {
-                    bail!("{id} still uses {kind}; remove it first");
+            ServiceCmd::Versions => {
+                for kind in services::SERVICES {
+                    let installed = services::installed_versions(kind);
+                    let list: Vec<String> = services::versions(kind)
+                        .iter()
+                        .map(|v| {
+                            let mut t = v.to_string();
+                            if *v == services::default_version(kind) {
+                                t += " (default)";
+                            }
+                            if installed.iter().any(|i| i == v) {
+                                t += " (installed)";
+                            }
+                            t
+                        })
+                        .collect();
+                    println!("{kind:<9} {}", list.join(", "));
                 }
-                services::uninstall(&kind)?
+            }
+            ServiceCmd::Uninstall { kind, version } => {
+                if let Some(id) = services::instances(&cfg).into_iter().find(|i| {
+                    services::kind_of(&cfg, i).ok() == Some(kind.as_str())
+                        && services::version(&cfg, i) == version
+                }) {
+                    bail!("{id} still uses {kind} {version}; remove it first");
+                }
+                services::uninstall(&kind, &version)?
             }
             ServiceCmd::Enable { id } => services::set_enabled(&mut cfg, &id, true)?,
             ServiceCmd::Disable { id } => services::set_enabled(&mut cfg, &id, false)?,

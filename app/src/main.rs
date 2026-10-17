@@ -594,11 +594,13 @@ fn set_service_port(
 /// Downloads (and for Redis, compiles) off the main thread, then starts it.
 #[tauri::command]
 async fn install_service(handle: AppHandle, id: String) -> Res<Vec<ServiceRow>> {
-    let kind = anvil::services::kind_of(&anvil::load().map_err(err)?, &id).map_err(err)?;
-    tauri::async_runtime::spawn_blocking(move || anvil::services::install(kind))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(err)?;
+    let (job_cfg, job_id) = (anvil::load().map_err(err)?, id.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        anvil::services::ensure_installed(&job_cfg, &job_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(err)?;
     let app = handle.state::<App>();
     let mut cfg = anvil::load().map_err(err)?;
     anvil::services::set_enabled(&mut cfg, &id, true).map_err(err)?;
@@ -686,27 +688,28 @@ async fn add_service(
     kind: String,
     name: Option<String>,
     port: Option<u16>,
+    version: Option<String>,
     tags: Vec<String>,
     apps: Vec<String>,
 ) -> Res<Vec<ServiceRow>> {
     let mut cfg = anvil::load().map_err(err)?;
-    let id = anvil::services::add(&mut cfg, &kind, name.as_deref(), port).map_err(err)?;
+    let id = anvil::services::add(&mut cfg, &kind, name.as_deref(), port, version.as_deref())
+        .map_err(err)?;
     let meta = anvil::services::set_tags(&mut cfg, &id, &tags)
         .and_then(|_| anvil::services::set_apps(&mut cfg, &id, &apps));
     if let Err(e) = meta {
         let _ = anvil::services::remove(&mut cfg, &id, false);
         return Err(err(e));
     }
-    if !anvil::services::installed(&kind) {
-        let job = kind.clone();
-        let installed =
-            tauri::async_runtime::spawn_blocking(move || anvil::services::install(&job))
-                .await
-                .map_err(|e| e.to_string())?;
-        if let Err(e) = installed {
-            let _ = anvil::services::remove(&mut cfg, &id, false);
-            return Err(err(e));
-        }
+    let (job_cfg, job_id) = (anvil::load().map_err(err)?, id.clone());
+    let installed = tauri::async_runtime::spawn_blocking(move || {
+        anvil::services::ensure_installed(&job_cfg, &job_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if let Err(e) = installed {
+        let _ = anvil::services::remove(&mut cfg, &id, false);
+        return Err(err(e));
     }
     anvil::services::set_enabled(&mut cfg, &id, true).map_err(err)?;
     let app = handle.state::<App>();

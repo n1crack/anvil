@@ -756,7 +756,8 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
             let anvil = port.and_then(|p| {
                 ids.iter()
                     .find(|id| {
-                        services::kind_of(cfg, id).is_ok_and(services::installed)
+                        services::kind_of(cfg, id)
+                            .is_ok_and(|k| services::installed(k, &services::version(cfg, id)))
                             && services::port(cfg, id) == p
                     })
                     .cloned()

@@ -1267,3 +1267,8 @@ kbd {
   color: var(--heat-text);
   font-size: 12px;
 }
+
+#filter.active {
+  background: color-mix(in srgb, var(--heat) 22%, transparent);
+  color: var(--heat-text);
+}

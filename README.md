@@ -117,14 +117,16 @@ Nothing runs until you add it. Add a service by picking its kind, a name and a p
 
 For each application, Anvil also reads its `.env` and tells you where every database, cache and mail server it points at comes from: an Anvil service, a Docker container or Compose service, another program on your Mac, or a remote host.
 
-| Service | Usual port |
-|---|---|
-| MySQL 8.4 | 3306 |
-| PostgreSQL 18 | 5432 |
-| Redis (built from source) | 6379 |
-| Mailpit | 1025 (SMTP), web inbox on 8025 (change it with `anvil service port <name> --web <port>`) |
+| Service | Versions | Usual port |
+|---|---|---|
+| MySQL | 9.7, 8.4 (default), 8.0 | 3306 |
+| PostgreSQL | 18 (default), 17, 16, 15, 14 | 5432 |
+| Redis (built from source) | 8.10 (default), 7.4, 7.2 | 6379 |
+| Mailpit | 1.31 | 1025 (SMTP), web inbox on 8025 (change it with `anvil service port <name> --web <port>`) |
 
-When the usual port is taken, by another service or another program, the next free one is suggested. Each kind's program is downloaded the first time you add one and shared after that; every service keeps its own data in `~/.anvil/data/<name>` and its own log. Services listen on 127.0.0.1 only, and turned-on services start with Anvil. MySQL starts with a `root` user without a password; PostgreSQL with a `postgres` user and trust authentication. Removing a service keeps its data unless you ask to delete it, so adding the same name again finds your databases.
+A service keeps the version it was added with, like a container image: data folders don't survive a major version change, so run a new version as a new service next to the old one.
+
+When the usual port is taken, by another service or another program, the next free one is suggested. Each version's program is downloaded the first time you add a service with it and shared after that, in `~/.anvil/services/<kind>/<version>`; every service keeps its own data in `~/.anvil/data/<name>` and its own log. Services listen on 127.0.0.1 only, and turned-on services start with Anvil. MySQL starts with a `root` user without a password; PostgreSQL with a `postgres` user and trust authentication. Removing a service keeps its data unless you ask to delete it, so adding the same name again finds your databases.
 
 ### New applications
 
@@ -150,7 +152,7 @@ cd app && cargo tauri build
 open ../target/release/bundle/macos/Anvil.app
 ```
 
-- **Applications list** with search, sorting by name or date modified, your own groups (Favorites first), a section per parked folder, linked folders, and extra linked domains under their application. Add applications with the + button: New Application, Add Folder of Applications (park) or Add Application Folder (link).
+- **Applications list** with search, a filter by type (only the types you have, with counts) and running only, sorting by name or date modified, your own groups (Favorites first), a section per parked folder, linked folders, and extra linked domains under their application. Add applications with the + button: New Application, Add Folder of Applications (park) or Add Application Folder (link).
 - **Application panel** with Start, Stop and Restart for apps with their own server, quick buttons for browser, Finder, Terminal, editor and log, and three tabs:
   - **Overview:** type, runtime, folder, web root, disk and services in use.
   - **Settings:** type, PHP version and php.ini settings, or start command, port and "Start with Anvil".
@@ -208,11 +210,12 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil app autostart <site> <true\|false>` | Start the app whenever Anvil starts |
 | `anvil app runtime <site> [version]` | Pin the language version (e.g. `24` for Node); leave it out for automatic |
 | `anvil service list` | List added services and their state |
-| `anvil service add <kind> [name] [--port N]` | Add `mysql`, `postgres`, `redis` or `mailpit`; downloads the program the first time |
+| `anvil service add <kind> [name] [--port N] [--version V]` | Add `mysql`, `postgres`, `redis` or `mailpit`; downloads that version the first time |
+| `anvil service versions` | Versions each service offers, and which are installed |
 | `anvil service remove <name> [--delete-data]` | Remove a service; its data is kept unless asked |
 | `anvil service tag <name> [tags…]` | Label a service, e.g. `queue`; no tags clears them |
 | `anvil service link <name> [apps…]` | The applications that use a service; they list it under their resources |
-| `anvil service uninstall <kind>` | Remove a program no service uses anymore |
+| `anvil service uninstall <kind> <version>` | Remove a program version no service uses anymore |
 | `anvil service enable <name>` / `disable <name>` | Start the service with Anvil, or not |
 | `anvil service port <name> [port] [--web [port]]` | Set the port; leave it out for the usual one. `--web` sets Mailpit's inbox port (no value resets it) |
 | `anvil usage [site]` | Disk usage of one application, or of Anvil and all applications |
@@ -281,7 +284,7 @@ Anvil generates the web server and PHP-FPM configuration from your sites and sup
 | `~/.anvil/config.toml` | Your settings |
 | `~/.anvil/php/<version>/` | PHP binaries and `php.ini` |
 | `~/.anvil/runtimes/<id>/` | Node.js, Go, Rust and .NET |
-| `~/.anvil/services/<kind>/` | MySQL, PostgreSQL, Redis and Mailpit programs, shared by every service of that kind |
+| `~/.anvil/services/<kind>/<version>/` | MySQL, PostgreSQL, Redis and Mailpit programs, shared by every service of that version |
 | `~/.anvil/data/<name>/` | Each service's data |
 | `~/.anvil/data/caddy/` | Certificate authority and site certificates |
 | `~/.anvil/bin/` | Web server and Composer |
