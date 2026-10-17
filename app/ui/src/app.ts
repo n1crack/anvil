@@ -1014,6 +1014,24 @@ export function el(tag: string, cls?: string | null, text?: string | number | nu
   return e;
 }
 
+/** A segmented control: one pressed item among a few, e.g. All · Errors · Warnings. */
+export function seg(label: string, items: [string, string][], current: string, pick: (id: string) => void) {
+  const box = el("div", "seg");
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", label);
+  for (const [id, text] of items) {
+    const b = el("button", null, text);
+    b.dataset.id = id;
+    b.setAttribute("aria-pressed", String(id === current));
+    b.onclick = () => {
+      for (const o of box.children) o.setAttribute("aria-pressed", String(o === b));
+      pick(id);
+    };
+    box.append(b);
+  }
+  return box;
+}
+
 export function renderResources(name) {
   const body = $("#site .res-body");
   if (!body) return;

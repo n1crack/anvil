@@ -1,14 +1,16 @@
-import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, selected, showError, showTab, snap, tab, tilde } from "./app";
+import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, seg, selected, showError, showTab, snap, tab, tilde } from "./app";
+import { copy } from "./services";
 
 /* Logs tab: an app's log files, newest first. app.js calls logsTab() from showTab. */
 
-export const LEVELS = [
+export const LEVELS: [string, string][] = [
   ["all", "All"],
   ["error", "Errors"],
   ["warning", "Warnings"],
-  ["info", "Info"],
-  ["debug", "Debug"],
 ];
+// More sources than this become a menu instead of a row of segments.
+export const SOURCES_INLINE = 5;
+export const FOLLOW_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v8M4.75 7.25 8 10.5l3.25-3.25M3.5 13.5h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 export const STEP = 500; // rows added to the page at a time
 export const levelGroup = (l) =>
   ["emergency", "alert", "critical", "error", "fatal"].includes(l)
@@ -51,11 +53,10 @@ window.logsTab = (root, visible) => {
 export function buildLogs(s) {
   const node = el("div", "logs");
   node.innerHTML = `
-    <div class="logs-files" role="tablist" aria-label="Log files"></div>
+    <div class="logs-files"></div>
     <div class="logs-bar">
       <input class="logs-search" type="search" placeholder="Search this log" aria-label="Search this log" spellcheck="false">
-      <select class="logs-level" aria-label="Level"></select>
-      <label class="logs-follow" title="Show new entries as they are written"><input type="checkbox" role="switch">Follow</label>
+      <button class="logs-follow icon-btn" aria-pressed="false" title="Follow: show new entries as they are written" aria-label="Follow">${FOLLOW_ICON}</button>
       <button class="logs-menu icon-btn" title="More" aria-label="More">⋯</button>
     </div>
     <p class="logs-status muted"></p>
@@ -78,12 +79,12 @@ export function buildLogs(s) {
     token: 0,
   };
 
-  const levels = $(".logs-level", node);
-  for (const [id, label] of LEVELS) levels.add(new Option(id === "all" ? "All levels" : label, id));
-  levels.onchange = () => {
-    v.level = levels.value;
-    loadLogs(v);
-  };
+  $(".logs-search", node).after(
+    seg("Level", LEVELS, v.level, (id) => {
+      v.level = id;
+      loadLogs(v);
+    }),
+  );
 
   let debounce;
   const search = $(".logs-search", node);
@@ -95,10 +96,11 @@ export function buildLogs(s) {
     }, 300);
   };
 
-  const fol = $(".logs-follow input", node);
-  fol.checked = v.follow;
-  fol.onchange = () => {
-    v.follow = fol.checked;
+  const fol = $(".logs-follow", node);
+  fol.setAttribute("aria-pressed", String(v.follow));
+  fol.onclick = () => {
+    v.follow = !v.follow;
+    fol.setAttribute("aria-pressed", String(v.follow));
     localStorage.setItem("logsFollow", v.follow ? "1" : "0");
     follow(v.follow);
   };
@@ -146,27 +148,40 @@ export async function loadSources(v, s) {
   loadLogs(v);
 }
 
-/** Every log file of the app side by side: name, size and when it last changed. */
+/** Which log this is, on one line: a segment per file, or a menu when there are many.
+ * Size and last change are in the tooltip. */
 export function drawFiles(v) {
   const strip = $(".logs-files", v.node);
-  strip.replaceChildren();
-  // Shown even for one file: it says which log this is.
   strip.hidden = !v.sources.length;
-  for (const src of v.sources) {
-    const b = el("button", src.bytes >= LARGE_LOG ? "logs-file large" : "logs-file");
-    b.setAttribute("role", "tab");
-    b.setAttribute("aria-selected", String(src === v.source));
-    b.title = src.path;
-    const when = src.modified ? `, ${ago(new Date(src.modified * 1000))}` : "";
-    b.append(el("strong", null, src.label), el("small", null, `${bytes(src.bytes)}${when}`));
-    b.onclick = () => {
-      v.source = src;
-      logSource.set(v.site, src.id);
-      drawFiles(v);
-      loadLogs(v);
-    };
-    strip.append(b);
+  const pick = (id) => {
+    v.source = v.sources.find((x) => x.id === id);
+    logSource.set(v.site, id);
+    drawFiles(v);
+    loadLogs(v);
+  };
+  const tip = (src) => `${tilde(src.path)}\n${bytes(src.bytes)}${src.modified ? `, changed ${ago(new Date(src.modified * 1000))}` : ""}`;
+  if (v.sources.length > SOURCES_INLINE) {
+    const menu = el("select", "logs-source");
+    menu.setAttribute("aria-label", "Log file");
+    for (const src of v.sources) menu.add(new Option(src.label, src.id));
+    menu.value = v.source?.id;
+    if (v.source) menu.title = tip(v.source);
+    menu.onchange = () => pick(menu.value);
+    return strip.replaceChildren(menu);
   }
+  const box = seg(
+    "Log file",
+    v.sources.map((x) => [x.id, x.label]),
+    v.source?.id,
+    pick,
+  );
+  for (const b of box.children) {
+    const src = v.sources.find((x) => x.id === b.dataset.id);
+    b.title = tip(src);
+    // A very large file is worth a glance before it's opened.
+    if (src.bytes >= LARGE_LOG) b.classList.add("large");
+  }
+  strip.replaceChildren(box);
 }
 
 // Above this a log isn't opened until asked: it's usually a forgotten single-file log.
@@ -277,18 +292,49 @@ export async function more(v) {
   showMore(v);
 }
 
+/** Adjacent entries with the same level and message, as one row each: [[newest, …], …]. */
+export const sameEntry = (a, b) => a.level === b.level && a.message === b.message;
+export function groupEntries(entries) {
+  const out: any[][] = [];
+  for (const e of entries) {
+    const last = out.at(-1);
+    if (last && sameEntry(last[0], e)) last.push(e);
+    else out.push([e]);
+  }
+  return out;
+}
+
+/** The rendered row at the newest or oldest end of the list. */
+const edgeRow = (v, newest) => {
+  const list = $(".logs-list", v.node);
+  const r = newest === chrono(v) ? list.lastElementChild : list.firstElementChild;
+  return r?.entries ? r : null;
+};
+
+/** Merge into an existing row: it is drawn again, still open if it was. */
+function grow(v, li, entries, older) {
+  const group = older ? [...li.entries, ...entries] : [...entries, ...li.entries];
+  const row = entryRow(v, group);
+  li.replaceWith(row);
+  if ($(".log-head", li).getAttribute("aria-expanded") === "true") toggleEntry(v, row);
+}
+
 export function showMore(v) {
   const list = $(".logs-list", v.node);
-  const frag = document.createDocumentFragment();
   const next = v.entries.slice(v.shown, v.shown + STEP);
+  const groups = groupEntries(next);
+  // The page before ended in the middle of a run of repeats.
+  const oldest = edgeRow(v, false);
+  if (oldest && groups.length && sameEntry(oldest.entries[0], groups[0][0])) grow(v, oldest, groups.shift(), true);
+  const frag = document.createDocumentFragment();
   if (chrono(v)) {
     // Older lines go on top without moving what is on screen.
-    for (const e of next.toReversed()) frag.append(entryRow(v, e));
+    for (const g of groups.toReversed()) frag.append(entryRow(v, g));
     const below = list.scrollHeight - list.scrollTop;
     list.prepend(frag);
     list.scrollTop = list.scrollHeight - below;
   } else {
-    for (const e of next) frag.append(entryRow(v, e));
+    for (const g of groups) frag.append(entryRow(v, g));
     list.append(frag);
   }
   v.shown += next.length;
@@ -315,54 +361,125 @@ export function status(v) {
   $(".logs-status", v.node).title = tilde(src.path);
 }
 
-export function entryRow(v, e) {
+/** One row: time of the newest, level as a dot and a word, the first line, ×N for repeats. */
+export function entryRow(v, group) {
+  const e = group[0];
   const li = el("li", `log lv-${levelGroup(e.level)}`);
-  li.entry = e;
+  li.entries = group;
   const head = el("button", "log-head");
   head.setAttribute("aria-expanded", "false");
   const d = logTime(e.time);
   const time = el("span", "log-time", d ? ago(d) : (e.time ?? ""));
   if (d) time.title = d.toLocaleString();
-  const badge = el("span", "log-level", e.level);
+  const level = el("span", "log-level");
+  level.append(el("i", "log-dot"), e.level.toLowerCase());
   const msg = el("span", "log-msg", e.message.split("\n", 1)[0] || "(empty)");
-  head.append(time, badge, msg);
-  if (e.trace.length) head.append(el("span", "log-frames", `${e.trace.length} frames`));
+  head.append(time, level, msg);
+  if (group.length > 1) {
+    const n = el("span", "log-count", `×${group.length}`);
+    n.title = `${group.length} times in a row`;
+    head.append(n);
+  }
   li.append(head);
   return li;
 }
+
+// A frame's file and line: Laravel's "/x/Foo.php(42)", Node's "/x/foo.js:42:7".
+export const FRAME = /(\/[^\s():'"]+\.[A-Za-z0-9]+)(?:\((\d+)\)|:(\d+))/;
+export const VENDOR = /\/(vendor|node_modules)\//;
+
+/** The frame's file relative to the app, or null when it isn't the app's. A path from a
+ * container (/var/www/html/app/…) is matched by its first app folder.
+ * ponytail: a custom container layout without those folders gets no editor link. */
+export function appFile(root, file) {
+  if (VENDOR.test(file)) return null;
+  if (file.startsWith(`${root}/`)) return file.slice(root.length + 1);
+  return file.match(/\/((?:app|src|routes|config|database|resources|tests|bootstrap|lib)\/.+)$/)?.[1] ?? null;
+}
+
+/** The stack trace: the app's own frames, the rest folded into "+N vendor frames". */
+export function traceList(v, trace) {
+  const ol = el("ol", "log-trace");
+  let own = 0;
+  for (const line of trace) {
+    const m = line.match(FRAME);
+    const rel = m ? appFile(v.path, m[1]) : null;
+    const li = el("li", rel ? "own" : "vendor");
+    if (!m) li.textContent = line;
+    else {
+      const lineNo = Number(m[2] ?? m[3]);
+      const label = `${rel ?? m[1].replace(`${v.path}/`, "")}:${lineNo}`;
+      let file;
+      if (rel && snap.editor) {
+        file = el("button", "log-file", label);
+        file.title = `Open in ${snap.editor} at line ${lineNo}`;
+        file.onclick = () => invoke("open_in_editor", { site: v.site, path: rel, line: lineNo }).catch((err) => showError(String(err)));
+      } else file = el("span", "log-file", label);
+      li.append(line.slice(0, m.index), file, line.slice(m.index! + m[0].length));
+    }
+    if (rel) own++;
+    ol.append(li);
+  }
+  const vendor = trace.length - own;
+  // Nothing of the app's own: the whole trace is what there is to read.
+  if (!own || !vendor) return [ol];
+  ol.classList.add("folded");
+  const more = el("button", "log-vendor", `+${vendor} vendor ${vendor === 1 ? "frame" : "frames"}`);
+  more.onclick = () => {
+    ol.classList.remove("folded");
+    more.remove();
+  };
+  return [ol, more];
+}
+
+/** Context JSON, indented, with quiet colors for keys, strings and literals. */
+export function jsonView(text) {
+  let src = text;
+  try {
+    const obj = JSON.parse(text);
+    if (obj && typeof obj === "object" && !Object.keys(obj).length) return null;
+    src = JSON.stringify(obj, null, 2);
+  } catch {
+    return el("pre", "log-text log-json", text);
+  }
+  const pre = el("pre", "log-text log-json");
+  let at = 0;
+  for (const m of src.matchAll(/("(?:\\.|[^"\\])*")(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g)) {
+    pre.append(src.slice(at, m.index));
+    pre.append(el("span", m[1] ? (m[2] ? "j-key" : "j-str") : /\d/.test(m[0]) ? "j-num" : "j-lit", m[1] ?? m[0]));
+    if (m[2]) pre.append(m[2]);
+    at = m.index! + m[0].length;
+  }
+  pre.append(src.slice(at));
+  return pre;
+}
+
+export const entryText = (e) => [`[${e.time ?? ""}] ${e.level}: ${e.message}`, e.context, ...e.trace].filter(Boolean).join("\n");
 
 export function toggleEntry(v, li) {
   const head = $(".log-head", li);
   const open = head.getAttribute("aria-expanded") !== "true";
   head.setAttribute("aria-expanded", String(open));
   if (!open) return $(".log-detail", li)?.remove();
-  const e = li.entry;
+  const e = li.entries[0];
   const box = el("div", "log-detail");
-  const meta = [e.time, e.env].filter(Boolean).join(", ");
-  if (meta) box.append(el("div", "log-meta", meta));
-  box.append(el("pre", "log-text", e.message));
-  if (e.context) {
-    // One line per key; strings as written, without JSON escaping.
-    let text = e.context;
-    try {
-      text = Object.entries(JSON.parse(text))
-        .map(([k, val]) => `${k}: ${typeof val === "string" ? val : JSON.stringify(val, null, 2)}`)
-        .join("\n");
-    } catch {}
-    if (text) {
-      box.append(el("h4", null, "Context"), el("pre", "log-text log-json", text));
-    }
-  }
-  if (e.trace.length) {
-    box.append(el("h4", null, "Stack trace"));
-    const ol = el("ol", "log-trace");
-    const project = `${v.path}/`;
-    for (const line of e.trace) {
-      const own = line.includes(project) && !line.includes("/vendor/");
-      ol.append(el("li", own ? "own" : "vendor", line.replaceAll(project, "")));
-    }
-    box.append(ol);
-  }
+  const top = el("div", "log-meta");
+  // Today's times without the date: "4 times: 10:42:07 · 10:41:55 · …".
+  const today = new Date().toDateString();
+  const times = li.entries.map((x) => {
+    const d = logTime(x.time);
+    return !d ? (x.time ?? "") : d.toDateString() === today ? d.toLocaleTimeString() : d.toLocaleString();
+  });
+  const when = el("span", null, li.entries.length > 1 ? `${li.entries.length} times: ${times.join(" · ")}` : times[0]);
+  if (e.env) when.append(el("span", "muted", ` · ${e.env}`));
+  const cp = el("button", "log-copy", "Copy");
+  cp.onclick = () => copy(entryText(e), cp);
+  top.append(when, cp);
+  box.append(top, el("pre", "log-text", e.message));
+  const ctx = e.context && jsonView(e.context);
+  if (ctx) box.append(el("h4", null, "Context"), ctx);
+  if (e.trace.length)
+    box.append(el("h4", null, li.entries.length > 1 ? "Stack trace of the latest" : "Stack trace"), ...traceList(v, e.trace));
   li.append(box);
 }
 
@@ -397,12 +514,16 @@ export async function followTick() {
   if (!fresh.length) return;
   const list = $(".logs-list", v.node);
   if (!v.entries.length) list.replaceChildren();
+  const groups = groupEntries(fresh);
+  // The same entry again: the newest row counts up instead of a new row.
+  const newest = edgeRow(v, true);
+  if (newest && sameEntry(newest.entries[0], groups.at(-1)![0])) grow(v, newest, groups.pop(), false);
   if (chrono(v)) {
     // Stay at the bottom only if that is where the reader was.
-    list.append(...fresh.toReversed().map((e) => entryRow(v, e)));
+    list.append(...groups.toReversed().map((g) => entryRow(v, g)));
     if (v.atEnd) list.scrollTop = list.scrollHeight;
   } else {
-    list.prepend(...fresh.map((e) => entryRow(v, e)));
+    list.prepend(...groups.map((g) => entryRow(v, g)));
   }
   v.entries.unshift(...fresh);
   v.shown += fresh.length;

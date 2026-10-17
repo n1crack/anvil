@@ -231,3 +231,43 @@ describe("audit fixes", () => {
     $('.modes [data-mode="apps"]').click();
   });
 });
+
+describe("logs", () => {
+  test("repeats fold into one row with ×N; open, it lists each time and folds vendor frames", async () => {
+    await select("shop");
+    $('.tabs [data-tab="logs"]').click();
+    await wait(80);
+    const first = $$(".logs-list .log")[0];
+    expect(first.querySelector(".log-count")?.textContent).toBe("×4");
+    expect(first.querySelector(".log-level")?.textContent).toBe("error");
+    expect(first.querySelector(".log-dot")).not.toBeNull();
+    (first.querySelector(".log-head") as HTMLElement).click();
+    expect(first.querySelector(".log-meta")?.textContent).toMatch(/^4 times: /);
+    const trace = first.querySelector(".log-trace")!;
+    expect(trace.classList.contains("folded")).toBe(true);
+    expect([...trace.querySelectorAll(".own .log-file")].map((f) => f.textContent)).toEqual([
+      "app/Http/Controllers/CheckoutController.php:42",
+      "app/Http/Middleware/EnsureCartNotEmpty.php:23",
+      "app/Providers/RouteServiceProvider.php:51",
+    ]);
+    const more = first.querySelector(".log-vendor") as HTMLElement;
+    expect(more.textContent).toBe("+56 vendor frames");
+    more.click();
+    expect(trace.classList.contains("folded")).toBe(false);
+    (trace.querySelector("button.log-file") as HTMLElement).click();
+    expect(calls("open_in_editor").at(-1)![1]).toEqual({ site: "shop", path: "app/Http/Controllers/CheckoutController.php", line: 42 });
+  });
+
+  test("only adjacent repeats group", async () => {
+    const { groupEntries } = await import("../src/logs");
+    const e = (level: string, message: string) => ({ level, message });
+    const groups = groupEntries([e("error", "a"), e("error", "a"), e("info", "a"), e("error", "a")]);
+    expect(groups.map((g) => g.length)).toEqual([2, 1, 1]);
+  });
+
+  test("Errors asks the backend for errors only", async () => {
+    ($$(".logs-bar .seg button").find((b) => b.textContent === "Errors") as HTMLElement).click();
+    await wait(80);
+    expect(calls("log_search").at(-1)![1]).toMatchObject({ site: "shop", level: "error" });
+  });
+});

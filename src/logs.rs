@@ -549,10 +549,76 @@ pub fn strip_ansi(s: &str) -> String {
     out
 }
 
+/// A stack frame's file, made absolute against the app's folder and refused when it
+/// resolves (symlinks included) outside of it.
+pub fn file_in(root: &Path, path: &str) -> Result<PathBuf> {
+    let root = fs::canonicalize(root).with_context(|| format!("{} not found", root.display()))?;
+    let file = fs::canonicalize(root.join(path)).with_context(|| format!("{path} not found"))?;
+    if !file.starts_with(&root) || !file.is_file() {
+        anyhow::bail!("{path} is not a file of this app");
+    }
+    Ok(file)
+}
+
+/// The command that opens `file` at `line` in `editor` (an app name from Settings):
+/// the editor's own CLI where it takes a line, `open -a` otherwise.
+pub fn editor_command(editor: &str, file: &Path, line: u32) -> (String, Vec<String>) {
+    let f = file.display().to_string();
+    match editor {
+        "Zed" => ("zed".into(), vec![format!("{f}:{line}")]),
+        "Visual Studio Code" => ("code".into(), vec!["-g".into(), format!("{f}:{line}")]),
+        "PhpStorm" => (
+            "phpstorm".into(),
+            vec!["--line".into(), line.to_string(), f],
+        ),
+        _ => ("open".into(), vec!["-a".into(), editor.into(), f]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn editor_commands_take_the_line() {
+        let f = Path::new("/a/app/X.php");
+        assert_eq!(
+            editor_command("Zed", f, 7),
+            ("zed".into(), vec!["/a/app/X.php:7".into()])
+        );
+        assert_eq!(
+            editor_command("Visual Studio Code", f, 7).1,
+            ["-g", "/a/app/X.php:7"]
+        );
+        assert_eq!(
+            editor_command("PhpStorm", f, 7).1,
+            ["--line", "7", "/a/app/X.php"]
+        );
+        assert_eq!(
+            editor_command("Nova", f, 7),
+            (
+                "open".into(),
+                vec!["-a".into(), "Nova".into(), "/a/app/X.php".into()]
+            )
+        );
+    }
+
+    #[test]
+    fn frames_outside_the_app_are_refused() {
+        let dir = std::env::temp_dir().join(format!("anvil-logs-editor-{}", std::process::id()));
+        fs::create_dir_all(dir.join("site/app")).unwrap();
+        fs::write(dir.join("site/app/X.php"), "").unwrap();
+        fs::write(dir.join("secret.txt"), "").unwrap();
+        let root = dir.join("site");
+        assert!(file_in(&root, "app/X.php").is_ok());
+        assert!(file_in(&root, &dir.join("site/app/X.php").to_string_lossy()).is_ok());
+        assert!(file_in(&root, "../secret.txt").is_err());
+        assert!(file_in(&root, &dir.join("secret.txt").to_string_lossy()).is_err());
+        assert!(file_in(&root, "app").is_err());
+        assert!(file_in(&root, "app/missing.php").is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     const LARAVEL: &str = "[2026-05-30 15:12:40] local.INFO: Started {\"user\":1} []
 [2026-05-30 15:12:42] local.ERROR: Boom {\"userId\":7,\"exception\":\"[object] (RuntimeException(code: 0): Boom at /app/Foo.php:3)

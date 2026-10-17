@@ -1230,6 +1230,26 @@ async fn log_open(site: String, source: String) -> Res<()> {
     .await
 }
 
+/// A stack frame's file at its line, in the editor from Settings. Only files inside
+/// the app's folder; an editor whose CLI isn't installed opens the file without the line.
+#[tauri::command]
+async fn open_in_editor(site: String, path: String, line: u32) -> Res<()> {
+    with_site(site, move |s| {
+        let editor = anvil::load()?
+            .editor
+            .ok_or_else(|| anyhow::anyhow!("No editor set in Settings"))?;
+        let file = anvil::logs::file_in(std::path::Path::new(&s.path), &path)?;
+        let (bin, args) = anvil::logs::editor_command(&editor, &file, line);
+        // Not waited on here: a launcher script may stay until the editor quits.
+        if let Ok(mut child) = Command::new(&bin).args(&args).spawn() {
+            std::thread::spawn(move || child.wait());
+            return Ok(());
+        }
+        anvil::run(Command::new("open").args(["-a", &editor]).arg(&file))
+    })
+    .await
+}
+
 #[derive(Serialize)]
 struct AnvilStorage {
     total: u64,
@@ -2717,6 +2737,7 @@ fn main() {
             log_text,
             log_search,
             log_clear,
+            open_in_editor,
             log_open,
             storage_anvil,
             storage_apps,

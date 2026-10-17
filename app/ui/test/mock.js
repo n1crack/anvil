@@ -230,6 +230,89 @@ window.mockServices = [
     clients: [],
   },
 ];
+// Logs of a Laravel shop, close to a real one.
+{
+  const now = Date.now();
+  const ts = (minAgo) =>
+    new Date(now - minAgo * 60000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace("T", " ");
+  const vend = (n) =>
+    `#${n} /var/www/shop/vendor/laravel/framework/src/Illuminate/${["Container/Container.php(950): Illuminate\\Container\\Container->build()", "Container/Container.php(821): Illuminate\\Container\\Container->resolve()", "Foundation/Application.php(1078): Illuminate\\Container\\Container->resolve()", "Pipeline/Pipeline.php(183): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()", "Routing/Router.php(799): Illuminate\\Routing\\Pipeline->then()"][n % 5]}`;
+  const trace = [];
+  for (let i = 0; i < 59; i++) {
+    if (i === 0)
+      trace.push(
+        "#0 /var/www/shop/vendor/laravel/framework/src/Illuminate/Container/Container.php(1019): Illuminate\\Container\\Container->notInstantiable()",
+      );
+    else if (i === 7) trace.push("#7 /var/www/shop/app/Http/Controllers/CheckoutController.php(42): request()");
+    else if (i === 8)
+      trace.push("#8 /var/www/shop/app/Http/Middleware/EnsureCartNotEmpty.php(23): App\\Http\\Middleware\\EnsureCartNotEmpty->handle()");
+    else if (i === 30) trace.push("#30 /var/www/shop/app/Providers/RouteServiceProvider.php(51): Illuminate\\Routing\\Router->group()");
+    else if (i === 58) trace.push("#58 {main}");
+    else trace.push(vend(i).replace(/^#\d+/, "#" + i));
+  }
+  const E = (min, level, message, extra = {}) => ({ time: ts(min), env: "local", level, message, context: null, trace: [], ...extra });
+  const err = "Target class [request] does not exist.";
+  const entries = [
+    E(1, "ERROR", err, { trace }),
+    E(2, "ERROR", err, { trace }),
+    E(2, "ERROR", err, { trace }),
+    E(4, "ERROR", err, { trace }),
+    E(6, "INFO", "Order placed", {
+      context: JSON.stringify({
+        order_id: 10482,
+        user_id: 37,
+        total: 129.9,
+        currency: "EUR",
+        items: [
+          { sku: "TS-001", qty: 2 },
+          { sku: "MG-014", qty: 1 },
+        ],
+      }),
+    }),
+    E(8, "WARNING", "Cache store [redis] unavailable, falling back to [file]"),
+    E(9, "DEBUG", "select * from `users` where `id` = ? limit 1 [37] (1.24ms)"),
+    E(9, "DEBUG", "select * from `orders` where `user_id` = ? [37] (0.88ms)"),
+    E(11, "ERROR", "SQLSTATE[HY000] [2002] Connection refused (Connection: mysql, SQL: select * from `sessions` where `id` = ?)", {
+      trace: trace.slice(0, 12),
+    }),
+    E(14, "INFO", "Queue worker started", { context: JSON.stringify({ queue: "default", tries: 1 }) }),
+    E(15, "DEBUG", "Mail sent to anna@example.com (subject: Your receipt)"),
+    E(19, "WARNING", "Deprecated: Creation of dynamic property App\\Models\\Cart::$coupon is deprecated"),
+    E(22, "DEBUG", "Stripe webhook payload received [charge.succeeded]"),
+    E(25, "INFO", "User logged in", { context: JSON.stringify({ user_id: 37, ip: "127.0.0.1" }) }),
+    E(31, "DEBUG", "select count(*) as aggregate from `products` where `active` = ? [1] (2.01ms)"),
+    E(33, "ERROR", err, { trace }),
+    E(36, "ERROR", err, { trace }),
+    E(41, "NOTICE", "Route [shop.cart] is slow: 842ms"),
+    E(47, "DEBUG", "View cache cleared"),
+    E(52, "INFO", "Scheduled task finished", { context: JSON.stringify({ command: "inspire", ms: 31 }) }),
+    E(58, "DEBUG", "Session regenerated"),
+    E(64, "WARNING", 'Undefined array key "discount" in app/Services/PriceCalculator.php:88'),
+    E(70, "DEBUG", "Config cached"),
+    E(75, "INFO", "Application booted", { context: null }),
+    E(80, "DEBUG", "Vite manifest read (3 entries)"),
+  ];
+  const page = { entries, start_offset: 0, end_offset: 2097152, truncated: false };
+  const sources = [
+    {
+      id: "laravel.log",
+      label: "laravel.log",
+      path: "/Users/x/Sites/shop/storage/logs/laravel.log",
+      bytes: 2097152,
+      modified: Math.floor(now / 1000) - 60,
+    },
+    { id: "once:build", label: "build", path: "/tmp/build.log", bytes: 4210, modified: Math.floor(now / 1000) - 3600 },
+    {
+      id: "php-fpm",
+      label: "PHP-FPM 8.4",
+      path: "/Users/x/.anvil/log/php-8.4-fpm.log",
+      bytes: 18200,
+      modified: Math.floor(now / 1000) - 7200,
+    },
+  ];
+  window.mockLogSources = sources;
+  window.mockLogPage = page;
+}
 const mockHandle = (cmd, a) => {
   const ov = a?.site && mockOv[a.site];
   switch (cmd) {
@@ -284,7 +367,12 @@ const mockHandle = (cmd, a) => {
       return { text: a.from ? "" : text, end_offset: text.length };
     }
     case "log_sources":
-      return [];
+      return window.mockLogSources;
+    case "log_read":
+    case "log_search":
+      return window.mockLogPage;
+    case "log_tail":
+      return { entries: window.mockTail?.splice(0) ?? [], start_offset: 0, end_offset: window.mockLogPage.end_offset, truncated: false };
     case "services":
     case "service_run":
       return mockServices;
