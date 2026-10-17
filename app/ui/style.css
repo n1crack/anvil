@@ -24,6 +24,18 @@
   --ok: #34c759;
   --ok-text: #5fd47e;
 
+  /* Starting: amber. */
+  --amber: var(--heat-white);
+  --amber-text: var(--heat-white);
+
+  /* Split from --line/--heat so the light theme can differ; same look in dark. */
+  --edge: var(--line); /* the border of buttons, fields and chips */
+  --select-mark: var(--heat-text); /* the thin line on a selected sidebar row */
+  --group-bg: color-mix(in srgb, var(--heat) 6%, transparent);
+  --group-text: color-mix(in srgb, var(--heat-text) 70%, var(--text));
+  --sidebar-bg: transparent; /* the native vibrancy shows through */
+  --card: var(--steel-hover); /* the sidebar's grouped rows */
+
   --radius-s: 6px;
   --radius-m: 10px;
   /* Narrower windows give the detail pane the room; 760px is the window minimum. */
@@ -34,20 +46,32 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Light: a clean native macOS light window. White content, a sidebar that lightens
+ * the vibrancy (and is a very light neutral without it), hairlines, neutral grey
+ * selection, and status colors that hold their contrast on white. */
 @media (prefers-color-scheme: light) {
   :root {
-    --steel-pane: #fbfbfc;
-    --steel-raised: #eceef1;
-    --steel-hover: rgba(0, 0, 0, 0.05);
-    --selected: rgba(0, 0, 0, 0.09);
-    --line: rgba(0, 0, 0, 0.09);
-    --text: #1c1f23;
-    --muted: #565d66;
-    --cold: #a3aab3;
+    --steel-pane: #ffffff;
+    --steel-raised: #f5f5f7;
+    --steel-hover: rgba(0, 0, 0, 0.04);
+    --selected: rgba(0, 0, 0, 0.075);
+    --line: rgba(0, 0, 0, 0.1);
+    --text: #1d1d1f;
+    --muted: #5f636b;
+    --cold: #a1a6ad;
     --heat-text: #c2410c;
-    --danger: #b81f27;
-    --ok: #28a745;
-    --ok-text: #17732f;
+    --danger: #c42127;
+    --ok: #1f9d3e;
+    --ok-text: #157030;
+    --amber: #b87400;
+    --amber-text: #8f5600;
+
+    --edge: rgba(0, 0, 0, 0.16);
+    --select-mark: transparent;
+    --group-bg: #f5f5f7;
+    --group-text: #a8410f;
+    --sidebar-bg: rgba(246, 246, 248, 0.72);
+    --card: rgba(255, 255, 255, 0.78);
   }
 }
 
@@ -102,6 +126,7 @@ button, select, input { font: inherit; color: inherit; }
   flex-direction: column;
   min-height: 0;
   border-right: 1px solid var(--line);
+  background: var(--sidebar-bg);
 }
 
 .toolbar {
@@ -161,7 +186,7 @@ button, select, input { font: inherit; color: inherit; }
 .ask input {
   height: 28px;
   padding: 0 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-pane);
 }
@@ -228,7 +253,7 @@ button, select, input { font: inherit; color: inherit; }
 .empty .empty-actions button {
   height: 28px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
   color: var(--text);
@@ -237,7 +262,7 @@ button, select, input { font: inherit; color: inherit; }
 /* Inset grouped list: one container, hairlines that start at the text column. */
 .rows {
   border-radius: var(--radius-m);
-  background: var(--steel-hover);
+  background: var(--card);
   overflow: hidden;
 }
 
@@ -437,7 +462,7 @@ button, select, input { font: inherit; color: inherit; }
   border-radius: 50%;
   background: var(--ok);
 }
-.run-badge.warm { background: var(--heat-white); animation: pulse 1.2s ease-in-out infinite; }
+.run-badge.warm { background: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
 .run-badge.bad { background: var(--danger); }
 
 /* Hovering a row: a short summary next to the list. */
@@ -466,7 +491,7 @@ button, select, input { font: inherit; color: inherit; }
  * --heat-text keeps the line visible in the light theme too. */
 .item[aria-current="true"] {
   background: var(--selected);
-  box-shadow: inset 2px 0 0 var(--heat-text);
+  box-shadow: inset 2px 0 0 var(--select-mark);
 }
 
 .empty {
@@ -506,7 +531,7 @@ button, select, input { font: inherit; color: inherit; }
   gap: 8px;
   height: 28px;
   padding: 0 12px 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 14px;
   background: var(--steel-raised);
   color: var(--muted);
@@ -628,7 +653,7 @@ button, select, input { font: inherit; color: inherit; }
 .alias-chip {
   height: 18px;
   padding: 0 7px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 9px;
   background: var(--steel-raised);
   color: var(--muted);
@@ -699,7 +724,7 @@ button, select, input { font: inherit; color: inherit; }
 .run-box button {
   height: 26px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 13px;
   background: var(--steel-raised);
 }
@@ -822,7 +847,7 @@ button, select, input { font: inherit; color: inherit; }
   height: 24px;
   min-width: 28px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
   font-size: 12px;
@@ -952,7 +977,7 @@ button.proc-name:hover { text-decoration: underline; }
 .row select {
   height: 26px;
   padding: 0 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
 }
@@ -962,7 +987,7 @@ button.proc-name:hover { text-decoration: underline; }
   width: 100%;
   max-width: 320px;
   padding: 4px 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
   font-variant-numeric: tabular-nums;
@@ -1050,7 +1075,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .nav button[aria-current="true"] {
   background: var(--selected);
   font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--heat-text);
+  box-shadow: inset 2px 0 0 var(--select-mark);
 }
 
 .page {
@@ -1145,7 +1170,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .page input:not([type]) {
   height: 26px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
 }
@@ -1260,7 +1285,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .row dd > select {
   height: 26px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
 }
@@ -1365,7 +1390,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .clean-all {
   height: 24px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
   font-size: 12px;
@@ -1512,7 +1537,7 @@ kbd {
 .field select {
   height: 28px;
   padding: 0 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
 }
@@ -1532,7 +1557,7 @@ kbd {
 .sheet-actions button {
   height: 28px;
   padding: 0 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
 }
@@ -1659,7 +1684,7 @@ kbd {
 .run-error .link {
   height: 26px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
 }
@@ -1671,7 +1696,7 @@ kbd {
 .proc.svc-row.with-icon { grid-template-columns: 22px auto 1fr auto; }
 .proc.svc-row.muted .proc-name { font-weight: 400; color: var(--muted); }
 .proc.svc-new { grid-template-columns: minmax(0, 260px) auto; justify-content: space-between; }
-.svc-new input { height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--steel-raised); }
+.svc-new input { height: 24px; padding: 0 8px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); }
 .svc-row .proc-actions .danger { color: var(--danger); }
 /* Destructive row actions show on the row you point at or tab into. */
 .svc-row .hover-only { visibility: hidden; }
@@ -1714,7 +1739,7 @@ kbd {
 .logs-bar > button {
   height: 26px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
   font-size: 12px;
@@ -1815,14 +1840,10 @@ kbd {
 }
 
 .lv-error .log-level { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
-.lv-warning .log-level { background: rgba(255, 209, 102, 0.14); color: var(--heat-white); }
+.lv-warning .log-level { background: rgba(255, 209, 102, 0.14); color: var(--amber-text); }
 /* Only warnings and errors get a badge; the everyday levels are quiet text. */
 .lv-info .log-level,
 .lv-debug .log-level { background: none; color: var(--muted); font-weight: 500; }
-
-@media (prefers-color-scheme: light) {
-  .lv-warning .log-level { color: #8a5a00; }
-}
 
 .log-msg {
   flex: 1;
@@ -1883,7 +1904,7 @@ kbd {
   height: 26px;
   margin: 12px auto 0;
   padding: 0 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 13px;
   background: var(--steel-raised);
   font-size: 12px;
@@ -1997,7 +2018,7 @@ kbd {
 .logs-large-actions button {
   height: 26px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
 }
@@ -2012,7 +2033,7 @@ kbd {
   gap: 6px;
   height: 22px;
   padding: 0 9px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 11px;
   background: none;
   color: var(--muted);
@@ -2046,7 +2067,7 @@ kbd {
 .git-btn {
   height: 28px;
   padding: 0 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
 }
@@ -2058,7 +2079,7 @@ kbd {
   flex: none;
   height: 26px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
 }
@@ -2112,7 +2133,7 @@ kbd {
 .setup button {
   height: 24px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-pane);
   color: var(--text);
@@ -2126,7 +2147,7 @@ kbd {
   height: 22px;
   margin-left: 4px;
   padding: 0 9px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 11px;
   background: var(--steel-raised);
   color: var(--text);
@@ -2150,7 +2171,7 @@ kbd {
 .connect-head select {
   height: 24px;
   padding: 0 6px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
   color: var(--text);
@@ -2163,7 +2184,7 @@ kbd {
 .logs-level {
   height: 26px;
   padding: 0 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
   font-size: 12px;
@@ -2189,7 +2210,7 @@ kbd {
 .pkg-check {
   height: 26px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
   font-size: 13px;
@@ -2252,8 +2273,8 @@ body.activity {
 .act-group th {
   padding: 14px 16px 4px;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--heat) 6%, transparent);
-  color: color-mix(in srgb, var(--heat-text) 70%, var(--text));
+  background: var(--group-bg);
+  color: var(--group-text);
   font-size: 11px;
   font-weight: 600;
   text-align: left;
@@ -2295,9 +2316,9 @@ body.activity {
 .act-row:hover { background: var(--steel-hover); }
 .act-row[aria-selected="true"] { background: var(--selected); }
 .act-status .dot { display: inline-block; margin-right: 7px; vertical-align: 0; }
-.act-status .dot.amber { background: var(--heat-white); }
+.act-status .dot.amber { background: var(--amber); }
 .act-row.running .act-status { color: var(--ok-text); }
-.act-row.starting .act-status { color: var(--heat-white); }
+.act-row.starting .act-status { color: var(--amber-text); }
 .act-row.crashed td { color: var(--danger); }
 .act-row.crashed .act-status .act-detail { color: var(--muted); }
 
@@ -2317,6 +2338,13 @@ body.activity {
   background: var(--steel-raised);
 }
 .act-pane[hidden] { display: none; }
+/* Light: the log is the same dark terminal surface as the console and Watch. */
+@media (prefers-color-scheme: light) {
+  .act-pane { background: #121518; color: #d7dce1; }
+  .act-pane-head { border-bottom-color: rgba(255, 255, 255, 0.08); }
+  .act-pane .act-log { color: #d7dce1; }
+  .act-pane .icon-btn { background: rgba(255, 255, 255, 0.08); color: #e8ebee; }
+}
 
 /* Between the list and the log: drag to resize. */
 .act-split {
@@ -2349,11 +2377,6 @@ body.activity {
   overflow-wrap: anywhere;
   user-select: text;
   -webkit-user-select: text;
-}
-
-@media (prefers-color-scheme: light) {
-  .act-row.starting .act-status { color: #a15c00; }
-  .act-status .dot.amber, .run-badge.warm { background: #d98a00; }
 }
 
 /* A small confirm bubble next to the button that asked. */

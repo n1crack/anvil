@@ -321,6 +321,32 @@ const mockHandle = (cmd, a) => {
       s.secure = a.on;
       return mockSnap;
     }
+    case "settings":
+      return {
+        paths: ["/Users/x/Sites"],
+        hidden: ["old-blog"],
+        tld: "test",
+        http_port: 80,
+        https_port: 443,
+        dns_port: 53,
+        editor: "Zed",
+        editors: ["Zed", "Visual Studio Code"],
+        php: [
+          { version: "8.4", installed: true, default: true },
+          { version: "8.3", installed: true, default: false },
+          { version: "8.2", installed: false, default: false },
+        ],
+        ini: { memory_limit: "512M", upload_max_filesize: "64M" },
+        terminal: "Terminal",
+        terminals: ["Terminal", "Ghostty"],
+        git_client: null,
+        git_clients: ["Fork"],
+        theme: null,
+        dock_icon: true,
+        https_default: true,
+        login: false,
+        config_dir: "/Users/x/Library/Application Support/Anvil",
+      };
     default:
       return null;
   }
