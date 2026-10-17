@@ -39,8 +39,10 @@ is. You can override the type with `anvil app type <site> <kind>` or in the app.
   you already have is left alone. A `pyproject.toml` project (one with a
   `[project]` table) gets a `uv.lock` written next to it, as `uv run` does; a
   project with only `requirements.txt` gets nothing added. The Python version
-  follows the project's `.python-version` and `requires-python` (uv installs a
-  missing one into `~/.anvil`) unless you pin one in the app.
+  follows the project's `.python-version` and `requires-python` unless you pin
+  one in the app. Anvil never installs a Python version by itself: if the
+  project needs one that isn't installed, the app says so and you install it in
+  Settings › Languages.
 - **Django** checks the host name and, behind HTTPS, the scheme. The app's
   Overview shows the two lines to add to `settings.py` once:
 
