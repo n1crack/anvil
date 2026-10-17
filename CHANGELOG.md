@@ -8,11 +8,6 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
-### Fixed
-
-- `anvil clean` exits with an error when it refuses or fails to delete an
-  item, instead of reporting success.
-
 ## [0.1.0] - 2026-10-17
 
 The first public release of Anvil, a macOS development environment.
@@ -69,6 +64,10 @@ The first public release of Anvil, a macOS development environment.
 - Clean-up only accepts paths Anvil knows for that kind of application and
   never follows a symlinked folder out of the project; removing a language
   version or an Anvil cache only accepts what is actually installed.
+- Downloads are checked against the checksum their source publishes before
+  they are unpacked or run (Node, Go, Caddy, PostgreSQL, MySQL, Redis,
+  Mailpit, Composer, rustup); PHP builds and the .NET installer publish none
+  and rely on HTTPS. A failed reinstall keeps the working version.
 - The config file is written atomically, so the app and the CLI never read a
   half-written one.
 - Git runs with `core.fsmonitor` disabled, so a repository can't make Anvil
