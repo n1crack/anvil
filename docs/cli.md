@@ -16,7 +16,7 @@ versions; the macOS app applies changes right away.
 | `anvil link [name]` | Serve the current directory as `<name>.test` |
 | `anvil unlink <name>` | Remove a linked site |
 | `anvil sites` | List sites with their type, PHP version and web root |
-| `anvil new <kind> <name> [--in <dir>]` | Create an application from a template: `laravel`, `statamic`, `symfony`, `php`, `static`, `next`, `nuxt`, `vite`, `node`, `rust`, `go`, `dotnet`. Default location: the first parked folder |
+| `anvil new <kind> <name> [--in <dir>]` | Create an application from a template: `laravel`, `statamic`, `symfony`, `php`, `static`, `next`, `nuxt`, `vite`, `node`, `rust`, `go`, `dotnet`, `django`, `fastapi`, `flask`. Default location: the first parked folder |
 
 ## PHP
 
