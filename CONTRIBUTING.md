@@ -29,9 +29,9 @@ Use `ANVIL_HOME=/tmp/anvil-dev` to keep a development run away from your real
   `src/main.rs`
 - `app/`: the `anvil-app` crate, the Tauri 2 app; the UI in `app/ui` is plain
   HTML, CSS and JavaScript without a build step
-- `docs/`: user documentation
+- `SIGNING.md`: how releases get signed
 
-See [docs/architecture.md](docs/architecture.md).
+User documentation lives on the website, [anvil.tr/docs](https://anvil.tr/docs), from its own repository; see [Architecture](https://anvil.tr/docs/architecture).
 
 ## Before you open a pull request
 
@@ -45,11 +45,11 @@ for f in app/ui/*.js; do node --check "$f"; done
 ```
 
 - Add a test for logic you change in `src/` where it is practical.
-- Update the docs in `docs/` for anything a user would notice.
+- Describe anything a user would notice in the pull request, so the website's documentation can follow.
 - Leave [CHANGELOG.md](CHANGELOG.md) alone: it is written once per release
   from the merged pull requests, so describe the change for users in the pull
   request instead.
-- Keep CLI help text and [docs/cli.md](docs/cli.md) in sync.
+- Keep CLI help text in sync with the [CLI reference](https://anvil.tr/docs/cli).
 
 ## Commit messages
 
