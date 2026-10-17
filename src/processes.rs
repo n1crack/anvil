@@ -190,29 +190,30 @@ fn laravel_dev_commands_cached(
     let mut h = std::collections::hash_map::DefaultHasher::new();
     dir.hash(&mut h);
     let file = cache.join(format!("devcommands-{:x}.json", h.finish()));
+    // A failed boot is remembered too (`commands: None`), so it isn't retried every poll.
     #[derive(Serialize, Deserialize)]
     struct Cached {
         stamp: [u64; 2],
-        commands: Vec<(String, String)>,
+        php: PathBuf,
+        commands: Option<Vec<(String, String)>>,
     }
     if let Some(c) = fs::read_to_string(&file)
         .ok()
         .and_then(|t| serde_json::from_str::<Cached>(&t).ok())
-        .filter(|c| c.stamp == stamp)
+        .filter(|c| c.stamp == stamp && c.php == php)
     {
-        return Some(c.commands);
+        return c.commands;
     }
-    let commands = laravel_dev_commands(dir, php)?;
+    let commands = laravel_dev_commands(dir, php);
     let _ = fs::create_dir_all(cache);
-    let _ = fs::write(
-        &file,
-        serde_json::to_string(&Cached {
-            stamp,
-            commands: commands.clone(),
-        })
-        .ok()?,
-    );
-    Some(commands)
+    if let Ok(t) = serde_json::to_string(&Cached {
+        stamp,
+        php: php.into(),
+        commands: commands.clone(),
+    }) {
+        let _ = fs::write(&file, t);
+    }
+    commands
 }
 
 /// A script name as an id: every char outside letters, digits, `-` and `_` becomes `-`.
@@ -699,5 +700,28 @@ mod tests {
         assert_eq!(laravel_dev_commands(&dir, &php), None);
         assert!(!marker.exists());
         fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn laravel_failure_is_cached() {
+        let (dir, php) = fake_php("cnt", "");
+        let root = dir.parent().unwrap().to_path_buf();
+        let log = root.join("runs");
+        fs::write(
+            &php,
+            format!("#!/bin/sh\necho x >> {}\nexit 1\n", log.display()),
+        )
+        .unwrap();
+        let cache = root.join("cache");
+        let runs = || fs::read_to_string(&log).map_or(0, |t| t.lines().count());
+        assert_eq!(laravel_dev_commands_cached(&dir, &php, &cache), None);
+        assert_eq!(laravel_dev_commands_cached(&dir, &php, &cache), None);
+        assert_eq!(runs(), 1);
+        // Another PHP binary retries.
+        let other = root.join("php2");
+        fs::copy(&php, &other).unwrap();
+        assert_eq!(laravel_dev_commands_cached(&dir, &other, &cache), None);
+        assert_eq!(runs(), 2);
+        fs::remove_dir_all(root).unwrap();
     }
 }
