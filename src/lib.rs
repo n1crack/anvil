@@ -13,6 +13,7 @@ pub mod processes;
 pub mod resources;
 pub mod runtimes;
 pub mod services;
+pub mod shims;
 pub mod style;
 pub mod uninstall;
 
@@ -1357,7 +1358,7 @@ mod tests {
         }
     }
 
-    fn site(name: &str, root: &str, php: Option<&str>) -> Site {
+    pub(crate) fn site(name: &str, root: &str, php: Option<&str>) -> Site {
         Site {
             name: name.into(),
             host: format!("{name}.test"),

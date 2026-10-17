@@ -1,0 +1,390 @@
+//! Terminal shims: `php`, `composer`, `laravel`, `node`, `npm` and `npx` in
+//! `~/.anvil/shims` run `anvil shim <tool>`, which picks the version of the site
+//! the current folder belongs to.
+
+use crate::{Config, Site, apps, create, home, installed_php, run, runtimes, sites};
+use anyhow::{Context, Result, bail};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+pub const TOOLS: [&str; 6] = ["php", "composer", "laravel", "node", "npm", "npx"];
+
+const BLOCK_START: &str = "# Anvil: php, composer, laravel and node follow each site's versions";
+const BLOCK_END: &str = "# Anvil end";
+
+/// `'…'` for sh, whatever the text holds.
+pub fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// The anvil CLI the shims run: this program when it is the CLI; from the app, the
+/// CLI bundled next to it, else cargo's, else whatever `anvil` is on PATH.
+pub fn pick_cli(exe: &Path, user_home: &Path, exists: impl Fn(&Path) -> bool) -> PathBuf {
+    if exe.file_name().is_some_and(|n| n == "anvil") {
+        return exe.to_path_buf();
+    }
+    [
+        exe.with_file_name("anvil"),
+        user_home.join(".cargo/bin/anvil"),
+    ]
+    .into_iter()
+    .find(|p| exists(p))
+    .unwrap_or_else(|| "anvil".into())
+}
+
+fn user_home() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+}
+
+/// Write the shims into `<home>/shims`.
+pub fn install(home: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let exe = std::env::current_exe().unwrap_or_default();
+    let cli = pick_cli(&exe, &user_home(), Path::exists);
+    let dir = home.join("shims");
+    fs::create_dir_all(&dir)?;
+    for tool in TOOLS {
+        let file = dir.join(tool);
+        fs::write(
+            &file,
+            format!(
+                "#!/bin/sh\nexec {} shim {tool} \"$@\"\n",
+                sh_quote(&cli.to_string_lossy())
+            ),
+        )?;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+/// The site whose folder holds `cwd`, the innermost when folders nest. Links
+/// are resolved: macOS reaches /var through /private/var.
+pub fn site_for<'a>(sites: &'a [Site], cwd: &Path) -> Option<&'a Site> {
+    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let cwd = real(cwd);
+    sites
+        .iter()
+        .map(|s| (s, real(&s.path)))
+        .filter(|(_, p)| cwd.starts_with(p))
+        .max_by_key(|(_, p)| p.components().count())
+        .map(|(s, _)| s)
+}
+
+/// The site's own PHP version, else the default, else the newest installed.
+fn php_version(pinned: Option<String>, cfg: &Config, installed: &[String]) -> Result<String> {
+    match pinned.or_else(|| cfg.php.clone()) {
+        Some(v) if installed.contains(&v) => Ok(v),
+        Some(v) => bail!("PHP {v} isn't installed in Anvil: run `anvil php install {v}`"),
+        None => installed
+            .last()
+            .cloned()
+            .context("No PHP installed in Anvil: run `anvil php install 8.4`"),
+    }
+}
+
+fn path_with(dir: &Path) -> (String, String) {
+    let path = std::env::var("PATH").unwrap_or_default();
+    ("PATH".into(), format!("{}:{path}", dir.display()))
+}
+
+pub type Resolved = (PathBuf, Vec<String>, Vec<(String, String)>);
+
+/// What `tool` runs in `cwd`: the program, the arguments before the user's, and
+/// extra environment. `fetch` downloads Composer or the Laravel installer when missing.
+pub fn resolve(tool: &str, cwd: &Path, cfg: &Config) -> Result<Resolved> {
+    resolve_with(tool, cwd, cfg, true)
+}
+
+pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result<Resolved> {
+    let h = home();
+    let all = sites(cfg);
+    let site = site_for(&all, cwd);
+    match tool {
+        "php" | "composer" | "laravel" => {
+            // From the config: a site that serves no PHP itself still has its pin.
+            let pinned = site
+                .and_then(|s| cfg.sites.get(&s.name))
+                .and_then(|s| s.php.clone());
+            let v = php_version(pinned, cfg, &installed_php())?;
+            let php_dir = h.join("php").join(&v);
+            let php = php_dir.join("php");
+            if tool == "php" {
+                return Ok((php, vec![], vec![]));
+            }
+            let mut env = vec![path_with(&php_dir)];
+            let phar = if fetch {
+                create::composer()?
+            } else {
+                h.join("bin/composer.phar")
+            };
+            if tool == "composer" {
+                return Ok((php, vec![phar.display().to_string()], env));
+            }
+            let composer_home = h.join("composer");
+            env.push(("COMPOSER_HOME".into(), composer_home.display().to_string()));
+            let laravel = composer_home.join("vendor/bin/laravel");
+            if fetch && !laravel.exists() {
+                run(Command::new(&php)
+                    .arg(&phar)
+                    .args(["global", "require", "laravel/installer"])
+                    .envs(env.clone()))?;
+            }
+            Ok((laravel, vec![], env))
+        }
+        "node" | "npm" | "npx" => {
+            let v = match site {
+                Some(s) if apps::runtime(&s.kind) == Some("node") => s.runtime_version.clone(),
+                Some(s) => apps::runtime_version("node", &s.path),
+                None => apps::runtime_version("node", cwd),
+            }
+            .context("No Node installed in Anvil: run `anvil runtime install node 24`")?;
+            let program = runtimes::root("node").join(&v).join("bin").join(tool);
+            if !program.exists() {
+                bail!("Node {v} isn't installed in Anvil: run `anvil runtime install node {v}`");
+            }
+            Ok((program, vec![], runtimes::env("node", &v)))
+        }
+        _ => bail!(
+            "Anvil has no shim for {tool}: use one of {}",
+            TOOLS.join(", ")
+        ),
+    }
+}
+
+/// `~/.zshrc` always; `~/.bash_profile` only when it exists.
+pub fn shell_rc_files(user_home: &Path) -> Vec<PathBuf> {
+    let mut v = vec![user_home.join(".zshrc")];
+    let bash = user_home.join(".bash_profile");
+    if bash.exists() {
+        v.push(bash);
+    }
+    v
+}
+
+/// The lines added to a shell rc file; `$HOME/.anvil` unless ANVIL_HOME points elsewhere.
+pub fn path_block(anvil_home: &Path, user_home: &Path) -> String {
+    let dir = if anvil_home == user_home.join(".anvil") {
+        "$HOME/.anvil".to_string()
+    } else {
+        let mut s = String::new();
+        for c in anvil_home.to_string_lossy().chars() {
+            if matches!(c, '"' | '\\' | '$' | '`') {
+                s.push('\\');
+            }
+            s.push(c);
+        }
+        s
+    };
+    format!("{BLOCK_START}\nexport PATH=\"{dir}/shims:$PATH\"\n{BLOCK_END}\n")
+}
+
+/// The file without Anvil's block; every other line as it was.
+fn without_block(text: &str) -> String {
+    let mut out = String::new();
+    let mut inside = false;
+    for line in text.split_inclusive('\n') {
+        let l = line.trim_end_matches('\n');
+        if l == BLOCK_START {
+            inside = true;
+        } else if inside && l == BLOCK_END {
+            inside = false;
+        } else if !inside {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+pub fn has_path_block(file: &Path) -> bool {
+    fs::read_to_string(file).is_ok_and(|t| t.lines().any(|l| l == BLOCK_START))
+}
+
+/// Add the block at the end of `file` (creating it); a block already there that
+/// differs is replaced.
+pub fn add_path_block(file: &Path, block: &str) -> Result<()> {
+    let text = match fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("couldn't read {}", file.display())),
+    };
+    if text.contains(block) {
+        return Ok(());
+    }
+    let mut new = without_block(&text);
+    if !new.is_empty() && !new.ends_with('\n') {
+        new.push('\n');
+    }
+    new.push_str(block);
+    fs::write(file, new).with_context(|| format!("couldn't write {}", file.display()))
+}
+
+pub fn remove_path_block(file: &Path) -> Result<()> {
+    if !has_path_block(file) {
+        return Ok(());
+    }
+    let text = fs::read_to_string(file)?;
+    fs::write(file, without_block(&text))
+        .with_context(|| format!("couldn't write {}", file.display()))
+}
+
+/// The shims are written and some shell rc file puts them on PATH.
+pub fn ready() -> bool {
+    home().join("shims/php").exists()
+        && shell_rc_files(&user_home())
+            .iter()
+            .any(|f| has_path_block(f))
+}
+
+/// Write the shims and put them on PATH in every shell rc file.
+pub fn setup() -> Result<Vec<PathBuf>> {
+    install(&home())?;
+    let user = user_home();
+    let block = path_block(&home(), &user);
+    let files = shell_rc_files(&user);
+    for f in &files {
+        add_path_block(f, &block)?;
+    }
+    Ok(files)
+}
+
+/// The shell rc files holding the PATH block.
+pub fn rc_files_with_block() -> Vec<PathBuf> {
+    shell_rc_files(&user_home())
+        .into_iter()
+        .filter(|f| has_path_block(f))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("anvil-shims-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn path_block_is_added_once_and_removed_cleanly() {
+        let d = tmp("rc");
+        let rc = d.join(".zshrc");
+        let original = "export FOO=1\n# Anvil end\nalias ll='ls -l'\n";
+        fs::write(&rc, original).unwrap();
+        let block = path_block(&d.join(".anvil"), &d);
+        assert!(block.contains("export PATH=\"$HOME/.anvil/shims:$PATH\""));
+        add_path_block(&rc, &block).unwrap();
+        add_path_block(&rc, &block).unwrap();
+        let text = fs::read_to_string(&rc).unwrap();
+        assert_eq!(text.matches(BLOCK_START).count(), 1);
+        assert!(text.starts_with(original));
+        assert!(has_path_block(&rc));
+        // Another home replaces the block instead of adding a second one.
+        let other = path_block(Path::new("/opt/an\"vil"), &d);
+        assert!(other.contains(r#"export PATH="/opt/an\"vil/shims:$PATH""#));
+        add_path_block(&rc, &other).unwrap();
+        let text = fs::read_to_string(&rc).unwrap();
+        assert_eq!(text.matches(BLOCK_START).count(), 1);
+        assert!(text.contains("/opt/an"));
+        remove_path_block(&rc).unwrap();
+        assert_eq!(fs::read_to_string(&rc).unwrap(), original);
+        remove_path_block(&rc).unwrap();
+        assert_eq!(fs::read_to_string(&rc).unwrap(), original);
+        // A missing rc file is created.
+        let new = d.join("new-rc");
+        add_path_block(&new, &block).unwrap();
+        assert_eq!(fs::read_to_string(&new).unwrap(), block);
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn writes_executable_shims() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp("install");
+        install(&d).unwrap();
+        for tool in TOOLS {
+            let f = d.join("shims").join(tool);
+            let text = fs::read_to_string(&f).unwrap();
+            assert!(text.starts_with("#!/bin/sh\nexec '"), "{text}");
+            assert!(text.ends_with(&format!("' shim {tool} \"$@\"\n")), "{text}");
+            assert_eq!(
+                fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+                0o755
+            );
+        }
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn rc_files() {
+        let d = tmp("files");
+        assert_eq!(shell_rc_files(&d), vec![d.join(".zshrc")]);
+        fs::write(d.join(".bash_profile"), "").unwrap();
+        assert_eq!(
+            shell_rc_files(&d),
+            vec![d.join(".zshrc"), d.join(".bash_profile")]
+        );
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn cli_choice() {
+        let u = Path::new("/Users/me");
+        let none = |_: &Path| false;
+        assert_eq!(
+            pick_cli(Path::new("/x/target/debug/anvil"), u, none),
+            PathBuf::from("/x/target/debug/anvil")
+        );
+        let app = Path::new("/Applications/Anvil.app/Contents/MacOS/anvil-app");
+        let bundled = |p: &Path| p == Path::new("/Applications/Anvil.app/Contents/MacOS/anvil");
+        assert_eq!(
+            pick_cli(app, u, bundled),
+            PathBuf::from("/Applications/Anvil.app/Contents/MacOS/anvil")
+        );
+        let cargo = |p: &Path| p == Path::new("/Users/me/.cargo/bin/anvil");
+        assert_eq!(
+            pick_cli(app, u, cargo),
+            PathBuf::from("/Users/me/.cargo/bin/anvil")
+        );
+        assert_eq!(pick_cli(app, u, none), PathBuf::from("anvil"));
+        assert_eq!(sh_quote("/a b/it's"), r"'/a b/it'\''s'");
+    }
+
+    #[test]
+    fn innermost_site_and_its_php() {
+        use crate::tests::site;
+        let sites = [
+            site("outer", "/p/outer", Some("8.3")),
+            site("inner", "/p/outer/inner", None),
+            site("other", "/p/outer-two", Some("8.2")),
+        ];
+        let f = |p: &str| site_for(&sites, Path::new(p)).map(|s| s.name.as_str());
+        assert_eq!(f("/p/outer/app"), Some("outer"));
+        assert_eq!(f("/p/outer/inner/src"), Some("inner"));
+        assert_eq!(f("/p/outer-two"), Some("other"));
+        assert_eq!(f("/p"), None);
+
+        let cfg = Config {
+            php: Some("8.4".into()),
+            ..Config::default()
+        };
+        let installed = ["8.3".to_string(), "8.4".to_string()];
+        assert_eq!(
+            php_version(sites[0].php.clone(), &cfg, &installed).unwrap(),
+            "8.3"
+        );
+        assert_eq!(
+            php_version(sites[1].php.clone(), &cfg, &installed).unwrap(),
+            "8.4"
+        );
+        assert_eq!(php_version(None, &cfg, &installed).unwrap(), "8.4");
+        let err = php_version(sites[2].php.clone(), &cfg, &installed).unwrap_err();
+        assert!(err.to_string().contains("anvil php install 8.2"));
+        let none = Config::default();
+        assert_eq!(php_version(None, &none, &installed).unwrap(), "8.4");
+        let err = php_version(None, &none, &[]).unwrap_err();
+        assert!(err.to_string().contains("No PHP installed in Anvil"));
+    }
+}

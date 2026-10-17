@@ -55,7 +55,7 @@ pub fn name(id: &str) -> &'static str {
     }
 }
 
-fn root(id: &str) -> PathBuf {
+pub(crate) fn root(id: &str) -> PathBuf {
     home().join("runtimes").join(id)
 }
 

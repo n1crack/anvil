@@ -99,6 +99,8 @@ enum Cmd {
     },
     /// Download the web server and print one-time system setup commands
     Setup,
+    /// The program `php`, `composer`, `laravel`, `node`, `npm` or `npx` runs in this folder
+    Which { tool: String },
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
     Trust,
     /// Run DNS, PHP-FPM and the web server in the foreground
@@ -334,7 +336,22 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `anvil shim <tool> [args…]`, what the shims in ~/.anvil/shims run: the
+/// arguments go through untouched, so it is handled before clap sees them.
+fn shim(tool: &std::ffi::OsStr, args: impl Iterator<Item = std::ffi::OsString>) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let tool = tool.to_string_lossy();
+    let (program, pre, env) = shims::resolve(&tool, &std::env::current_dir()?, &load()?)?;
+    let e = Command::new(&program).args(pre).args(args).envs(env).exec();
+    Err(e).with_context(|| format!("couldn't run {}", program.display()))
+}
+
 fn run() -> Result<()> {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().is_some_and(|a| a == "shim") {
+        let tool = args.next().context("usage: anvil shim <tool> [args…]")?;
+        return shim(&tool, args);
+    }
     let cmd = Cli::parse().cmd;
     // A broken config must not stop an uninstall; it then keeps ~/.anvil.
     let loaded = load();
@@ -865,6 +882,13 @@ fn run() -> Result<()> {
             print_resolver_step(&cfg);
             print_ports_step(&cfg)?;
             println!("{}", commands("Then `anvil trust` for HTTPS."));
+        }
+        Cmd::Which { tool } => {
+            let (program, pre, _) =
+                shims::resolve_with(&tool, &std::env::current_dir()?, &cfg, false)?;
+            let mut line = vec![program.display().to_string()];
+            line.extend(pre);
+            println!("{}", line.join(" "));
         }
         Cmd::Tld { tld } => {
             if let Some(t) = tld {

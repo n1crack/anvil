@@ -49,7 +49,7 @@ pub fn needs(kind: &str) -> Option<&'static str> {
     }
 }
 
-fn composer() -> Result<PathBuf> {
+pub(crate) fn composer() -> Result<PathBuf> {
     let phar = home().join("bin").join("composer.phar");
     if !phar.exists() {
         let url = "https://getcomposer.org/download/latest-stable/composer.phar";
