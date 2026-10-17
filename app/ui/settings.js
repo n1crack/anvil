@@ -365,6 +365,15 @@ function render() {
   git.add(new Option("Other app…", "other"));
 
   $("#address").textContent = `https://name.${s.tld}${s.https_port === 443 ? "" : `:${s.https_port}`}`;
+  // .localhost works without setup; another suffix needs the resolver step once.
+  const tld = $("#tld");
+  tld.replaceChildren(new Option(".test", "test"), new Option(".localhost (no password needed)", "localhost"));
+  if (!["test", "localhost"].includes(s.tld)) tld.add(new Option(`.${s.tld}`, s.tld));
+  tld.value = s.tld;
+  $("#tld-note").textContent = s.tld === "localhost"
+    ? "Reaches this Mac by itself."
+    : "Needs a one-time step that asks for your password.";
+  tld.onchange = () => call("set_tld", { tld: tld.value });
   $("#ports").textContent = `HTTP on ${s.http_port}, DNS on ${s.dns_port}. Change them in config.toml.`;
   $("#config-dir").textContent = tilde(s.config_dir);
 

@@ -80,4 +80,5 @@ See [services.md](services.md) for what each service offers.
 | `anvil setup` | Download the web server and print the one-time DNS command |
 | `anvil start` | Run DNS, PHP-FPM, the web server, enabled services and autostart apps in the foreground (Ctrl-C to stop) |
 | `anvil trust` | Trust Anvil's local HTTPS certificate authority in your login keychain |
+| `anvil tld [suffix]` | Show the domain suffix, or set it: `localhost` needs no resolver file or password, `test` needs the one-time resolver step |
 | `anvil uninstall [--yes]` | List what Anvil changed on this Mac: `/etc/resolver` files it wrote, its certificate authority in the keychain, the login item, the app's `~/Library` folders and `~/.anvil`. With `--yes`, remove them (quit Anvil first) |
