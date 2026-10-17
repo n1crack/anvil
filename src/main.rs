@@ -76,12 +76,26 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum ServiceCmd {
-    /// List services and their state
+    /// List added services and their state
     List,
-    /// Download a service (Redis is built from source)
-    Install { id: String },
-    /// Remove a service's program; its data is kept
-    Uninstall { id: String },
+    /// Add a service: `add redis`, `add redis cache --port 6380`. Downloads the
+    /// program the first time (Redis is built from source).
+    Add {
+        /// mysql, postgres, redis or mailpit
+        kind: String,
+        /// Defaults to the kind, then `<kind>-2`…
+        name: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    /// Remove a service; its data is kept unless --delete-data
+    Remove {
+        id: String,
+        #[arg(long)]
+        delete_data: bool,
+    },
+    /// Remove a program no service uses anymore, e.g. `uninstall redis`
+    Uninstall { kind: String },
     /// Start the service with Anvil
     Enable { id: String },
     /// Don't start the service with Anvil
@@ -173,7 +187,7 @@ fn start(cfg: &Config) -> Result<()> {
     );
 
     for s in services.info(cfg).iter().filter(|s| s.running) {
-        println!("  {} on 127.0.0.1:{}", s.name, s.port);
+        println!("  {} ({}) on 127.0.0.1:{}", s.id, s.name, s.port);
     }
 
     // On Ctrl-C / SIGTERM, stop everything cleanly (databases get time to flush).
@@ -252,7 +266,11 @@ fn main() -> Result<()> {
         },
         Cmd::Service { cmd } => match cmd {
             ServiceCmd::List => {
-                for s in services::Services::default().info(&cfg) {
+                let list = services::Services::default().info(&cfg);
+                if list.is_empty() {
+                    println!("No services yet. Add one with `anvil service add mysql`.");
+                }
+                for s in list {
                     let state = match (s.installed, s.enabled) {
                         (false, _) => "not installed",
                         (true, true) => "enabled",
@@ -263,16 +281,36 @@ fn main() -> Result<()> {
                         .map(|p| format!(", inbox on {p}"))
                         .unwrap_or_default();
                     println!(
-                        "{:<12} {:<9} port {:<6} {state}{inbox}",
-                        s.id, s.version, s.port
+                        "{:<12} {:<10} {:<9} port {:<6} {state}{inbox}",
+                        s.id, s.kind, s.version, s.port
                     );
                 }
             }
-            ServiceCmd::Install { id } => {
-                services::install(&id)?;
-                println!("Installed {id}. Enable it with `anvil service enable {id}`.");
+            ServiceCmd::Add { kind, name, port } => {
+                let id = services::add(&mut cfg, &kind, name.as_deref(), port)?;
+                if !services::installed(&kind) {
+                    println!("Downloading {kind}…");
+                    if let Err(e) = services::install(&kind) {
+                        services::remove(&mut cfg, &id, false)?;
+                        return Err(e);
+                    }
+                }
+                services::set_enabled(&mut cfg, &id, true)?;
+                println!(
+                    "Added {id} on port {}; it starts with `anvil start`.",
+                    services::port(&cfg, &id)
+                );
             }
-            ServiceCmd::Uninstall { id } => services::uninstall(&id)?,
+            ServiceCmd::Remove { id, delete_data } => services::remove(&mut cfg, &id, delete_data)?,
+            ServiceCmd::Uninstall { kind } => {
+                if let Some(id) = services::instances(&cfg)
+                    .into_iter()
+                    .find(|i| services::kind_of(&cfg, i).ok() == Some(kind.as_str()))
+                {
+                    bail!("{id} still uses {kind}; remove it first");
+                }
+                services::uninstall(&kind)?
+            }
             ServiceCmd::Enable { id } => services::set_enabled(&mut cfg, &id, true)?,
             ServiceCmd::Disable { id } => services::set_enabled(&mut cfg, &id, false)?,
             ServiceCmd::Port { id, port, web } => {

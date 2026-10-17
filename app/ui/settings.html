@@ -109,8 +109,9 @@
 
     <section id="services" class="page" hidden>
       <h1>Services</h1>
-      <p class="hint">Databases, cache and mail run on your Mac, listen only on 127.0.0.1 and keep their data in Anvil’s folder. Turned-on services start with Anvil.</p>
+      <p class="hint">Databases, cache and mail run on your Mac, listen only on 127.0.0.1 and keep their data in Anvil’s folder. Add as many as you need, each on its own port. Turned-on services start with Anvil.</p>
       <div id="service-list"></div>
+      <div class="below"><button id="add-service">Add Service…</button></div>
     </section>
     <section id="storage" class="page" hidden>
       <h1>Storage</h1>
@@ -159,6 +160,31 @@
       <p class="muted small">Licensed under the Apache License 2.0. Built with Rust, Tauri, Caddy and static-php-cli.</p>
     </section>
   </main>
+
+  <dialog id="new-service" class="sheet" aria-labelledby="svc-title">
+    <form method="dialog" id="svc-form">
+      <h2 id="svc-title">Add service</h2>
+      <fieldset class="kinds">
+        <legend class="visually-hidden">Service</legend>
+        <div id="svc-kinds" class="kind-grid"></div>
+      </fieldset>
+      <label class="field">
+        <span>Name</span>
+        <input id="svc-name" required autocomplete="off" spellcheck="false">
+        <small id="svc-note"></small>
+      </label>
+      <label class="field">
+        <span>Port</span>
+        <input id="svc-port" required inputmode="numeric">
+      </label>
+      <p id="svc-error" class="error" hidden></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" id="svc-cancel">Cancel</button>
+        <button type="submit" id="svc-create" class="primary">Add</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="settings.js"></script>
 </body>

@@ -1,6 +1,9 @@
-//! Databases, cache and mail: installed into `~/.anvil/services/<id>`, data in
-//! `~/.anvil/data/<id>`, listening on 127.0.0.1 only. They run independently of
-//! the web server, so changing a site never restarts a database.
+//! Databases, cache and mail, added like containers: pick a kind, name and
+//! port, and Anvil runs it. Each kind's program is installed once into
+//! `~/.anvil/services/<kind>` and shared; every service has its own port, data
+//! in `~/.anvil/data/<id>` and log. Nothing exists until it's added.
+//! Everything listens on 127.0.0.1 only and runs independently of the web
+//! server, so changing a site never restarts a database.
 
 use crate::{Config, fetch_tgz, home, kill_orphans, platform, run, save, terminate};
 use anyhow::{Context, Result, bail};
@@ -21,6 +24,10 @@ const MAILPIT_VERSION: &str = "v1.31.6";
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct ServiceConfig {
+    /// Which program runs it (`redis`). Older configs leave it out and use
+    /// the kind as the name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     /// Start with Anvil.
     pub enabled: bool,
     pub port: Option<u16>,
@@ -31,7 +38,9 @@ pub struct ServiceConfig {
 
 #[derive(Serialize)]
 pub struct ServiceInfo {
-    pub id: &'static str,
+    /// The name it was added under, e.g. `redis` or `cache`.
+    pub id: String,
+    pub kind: &'static str,
     pub name: &'static str,
     pub category: &'static str,
     pub version: String,
@@ -87,7 +96,7 @@ const MAILPIT_WEB: u16 = 8025;
 
 /// Mailpit's web inbox port; only Mailpit has one.
 pub fn web_port(cfg: &Config, id: &str) -> Option<u16> {
-    (id == "mailpit").then(|| {
+    (kind_of(cfg, id).ok() == Some("mailpit")).then(|| {
         cfg.services
             .get(id)
             .and_then(|s| s.web_port)
@@ -99,7 +108,7 @@ pub fn port(cfg: &Config, id: &str) -> u16 {
     cfg.services
         .get(id)
         .and_then(|s| s.port)
-        .unwrap_or_else(|| default_port(id))
+        .unwrap_or_else(|| kind_of(cfg, id).map_or(0, default_port))
 }
 
 fn dir(id: &str) -> PathBuf {
@@ -127,8 +136,150 @@ fn check(id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn installed(id: &str) -> bool {
-    binary(id).exists()
+/// The service kind behind an instance id.
+pub fn kind_of(cfg: &Config, id: &str) -> Result<&'static str> {
+    if let Some(k) = SERVICES.iter().find(|k| **k == id) {
+        return Ok(k);
+    }
+    let kind = cfg.services.get(id).and_then(|s| s.kind.as_deref());
+    SERVICES
+        .into_iter()
+        .find(|k| Some(*k) == kind)
+        .with_context(|| format!("Unknown service {id}"))
+}
+
+/// Every added service, by name.
+pub fn instances(cfg: &Config) -> Vec<String> {
+    cfg.services
+        .keys()
+        .filter(|id| kind_of(cfg, id).is_ok())
+        .cloned()
+        .collect()
+}
+
+#[derive(Serialize)]
+pub struct Kind {
+    pub kind: &'static str,
+    pub name: &'static str,
+    pub category: &'static str,
+    pub installed: bool,
+    /// Name and port the Add Service sheet starts with.
+    pub suggested_name: String,
+    pub suggested_port: u16,
+}
+
+/// What can be added, with a free name and port for each.
+pub fn kinds(cfg: &Config) -> Vec<Kind> {
+    SERVICES
+        .into_iter()
+        .map(|kind| {
+            let taken = ports_taken(cfg, "");
+            Kind {
+                kind,
+                name: name(kind),
+                category: category(kind),
+                installed: installed(kind),
+                suggested_name: free_name(cfg, kind),
+                suggested_port: free_port(&taken, default_port(kind)),
+            }
+        })
+        .collect()
+}
+
+fn free_name(cfg: &Config, kind: &str) -> String {
+    std::iter::once(kind.to_string())
+        .chain((2..).map(|i| format!("{kind}-{i}")))
+        .find(|n| !cfg.services.contains_key(n))
+        .unwrap()
+}
+
+/// `from` or the next port no service and no other program uses.
+fn free_port(taken: &[u16], from: u16) -> u16 {
+    (from..u16::MAX)
+        .find(|p| !taken.contains(p) && !in_use(*p))
+        .unwrap_or(from)
+}
+
+/// Whether a kind's program is installed.
+pub fn installed(kind: &str) -> bool {
+    binary(kind).exists()
+}
+
+/// Ports every other instance uses (service and web), for clash checks.
+fn ports_taken(cfg: &Config, except: &str) -> Vec<u16> {
+    instances(cfg)
+        .iter()
+        .filter(|i| *i != except)
+        .flat_map(|i| [Some(port(cfg, i)), web_port(cfg, i)])
+        .flatten()
+        .collect()
+}
+
+/// Add a service: `name` defaults to the kind (`redis`, then `redis-2`…),
+/// `port` to its usual one or the next free. Returns the name.
+pub fn add(cfg: &mut Config, kind: &str, name: Option<&str>, port: Option<u16>) -> Result<String> {
+    let id = insert(cfg, kind, name, port)?;
+    save(cfg)?;
+    Ok(id)
+}
+
+fn check_name(id: &str) -> Result<()> {
+    let ok = id.len() <= 40
+        && id.starts_with(|c: char| c.is_ascii_lowercase())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !ok {
+        bail!("Use lowercase letters, numbers and dashes for the service name");
+    }
+    Ok(())
+}
+
+fn insert(cfg: &mut Config, kind: &str, name: Option<&str>, port: Option<u16>) -> Result<String> {
+    check(kind)?;
+    let id = name.map_or_else(|| free_name(cfg, kind), str::to_string);
+    check_name(&id)?;
+    if cfg.services.contains_key(&id) {
+        bail!("There's already a service called {id}");
+    }
+    let mut taken = ports_taken(cfg, "");
+    let port = match port {
+        Some(p) => {
+            check_port(cfg, "", p)?;
+            p
+        }
+        None => free_port(&taken, default_port(kind)),
+    };
+    taken.push(port);
+    let web = (kind == "mailpit").then(|| free_port(&taken, MAILPIT_WEB));
+    cfg.services.insert(
+        id.clone(),
+        ServiceConfig {
+            kind: Some(kind.into()),
+            enabled: false,
+            port: Some(port),
+            web_port: web,
+        },
+    );
+    Ok(id)
+}
+
+/// Remove a service. Its data stays unless `delete_data`, so adding the same
+/// name again finds the databases; the program stays for other services.
+pub fn remove(cfg: &mut Config, id: &str, delete_data: bool) -> Result<()> {
+    if !cfg.services.contains_key(id) {
+        bail!("There's no service called {id}");
+    }
+    check_name(id)?;
+    cfg.services.remove(id);
+    save(cfg)?;
+    if delete_data {
+        match fs::remove_dir_all(data(id)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Download (or for Redis, build) a service into `~/.anvil/services/<id>`.
@@ -237,40 +388,45 @@ pub fn uninstall(id: &str) -> Result<()> {
 }
 
 pub fn set_enabled(cfg: &mut Config, id: &str, enabled: bool) -> Result<()> {
-    check(id)?;
+    kind_of(cfg, id)?;
     cfg.services.entry(id.into()).or_default().enabled = enabled;
     save(cfg)
 }
 
 pub fn set_port(cfg: &mut Config, id: &str, port: Option<u16>) -> Result<()> {
-    check(id)?;
-    if port.is_some_and(|p| p < 1024) {
-        bail!("Use a port of 1024 or higher");
-    }
+    let kind = kind_of(cfg, id)?;
+    check_port(cfg, id, port.unwrap_or(default_port(kind)))?;
     cfg.services.entry(id.into()).or_default().port = port;
     save(cfg)
 }
 
-pub fn set_web_port(cfg: &mut Config, id: &str, port: Option<u16>) -> Result<()> {
-    check(id)?;
-    if id != "mailpit" {
-        bail!("Only Mailpit has a web port");
-    }
-    if port.is_some_and(|p| p < 1024) {
+fn check_port(cfg: &Config, id: &str, port: u16) -> Result<()> {
+    if port < 1024 {
         bail!("Use a port of 1024 or higher");
     }
+    if ports_taken(cfg, id).contains(&port) {
+        bail!("Another Anvil service already uses port {port}");
+    }
+    Ok(())
+}
+
+pub fn set_web_port(cfg: &mut Config, id: &str, port: Option<u16>) -> Result<()> {
+    if kind_of(cfg, id)? != "mailpit" {
+        bail!("Only Mailpit has a web port");
+    }
+    check_port(cfg, id, port.unwrap_or(MAILPIT_WEB))?;
     cfg.services.entry(id.into()).or_default().web_port = port;
     save(cfg)
 }
 
 /// First start: create the data directory the way each server expects.
-fn init(id: &str, log: &fs::File) -> Result<()> {
+fn init(kind: &str, id: &str, log: &fs::File) -> Result<()> {
     let data = data(id);
     if data.exists() {
         return Ok(());
     }
-    let d = dir(id);
-    let status = match id {
+    let d = dir(kind);
+    let status = match kind {
         "mysql" => Command::new(d.join("bin/mysqld"))
             .arg("--no-defaults")
             .arg("--initialize-insecure")
@@ -293,27 +449,27 @@ fn init(id: &str, log: &fs::File) -> Result<()> {
     };
     if !status.success() {
         let _ = fs::remove_dir_all(&data);
-        bail!(
-            "Setting up {} failed — see {}",
-            name(id),
-            home().join("log").join(format!("{id}.log")).display()
-        );
+        bail!("Setting up {id} failed — see {}", log_file(id).display());
     }
     Ok(())
 }
 
 fn command(cfg: &Config, id: &str) -> Command {
-    let (d, data, run_dir) = (dir(id), data(id), home().join("run"));
+    let kind = kind_of(cfg, id).unwrap_or("redis");
+    let (d, data, run_dir) = (dir(kind), data(id), home().join("run"));
     let port = port(cfg, id).to_string();
-    let mut c = Command::new(binary(id));
-    match id {
+    let mut c = Command::new(binary(kind));
+    match kind {
         "mysql" => {
             c.arg("--no-defaults")
                 .arg(format!("--basedir={}", d.display()))
                 .arg(format!("--datadir={}", data.display()))
                 .arg(format!("--port={port}"))
                 .arg("--bind-address=127.0.0.1")
-                .arg(format!("--socket={}", run_dir.join("mysql.sock").display()))
+                .arg(format!(
+                    "--socket={}",
+                    run_dir.join(format!("{id}.sock")).display()
+                ))
                 .arg("--mysqlx=OFF");
         }
         "postgres" => {
@@ -344,6 +500,10 @@ fn pid_file(id: &str) -> PathBuf {
     home().join("run").join(format!("{id}.pids"))
 }
 
+fn log_file(id: &str) -> PathBuf {
+    home().join("log").join(format!("{id}.log"))
+}
+
 /// Running services, keyed by id.
 #[derive(Default)]
 pub struct Services {
@@ -362,21 +522,18 @@ impl Services {
     }
 
     pub fn start(&mut self, cfg: &Config, id: &str) -> Result<()> {
-        check(id)?;
+        let kind = kind_of(cfg, id)?;
         if self.running(id) {
             return Ok(());
         }
-        if !installed(id) {
-            bail!("{} is not installed", name(id));
+        if !installed(kind) {
+            bail!("{} is not installed", name(kind));
         }
         kill_orphans(&pid_file(id), false);
         let port = port(cfg, id);
         for p in [Some(port), web_port(cfg, id)].into_iter().flatten() {
             if in_use(p) {
-                bail!(
-                    "{}: port {p} is already in use by another program — pick another port",
-                    name(id)
-                );
+                bail!("{id}: port {p} is already in use by another program — pick another port");
             }
         }
         for d in ["run", "log"] {
@@ -385,22 +542,21 @@ impl Services {
         let log = fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(home().join("log").join(format!("{id}.log")))?;
-        init(id, &log)?;
+            .open(log_file(id))?;
+        init(kind, id, &log)?;
         let mut child = command(cfg, id)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
             .spawn()
-            .with_context(|| format!("failed to start {}", name(id)))?;
+            .with_context(|| format!("failed to start {id}"))?;
 
         // A server that dies right away (bad data dir, port race) should say so now.
         std::thread::sleep(Duration::from_millis(300));
         if let Ok(Some(status)) = child.try_wait() {
             bail!(
-                "{} stopped right after starting ({status}) — see {}",
-                name(id),
-                home().join("log").join(format!("{id}.log")).display()
+                "{id} stopped right after starting ({status}) — see {}",
+                log_file(id).display()
             );
         }
         fs::write(
@@ -425,9 +581,9 @@ impl Services {
 
     /// Start every enabled service; returns the ones that failed with why.
     pub fn start_enabled(&mut self, cfg: &Config) -> Vec<(String, String)> {
-        SERVICES
+        instances(cfg)
             .iter()
-            .filter(|id| cfg.services.get(**id).is_some_and(|s| s.enabled))
+            .filter(|id| cfg.services.get(*id).is_some_and(|s| s.enabled))
             .filter_map(|id| {
                 self.start(cfg, id)
                     .err()
@@ -437,26 +593,28 @@ impl Services {
     }
 
     pub fn info(&mut self, cfg: &Config) -> Vec<ServiceInfo> {
-        SERVICES
-            .iter()
+        instances(cfg)
+            .into_iter()
             .map(|id| {
-                let running = self.running(id);
-                let port = port(cfg, id);
-                let web_port = web_port(cfg, id);
+                let kind = kind_of(cfg, &id).unwrap_or("redis");
+                let running = self.running(&id);
+                let port = port(cfg, &id);
+                let web_port = web_port(cfg, &id);
                 let suggest = |p: u16| (!running && in_use(p)).then(|| next_free(p)).flatten();
                 ServiceInfo {
-                    id,
-                    name: name(id),
-                    category: category(id),
-                    version: version_of(id),
+                    kind,
+                    name: name(kind),
+                    category: category(kind),
+                    version: version_of(kind),
                     port,
                     web: web_port.map(|p| format!("http://127.0.0.1:{p}")),
                     web_port,
-                    installed: installed(id),
-                    enabled: cfg.services.get(*id).is_some_and(|s| s.enabled),
+                    installed: installed(kind),
+                    enabled: cfg.services.get(&id).is_some_and(|s| s.enabled),
                     running,
                     suggested_port: suggest(port),
                     suggested_web_port: web_port.and_then(suggest),
+                    id,
                 }
             })
             .collect()
@@ -485,7 +643,7 @@ mod tests {
             ServiceConfig {
                 enabled: true,
                 port: Some(6380),
-                web_port: None,
+                ..Default::default()
             },
         );
         assert_eq!(port(&cfg, "redis"), 6380);
@@ -508,5 +666,39 @@ mod tests {
             .collect();
         assert!(args.windows(2).any(|w| w == ["--listen", "127.0.0.1:8026"]));
         assert!(args.windows(2).any(|w| w == ["--smtp", "127.0.0.1:1025"]));
+    }
+
+    #[test]
+    fn added_services() {
+        let mut cfg = Config::default();
+        assert!(instances(&cfg).is_empty());
+        assert_eq!(
+            insert(&mut cfg, "redis", None, Some(16379)).unwrap(),
+            "redis"
+        );
+        let id = insert(&mut cfg, "redis", None, None).unwrap();
+        assert_eq!(id, "redis-2");
+        assert_eq!(kind_of(&cfg, &id).unwrap(), "redis");
+        let p = port(&cfg, &id);
+        assert_ne!(p, 16379);
+        assert!(insert(&mut cfg, "redis", Some("cache"), Some(p)).is_err()); // port taken
+        assert!(insert(&mut cfg, "redis", Some("redis-2"), None).is_err());
+        assert!(insert(&mut cfg, "redis", Some("../x"), None).is_err());
+        assert!(insert(&mut cfg, "mongodb", None, None).is_err());
+        assert!(check_port(&cfg, "redis", p).is_err());
+        assert!(check_port(&cfg, "redis-2", p).is_ok());
+
+        // Each service gets its own data, log and socket; the program is shared.
+        let args: Vec<String> = command(&cfg, &id)
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.iter().any(|a| a.ends_with("data/redis-2")));
+        assert_eq!(command(&cfg, &id).get_program(), binary("redis"));
+
+        let a = insert(&mut cfg, "mailpit", Some("mail-a"), None).unwrap();
+        let b = insert(&mut cfg, "mailpit", Some("mail-b"), None).unwrap();
+        assert_ne!(web_port(&cfg, &a), web_port(&cfg, &b));
+        assert_eq!(instances(&cfg), ["mail-a", "mail-b", "redis", "redis-2"]);
     }
 }
