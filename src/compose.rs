@@ -40,8 +40,12 @@ pub(crate) fn docker_bin() -> PathBuf {
 
 /// Run `docker compose <args>` in `dir`; stdout on success, a readable error otherwise.
 fn compose(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
+    run(docker, dir, &[&["compose"], args].concat(), timeout)
+}
+
+/// Run `docker <args>` in `dir`; stdout on success, a readable error otherwise.
+fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
     let mut child = match Command::new(docker)
-        .arg("compose")
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::null())
@@ -165,6 +169,65 @@ pub fn containers(dir: &Path) -> Result<Vec<Container>> {
     containers_with(&docker_bin(), dir)
 }
 
+/// Each line of `docker ps` as one JSON object, with the compose labels.
+const PS_FORMAT: &str = r#"{"dir":{{json (.Label "com.docker.compose.project.working_dir")}},"service":{{json (.Label "com.docker.compose.service")}},"state":{{json .State}},"status":{{json .Status}},"ports":{{json .Ports}}}"#;
+
+/// Read `docker ps --format PS_FORMAT`: the project folder and the container of each line.
+pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
+    #[derive(serde::Deserialize)]
+    struct Line {
+        dir: String,
+        service: String,
+        state: String,
+        status: String,
+        ports: String,
+    }
+    lines
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Line>(l).ok())
+        .filter(|l| !l.dir.is_empty() && !l.service.is_empty())
+        .map(|l| {
+            // "0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp": the published port is before "->".
+            let mut ports: Vec<u16> = l
+                .ports
+                .split(", ")
+                .filter_map(|p| p.split_once("->")?.0.rsplit(':').next()?.parse().ok())
+                .collect();
+            ports.sort_unstable();
+            ports.dedup();
+            // "Up 3 days (healthy)", "Up 5 seconds (health: starting)".
+            let health = ["unhealthy", "healthy", "starting"]
+                .into_iter()
+                .find(|h| l.status.ends_with(&format!("{h})")))
+                .map(str::to_string);
+            let c = Container {
+                service: l.service,
+                state: l.state,
+                health,
+                ports,
+            };
+            (PathBuf::from(l.dir), c)
+        })
+        .collect()
+}
+
+fn running_with(docker: &Path) -> Result<Vec<(PathBuf, Container)>> {
+    let args = [
+        "ps",
+        "--filter",
+        "label=com.docker.compose.service",
+        "--format",
+        PS_FORMAT,
+    ];
+    Ok(parse_running(&run(docker, Path::new("/"), &args, READ)?))
+}
+
+/// Every running compose container, by the folder its project was started from:
+/// one `docker ps` for all projects.
+pub fn running() -> Result<Vec<(PathBuf, Container)>> {
+    running_with(&docker_bin())
+}
+
 fn action_with(docker: &Path, dir: &Path, service: &str, action: &str) -> Result<()> {
     let args: &[&str] = match action {
         "start" => &["up", "-d", "--", service],
@@ -245,6 +308,76 @@ mod tests {
         let array = format!("[{}]", lines.trim().replace('\n', ","));
         assert_eq!(parse_ps(&array), want);
         assert!(parse_ps("").is_empty());
+    }
+
+    #[test]
+    fn reads_running_containers_by_project_folder() {
+        let lines = concat!(
+            r#"{"dir":"/Users/x/elpida","service":"sphere","state":"running","status":"Up 3 days (healthy)","ports":"0.0.0.0:2593->2593/tcp, [::]:2593->2593/tcp"}"#,
+            "\n",
+            r#"{"dir":"/Users/x/elpida","service":"nobetci","state":"running","status":"Up 3 days","ports":""}"#,
+            "\n",
+            r#"{"dir":"/Users/x/shop","service":"db","state":"running","status":"Up 5 seconds (health: starting)","ports":"127.0.0.1:3307->3306/tcp, 8080/tcp"}"#,
+            "\n",
+            // Not from compose: no labels.
+            r#"{"dir":"","service":"","state":"running","status":"Up 1 hour","ports":""}"#,
+            "\nnot json\n"
+        );
+        let got: Vec<_> = parse_running(lines)
+            .into_iter()
+            .map(|(d, c)| (d, c.service, c.state, c.health, c.ports))
+            .collect();
+        let s = |v: &str| v.to_string();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    PathBuf::from("/Users/x/elpida"),
+                    s("sphere"),
+                    s("running"),
+                    Some(s("healthy")),
+                    vec![2593]
+                ),
+                (
+                    PathBuf::from("/Users/x/elpida"),
+                    s("nobetci"),
+                    s("running"),
+                    None,
+                    vec![]
+                ),
+                (
+                    PathBuf::from("/Users/x/shop"),
+                    s("db"),
+                    s("running"),
+                    Some(s("starting")),
+                    vec![3307]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn asks_docker_ps_once_with_the_compose_labels() {
+        let bin = tmp("running-bin");
+        let log = bin.join("args");
+        let docker = fake_docker(
+            &bin,
+            &format!(
+                "echo \"$@\" >> {}\necho '{{\"dir\":\"/s\",\"service\":\"web\",\"state\":\"running\",\"status\":\"Up\",\"ports\":\"\"}}'",
+                log.display()
+            ),
+        );
+        let got = running_with(&docker).unwrap();
+        assert_eq!(
+            (got[0].0.as_path(), got[0].1.service.as_str()),
+            (Path::new("/s"), "web")
+        );
+        let args = fs::read_to_string(log).unwrap();
+        assert!(
+            args.starts_with("ps --filter label=com.docker.compose.service --format "),
+            "{args}"
+        );
+        assert_eq!(args.lines().count(), 1);
     }
 
     #[test]

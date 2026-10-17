@@ -17,14 +17,21 @@ function showError(msg) {
   $("#error").hidden = !msg;
 }
 
-async function load() {
-  try {
-    data = await invoke("activity");
-    showError(null);
-  } catch (e) {
-    return showError(String(e));
-  }
-  render();
+let loading = null; // the `activity` request on its way: a slow Docker must not stack them
+
+function load() {
+  loading ??= (async () => {
+    try {
+      data = await invoke("activity");
+      showError(null);
+    } catch (e) {
+      return showError(String(e));
+    } finally {
+      loading = null;
+    }
+    render();
+  })();
+  return loading;
 }
 
 window.refresh = load;
@@ -77,6 +84,8 @@ async function act(key, action) {
     showError(String(e));
   }
   busy.delete(key);
+  // A poll that began before the action ended would show the old state.
+  await loading;
   await load();
 }
 

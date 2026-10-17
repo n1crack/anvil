@@ -406,17 +406,15 @@ fn activity(app: State<App>) -> Res<Activity> {
         (services.info(&cfg), services.pids())
     };
 
-    // Docker is only asked about apps with a compose file, all at once.
-    let containers: Vec<_> = std::thread::scope(|scope| {
-        let jobs: Vec<_> = sites
-            .iter()
-            .filter(|s| anvil::compose::file(&s.path).is_some())
-            .map(|s| (s, scope.spawn(|| anvil::compose::containers(&s.path))))
-            .collect();
-        jobs.into_iter()
-            .filter_map(|(s, j)| Some((s, j.join().ok()?.ok()?)))
-            .collect()
-    });
+    // One `docker ps` for every project, and only when an app has a compose file.
+    let containers = if sites
+        .iter()
+        .any(|s| anvil::compose::file(&s.path).is_some())
+    {
+        anvil::compose::running().unwrap_or_default()
+    } else {
+        vec![]
+    };
 
     let table = anvil::resources::ps();
     let web = web_pids
@@ -493,8 +491,16 @@ fn activity(app: State<App>) -> Res<Activity> {
                 rows.push(r);
             }
         }
-        for (_, list) in containers.iter().filter(|(s, _)| s.name == site.name) {
-            for c in list.iter().filter(|c| c.state == "running") {
+        // The project folder may be named through a symlink on either side.
+        let real = site.path.canonicalize().ok();
+        let here = |dir: &std::path::Path| {
+            dir == site.path || (real.is_some() && dir.canonicalize().ok() == real)
+        };
+        if anvil::compose::file(&site.path).is_some() {
+            for (_, c) in containers
+                .iter()
+                .filter(|(dir, c)| c.state == "running" && here(dir))
+            {
                 let state = if c.health.as_deref() == Some("starting") {
                     "starting"
                 } else {
