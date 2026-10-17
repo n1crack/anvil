@@ -710,12 +710,13 @@ button, select, input { font: inherit; color: inherit; }
 
 .path-open:hover { background: var(--steel-hover); }
 
-/* Processes: dot, name, the newest line, Start/Stop. */
+/* Processes: dot, name, the newest line, Restart/■/▶; rows open their log. */
 .procs-head { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
 .procs-head .res-sub { margin: 0; }
-.procs-head button,
-.proc button:last-child {
+.proc-actions { display: flex; gap: 6px; }
+.proc-actions button {
   height: 24px;
+  min-width: 28px;
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-s);
@@ -730,11 +731,15 @@ button, select, input { font: inherit; color: inherit; }
   gap: 12px;
   min-height: 40px;
   padding: 6px 14px;
+  cursor: pointer;
 }
 
-.proc + .proc { border-top: 1px solid var(--line); }
-/* Running: a thin green line, like the dot, along the row's edge. */
+.proc:hover { background: var(--steel-hover); }
+.procs-list > * + * { border-top: 1px solid var(--line); }
+/* Running: a thin green line, like the dot, along the row's edge; crashed: a red one. */
 .proc.running { box-shadow: inset 2px 0 0 var(--ok); }
+.proc.crashed { box-shadow: inset 2px 0 0 var(--danger); }
+.dot.bad { background: var(--danger); }
 .proc-name { padding: 0; border: 0; background: none; font-weight: 600; text-align: left; }
 .proc-name:hover { text-decoration: underline; }
 
@@ -745,6 +750,30 @@ button, select, input { font: inherit; color: inherit; }
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+.procs-note { margin: 0; color: var(--muted); font-size: 12px; }
+
+.proc-log {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px 14px;
+  overflow: auto;
+  color: var(--muted);
+  font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.procs .chips .chip {
+  height: 22px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 11px;
+  cursor: pointer;
+}
+
+.procs .chips .chip:hover { background: var(--steel-hover); }
 
 .proc-last.error-text { color: var(--danger); }
 

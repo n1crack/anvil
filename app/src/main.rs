@@ -205,11 +205,39 @@ struct ProcessRow {
     /// The newest line it wrote.
     last: Option<String>,
     error: Option<String>,
+    /// Where an extra dev server answers, e.g. `https://docs.vuefinder.test`.
+    address: Option<String>,
+    pid: Option<u32>,
+    /// How it ended on its own, until started or stopped again.
+    crashed: Option<anvil::apps::Exit>,
+}
+
+/// What the Overview shows below an app's details.
+#[derive(Serialize)]
+struct Overview {
+    rows: Vec<ProcessRow>,
+    /// package.json scripts that run once (`build`, `lint`).
+    commands: Vec<String>,
+    /// The compose file's services; `None` without a compose file.
+    containers: Option<Vec<anvil::compose::Container>>,
+    docker_error: Option<String>,
 }
 
 fn process_rows(app: &App, site: &Site) -> Vec<ProcessRow> {
+    // Only non-PHP apps have extra servers with an address of their own.
+    let cfg = (!anvil::apps::is_php(&site.kind))
+        .then(|| anvil::load().ok())
+        .flatten();
+    let servers = cfg
+        .as_ref()
+        .map(|c| anvil::processes::server_rows(c, site))
+        .unwrap_or_default();
+    // Detecting may run PHP: do it before taking the locks.
+    let detected = anvil::processes::detect(site);
     let errors = app.app_errors.lock().unwrap();
-    anvil::processes::detect(site)
+    let mut apps = app.apps.lock().unwrap();
+    let crashed = apps.crashed();
+    detected
         .into_iter()
         .map(|p| {
             let key = anvil::processes::key(&site.name, &p.id);
@@ -221,14 +249,45 @@ fn process_rows(app: &App, site: &Site) -> Vec<ProcessRow> {
             .ok()
             .and_then(|page| page.entries.into_iter().next())
             .map(|e| e.message.lines().next().unwrap_or("").to_string());
+            let address = cfg.as_ref().and_then(|c| {
+                let row = servers.iter().find(|r| r.id == p.id)?;
+                let host = Site {
+                    host: row.host.clone(),
+                    ..site.clone()
+                };
+                Some(anvil::site_url(c, &host))
+            });
             ProcessRow {
-                running: app.apps.lock().unwrap().running(&key),
+                running: apps.running(&key),
+                pid: apps.pid(&key),
+                crashed: crashed
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, e)| e.clone()),
                 error: errors.get(&key).cloned(),
                 last,
+                address,
                 process: p,
             }
         })
         .collect()
+}
+
+fn overview(app: &App, site: &Site) -> Overview {
+    // Docker is only asked about apps that have a compose file.
+    let (containers, docker_error) = match anvil::compose::file(&site.path) {
+        None => (None, None),
+        Some(_) => match anvil::compose::containers(&site.path) {
+            Ok(c) => (Some(c), None),
+            Err(e) => (None, Some(err(e))),
+        },
+    };
+    Overview {
+        rows: process_rows(app, site),
+        commands: anvil::processes::package_scripts(&site.path).1,
+        containers,
+        docker_error,
+    }
 }
 
 fn find_site(name: &str) -> Res<Site> {
@@ -240,23 +299,29 @@ fn find_site(name: &str) -> Res<Site> {
 }
 
 #[tauri::command(async)]
-fn processes(app: State<App>, site: String) -> Res<Vec<ProcessRow>> {
+fn processes(app: State<App>, site: String) -> Res<Overview> {
     let s = find_site(&site)?;
     if let Some(e) = anvil::processes::project_file_error(&s) {
         return Err(e);
     }
-    Ok(process_rows(&app, &s))
+    Ok(overview(&app, &s))
 }
 
-/// Start, stop or restart one process, or all of them when `name` is None.
+/// Start, stop or restart one process, or all of them and the app's own server
+/// when `name` is None.
 #[tauri::command(async)]
 fn process_run(
+    handle: AppHandle,
     app: State<App>,
     site: String,
     name: Option<String>,
     action: String,
-) -> Res<Vec<ProcessRow>> {
+) -> Res<Overview> {
     let s = find_site(&site)?;
+    if name.is_none() && anvil::apps::runs_process(&s.kind) {
+        run_app(&app, &s.name, &action)?;
+        changed(&handle);
+    }
     for p in anvil::processes::detect(&s)
         .into_iter()
         .filter(|p| name.as_deref().is_none_or(|n| n == p.id))
@@ -273,19 +338,60 @@ fn process_run(
             }
         }
     }
-    Ok(process_rows(&app, &s))
+    Ok(overview(&app, &s))
+}
+
+/// Run one of the app's package.json commands once (`npm run <script>`).
+#[tauri::command(async)]
+fn command_run(app: State<App>, site: String, script: String) -> Res<Overview> {
+    let s = find_site(&site)?;
+    if !anvil::processes::package_scripts(&s.path)
+        .1
+        .contains(&script)
+    {
+        return Err(format!("{site} has no command named {script}"));
+    }
+    app.apps
+        .lock()
+        .unwrap()
+        .run_once(&s, &script)
+        .map_err(err)?;
+    Ok(overview(&app, &s))
+}
+
+/// `docker compose up -d|stop|restart` one service. It can take minutes (a slow
+/// shutdown), so no lock is held while Docker works.
+#[tauri::command(async)]
+fn container_run(app: State<App>, site: String, service: String, action: String) -> Res<Overview> {
+    let s = find_site(&site)?;
+    if anvil::compose::file(&s.path).is_none() {
+        return Err(format!("{site} has no compose file"));
+    }
+    anvil::compose::action(&s.path, &service, &action).map_err(err)?;
+    Ok(overview(&app, &s))
+}
+
+#[tauri::command(async)]
+fn container_log(site: String, service: String) -> Res<String> {
+    let s = find_site(&site)?;
+    anvil::compose::logs(&s.path, &service).map_err(err)
+}
+
+fn run_app(app: &App, site: &str, action: &str) -> Res<()> {
+    let cfg = anvil::load().map_err(err)?;
+    if action != "start" {
+        app.apps.lock().unwrap().stop(site);
+        app.app_errors.lock().unwrap().remove(site);
+    }
+    if action != "stop" {
+        start_app(app, &cfg, site);
+    }
+    Ok(())
 }
 
 #[tauri::command(async)]
 fn app_run(handle: AppHandle, app: State<App>, site: String, action: String) -> Res<Snapshot> {
-    let cfg = anvil::load().map_err(err)?;
-    if action != "start" {
-        app.apps.lock().unwrap().stop(&site);
-        app.app_errors.lock().unwrap().remove(&site);
-    }
-    if action != "stop" {
-        start_app(&app, &cfg, &site);
-    }
+    run_app(&app, &site, &action)?;
     changed(&handle);
     snapshot(&app)
 }
@@ -1821,6 +1927,9 @@ fn main() {
             set_tld,
             processes,
             process_run,
+            command_run,
+            container_run,
+            container_log,
             service_log,
             set_dock_icon,
             set_login,

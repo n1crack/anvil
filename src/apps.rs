@@ -384,7 +384,7 @@ pub struct Apps {
 }
 
 /// How a process ended on its own.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Exit {
     /// `None` when a signal ended it.
     pub code: Option<i32>,
