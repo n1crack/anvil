@@ -8,6 +8,7 @@ pub mod dns;
 pub mod git;
 pub mod logs;
 pub mod packages;
+pub mod processes;
 pub mod resources;
 pub mod runtimes;
 pub mod services;
