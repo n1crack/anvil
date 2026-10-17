@@ -1259,3 +1259,11 @@ kbd {
 .svc-env-hint { margin: 0 0 8px; }
 .svc-remove { margin-top: 16px; color: var(--heat-text); }
 #svc-port-edit, #svc-web-edit { max-width: 100px; }
+.res-list dt .link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--heat-text);
+  font-size: 12px;
+}

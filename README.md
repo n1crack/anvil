@@ -113,7 +113,9 @@ Node.js, Go, Rust (through rustup) and .NET are installed into `~/.anvil/runtime
 
 ### Services
 
-Nothing runs until you add it. Add a service by picking its kind, a name and a port, and add as many of each as you need: two MySQL servers for two projects, a separate Redis for queues, a second Mailpit inbox.
+Nothing runs until you add it. Add a service by picking its kind, a name and a port, and add as many of each as you need: two MySQL servers for two projects, a separate Redis for queues, a second Mailpit inbox. New services get a readable name such as `redis-swift-ember`; you can type your own. Tag services and attach them to the applications that use them; each service shows the `.env` lines to connect.
+
+For each application, Anvil also reads its `.env` and tells you where every database, cache and mail server it points at comes from: an Anvil service, a Docker container or Compose service, another program on your Mac, or a remote host.
 
 | Service | Usual port |
 |---|---|
@@ -153,11 +155,11 @@ open ../target/release/bundle/macos/Anvil.app
   - **Overview:** type, runtime, folder, web root, disk and services in use.
   - **Settings:** type, PHP version and php.ini settings, or start command, port and "Start with Anvil".
   - **Resources:** disk breakdown with clean-up, processes and services.
+- **Services** next to Applications in the sidebar: grouped by kind with a running dot and tags. Each service has Start, Stop and Restart, its ports, the applications that use it, tags, data folder and log, the `.env` lines to copy, and removal with or without its data. The + button (⌘N) adds one: kind, name, port, application and tags.
 - **Settings window:**
   - **General:** site folders, launch at login, Dock icon, theme, editor and terminal, domain and ports.
   - **PHP:** install and remove versions, set the default, php.ini defaults for all applications.
   - **Languages:** install and remove Node.js, Go, Rust and .NET.
-  - **Services:** add services like containers (kind, name, port), turn them on and off, change ports, open a Mailpit inbox, remove them with or without their data.
   - **Storage:** Anvil's own footprint and every application's size.
   - **Shortcuts** and **About**.
 - **Menu bar menu:** status, Start/Stop, Restart, switch the default PHP version, Logs, Settings and Quit.
@@ -208,6 +210,8 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil service list` | List added services and their state |
 | `anvil service add <kind> [name] [--port N]` | Add `mysql`, `postgres`, `redis` or `mailpit`; downloads the program the first time |
 | `anvil service remove <name> [--delete-data]` | Remove a service; its data is kept unless asked |
+| `anvil service tag <name> [tags…]` | Label a service, e.g. `queue`; no tags clears them |
+| `anvil service link <name> [apps…]` | The applications that use a service; they list it under their resources |
 | `anvil service uninstall <kind>` | Remove a program no service uses anymore |
 | `anvil service enable <name>` / `disable <name>` | Start the service with Anvil, or not |
 | `anvil service port <name> [port] [--web [port]]` | Set the port; leave it out for the usual one. `--web` sets Mailpit's inbox port (no value resets it) |

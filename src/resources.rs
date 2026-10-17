@@ -750,7 +750,7 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
         .iter()
         .map(|id| home().join("data").join(id))
         .collect::<Vec<_>>());
-    wanted
+    let mut found = wanted
         .into_iter()
         .map(|(label, port, host)| {
             let anvil = port.and_then(|p| {
@@ -802,7 +802,34 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
                 anvil,
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    // Services attached to this app in Anvil that its .env doesn't mention (yet).
+    for id in ids {
+        let attached = cfg.services[&id].apps.contains(&site.name);
+        if !attached
+            || found
+                .iter()
+                .any(|u| u.anvil.as_deref() == Some(id.as_str()))
+        {
+            continue;
+        }
+        let proc = svc
+            .pid(&id)
+            .and_then(|pid| table.iter().find(|p| p.pid == pid));
+        found.push(ServiceUse {
+            label: services::name(services::kind_of(cfg, &id).unwrap_or("redis")).into(),
+            port: Some(services::port(cfg, &id)),
+            host: None,
+            source: Source::Anvil,
+            detail: Some(id.clone()),
+            running: svc.running(&id),
+            memory: proc.map(|p| p.rss),
+            cpu: proc.map(|p| p.cpu),
+            data_bytes: data_sizes.get(&home().join("data").join(&id)).copied(),
+            anvil: Some(id),
+        });
+    }
+    found
 }
 
 /// Anvil's own footprint: installed versions, service data, caches and logs.

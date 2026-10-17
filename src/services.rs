@@ -68,7 +68,7 @@ pub struct ServiceInfo {
     pub suggested_web_port: Option<u16>,
 }
 
-fn name(id: &str) -> &'static str {
+pub fn name(id: &str) -> &'static str {
     match id {
         "mysql" => "MySQL",
         "postgres" => "PostgreSQL",
