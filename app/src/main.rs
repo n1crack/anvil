@@ -316,6 +316,86 @@ async fn clean(handle: AppHandle, site: String, path: String) -> Res<u64> {
     .map_err(|e| e.to_string())?
 }
 
+/// Run `f` off the main thread with the app named `site`.
+async fn with_site<T: Send + 'static>(
+    site: String,
+    f: impl FnOnce(Site) -> anyhow::Result<T> + Send + 'static,
+) -> Res<T> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = anvil::load().map_err(err)?;
+        let s = anvil::sites(&cfg)
+            .into_iter()
+            .find(|s| s.name == site)
+            .ok_or_else(|| format!("No app named {site}"))?;
+        f(s).map_err(err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A log path, only if it is one of the app's own sources.
+fn log_path(s: &Site, source: &str) -> anyhow::Result<std::path::PathBuf> {
+    Ok(std::path::PathBuf::from(anvil::logs::find(s, source)?.path))
+}
+
+#[tauri::command]
+async fn log_sources(site: String) -> Res<Vec<anvil::logs::LogSource>> {
+    with_site(site, |s| Ok(anvil::logs::sources(&s))).await
+}
+
+#[tauri::command]
+async fn log_read(site: String, source: String, before: Option<u64>) -> Res<anvil::logs::Page> {
+    with_site(site, move |s| {
+        anvil::logs::read(&log_path(&s, &source)?, before, anvil::logs::PAGE)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn log_tail(site: String, source: String, from: u64) -> Res<anvil::logs::Page> {
+    with_site(site, move |s| {
+        anvil::logs::tail(&log_path(&s, &source)?, from)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn log_search(
+    site: String,
+    source: String,
+    query: String,
+    level: Option<String>,
+    before: Option<u64>,
+) -> Res<anvil::logs::Page> {
+    with_site(site, move |s| {
+        anvil::logs::search(
+            &log_path(&s, &source)?,
+            &query,
+            level.as_deref(),
+            before,
+            500,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn log_clear(site: String, source: String) -> Res<()> {
+    with_site(site, move |s| anvil::logs::clear(&s, &source)).await
+}
+
+#[tauri::command]
+async fn log_open(site: String, source: String) -> Res<()> {
+    with_site(site, move |s| {
+        anvil::run(
+            Command::new("open")
+                .args(["-a", "Console"])
+                .arg(log_path(&s, &source)?),
+        )
+    })
+    .await
+}
+
 #[derive(Serialize)]
 struct AnvilStorage {
     total: u64,
@@ -1421,6 +1501,12 @@ fn main() {
             open_log,
             resources,
             clean,
+            log_sources,
+            log_read,
+            log_tail,
+            log_search,
+            log_clear,
+            log_open,
             storage_anvil,
             storage_apps,
             clean_anvil,
