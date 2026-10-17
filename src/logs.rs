@@ -545,6 +545,7 @@ mod tests {
             source: "package.json",
             server: true,
             port: None,
+            ..Default::default()
         };
         let (id, path) = process_log("shop", &p);
         assert_eq!(id, "proc:docs-dev");

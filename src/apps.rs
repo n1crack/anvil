@@ -870,6 +870,7 @@ mod tests {
             source: ".anvil.toml",
             server: false,
             port: None,
+            ..Default::default()
         }
     }
 

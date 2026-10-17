@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Default)]
 pub struct Process {
     /// Key and file-name part (`process_id` of the name); `name` is what the UI shows.
     pub id: String,
@@ -19,6 +19,71 @@ pub struct Process {
     pub server: bool,
     /// The port a package.json server row is told to listen on (`$PORT`) and is proxied from.
     pub port: Option<u16>,
+    /// Started together with Anvil.
+    pub autostart: bool,
+    /// The command was overridden in the app's settings.
+    pub edited: bool,
+    /// A package.json command script the user pinned as a row.
+    pub pinned: bool,
+}
+
+/// An edit of one process's settings; `None` leaves a field as it is.
+#[derive(Default, Debug)]
+pub struct ProcessChange {
+    /// `Some(None)` goes back to the detected command.
+    pub command: Option<Option<String>>,
+    pub autostart: Option<bool>,
+    pub hidden: Option<bool>,
+    pub pinned: Option<bool>,
+}
+
+/// Merge `change` into the site's settings for process `id`; an entry back at its
+/// defaults is dropped. The app's own row (`""`) lives in `SiteConfig.command` instead.
+pub fn apply_process_change(
+    site: &mut crate::SiteConfig,
+    id: &str,
+    change: ProcessChange,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(!id.is_empty(), "the app's own row has no process settings");
+    let mut p = site.processes.get(id).cloned().unwrap_or_default();
+    if let Some(command) = change.command {
+        p.command = match command {
+            Some(c) => {
+                anyhow::ensure!(!c.trim().is_empty(), "the command can't be empty");
+                Some(c)
+            }
+            None => None,
+        };
+    }
+    p.autostart = change.autostart.unwrap_or(p.autostart);
+    p.hidden = change.hidden.unwrap_or(p.hidden);
+    p.pinned = change.pinned.unwrap_or(p.pinned);
+    if p == crate::ProcessConfig::default() {
+        site.processes.remove(id);
+    } else {
+        site.processes.insert(id.into(), p);
+    }
+    Ok(())
+}
+
+/// Change one process's settings of `site` and save.
+pub fn set_process(
+    cfg: &mut crate::Config,
+    site: &str,
+    id: &str,
+    change: ProcessChange,
+) -> anyhow::Result<()> {
+    apply_process_change(cfg.sites.entry(site.into()).or_default(), id, change)?;
+    crate::save(cfg)
+}
+
+/// Ids of the processes hidden in the app's settings, so they can be brought back.
+pub fn hidden(site: &crate::SiteConfig) -> Vec<String> {
+    site.processes
+        .iter()
+        .filter(|(_, p)| p.hidden)
+        .map(|(id, _)| id.clone())
+        .collect()
 }
 
 /// An extra dev server of a non-PHP app, answering at `host`.
@@ -44,11 +109,8 @@ pub fn project_file_error(site: &Site) -> Option<String> {
 
 /// An app's processes: `.anvil.toml`'s by name, a dev script's in its order.
 pub fn detect(site: &Site) -> Vec<Process> {
-    // Only non-PHP apps need the config (for their rows' ports); no config, no rows.
-    let cfg = (!apps::is_php(&site.kind))
-        .then(|| crate::load().ok())
-        .flatten();
-    detect_with(site, cfg.as_ref())
+    // The config gives non-PHP apps their rows' ports (no config, no rows) and every app its settings.
+    detect_with(site, crate::load().ok().as_ref())
 }
 
 /// `detect` with a config already loaded.
@@ -57,11 +119,78 @@ pub fn detect_with(site: &Site, cfg: Option<&crate::Config>) -> Vec<Process> {
         .join("php")
         .join(site.php.as_deref().unwrap_or_default())
         .join("php");
-    let cfg = cfg.filter(|_| !apps::is_php(&site.kind));
     detect_in(site, &php, &home().join("cache"), cfg)
 }
 
 fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>) -> Vec<Process> {
+    apply_settings(site, cfg, detect_base(site, php, cache, cfg))
+}
+
+/// The app's per-process settings applied: hidden rows dropped, commands replaced,
+/// autostart copied, and pinned package.json commands added as rows.
+fn apply_settings(
+    site: &Site,
+    cfg: Option<&crate::Config>,
+    mut procs: Vec<Process>,
+) -> Vec<Process> {
+    let Some(set) = cfg
+        .and_then(|c| c.sites.get(&site.name))
+        .map(|s| &s.processes)
+        .filter(|p| !p.is_empty())
+    else {
+        return procs;
+    };
+    let pinned = |id: &str| set.get(id).is_some_and(|p| p.pinned);
+    let extra: Vec<Process> = pinned_scripts(&site.path, &pinned)
+        .into_iter()
+        .map(|(p, _)| p)
+        .filter(|p| !procs.iter().any(|d| d.id == p.id))
+        .collect();
+    procs.extend(extra);
+    procs.retain(|p| !set.get(&p.id).is_some_and(|c| c.hidden));
+    for p in &mut procs {
+        if let Some(c) = set.get(&p.id) {
+            p.autostart = c.autostart;
+            p.pinned = c.pinned;
+            if let Some(command) = &c.command {
+                p.command = command.clone();
+                p.edited = true;
+            }
+        }
+    }
+    procs
+}
+
+/// The package.json command scripts `keep` accepts, as rows in file order, each with
+/// whether the script pins its own port.
+fn pinned_scripts(dir: &Path, keep: &dyn Fn(&str) -> bool) -> Vec<(Process, bool)> {
+    let json: serde_json::Value = fs::read_to_string(dir.join("package.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let empty = serde_json::Map::new();
+    let scripts = json["scripts"].as_object().unwrap_or(&empty);
+    let commands = package_scripts(dir).1;
+    scripts
+        .iter()
+        .filter(|(n, _)| commands.contains(n) && keep(&process_id(n)))
+        .filter_map(|(n, c)| Some((n, c.as_str()?)))
+        .map(|(name, command)| {
+            let p = Process {
+                id: process_id(name),
+                name: name.clone(),
+                command: start_command(name, command, scripts),
+                source: "package.json",
+                server: is_server_script(name, command),
+                ..Default::default()
+            };
+            (p, pin_flags(command).is_some())
+        })
+        .collect()
+}
+
+fn detect_base(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>) -> Vec<Process> {
+    let cfg = cfg.filter(|_| !apps::is_php(&site.kind));
     let own = fs::read_to_string(site.path.join(".anvil.toml"))
         .ok()
         .and_then(|t| toml::from_str::<ProjectFile>(&t).ok());
@@ -77,6 +206,7 @@ fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>)
                 source: ".anvil.toml",
                 server: false,
                 port: None,
+                ..Default::default()
             })
             .collect();
     }
@@ -97,6 +227,7 @@ fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>)
                 source: "artisan dev",
                 server: false,
                 port: None,
+                ..Default::default()
             })
             .collect();
     }
@@ -125,6 +256,7 @@ fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>)
             source: "composer.json",
             server: false,
             port: None,
+            ..Default::default()
         })
         .collect();
     if !split.is_empty() {
@@ -139,6 +271,7 @@ fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>)
             source: "package.json",
             server: false,
             port: None,
+            ..Default::default()
         }];
     }
     vec![]
@@ -284,10 +417,21 @@ fn rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
         taken.extend(crate::services::web_port(cfg, &id));
     }
     let mut prefixes: Vec<String> = vec![];
-    package_scripts(&site.path)
-        .0
+    // Pinned command scripts that pin their own port are rows like the servers.
+    let pinned = |id: &str| {
+        cfg.sites
+            .get(&site.name)
+            .is_some_and(|s| s.processes.get(id).is_some_and(|p| p.pinned))
+    };
+    let mut procs = package_scripts(&site.path).0;
+    procs.retain(|p| p.name != "dev");
+    procs.extend(
+        pinned_scripts(&site.path, &pinned)
+            .into_iter()
+            .filter_map(|(p, pins)| pins.then_some(p)),
+    );
+    procs
         .into_iter()
-        .filter(|p| p.name != "dev")
         .map(|mut p| {
             // ponytail: ports of other apps' rows aren't known here; the 4000-wide hash makes a clash rare.
             let port = apps::hashed_port(&format!("{}@{}", site.name, p.id), 45000, &taken, cfg);
@@ -452,6 +596,7 @@ pub fn package_scripts(dir: &Path) -> (Vec<Process>, Vec<String>) {
                 source: "package.json",
                 server: true,
                 port: None,
+                ..Default::default()
             });
         } else {
             commands.push(name.clone());
@@ -1133,6 +1278,128 @@ echo '{DEV_JSON}'
         fs::remove_dir_all(&s.path).unwrap();
     }
 
+    fn settings(cfg: &mut crate::Config, site: &str, id: &str, change: ProcessChange) {
+        apply_process_change(cfg.sites.entry(site.into()).or_default(), id, change).unwrap();
+    }
+
+    #[test]
+    fn process_settings_shape_the_rows() {
+        // A Laravel app: hide `logs`, edit `queue`, autostart `vite`.
+        let (dir, php) = fake_php("set", &format!("echo '{DEV_JSON}'"));
+        let cache = dir.parent().unwrap().join("cache");
+        let l = site(&dir, "laravel");
+        let mut cfg = crate::Config::default();
+        let name = |p: &Process| p.name.clone();
+        settings(
+            &mut cfg,
+            "shop",
+            "logs",
+            ProcessChange {
+                hidden: Some(true),
+                ..Default::default()
+            },
+        );
+        settings(
+            &mut cfg,
+            "shop",
+            "queue",
+            ProcessChange {
+                command: Some(Some("php artisan queue:work".into())),
+                ..Default::default()
+            },
+        );
+        settings(
+            &mut cfg,
+            "shop",
+            "vite",
+            ProcessChange {
+                autostart: Some(true),
+                ..Default::default()
+            },
+        );
+        let p = detect_in(&l, &php, &cache, Some(&cfg));
+        assert_eq!(p.iter().map(name).collect::<Vec<_>>(), ["queue", "vite"]);
+        assert_eq!(p[0].command, "php artisan queue:work");
+        assert!(p[0].edited && !p[0].autostart);
+        assert!(p[1].autostart && !p[1].edited);
+        assert_eq!(hidden(&cfg.sites["shop"]), ["logs"]);
+        // Resetting the command and unhiding brings the detected row back.
+        let reset = ProcessChange {
+            command: Some(None),
+            hidden: Some(false),
+            ..Default::default()
+        };
+        settings(&mut cfg, "shop", "queue", reset);
+        settings(
+            &mut cfg,
+            "shop",
+            "logs",
+            ProcessChange {
+                hidden: Some(false),
+                ..Default::default()
+            },
+        );
+        let p = detect_in(&l, &php, &cache, Some(&cfg));
+        assert_eq!(p.len(), 3);
+        assert!(!p[0].edited);
+        // An entry back at its defaults is removed.
+        assert!(!cfg.sites["shop"].processes.contains_key("logs"));
+        assert!(!cfg.sites["shop"].processes.contains_key("queue"));
+        fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+
+        // A pinned command script becomes a row after the detected ones.
+        let pkg = r#"{"dev":"vite","build-only":"vite build","docs:dev":"run-s build-only docs:serve","docs:serve":"vitepress dev docs","docs:build":"npm run build && vitepress build docs","lint":"oxlint"}"#;
+        let s = vite_site("pin", "vuefinder", pkg);
+        let mut cfg = crate::Config::default();
+        let pin = ProcessChange {
+            pinned: Some(true),
+            ..Default::default()
+        };
+        settings(&mut cfg, "vuefinder", "docs-serve", pin);
+        let pin = ProcessChange {
+            pinned: Some(true),
+            ..Default::default()
+        };
+        settings(&mut cfg, "vuefinder", "lint", pin);
+        let pin = ProcessChange {
+            pinned: Some(true),
+            ..Default::default()
+        };
+        settings(&mut cfg, "vuefinder", "gone", pin);
+        let p = detect_in(&s, Path::new("php"), Path::new("cache"), Some(&cfg));
+        let ids: Vec<_> = p.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["docs-dev", "docs-serve", "lint"]);
+        let serve = &p[1];
+        assert!(serve.pinned && !p[0].pinned);
+        assert_eq!((serve.source, serve.server), ("package.json", false));
+        assert_eq!(
+            serve.command,
+            "npm run docs:serve -- --port $PORT --strictPort --host 127.0.0.1"
+        );
+        assert!(serve.port.is_some());
+        assert!(address(&cfg, &s, "docs-serve").is_some());
+        // A command that doesn't serve has no port or address.
+        assert_eq!((p[2].command.as_str(), p[2].port), ("npm run lint", None));
+        assert!(address(&cfg, &s, "lint").is_none());
+        fs::remove_dir_all(&s.path).unwrap();
+
+        // Validation: no empty command, no id for the app's own row.
+        let mut sc = crate::SiteConfig::default();
+        for command in ["", "  "] {
+            let c = ProcessChange {
+                command: Some(Some(command.into())),
+                ..Default::default()
+            };
+            assert!(apply_process_change(&mut sc, "queue", c).is_err());
+        }
+        let c = ProcessChange {
+            autostart: Some(true),
+            ..Default::default()
+        };
+        assert!(apply_process_change(&mut sc, "", c).is_err());
+        assert!(sc.processes.is_empty());
+    }
+
     #[test]
     fn server_rows_get_port_in_env() {
         let mut p = Process {
@@ -1142,6 +1409,7 @@ echo '{DEV_JSON}'
             source: "package.json",
             server: true,
             port: Some(45001),
+            ..Default::default()
         };
         let site = site(Path::new("/s"), "vite");
         let env = apps::process_env(&site, &p, "test");

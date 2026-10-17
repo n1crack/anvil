@@ -108,6 +108,26 @@ pub struct SiteConfig {
     /// HTTPS on or off; unset follows `Config::https_default`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub https: Option<bool>,
+    /// Per-process settings of the app's other processes, by process id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub processes: BTreeMap<String, ProcessConfig>,
+}
+
+/// What the user changed about one process of an app (see `processes::set_process`).
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub struct ProcessConfig {
+    /// Replaces the detected command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Start with Anvil.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub autostart: bool,
+    /// Not listed among the app's processes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+    /// A package.json command script shown as a row.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
 }
 
 impl Default for Config {
