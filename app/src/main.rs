@@ -2410,6 +2410,18 @@ fn app_icon(name: String) -> Res<Option<String>> {
     Ok(url)
 }
 
+/// Every window closes; Anvil stays in the menu bar.
+fn hide_windows(handle: &AppHandle) {
+    for w in handle.webview_windows().values() {
+        if w.label() == "main" {
+            let _ = w.hide();
+        } else {
+            let _ = w.close();
+        }
+    }
+    update_dock(handle);
+}
+
 fn show(handle: &AppHandle) {
     if let Some(w) = handle.get_webview_window("main") {
         let _ = w.show();
@@ -2441,7 +2453,18 @@ fn app_menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .hide_others()
         .show_all()
         .separator()
-        .quit()
+        // ⌘Q closes the windows only: apps, processes and services keep running in
+        // the menu bar. Quitting for real (which stops them) is a separate item.
+        .item(&item(
+            "close_all",
+            "Close Anvil Windows",
+            Some("CmdOrCtrl+Q"),
+        )?)
+        .item(&item(
+            "quit_all",
+            "Quit Anvil and Stop Everything",
+            Some("CmdOrCtrl+Alt+Q"),
+        )?)
         .build()?;
     let file = SubmenuBuilder::new(handle, "File")
         .item(&item("new", "New…", Some("CmdOrCtrl+N"))?)
@@ -2509,8 +2532,11 @@ fn on_app_menu(handle: &AppHandle, id: &str) {
     let Some(action) = id.strip_prefix("m:") else {
         return;
     };
-    if action == "settings" {
-        return open_settings(handle);
+    match action {
+        "settings" => return open_settings(handle),
+        "close_all" => return hide_windows(handle),
+        "quit_all" => return handle.exit(0),
+        _ => {}
     }
     show(handle);
     if let Some(w) = handle.get_webview_window("main") {
@@ -2773,6 +2799,14 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to build Anvil")
         .run(|handle, e| match e {
+            // macOS asking Anvil to quit (Dock, a logout aside) without Anvil choosing to:
+            // keep running in the menu bar so nothing the user started stops.
+            RunEvent::ExitRequested {
+                code: None, api, ..
+            } => {
+                api.prevent_exit();
+                hide_windows(handle);
+            }
             RunEvent::Exit => {
                 let app = handle.state::<App>();
                 *app.apps.lock().unwrap() = Default::default();
