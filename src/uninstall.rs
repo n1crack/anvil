@@ -324,14 +324,22 @@ fn apply(steps: &[Step]) {
             Step::Authority(sha1) => run(Command::new("security")
                 .args(["delete-certificate", "-Z", sha1, "-t"])
                 .arg(login_keychain())),
-            Step::SystemAuthority(sha1) => run(Command::new("sudo").args([
-                "security",
-                "delete-certificate",
-                "-Z",
-                sha1,
-                "-t",
-                SYSTEM_KEYCHAIN,
-            ])),
+            Step::SystemAuthority(sha1) => {
+                // The admin-domain trust setting outlives the certificate unless it is
+                // removed first; the root file is still in ~/.anvil at this point.
+                let root = home().join("data/caddy/pki/authorities/local/root.crt");
+                let _ = run(Command::new("sudo")
+                    .args(["security", "remove-trusted-cert", "-d"])
+                    .arg(&root));
+                run(Command::new("sudo").args([
+                    "security",
+                    "delete-certificate",
+                    "-Z",
+                    sha1,
+                    "-t",
+                    SYSTEM_KEYCHAIN,
+                ]))
+            }
             Step::PathBlock(p) => shims::remove_path_block(p),
             Step::Resolver(p) => run(Command::new("sudo").arg("rm").arg("-f").arg(p)),
             Step::Ports(p) => run(Command::new("sudo").args([
