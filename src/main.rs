@@ -694,7 +694,8 @@ fn run() -> Result<()> {
             }
             let parent = dir_or_cwd(Some(parent))?;
             println!("Creating {} ({})…", bold(&name), dim(apps::label(&kind)));
-            let path = create::create(&kind, &name, &parent, cfg.php.as_deref())?;
+            let opts = create::resolve(&kind, &cfg, &Default::default())?;
+            let path = create::create(&kind, &name, &parent, &opts)?;
             // Outside a parked folder the new app needs a link to get its address.
             if !cfg.paths.contains(&parent) {
                 link(&mut cfg, &name, path.clone())?;
