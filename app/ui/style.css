@@ -1522,9 +1522,6 @@ kbd {
 .pkg-chips .chip { gap: 4px; padding: 2px 9px; color: var(--muted); }
 .pkg-chips .chip b { font-weight: 500; color: var(--text); }
 
-.pkg-head { gap: 12px; }
-.pkg-head .muted { font-size: 12px; }
-.pkg-head .clean-all { flex: none; }
 
 .pkg-tools {
   display: flex;
@@ -1544,8 +1541,6 @@ kbd {
 }
 
 .pkg-tools input::placeholder { color: var(--muted); }
-.pkg-modes { margin: 0; flex: none; }
-.pkg-modes button { padding: 0 10px; }
 
 .pkg-list .row { min-height: 36px; padding: 6px 14px; }
 .pkg-list dt { flex-direction: row; align-items: baseline; gap: 8px; }
@@ -1566,14 +1561,6 @@ kbd {
 .pkg-new.minor,
 .pkg-new.patch { background: var(--steel-raised); color: var(--muted); }
 
-.pkg-more {
-  margin-top: 6px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--heat-text);
-  font-size: 12px;
-}
 
 .pkg-none { margin: 4px 0; }
 
@@ -1667,3 +1654,46 @@ kbd {
   color: inherit;
   font-weight: 600;
 }
+
+.git-btn {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}
+
+.git-btn:hover { border-color: var(--cold); }
+
+/* Packages: folded development dependencies and scripts. */
+.pkg-check {
+  flex: none;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}
+
+.pkg-fold { max-width: 640px; margin-top: 8px; }
+
+.pkg-fold summary {
+  width: fit-content;
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: default;
+  list-style: none;
+}
+
+.pkg-fold summary::before {
+  content: "›";
+  display: inline-block;
+  width: 12px;
+  transition: transform 0.15s ease;
+}
+
+.pkg-fold[open] summary::before { transform: rotate(90deg); }
+.pkg-fold summary:hover { color: var(--text); }
+.pkg-fold summary::-webkit-details-marker { display: none; }
+.pkg-fold > .group { margin-top: 4px; }

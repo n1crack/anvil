@@ -23,29 +23,16 @@ function commitAgo(secs) {
 
 function drawGit(name) {
   const root = $("#site");
-  const overview = $('[data-panel="overview"]', root);
-  if (!overview) return;
+  const panel = $('[data-panel="git"]', root);
+  if (!panel) return;
   const g = gitCache.get(name);
   const repo = g && !g.error;
-
-  let btn = $(".git-btn", root);
-  if (!btn) {
-    btn = el("button", "git-btn");
-    btn.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 2.5-3 2.5-6 4"/></svg><span></span>`;
-    btn.onclick = () => open("git");
-    $(".editor-btn", root).after(btn);
-  }
-  btn.hidden = !repo || !snap.git_client;
-  btn.title = `Open in ${snap.git_client} (⌘G)`;
-  $("span", btn).textContent = snap.git_client;
-
-  $(".git", overview)?.remove();
-  if (!g) return;
-  const box = el("div", "git");
-  if (g.error) {
-    box.append(el("h3", "res-sub", "Git"), el("p", "error", g.error));
-    return overview.append(box);
-  }
+  // The tab only exists for repositories.
+  const tabBtn = $('.tabs [data-tab="git"]', root);
+  // Hidden until git answers; only a folder known not to be a repository leaves the tab.
+  tabBtn.hidden = !repo;
+  if (g && !repo && tab === "git") showTab(root, "overview");
+  panel.replaceChildren();
   if (!repo) return;
 
   const list = el("dl", "group");
@@ -56,7 +43,6 @@ function drawGit(name) {
     r.append(el("dt", null, label), dd);
     list.append(r);
   };
-
   let branch = g.detached ? `Detached at ${g.branch}` : g.branch;
   if (g.ahead) branch += ` ↑${g.ahead}`;
   if (g.behind) branch += ` ↓${g.behind}`;
@@ -77,8 +63,17 @@ function drawGit(name) {
     };
     row("Remote", a);
   }
-  box.append(el("h3", "res-sub", "Git"), list);
-  overview.append(box);
+  panel.append(list);
+
+  // The git app lives here, not among the buttons at the top.
+  if (snap.git_client) {
+    const actions = el("div", "below");
+    const btn = el("button", "git-btn", `Open in ${snap.git_client}`);
+    btn.title = "⌘G";
+    btn.onclick = () => open("git");
+    actions.append(btn);
+    panel.append(actions);
+  }
 }
 
 /** Called by renderSite; reads git again when another app is shown. */
