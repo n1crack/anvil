@@ -372,21 +372,115 @@ fn rules_for(site: &Site) -> Vec<Rule> {
 }
 
 /// Sizes in bytes for several paths with one `du` call (missing paths are skipped).
+/// Allocated size of each path, like `du -sk` but in one parallel pass: every
+/// folder is a job on a shared queue, and each file's blocks are added to the
+/// counters of all requested paths above it. Nested paths cost nothing extra.
+/// Symlinks aren't followed, and a hard-linked file counts once per requested
+/// path, so every size equals `du -sk <path>` run on its own.
 fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
-    let existing: Vec<&PathBuf> = paths.iter().filter(|p| p.exists()).collect();
-    if existing.is_empty() {
-        return BTreeMap::new();
-    }
-    let out = Command::new("du").arg("-sk").args(&existing).output();
-    let Ok(out) = out else {
-        return BTreeMap::new();
+    use std::collections::HashSet;
+    use std::os::unix::fs::MetadataExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Condvar, Mutex};
+
+    let wanted: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| p.symlink_metadata().is_ok())
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let lookup: std::collections::HashMap<&Path, usize> = wanted
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.as_path(), i))
+        .collect();
+    let index = |p: &Path| lookup.get(p).copied();
+    let counters: Vec<AtomicU64> = wanted.iter().map(|_| AtomicU64::new(0)).collect();
+    // Hard links seen per requested path, split into shards to keep the locks short.
+    let linked: Vec<Mutex<HashSet<(usize, u64, u64)>>> =
+        (0..64).map(|_| Mutex::new(HashSet::new())).collect();
+    let add = |targets: &[usize], m: &std::fs::Metadata| {
+        let n = m.blocks() * 512;
+        let shared = !m.is_dir() && m.nlink() > 1;
+        for &t in targets {
+            let key = (t, m.dev(), m.ino());
+            if shared
+                && !linked[(m.ino() as usize ^ t) % 64]
+                    .lock()
+                    .unwrap()
+                    .insert(key)
+            {
+                continue;
+            }
+            counters[t].fetch_add(n, Ordering::Relaxed);
+        }
     };
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| {
-            let (kb, path) = l.split_once('\t')?;
-            Some((PathBuf::from(path), kb.trim().parse::<u64>().ok()? * 1024))
-        })
+
+    // Roots are requested paths with no requested ancestor; the rest are found on the way.
+    type Job = (PathBuf, Arc<Vec<usize>>);
+    let mut jobs: Vec<Job> = vec![];
+    for (i, p) in wanted.iter().enumerate() {
+        if wanted.iter().any(|o| o != p && p.starts_with(o)) {
+            continue;
+        }
+        let Ok(m) = p.symlink_metadata() else {
+            continue;
+        };
+        add(&[i], &m);
+        if m.is_dir() {
+            jobs.push((p.clone(), Arc::new(vec![i])));
+        }
+    }
+
+    // Workers take folders off the queue until it is empty and nobody is still listing one.
+    let queue = (Mutex::new((jobs, 0usize)), Condvar::new());
+    let threads = std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .min(16);
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                loop {
+                    let (dir, targets) = {
+                        let mut q = queue.0.lock().unwrap();
+                        loop {
+                            if let Some(job) = q.0.pop() {
+                                q.1 += 1;
+                                break job;
+                            }
+                            if q.1 == 0 {
+                                queue.1.notify_all();
+                                return;
+                            }
+                            q = queue.1.wait(q).unwrap();
+                        }
+                    };
+                    let mut found = vec![];
+                    for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                        let Ok(m) = entry.metadata() else { continue };
+                        let path = entry.path();
+                        let mut t = targets.clone();
+                        if let Some(i) = index(&path) {
+                            Arc::make_mut(&mut t).push(i);
+                        }
+                        add(&t, &m);
+                        if m.is_dir() {
+                            found.push((path, t));
+                        }
+                    }
+                    let mut q = queue.0.lock().unwrap();
+                    q.0.extend(found);
+                    q.1 -= 1;
+                    queue.1.notify_all();
+                }
+            });
+        }
+    });
+    wanted
+        .into_iter()
+        .zip(counters)
+        .map(|(p, c)| (p, c.into_inner()))
         .collect()
 }
 
@@ -1333,5 +1427,40 @@ mod tests {
         assert_eq!(d.get(&3307).map(String::as_str), Some("shop-db"));
         assert_eq!(d.get(&6379).map(String::as_str), Some("cache"));
         assert_eq!(d.len(), 2);
+    }
+
+    #[test]
+    fn du_matches_the_system_du() {
+        let root = std::env::temp_dir().join(format!("anvil-du-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let deep = root.join("node_modules/a/b");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(deep.join("big"), vec![1u8; 300_000]).unwrap();
+        std::fs::write(root.join("src/main.rs"), vec![2u8; 5_000]).unwrap();
+        // A hard link counts once, a symlink isn't followed.
+        std::fs::hard_link(deep.join("big"), root.join("src/big-link")).unwrap();
+        std::os::unix::fs::symlink("/usr", root.join("usr-link")).unwrap();
+
+        let paths = [
+            root.clone(),
+            root.join("node_modules"),
+            root.join("node_modules/a/b"),
+        ];
+        let ours = du(&paths);
+        let out = Command::new("du").arg("-sk").args(&paths).output().unwrap();
+        // The system du counts a hard link once per run, so ask it about each path alone.
+        for p in &paths {
+            let out = Command::new("du").arg("-sk").arg(p).output().unwrap();
+            let kb: u64 = String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert_eq!(ours[p], kb * 1024, "{}", p.display());
+        }
+        assert!(out.status.success());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
