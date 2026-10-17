@@ -4,6 +4,8 @@ const $ = (sel, root = document) => root.querySelector(sel);
 let snap = null;
 let selected = localStorage.getItem("selected");
 let filter = "";
+// The sidebar shows applications or services; services.js draws the latter.
+let mode = localStorage.getItem("mode") === "services" ? "services" : "apps";
 
 const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 const url = (s) => `https://${s.name}.${snap.tld}:${snap.https_port}`;
@@ -32,7 +34,10 @@ function toast(msg) {
   toastTimer = setTimeout(() => (t.hidden = true), 2400);
 }
 
-window.refresh = () => call("state");
+window.refresh = () => {
+  call("state");
+  window.loadServices?.();
+};
 
 function render() {
   showError(snap.error);
@@ -42,8 +47,17 @@ function render() {
   $("#power-label").textContent = snap.running ? "Serving" : "Stopped";
 
   if (!snap.sites.some((s) => s.name === selected)) selected = snap.sites[0]?.name;
-  renderList();
-  renderSite();
+  renderMain();
+}
+
+function renderMain() {
+  if (mode === "services") {
+    renderServiceList();
+    renderService();
+  } else {
+    renderList();
+    renderSite();
+  }
 }
 
 const icons = new Map(); // site name -> data URL or null
@@ -753,6 +767,7 @@ $("#new-form").onsubmit = async (e) => {
 };
 
 $("#add").onclick = async () => {
+  if (mode === "services") return openAddService();
   const pick = (title) => window.__TAURI__.dialog.open({ directory: true, title });
   const menu = await M.Menu.new({
     items: await Promise.all([
@@ -802,11 +817,13 @@ document.addEventListener("contextmenu", (e) => {
 
 $("#search").oninput = (e) => {
   filter = e.target.value.trim();
-  renderList();
+  if (mode === "services") renderServiceList();
+  else renderList();
 };
 
 // Arrow keys move through the list like a native outline: up/down to move, left/right to fold.
 $("#list").onkeydown = (e) => {
+  if (mode === "services") return serviceKeys(e);
   const cur = $(`.item[data-name="${CSS.escape(selected ?? "")}"]`);
   if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && cur?.hasAttribute("aria-expanded")) {
     e.preventDefault();
@@ -836,7 +853,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   const action = { o: "browser", e: "editor", t: "terminal" }[e.key];
-  if (action && selected && (action !== "editor" || snap.editor)) {
+  if (action && mode === "apps" && selected && (action !== "editor" || snap.editor)) {
     e.preventDefault();
     open(action);
     return;
@@ -848,7 +865,8 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "n") {
     e.preventDefault();
-    openNewApp();
+    if (mode === "services") openAddService();
+    else openNewApp();
     return;
   }
   if (e.metaKey && e.key === ",") {

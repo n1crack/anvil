@@ -1142,3 +1142,120 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* ---------- Applications | Services switch and service details ---------- */
+
+.modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  margin: 0 16px 8px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--steel-hover);
+}
+
+.modes button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.modes button:hover { color: var(--text); }
+
+.modes button[aria-selected="true"] {
+  background: var(--steel-raised);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+/* Running services: a small heat-coloured count, quiet when zero. */
+.modes .count:not(:empty) {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--heat) 22%, transparent);
+  color: var(--heat-text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Each service kind keeps one hue so a list of many reads at a glance. */
+.svc-mark { font-size: 12px; letter-spacing: -0.02em; }
+.svc-mysql { --hue: #4f8fd6; }
+.svc-postgres { --hue: #7b8fe0; }
+.svc-redis { --hue: #e0574a; }
+.svc-mailpit { --hue: #3fb59a; }
+.mark.svc-mark {
+  background: color-mix(in srgb, var(--hue) 20%, var(--steel-raised));
+  color: color-mix(in srgb, var(--hue) 75%, var(--text));
+}
+
+.item .tag {
+  padding: 1px 6px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.svc-what { font-size: 13px; }
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.chips .chip button {
+  height: 18px;
+  padding: 0 5px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+
+.chips .chip button:hover { color: var(--text); }
+.chips .chip.link { cursor: pointer; color: var(--heat-text); }
+.chips .chip.link:hover { text-decoration: underline; }
+.row .chips input { width: 140px; }
+.chips select { max-width: 220px; }
+
+.env {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 640px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+
+.env pre {
+  flex: 1;
+  margin: 0;
+  overflow-x: auto;
+  font: 12px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.env button,
+.svc-remove,
+.run-error .link {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}
+
+.svc-env-hint { margin: 0 0 8px; }
+.svc-remove { margin-top: 16px; color: var(--heat-text); }
+#svc-port-edit, #svc-web-edit { max-width: 100px; }

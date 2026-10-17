@@ -34,6 +34,12 @@ pub struct ServiceConfig {
     /// Mailpit's web inbox port.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub web_port: Option<u16>,
+    /// Free-form labels, e.g. "queue" or "client-x".
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Applications that use it, by site name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -51,6 +57,11 @@ pub struct ServiceInfo {
     pub installed: bool,
     pub enabled: bool,
     pub running: bool,
+    pub tags: Vec<String>,
+    pub apps: Vec<String>,
+    /// Lines to paste into an app's `.env` to connect.
+    pub env: String,
+    pub log: PathBuf,
     /// Set when the port is taken by another program: the next free one.
     pub suggested_port: Option<u16>,
     /// The same for Mailpit's web inbox port.
@@ -115,7 +126,7 @@ fn dir(id: &str) -> PathBuf {
     home().join("services").join(id)
 }
 
-fn data(id: &str) -> PathBuf {
+pub fn data(id: &str) -> PathBuf {
     home().join("data").join(id)
 }
 
@@ -186,8 +197,31 @@ pub fn kinds(cfg: &Config) -> Vec<Kind> {
         .collect()
 }
 
+const ADJECTIVES: [&str; 24] = [
+    "bold", "bright", "brisk", "calm", "eager", "gentle", "golden", "keen", "lucky", "noble",
+    "proud", "quick", "quiet", "rapid", "sharp", "silver", "solid", "steady", "swift", "tidy",
+    "warm", "wise", "lively", "sturdy",
+];
+const NOUNS: [&str; 24] = [
+    "anvil", "bellows", "blade", "bronze", "chisel", "cinder", "copper", "crucible", "ember",
+    "flint", "forge", "hammer", "ingot", "iron", "kiln", "rivet", "spark", "steel", "tongs",
+    "furnace", "smelter", "nail", "chain", "bolt",
+];
+
+/// A readable name like `redis-swift-ember` that no service has yet.
 fn free_name(cfg: &Config, kind: &str) -> String {
-    std::iter::once(kind.to_string())
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos() as usize ^ d.as_secs() as usize);
+    (0..ADJECTIVES.len() * NOUNS.len())
+        .map(|i| {
+            let n = seed.wrapping_add(i.wrapping_mul(7919));
+            format!(
+                "{kind}-{}-{}",
+                ADJECTIVES[n % ADJECTIVES.len()],
+                NOUNS[(n / ADJECTIVES.len()) % NOUNS.len()]
+            )
+        })
         .chain((2..).map(|i| format!("{kind}-{i}")))
         .find(|n| !cfg.services.contains_key(n))
         .unwrap()
@@ -259,6 +293,7 @@ fn insert(cfg: &mut Config, kind: &str, name: Option<&str>, port: Option<u16>) -
             enabled: false,
             port: Some(port),
             web_port: web,
+            ..Default::default()
         },
     );
     Ok(id)
@@ -387,6 +422,54 @@ pub fn uninstall(id: &str) -> Result<()> {
     fs::remove_dir_all(dir(id)).with_context(|| format!("{} is not installed", name(id)))
 }
 
+/// Replace a service's tags; blanks and duplicates are dropped.
+pub fn set_tags(cfg: &mut Config, id: &str, tags: &[String]) -> Result<()> {
+    let mut clean: Vec<String> = vec![];
+    for t in tags.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+        if t.len() > 30 || t.contains(',') {
+            bail!("Keep tags short and without commas");
+        }
+        if !clean.iter().any(|c| c == t) {
+            clean.push(t.to_string());
+        }
+    }
+    entry(cfg, id)?.tags = clean;
+    save(cfg)
+}
+
+/// Which applications use a service.
+pub fn set_apps(cfg: &mut Config, id: &str, apps: &[String]) -> Result<()> {
+    let mut list: Vec<String> = vec![];
+    for a in apps.iter().filter(|a| !a.is_empty()) {
+        if !list.contains(a) {
+            list.push(a.clone());
+        }
+    }
+    entry(cfg, id)?.apps = list;
+    save(cfg)
+}
+
+fn entry<'a>(cfg: &'a mut Config, id: &str) -> Result<&'a mut ServiceConfig> {
+    cfg.services
+        .get_mut(id)
+        .with_context(|| format!("There's no service called {id}"))
+}
+
+/// What an app puts in `.env` to use this service (Laravel names plus a URL).
+pub fn env_lines(cfg: &Config, id: &str) -> String {
+    let p = port(cfg, id);
+    match kind_of(cfg, id).unwrap_or("redis") {
+        "mysql" => format!(
+            "DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT={p}\nDB_USERNAME=root\nDB_PASSWORD=\nDATABASE_URL=mysql://root@127.0.0.1:{p}/"
+        ),
+        "postgres" => format!(
+            "DB_CONNECTION=pgsql\nDB_HOST=127.0.0.1\nDB_PORT={p}\nDB_USERNAME=postgres\nDB_PASSWORD=\nDATABASE_URL=postgres://postgres@127.0.0.1:{p}/postgres"
+        ),
+        "redis" => format!("REDIS_HOST=127.0.0.1\nREDIS_PORT={p}\nREDIS_URL=redis://127.0.0.1:{p}"),
+        _ => format!("MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT={p}"),
+    }
+}
+
 pub fn set_enabled(cfg: &mut Config, id: &str, enabled: bool) -> Result<()> {
     kind_of(cfg, id)?;
     cfg.services.entry(id.into()).or_default().enabled = enabled;
@@ -500,7 +583,7 @@ fn pid_file(id: &str) -> PathBuf {
     home().join("run").join(format!("{id}.pids"))
 }
 
-fn log_file(id: &str) -> PathBuf {
+pub fn log_file(id: &str) -> PathBuf {
     home().join("log").join(format!("{id}.log"))
 }
 
@@ -614,6 +697,18 @@ impl Services {
                     running,
                     suggested_port: suggest(port),
                     suggested_web_port: web_port.and_then(suggest),
+                    tags: cfg
+                        .services
+                        .get(&id)
+                        .map(|s| s.tags.clone())
+                        .unwrap_or_default(),
+                    apps: cfg
+                        .services
+                        .get(&id)
+                        .map(|s| s.apps.clone())
+                        .unwrap_or_default(),
+                    env: env_lines(cfg, &id),
+                    log: log_file(&id),
                     id,
                 }
             })
@@ -673,11 +768,17 @@ mod tests {
         let mut cfg = Config::default();
         assert!(instances(&cfg).is_empty());
         assert_eq!(
-            insert(&mut cfg, "redis", None, Some(16379)).unwrap(),
+            insert(&mut cfg, "redis", Some("redis"), Some(16379)).unwrap(),
             "redis"
         );
-        let id = insert(&mut cfg, "redis", None, None).unwrap();
-        assert_eq!(id, "redis-2");
+        let id = insert(&mut cfg, "redis", Some("redis-2"), None).unwrap();
+        let auto = insert(&mut cfg, "redis", None, None).unwrap();
+        assert!(
+            auto.starts_with("redis-") && auto.matches('-').count() == 2,
+            "{auto}"
+        );
+        assert!(check_name(&auto).is_ok());
+        cfg.services.remove(&auto);
         assert_eq!(kind_of(&cfg, &id).unwrap(), "redis");
         let p = port(&cfg, &id);
         assert_ne!(p, 16379);

@@ -9,6 +9,10 @@
 <body>
   <aside class="sidebar">
     <div class="titlebar" data-tauri-drag-region></div>
+    <div class="modes" role="tablist" aria-label="Show">
+      <button role="tab" data-mode="apps">Applications</button>
+      <button role="tab" data-mode="services">Services<span id="svc-running" class="count"></span></button>
+    </div>
     <div class="toolbar">
       <label class="search">
         <span class="visually-hidden">Search applications</span>
@@ -177,7 +181,89 @@
     </form>
   </dialog>
 
+  <template id="service-tpl">
+    <header class="site-head">
+      <div class="site-title">
+        <span class="mark big" aria-hidden="true"></span>
+        <div>
+          <h1 class="site-name"></h1>
+          <span class="svc-what muted"></span>
+        </div>
+      </div>
+      <div class="run-box">
+        <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text"></span></span>
+        <button data-svc="start">Start</button>
+        <button data-svc="restart">Restart</button>
+        <button data-svc="stop">Stop</button>
+      </div>
+    </header>
+    <p class="run-error error" hidden></p>
+
+    <div class="quick">
+      <button data-svc-open="inbox" title="Open the Mailpit inbox" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5"/><path d="m2.5 4.5 5.5 4 5.5-4"/></svg>Inbox
+      </button>
+      <button data-svc-open="data" title="Show the data folder in Finder">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>Data
+      </button>
+      <button class="show-log" data-svc-open="log" title="Open the service’s log">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.75 1.75h6l2.5 2.5v10h-8.5z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>Log
+      </button>
+    </div>
+
+    <dl class="group">
+      <div class="row"><dt><label for="svc-port-edit">Port</label></dt><dd><input id="svc-port-edit" inputmode="numeric"></dd></div>
+      <div class="row svc-web" hidden><dt><label for="svc-web-edit">Inbox port</label></dt><dd><input id="svc-web-edit" inputmode="numeric"></dd></div>
+      <div class="row row-top"><dt>Applications</dt><dd class="chips svc-apps"></dd></div>
+      <div class="row row-top"><dt>Tags</dt><dd class="chips svc-tags"></dd></div>
+      <div class="row"><dt>Data</dt><dd class="path svc-data"></dd></div>
+    </dl>
+
+    <h3 class="res-sub">Connect</h3>
+    <p class="muted svc-env-hint">Paste into an application’s <code>.env</code>.</p>
+    <div class="env">
+      <pre class="svc-env"></pre>
+      <button class="svc-copy">Copy</button>
+    </div>
+
+    <div class="below"><button class="svc-remove">Remove Service…</button></div>
+  </template>
+
+  <dialog id="new-service" class="sheet" aria-labelledby="svc-title">
+    <form method="dialog" id="svc-form">
+      <h2 id="svc-title">Add service</h2>
+      <fieldset class="kinds">
+        <legend class="visually-hidden">Service</legend>
+        <div id="svc-kinds" class="kind-grid"></div>
+      </fieldset>
+      <label class="field">
+        <span>Name</span>
+        <input id="svc-name" required autocomplete="off" spellcheck="false">
+        <small id="svc-note"></small>
+      </label>
+      <label class="field">
+        <span>Port</span>
+        <input id="svc-port" required inputmode="numeric">
+      </label>
+      <label class="field">
+        <span>Application</span>
+        <select id="svc-app"></select>
+      </label>
+      <label class="field">
+        <span>Tags</span>
+        <input id="svc-tags" autocomplete="off" spellcheck="false" placeholder="queue, client-x">
+      </label>
+      <p id="svc-error" class="error" hidden></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" id="svc-cancel">Cancel</button>
+        <button type="submit" id="svc-create" class="primary">Add</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script src="app.js"></script>
+  <script src="services.js"></script>
 </body>
 </html>
