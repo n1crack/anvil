@@ -710,10 +710,27 @@ button, select, input { font: inherit; color: inherit; }
 
 .path-open:hover { background: var(--steel-hover); }
 
-/* Processes: dot, name, the newest line, Restart/■/▶; rows open their log. */
-.procs-head { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
+/* Processes: dot, name, address or command, then auto, 🌐, Restart/■/▶ and ⋯;
+ * rows open their output in the console below. First in the Overview. */
+.procs { margin-bottom: 24px; }
+.procs-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .procs-head .res-sub { margin: 0; }
-.proc-actions { display: flex; gap: 6px; }
+.proc-link { padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; }
+.proc-link:hover { color: var(--text); text-decoration: underline; }
+.proc-actions { display: flex; align-items: center; gap: 6px; }
+.proc-actions button:disabled { opacity: 0.4; }
+.proc-tag {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+.proc-edit { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.proc-edit input { flex: 1; min-width: 0; height: 24px; font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
+.proc-edit .error-text { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.proc-edit button,
 .proc-actions button {
   height: 24px;
   min-width: 28px;
@@ -731,7 +748,6 @@ button, select, input { font: inherit; color: inherit; }
   gap: 12px;
   min-height: 40px;
   padding: 6px 14px;
-  cursor: pointer;
 }
 
 .proc:hover { background: var(--steel-hover); }
@@ -777,6 +793,50 @@ button, select, input { font: inherit; color: inherit; }
 .procs .chips .chip:hover { background: var(--steel-hover); }
 
 .proc-last.error-text { color: var(--danger); }
+
+.chip-wrap { display: inline-flex; align-items: center; }
+.chip-pin { visibility: hidden; padding: 0 2px; border: 0; background: none; font-size: 11px; }
+.chip-wrap:hover .chip-pin,
+.chip-pin:focus-visible { visibility: visible; }
+
+/* The console: a terminal's colors on a dark surface, in light mode too. */
+.console {
+  margin: -12px 0 24px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: #121518;
+  color: #d7dce1;
+}
+.console[hidden] { display: none; }
+.console-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+}
+.console-title { flex: 1; overflow: hidden; font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.console .proc-actions button,
+.console .icon-btn { border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.08); color: #e8ebee; }
+.console-out {
+  height: 260px;
+  margin: 0;
+  padding: 8px 14px;
+  overflow: auto;
+  font: 11px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.console-out:empty::before { content: "No output yet"; color: #8d959f; }
+.ansi-b { font-weight: 700; }
+.ansi0 { color: #6e7681; } .ansi1 { color: #ff7b72; } .ansi2 { color: #7ee787; } .ansi3 { color: #e3b341; }
+.ansi4 { color: #79c0ff; } .ansi5 { color: #d2a8ff; } .ansi6 { color: #76e3ea; } .ansi7 { color: #d7dce1; }
+.ansi8 { color: #8b949e; } .ansi9 { color: #ffa198; } .ansi10 { color: #aff5b4; } .ansi11 { color: #f8e3a1; }
+.ansi12 { color: #a5d6ff; } .ansi13 { color: #e2c5ff; } .ansi14 { color: #b3f0ff; } .ansi15 { color: #ffffff; }
 
 .path {
   overflow-wrap: anywhere;

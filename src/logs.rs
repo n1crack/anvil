@@ -196,6 +196,34 @@ pub fn tail(path: &Path, from: u64) -> Result<Page> {
     })
 }
 
+/// A process's output as written, escape codes and all, for a terminal-like view.
+#[derive(Serialize, Debug, Default)]
+pub struct Text {
+    pub text: String,
+    /// Where new output will start; pass as `from` next time.
+    pub end_offset: u64,
+}
+
+/// Output appended since `from`: at most the newest `PAGE`, from a line's start.
+/// A file that shrank (cleared) starts over.
+pub fn tail_text(path: &Path, from: u64) -> Result<Text> {
+    let len = fs::metadata(path)?.len();
+    let from = if from > len { 0 } else { from };
+    let start = from.max(len.saturating_sub(PAGE));
+    let mut f = File::open(path)?;
+    f.seek(SeekFrom::Start(start))?;
+    let mut buf = Vec::new();
+    f.take(len - start).read_to_end(&mut buf)?;
+    if start > from {
+        let line = buf.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
+        buf.drain(..line);
+    }
+    Ok(Text {
+        text: String::from_utf8_lossy(&buf).into_owned(),
+        end_offset: len,
+    })
+}
+
 /// Entries matching `query` (case-insensitive) and a level group, newest first,
 /// scanning backwards from `before` until `limit` matches or `SEARCH_BYTES`.
 pub fn search(
@@ -736,6 +764,23 @@ mod tests {
         let t = tail(&p, end).unwrap();
         assert_eq!(t.entries.len(), 1);
         assert_eq!(t.entries[0].message, "new one");
+        fs::remove_file(p).unwrap();
+    }
+
+    #[test]
+    fn text_keeps_colors_and_starts_on_a_line() {
+        let p = temp("text", "\x1b[32mok\x1b[39m\r\n");
+        let t = tail_text(&p, 0).unwrap();
+        assert_eq!(t.text, "\x1b[32mok\x1b[39m\r\n");
+        assert_eq!(t.end_offset, 14);
+        assert_eq!(tail_text(&p, 14).unwrap().text, "");
+        // Shrunk (cleared): from the start again.
+        assert_eq!(tail_text(&p, 99).unwrap().end_offset, 14);
+        assert_eq!(tail_text(&p, 99).unwrap().text.len(), 14);
+        // More than a page behind: the newest page, from a line's start.
+        let long = format!("{}\nlast\n", "x".repeat(PAGE as usize));
+        fs::write(&p, &long).unwrap();
+        assert_eq!(tail_text(&p, 0).unwrap().text, "last\n");
         fs::remove_file(p).unwrap();
     }
 }

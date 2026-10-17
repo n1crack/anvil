@@ -525,12 +525,9 @@ function renderSite() {
   const link = $(".site-url", root);
   link.textContent = url(s).replace("https://", "");
   link.onclick = (e) => { e.preventDefault(); if (snap.running) open("browser"); };
-  // A stopped server can't answer: the address and Browser look and act off.
+  // A stopped server can't answer: the address looks and acts off.
   link.classList.toggle("off", !snap.running);
-  link.title = snap.running ? "" : "Start Anvil to open this address";
-  const browser = $('[data-open="browser"]', root);
-  browser.disabled = !snap.running;
-  browser.title = snap.running ? "Open in browser (⌘O)" : "Start Anvil to open this address";
+  link.title = snap.running ? "Open in browser (⌘O)" : "Start Anvil to open this address";
 
   const editor = $(".editor-btn", root);
   if (snap.editor) {
@@ -859,21 +856,10 @@ function renderRun(s, root) {
   renderRunSettings(s, root);
 }
 
-/** Only the run box and its error: safe to redraw while the user types elsewhere. */
+/** The run error: safe to redraw while the user types elsewhere. The run box is
+ * the Overview's (processes.js), for every process of the app. */
 function renderRunState(s, root) {
-  const state = snap.app_states[s.name]; // "running" | "starting" | undefined
   const error = snap.app_errors[s.name];
-  $(".run-box", root).hidden = false;
-  $(".run-box .dot", root).className = `dot ${state === "running" ? "on" : state ? "warm" : ""}`;
-  const text = $(".state-text", root);
-  text.textContent = state === "running" ? "Running" : state ? "Starting…" : "Stopped";
-  text.title = state === "running" ? `Port ${s.port}` : state ? "First builds can take a while" : "";
-  $('[data-run="start"]', root).hidden = !!state;
-  $('[data-run="restart"]', root).hidden = !state;
-  $('[data-run="stop"]', root).hidden = !state;
-  for (const b of root.querySelectorAll("[data-run]")) {
-    b.onclick = () => call("app_run", { site: s.name, action: b.dataset.run });
-  }
   const err = $(".run-error", root);
   err.textContent = error ?? "";
   err.hidden = !error;

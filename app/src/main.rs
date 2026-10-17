@@ -1129,6 +1129,15 @@ async fn log_tail(site: String, source: String, from: u64) -> Res<anvil::logs::P
     .await
 }
 
+/// The console's view of a process's output: raw, so colors survive.
+#[tauri::command]
+async fn log_text(site: String, source: String, from: u64) -> Res<anvil::logs::Text> {
+    with_site(site, move |s| {
+        anvil::logs::tail_text(&log_path(&s, &source)?, from)
+    })
+    .await
+}
+
 #[tauri::command]
 async fn log_search(
     site: String,
@@ -2538,6 +2547,7 @@ fn main() {
             log_sources,
             log_read,
             log_tail,
+            log_text,
             log_search,
             log_clear,
             log_open,

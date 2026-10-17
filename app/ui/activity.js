@@ -190,20 +190,6 @@ function select(key) {
 const nameOf = (key) =>
   [...data.web, ...data.apps.flatMap((a) => a.rows), ...data.services].find((r) => r.key === key)?.name ?? key;
 
-/** Terminal output as a terminal would leave it: progress bars redraw a line with \r
- * or \b, colors come as escape codes; neither belongs in plain text. */
-function clean(text) {
-  return text
-    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "")
-    .split("\n")
-    .map((l) => {
-      l = l.slice(l.lastIndexOf("\r", l.length - 2) + 1).replace(/\r$/, "");
-      while (/[^\x08]\x08/.test(l)) l = l.replace(/[^\x08]\x08/, "");
-      return l.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
-    })
-    .join("\n");
-}
-
 const line = (e) => [e.time ? `${e.time} ${e.message}` : e.message, e.context, ...e.trace].filter(Boolean).join("\n");
 
 async function tail() {

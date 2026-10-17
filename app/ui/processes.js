@@ -1,11 +1,15 @@
-/* Processes: an app's queue worker, log tailer, extra dev servers, one-off commands
- * and Docker Compose containers, in the Overview. Each row starts and stops on its
- * own. Shares $, el, invoke, snap, selected, tab, mode, toast and showError with app.js. */
+/* Processes: an app's own server (or the site Anvil serves), queue worker, log tailer,
+ * extra dev servers, one-off commands and Docker Compose containers, first in the
+ * Overview. Each row starts and stops on its own; the header's Start/Stop run them all.
+ * A row or command opens its output in a console below. Shares $, el, invoke, call,
+ * snap, selected, tab, mode, M, render, toast and showError with app.js; clean and
+ * ansi with term.js. */
 
 const procCache = new Map(); // site name -> overview from the backend
 const procLoading = new Set(); // site names with a request on its way
 const procBusy = new Map(); // "site/service" -> "starting…" while Docker works
 const procLogs = new Map(); // "site/service" -> container log text, while shown
+let procEdit = null; // { site, id, value, error } while a row's command is edited
 
 /** Called by renderSite: draw what is known, then ask again. */
 window.renderProcesses = (s) => {
@@ -31,7 +35,7 @@ async function loadProcs(name, cmd = "processes", args = {}) {
 }
 
 /** Docker can take minutes: the rows say what they are doing until it is done.
- * Without a service, the whole project (Start all / Stop all) in compose's order. */
+ * Without a service, the whole project in compose's order. */
 async function containerRun(name, services, action, service) {
   const keys = services.map((s) => `${name}/${s}`);
   const word = { start: "starting…", stop: "stopping…", restart: "restarting…" }[action];
@@ -64,30 +68,151 @@ function procBtn(label, aria, onclick) {
   b.setAttribute("aria-label", aria);
   b.onclick = (e) => {
     e.stopPropagation();
-    onclick();
+    onclick(b);
   };
   return b;
 }
 
-/** One row: dot, name, detail; Restart and ■ when running, ▶ when stopped, Restart when crashed. */
-function procRow({ name, state, detail, error, title, busy, open, run }) {
+/** Below a button, as the other menus. */
+function popup(menu, btn) {
+  const r = btn.getBoundingClientRect();
+  const dpi = window.__TAURI__.dpi;
+  menu.popup(dpi ? new dpi.LogicalPosition(r.left, r.bottom + 4) : undefined);
+}
+
+const setProc = (name, id, change) => loadProcs(name, "set_process", { id, ...change });
+
+/** ⋯ on a row: edit its command, start it with Anvil, reset or remove it. */
+async function procMenu(name, r, btn) {
+  const items = [
+    M.MenuItem.new({
+      text: "Edit command…",
+      action: () => {
+        procEdit = { site: name, id: r.id, value: r.command, error: null };
+        drawProcs(name);
+      },
+    }),
+    M.CheckMenuItem.new({ text: "Start with Anvil", checked: r.autostart, action: () => setProc(name, r.id, { autostart: !r.autostart }) }),
+  ];
+  if (r.edited) items.push(M.MenuItem.new({ text: "Reset command", action: () => setProc(name, r.id, { reset: true }) }));
+  if (!r.main) {
+    items.push(
+      M.PredefinedMenuItem.new({ item: "Separator" }),
+      r.pinned
+        ? M.MenuItem.new({ text: "Unpin", action: () => setProc(name, r.id, { pinned: false }) })
+        : M.MenuItem.new({ text: "Remove from processes", action: () => setProc(name, r.id, { hidden: true }) }),
+    );
+  }
+  popup(await M.Menu.new({ items: await Promise.all(items) }), btn);
+}
+
+/** Hidden rows, to bring back one at a time. */
+async function hiddenMenu(name, hidden, btn) {
+  const items = hidden.map((h) => M.MenuItem.new({ text: h.name, action: () => setProc(name, h.id, { hidden: false }) }));
+  popup(await M.Menu.new({ items: await Promise.all(items) }), btn);
+}
+
+/** The row's command as a one-line field: Return saves, Esc cancels. */
+function editField(name, r) {
+  const form = el("form", "proc-edit");
+  form.onclick = (e) => e.stopPropagation();
+  const input = el("input");
+  input.value = procEdit.value;
+  input.spellcheck = false;
+  input.setAttribute("aria-label", `Command for ${r.name}`);
+  input.oninput = () => (procEdit.value = input.value);
+  const cancel = () => {
+    procEdit = null;
+    drawProcs(name);
+  };
+  input.onkeydown = (e) => {
+    if (e.key === "Escape") cancel(); // a handler returning false would swallow every other key
+  };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      procCache.set(name, await invoke("set_process", { site: name, id: r.id, command: procEdit.value.trim() }));
+      procEdit = null;
+    } catch (err) {
+      procEdit.error = String(err);
+    }
+    if (selected === name) drawProcs(name);
+  };
+  const save = el("button", null, "Save");
+  save.type = "submit";
+  const no = el("button", null, "Cancel");
+  no.type = "button";
+  no.onclick = cancel;
+  form.append(input, save, no);
+  if (procEdit.error) form.append(el("span", "proc-last error-text", procEdit.error));
+  return form;
+}
+
+/** One line: dot, name, detail, then the auto tag, 🌐, Restart and ■ (or ▶) and ⋯. */
+function procRow({ name, state, detail, error, title, busy, open, run, auto, web, menu, edit }) {
   const row = el("div", `proc ${state}`);
   const dot = el("span", `dot ${state === "running" ? "on" : state === "crashed" ? "bad" : ""}`);
   dot.title = { running: "Running", crashed: "Crashed", stopped: "Stopped" }[state];
-  const label = el("button", "proc-name", name);
+  const label = el(open ? "button" : "span", "proc-name", name);
   label.title = title;
-  row.onclick = open;
-  const last = el("span", error ? "proc-last error-text" : "proc-last", busy ?? error ?? detail);
-  last.title = last.textContent;
-  row.append(dot, label, last);
+  if (open) row.onclick = open;
+  row.append(dot, label);
+  if (edit) row.append(edit);
+  else {
+    const last = el("span", error ? "proc-last error-text" : "proc-last", busy ?? error ?? detail);
+    last.title = last.textContent;
+    row.append(last);
+  }
   const actions = el("span", "proc-actions");
-  if (!busy) {
+  if (auto) actions.append(Object.assign(el("span", "proc-tag", "auto"), { title: "Starts with Anvil" }));
+  if (web) {
+    const b = procBtn("🌐", `Open ${name} in the browser`, () => invoke("open_url", { url: web }).catch((e) => showError(String(e))));
+    b.title = state === "running" ? web : "Not running";
+    b.disabled = state !== "running";
+    actions.append(b);
+  }
+  if (run && !busy && !edit) {
     if (state !== "stopped") actions.append(procBtn("Restart", `Restart ${name}`, () => run("restart")));
     if (state === "running") actions.append(procBtn("■", `Stop ${name}`, () => run("stop")));
     if (state === "stopped") actions.append(procBtn("▶", `Start ${name}`, () => run("start")));
   }
+  if (menu && !edit) actions.append(procBtn("⋯", `More for ${name}`, menu));
   row.append(actions);
   return row;
+}
+
+/** The header: how many run, and Start/Stop for all; a PHP site alone says whether it's served. */
+function drawRunBox(name, rows, containers) {
+  const box = $("#site .run-box");
+  if (!box) return;
+  const up = (c) => c.state === "running";
+  const own = rows.filter((r) => r.kind !== "site");
+  const total = own.length + containers.length;
+  const running = own.filter((r) => r.running).length + containers.filter(up).length;
+  const crashed = own.filter((r) => r.crashed && !r.running).length;
+  box.hidden = !rows.length && !containers.length;
+  const text = $(".state-text", box);
+  const [start, stop] = [$('[data-all="start"]', box), $('[data-all="stop"]', box)];
+  if (!total) {
+    const serving = rows.some((r) => r.running);
+    $(".dot", box).className = `dot ${serving ? "on" : ""}`;
+    text.textContent = serving ? "Serving" : "Not serving";
+    text.classList.remove("error-text");
+    start.hidden = stop.hidden = true;
+    return;
+  }
+  $(".dot", box).className = `dot ${crashed ? "bad" : running ? "on" : ""}`;
+  text.textContent = [running && `${running} running`, crashed && `${crashed} crashed`].filter(Boolean).join(", ") || "Stopped";
+  text.classList.toggle("error-text", !!crashed);
+  start.hidden = running === total;
+  stop.hidden = !running;
+  const all = (action) => {
+    loadProcs(name, "process_run", { name: null, action });
+    const change = containers.filter((c) => up(c) !== (action === "start")).map((c) => c.service);
+    if (change.length) containerRun(name, change, action);
+  };
+  start.onclick = () => all("start");
+  stop.onclick = () => all("stop");
 }
 
 function drawProcs(name) {
@@ -97,44 +222,47 @@ function drawProcs(name) {
   const rows = o?.rows ?? [];
   const commands = o?.commands ?? [];
   const containers = o?.containers ?? [];
+  const hidden = o?.hidden ?? [];
   const compose = !!(o?.containers || o?.docker_error);
-  box.hidden = !(rows.length || commands.length || compose);
+  drawRunBox(name, rows, containers);
+  box.hidden = !(rows.length || commands.length || compose || hidden.length);
   box.replaceChildren();
+  drawConsole(name);
   if (box.hidden) return;
+  let focus = null;
 
-  const s = snap?.sites.find((x) => x.name === name);
-  const own = s && PROCESS_KINDS.has(s.kind);
-  const up = (c) => c.state === "running";
-  const anyUp = (own && !!snap.app_states[name]) || rows.some((r) => r.running) || containers.some(up);
-  const anyDown = (own && !snap.app_states[name]) || rows.some((r) => !r.running) || containers.some((c) => !up(c));
-  if (rows.length || containers.length) {
+  if (rows.length || hidden.length) {
     const head = el("div", "procs-head");
     head.append(el("h3", "res-sub", "Processes"));
-    const all = (action) => {
-      loadProcs(name, "process_run", { name: null, action });
-      const change = containers.filter((c) => up(c) !== (action === "start")).map((c) => c.service);
-      if (change.length) containerRun(name, change, action);
-    };
-    const buttons = el("span", "proc-actions");
-    if (anyDown) buttons.append(procBtn("Start all", "Start the app and all its processes", () => all("start")));
-    if (anyUp) buttons.append(procBtn("Stop all", "Stop the app and all its processes", () => all("stop")));
-    head.append(buttons);
+    if (hidden.length) {
+      const more = el("button", "proc-link", `Show hidden (${hidden.length})`);
+      more.onclick = () => hiddenMenu(name, hidden, more);
+      head.append(more);
+    }
     box.append(head);
   }
 
   if (rows.length) {
     const list = el("div", "group procs-list");
     for (const r of rows) {
+      const site = r.kind === "site";
       const where = r.address ?? (r.port ? `:${r.port}` : null);
       const exit = r.crashed && !r.running ? `Exited${r.crashed.code == null ? "" : ` with code ${r.crashed.code}`}` : null;
+      const editing = procEdit?.site === name && procEdit.id === r.id;
+      const edit = editing ? editField(name, r) : null;
+      if (edit) focus = $("input", edit);
       list.append(procRow({
         name: r.name,
         state: r.running ? "running" : r.crashed ? "crashed" : "stopped",
-        detail: [where, exit, r.last || r.command].filter(Boolean).join(" · "),
+        detail: exit ?? where ?? r.command,
         error: r.error,
-        title: `${r.command}\nFrom ${r.source}. Click to show its log.`,
-        open: () => window.showLog?.(name, `proc:${r.id}`),
-        run: (action) => loadProcs(name, "process_run", { name: r.id, action }),
+        title: site ? (r.running ? "Served by Anvil" : "Start Anvil to serve it") : `${r.command}\nFrom ${r.source}. Click to show its output.`,
+        open: site ? null : () => openConsole(name, r.main ? "app" : `proc:${r.id}`, r.command || r.name),
+        run: site ? null : r.main ? (action) => call("app_run", { site: name, action }) : (action) => loadProcs(name, "process_run", { name: r.id, action }),
+        auto: r.autostart,
+        web: r.web,
+        menu: site ? null : (btn) => procMenu(name, r, btn),
+        edit,
       }));
     }
     box.append(list);
@@ -148,6 +276,7 @@ function drawProcs(name) {
       box.append(note);
     } else {
       const list = el("div", "group procs-list procs-containers");
+      const up = (c) => c.state === "running";
       for (const c of containers) {
         const key = `${name}/${c.service}`;
         list.append(procRow({
@@ -171,6 +300,7 @@ function drawProcs(name) {
     for (const c of commands) {
       // Running: a filling ring; then green or red for how the last run ended.
       const mark = c.running ? "warm" : c.exit ? (c.exit.code === 0 ? "on" : "bad") : null;
+      const wrap = el("span", "chip-wrap");
       const chip = el("button", "chip");
       if (mark) chip.append(el("span", `dot ${mark}`));
       chip.append(c.name);
@@ -178,23 +308,109 @@ function drawProcs(name) {
         ? `npm run ${c.name} is running. Click to show its output.`
         : `npm run ${c.name}${c.exit ? `, last run ${c.exit.code === 0 ? "succeeded" : "failed"}` : ""}. Click to run it.`;
       chip.onclick = async () => {
-        if (!c.running) {
-          if (!(await loadProcs(name, "command_run", { script: c.name }))) return;
-          toast(`Running ${c.name}`);
-        }
-        window.showLog?.(name, `once:${c.id}`);
+        if (!c.running && !(await loadProcs(name, "command_run", { script: c.name }))) return;
+        openConsole(name, `once:${c.id}`, `npm run ${c.name}`);
       };
-      chips.append(chip);
+      const pin = procBtn("📌", `Add ${c.name} to processes`, () => setProc(name, c.id, { pinned: true }));
+      pin.className = "chip-pin";
+      pin.title = "Add to processes";
+      wrap.append(chip, pin);
+      chips.append(wrap);
     }
     box.append(chips);
   }
+  focus?.focus();
 }
 
-// While the Overview is shown, keep states and last lines fresh.
+/* ---------- Console: one row's or command's output, as a terminal shows it ---------- */
+
+const conBox = el("section", "console");
+conBox.setAttribute("aria-label", "Output");
+conBox.innerHTML = `<header class="console-head"><span class="console-title"></span><span class="proc-actions"></span><button class="icon-btn console-close" aria-label="Close output">×</button></header><pre class="console-out"></pre>`;
+const conOut = $(".console-out", conBox);
+let con = null; // { site, source, label, raw, from, busy }
+let conAtEnd = true; // follow new output only while the reader is at the bottom
+let conTop = 0;
+conOut.onscroll = () => {
+  if (!conOut.clientHeight) return; // detached by a redraw, not scrolled
+  conTop = conOut.scrollTop;
+  conAtEnd = conTop + conOut.clientHeight >= conOut.scrollHeight - 4;
+};
+$(".console-close", conBox).onclick = () => {
+  con = null;
+  conBox.hidden = true;
+};
+
+function openConsole(site, source, label) {
+  if (con?.site !== site || con.source !== source) {
+    con = { site, source, label, raw: "", from: 0, busy: false };
+    conOut.replaceChildren();
+    conAtEnd = true;
+  }
+  drawConsole(site);
+  conTail();
+}
+
+/** Under the Commands; what it shows, ■ while running, ↻ for a command that ended. */
+function drawConsole(name) {
+  const box = $("#site .procs");
+  if (!box) return;
+  if (box.nextElementSibling !== conBox) {
+    box.after(conBox);
+    conOut.scrollTop = conAtEnd ? conOut.scrollHeight : conTop;
+  }
+  conBox.hidden = con?.site !== name;
+  if (conBox.hidden) return;
+  const o = procCache.get(name);
+  const [kind, id] = con.source === "app" ? ["app", ""] : con.source.split(":");
+  const chip = kind === "once" ? o?.commands.find((c) => c.id === id) : null;
+  const row = kind === "once" ? null : o?.rows.find((r) => (kind === "app" ? r.main : !r.main && r.id === id));
+  $(".console-title", conBox).textContent = con.label;
+  const actions = $(".proc-actions", conBox);
+  actions.replaceChildren();
+  if ((chip ?? row)?.running) {
+    const stop = {
+      app: () => call("app_run", { site: name, action: "stop" }),
+      proc: () => loadProcs(name, "process_run", { name: id, action: "stop" }),
+      once: () => invoke("once_stop", { site: name, id }).then(() => loadProcs(name), (e) => showError(String(e))),
+    }[kind];
+    actions.append(procBtn("■ Stop", `Stop ${con.label}`, stop));
+  } else if (chip) {
+    actions.append(procBtn("↻ Run again", `Run ${con.label} again`, () => loadProcs(name, "command_run", { script: chip.name })));
+  }
+}
+
+/** New output since the last look; all of it is drawn again so a line redrawn
+ * with \r, or a color begun earlier, comes out right. */
+async function conTail() {
+  const c = con;
+  if (!c || c.busy) return;
+  c.busy = true;
+  let page;
+  try {
+    page = await invoke("log_text", { site: c.site, source: c.source, from: c.from });
+  } catch {
+    return; // no output yet
+  } finally {
+    c.busy = false;
+  }
+  if (c !== con) return;
+  if (page.end_offset < c.from) c.raw = ""; // cleared: start over
+  c.from = page.end_offset;
+  if (!page.text) return;
+  c.raw += page.text;
+  // ponytail: keeps the newest ~512 KB and redraws all of it; a ring of lines if that gets slow.
+  if (c.raw.length > 524288) c.raw = c.raw.slice(c.raw.indexOf("\n", c.raw.length - 262144) + 1);
+  conOut.replaceChildren(ansi(clean(c.raw, true)));
+  if (conAtEnd) conOut.scrollTop = conOut.scrollHeight;
+}
+
+// While the Overview is shown, keep states and the console fresh.
 setInterval(() => {
   if (document.hidden || mode !== "apps" || !selected || tab !== "overview") return;
+  if (con?.site === selected) conTail();
   const o = procCache.get(selected);
-  if (procLoading.has(selected) || !(o?.rows.length || o?.commands.length || o?.containers || o?.docker_error)) return;
+  if (procLoading.has(selected) || !(o?.rows.length || o?.commands.length || o?.containers || o?.docker_error || o?.hidden.length)) return;
   loadProcs(selected);
 }, 2000);
 
