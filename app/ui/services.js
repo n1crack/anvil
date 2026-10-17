@@ -554,7 +554,9 @@ function drawContents(svc, root, c) {
       const name = input.value.trim();
       if (name) renderContents(svc, root, { id: svc.id, action: "create", name });
     };
-    input.onkeydown = (e) => e.key === "Enter" && create();
+    input.onkeydown = (e) => {
+      if (e.key === "Enter") create();
+    };
     row.append(input, act("Create", create, "plain"));
     list.append(row);
   } else if (svc.kind === "redis") {

@@ -475,7 +475,10 @@ function ask(label, placeholder, preview) {
       e.preventDefault();
       done(input.value.trim() || null);
     };
-    input.onkeydown = (e) => e.key === "Escape" && done(null);
+    // A block body: returning false from an on-handler would cancel every keystroke.
+    input.onkeydown = (e) => {
+      if (e.key === "Escape") done(null);
+    };
   });
 }
 
