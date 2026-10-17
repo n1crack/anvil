@@ -446,9 +446,9 @@ button, select, input { font: inherit; color: inherit; }
   transition: background 0.6s ease, box-shadow 0.6s ease;
 }
 
-.power[aria-checked="true"] { color: var(--ok-text); }
+.power[data-on="true"] { color: var(--ok-text); }
 
-.power[aria-checked="true"] .ingot {
+.power[data-on="true"] .ingot {
   background: linear-gradient(180deg, color-mix(in srgb, var(--ok) 55%, white), var(--ok) 55%, color-mix(in srgb, var(--ok) 70%, black));
   box-shadow: 0 0 10px 1px color-mix(in srgb, var(--ok) 60%, transparent);
 }
