@@ -1430,7 +1430,7 @@ fn app_menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&item("find", "Find", Some("CmdOrCtrl+F"))?)
         .item(&item("reload", "Reload", Some("CmdOrCtrl+R"))?)
         .build()?;
-    let application = SubmenuBuilder::new(handle, "Application")
+    let mut application = SubmenuBuilder::new(handle, "Application")
         .item(&item(
             "open:browser",
             "Open in Browser",
@@ -1441,8 +1441,13 @@ fn app_menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
             "open:terminal",
             "Open Terminal",
             Some("CmdOrCtrl+T"),
-        )?)
-        .item(&item("open:git", "Open in Git App", Some("CmdOrCtrl+G"))?)
+        )?);
+    // Without a git app the item could only do nothing, as the Git tab hides its button.
+    // ponytail: checked once at launch; a git app installed later shows after a restart.
+    if anvil::load().is_ok_and(|cfg| git_client(&cfg).is_some()) {
+        application = application.item(&item("open:git", "Open in Git App", Some("CmdOrCtrl+G"))?);
+    }
+    let application = application
         .item(&item("logs", "Show Logs", Some("CmdOrCtrl+L"))?)
         .build()?;
     let window = SubmenuBuilder::new(handle, "Window")
