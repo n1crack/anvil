@@ -656,6 +656,24 @@ const mockHandle = (cmd, a) => {
         login: false,
         config_dir: "/Users/x/Library/Application Support/Anvil",
       };
+    case "storage_anvil": {
+      // As resources::anvil_disk: largest first, total is their sum.
+      const A = "/Users/x/.anvil";
+      const item = (label, path, bytes, category, safety, note) => ({ label, path: `${A}/${path}`, bytes, category, safety, note });
+      const items = [
+        item("mysql data", "data/mysql", 1932735283, "Data", "keep", "Your databases and mail"),
+        item("PHP 8.4", "php/8.4", 412090368, "PHP", "keep", "Remove versions in Settings › PHP"),
+        item("PHP 8.3", "php/8.3", 398458880, "PHP", "keep", "Remove versions in Settings › PHP"),
+        item("MySQL", "services/mysql", 318767104, "Services", "keep", "The program, shared by every service of this kind"),
+        item("Node.js", "runtimes/node", 196083712, "Languages", "keep", "Remove versions in Settings › Languages"),
+        item("composer cache", "cache/composer", 88080384, "Cache", "safe", "Downloaded again when a build needs it"),
+        item("Web server", "bin", 47185920, "Anvil", "keep", "Needed to serve your apps"),
+        item("Logs", "log", 12582912, "Logs", "safe", "Only history; new lines keep coming"),
+        item("redis data", "data/redis", 2097152, "Data", "keep", "Your databases and mail"),
+        item("Certificates", "data/caddy", 65536, "Anvil", "keep", "Your local HTTPS certificates"),
+      ];
+      return { total: items.reduce((s, i) => s + i.bytes, 0), items };
+    }
     default:
       return null;
   }
