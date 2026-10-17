@@ -411,12 +411,19 @@ $("#svc-form").onsubmit = async (e) => {
   e.preventDefault();
   const name = $("#svc-name").value.trim();
   const app = $("#svc-app").value;
+  // Ports below 1024 need root; above 65535 don't exist. Say so before anything is installed.
+  const port = Number.parseInt($("#svc-port").value, 10);
+  if (!(port >= 1024 && port <= 65535)) {
+    $("#svc-error").textContent = "Use a port between 1024 and 65535.";
+    $("#svc-error").hidden = false;
+    return;
+  }
   setServiceBusy(true);
   try {
     services = await invoke("add_service", {
       kind: svcKind,
       name: name || null,
-      port: Number.parseInt($("#svc-port").value, 10) || null,
+      port,
       version: $("#svc-version").value || null,
       tags: [],
       apps: app ? [app] : [],

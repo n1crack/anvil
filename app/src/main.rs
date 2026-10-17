@@ -942,26 +942,32 @@ fn open_service(id: String, what: String) -> Res<()> {
     anvil::run(Command::new("open").arg("-a").arg(app).arg(path)).map_err(err)
 }
 
-/// The newest lines of a service's log, oldest first; none when it hasn't written one.
+/// The newest lines of a service's log as written (colour codes removed), oldest
+/// first; none when it hasn't written one. Reads only the file's last 16 KB.
 #[tauri::command(async)]
-fn service_log(app: State<App>, id: String) -> Res<Vec<String>> {
+fn service_log(id: String) -> Res<Vec<String>> {
+    use std::io::{Read, Seek, SeekFrom};
     let cfg = anvil::load().map_err(err)?;
-    let info = app.services.lock().unwrap().info(&cfg);
-    let svc = info
-        .into_iter()
-        .find(|s| s.id == id)
-        .ok_or("No such service")?;
-    let Ok(page) = anvil::logs::read(&svc.log, None, 16 * 1024) else {
+    if !cfg.services.contains_key(&id) {
+        return Err(format!("No service named {id}"));
+    }
+    let Ok(mut f) = std::fs::File::open(anvil::services::log_file(&id)) else {
         return Ok(vec![]);
     };
-    let mut lines: Vec<String> = page
-        .entries
-        .into_iter()
-        .take(8)
-        .map(|e| e.message.lines().next().unwrap_or("").to_string())
+    let len = f.metadata().map_err(|e| e.to_string())?.len();
+    let start = len.saturating_sub(16 * 1024);
+    f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&buf);
+    // From the middle of the file, the first line is likely cut: skip it.
+    let lines: Vec<String> = text
+        .lines()
+        .skip(usize::from(start > 0))
+        .map(anvil::logs::strip_ansi)
+        .filter(|l| !l.trim().is_empty())
         .collect();
-    lines.reverse();
-    Ok(lines)
+    Ok(lines[lines.len().saturating_sub(8)..].to_vec())
 }
 
 /// Databases, keys or messages in a running service.

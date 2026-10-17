@@ -1458,7 +1458,7 @@ kbd {
 
 .svc-env-hint { margin: 0 0 8px; }
 
-/* A service's newest log lines: a quiet box, cut at the right edge. */
+/* A service's newest log lines: a quiet box; long lines scroll sideways. */
 .svc-log {
   max-width: 720px;
   margin: 0 0 8px;

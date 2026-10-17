@@ -408,6 +408,10 @@ fn insert(
     let port = match port {
         Some(p) => {
             check_port(cfg, "", p)?;
+            // Said now rather than after a download that can take minutes.
+            if in_use(p) {
+                bail!("Port {p} is in use by another program; pick another one");
+            }
             p
         }
         None => free_port(&taken, default_port(kind)),
@@ -648,6 +652,9 @@ fn check_port(cfg: &Config, id: &str, port: u16) -> Result<()> {
     }
     if ports_taken(cfg, id).contains(&port) {
         bail!("Another Anvil service already uses port {port}");
+    }
+    if [cfg.http_port, cfg.https_port, cfg.dns_port].contains(&port) {
+        bail!("Port {port} is Anvil's own web or DNS port");
     }
     Ok(())
 }
@@ -974,6 +981,10 @@ mod tests {
         cfg.services.remove(&old);
         assert!(check_port(&cfg, "redis", p).is_err());
         assert!(check_port(&cfg, "redis-2", p).is_ok());
+        // Anvil's own ports are never a service's.
+        for own in [cfg.http_port, cfg.https_port, cfg.dns_port] {
+            assert!(check_port(&cfg, "redis-2", own).is_err());
+        }
 
         // Each service gets its own data, log and socket; the program is shared.
         let args: Vec<String> = command(&cfg, &id)
