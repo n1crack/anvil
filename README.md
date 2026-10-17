@@ -20,7 +20,7 @@ Anvil turns the folders on your Mac into running applications at local domains l
 ## Why Anvil
 
 - **Native and fast.** Runtimes and services run directly on your Mac. No VM layer between your code and the CPU.
-- **Isolated.** PHP, Node.js, Go, Rust, .NET and the services live in their own folders under `~/.anvil`. Nothing leaks into your shell or your system.
+- **Isolated.** PHP, Node.js, Go, Rust, .NET, Python and the services live in their own folders under `~/.anvil`. Nothing leaks into your shell or your system.
 - **Per-application control.** Every application can have its own PHP version, php.ini settings, start command and port.
 - **Everything included.** No paid tiers, no upsells. Every feature is free.
 - **Open.** GPLv3 licensed. Read it, change it, ship it.
@@ -36,7 +36,7 @@ Anvil turns the folders on your Mac into running applications at local domains l
 | Automatic detection: Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt, Vite, Node.js, Rust, Go, .NET | ✅ Available |
 | PHP 8.0 – 8.5, isolated, per-application version | ✅ Available |
 | php.ini settings per application (own PHP-FPM pool) and global defaults | ✅ Available |
-| Node.js, Go, Rust and .NET toolchains, isolated in `~/.anvil` | ✅ Available |
+| Node.js, Go, Rust, .NET and Python (Django, FastAPI, Flask) toolchains, isolated in `~/.anvil` | ✅ Available |
 | Apps with their own dev server, proxied to their `.test` domain | ✅ Available |
 | Services: MySQL, PostgreSQL, Redis, Mailpit, any number of each | ✅ Available |
 | New applications from templates | ✅ Available |

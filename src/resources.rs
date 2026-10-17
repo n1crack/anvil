@@ -207,6 +207,22 @@ fn rules(kind: &str) -> Vec<Rule> {
             Rebuild,
             "go mod vendor brings them back",
         )],
+        "django" | "fastapi" | "flask" => vec![
+            (
+                ".venv",
+                "Virtual environment",
+                "Dependencies",
+                Rebuild,
+                "uv recreates it on the next start",
+            ),
+            (
+                "__pycache__",
+                "Compiled Python",
+                "Build",
+                Safe,
+                "Python writes it again when it runs",
+            ),
+        ],
         "dotnet" => vec![
             (
                 "bin",

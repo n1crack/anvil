@@ -16,6 +16,9 @@ is. You can override the type with `anvil app type <site> <kind>` or in the app.
 | Nuxt | `nuxt` in `package.json` | `npm run dev` |
 | Vite | `vite` in `package.json` | `npm run dev` |
 | Node.js | `package.json` | `npm run dev`, or `npm run start` without a `dev` script |
+| Django | `manage.py` that imports Django | `python manage.py runserver` |
+| FastAPI | `fastapi` in `pyproject.toml` or `requirements.txt` | `uvicorn` |
+| Flask | `flask` in `pyproject.toml` or `requirements.txt` | `flask run` |
 | Static | anything else | the web server |
 
 - **PHP applications** are served through PHP-FPM. The web root is `public/`
@@ -30,6 +33,23 @@ is. You can override the type with `anvil app type <site> <kind>` or in the app.
 - Node.js picks the version from `.nvmrc` or `.node-version` when it is
   installed; otherwise the newest installed version is used. Pin another one
   with `anvil app runtime`.
+- **Python applications** run through [uv](https://docs.astral.sh/uv/), which
+  Anvil installs (checked against a pinned checksum) together with the Python
+  versions in `~/.anvil`. A project with `pyproject.toml` gets uv's environment
+  in its `.venv`; one with only `requirements.txt` gets its packages from uv's
+  cache, so nothing is added to the folder. Python comes from
+  `.python-version` when installed, else the newest.
+- **Django** checks the host name and, behind HTTPS, the scheme. The app's
+  Overview shows the two lines to add to `settings.py` once:
+
+  ```python
+  ALLOWED_HOSTS = [".test"]
+  SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+  ```
+
+  Without them Django answers 400 Bad Request for `.test` addresses and forms
+  fail their CSRF check. (With `.localhost`, Django's debug mode already
+  accepts the host, but forms still need the second line.)
 
 ## PHP
 
@@ -42,7 +62,7 @@ its own settings gets its own PHP-FPM pool.
 
 ## Languages
 
-Node.js, Go, Rust (through rustup) and .NET are installed into
+Node.js, Go, Rust (through rustup), .NET and Python (through uv) are installed into
 `~/.anvil/runtimes` and only put on `PATH` for the applications Anvil runs.
 Their package and build caches go to `~/.anvil/cache`, so `~/.npm`, `~/go`,
 `~/.cargo` and `~/.nuget` stay untouched. So do the caches of tools those
