@@ -799,9 +799,7 @@ export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | n
   return close;
 }
 
-export const appIcons = new Map<string, Promise<string | null>>(); // app name -> promise of its icon as a data URL, or null
-
-/** Finder, the terminal and the editor as their own colored icons; the outline stays when there is none. */
+/** Finder, the terminal and the editor as outline icons; which app each opens is in the tooltip. */
 export function drawOpenWith(root) {
   const label = (a) =>
     a
@@ -817,18 +815,6 @@ export function drawOpenWith(root) {
     b.setAttribute("aria-label", String(b.title));
     // Plain outline icons here, like the rest of the toolbar; the app's name is in the tooltip.
   }
-}
-
-/** `box`'s content becomes the app's own icon once known; the outline stays otherwise. */
-export function appIconInto(box, name) {
-  if (!appIcons.has(name))
-    appIcons.set(
-      name,
-      invoke("app_icon", { name }).catch(() => null),
-    );
-  appIcons.get(name)!.then((src) => {
-    if (src) box.replaceChildren(Object.assign(new Image(), { src, alt: "" }));
-  });
 }
 
 export function renderSite() {

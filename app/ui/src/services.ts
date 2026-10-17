@@ -1,7 +1,6 @@
 import type { ServiceRow } from "./types";
 import {
   $,
-  appIconInto,
   listSection,
   resCache,
   bytes,
@@ -209,11 +208,10 @@ export function renderService() {
   const inbox = $('[data-svc-open="inbox"]', root);
   inbox.hidden = !svc.web;
   inbox.disabled = !svc.running;
-  // The data folder opens in Finder: its own icon, as on an app's page.
+  // The data folder opens in Finder: the outline folder icon, as on an app's page.
   const data = $('[data-svc-open="data"]', root);
   data.title = `Show ~/.anvil/data/${svc.id} in Finder`;
   data.setAttribute("aria-label", String(data.title));
-  appIconInto(data, "Finder");
   inbox.onclick = () => invoke("open_url", { url: svc.web }).catch((e) => showError(String(e)));
   for (const what of ["data", "log"]) {
     $(`[data-svc-open="${what}"]`, root).onclick = () => invoke("open_service", { id: svc.id, what }).catch((e) => showError(String(e)));
@@ -292,7 +290,6 @@ export function renderService() {
   for (const client of svc.clients) {
     const icon = el("span", "svc-icon");
     icon.innerHTML = DB_ICON;
-    appIconInto(icon, client);
     const open = el("button", null, "Open");
     open.setAttribute("aria-label", String(`Open ${svc.id} in ${client}`));
     open.onclick = () => openClient(svc, client, chosenDb[svc.id]);
