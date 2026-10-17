@@ -69,3 +69,39 @@ describe("colorize", () => {
     expect(div.querySelector(".ansi4, .term-time")).toBeNull();
   });
 });
+
+describe("links", () => {
+  const render = (text: string) => {
+    const div = document.createElement("div");
+    div.append(colorize(clean(text, true)));
+    document.body.append(div);
+    return div;
+  };
+  const links = (div: HTMLElement) => [...div.querySelectorAll<HTMLElement>(".term-link")];
+
+  test("URLs are found, also when a color splits one; text stays the same", () => {
+    const div = render("  ➜  Local:   \x1b[36mhttp://localhost:\x1b[1m5174\x1b[22m/\x1b[39m\nsee https://laravel.com/docs, then http://shop.test.");
+    expect(links(div).map((a) => a.dataset.url)).toEqual(["http://localhost:5174/", "https://laravel.com/docs", "http://shop.test"]);
+    expect(links(div)[0].textContent).toBe("http://localhost:5174/");
+    expect(links(div)[0].querySelector(".ansi-b")?.textContent).toBe("5174");
+    expect(links(div)[0].title).toBe("⌘-click to open");
+    expect(div.textContent).toBe("  ➜  Local:   http://localhost:5174/\nsee https://laravel.com/docs, then http://shop.test.");
+  });
+
+  test("⌘-click opens through open_url; a plain click opens nothing", async () => {
+    const calls: [string, any][] = [];
+    (window as any).__TAURI__ = { core: { invoke: async (cmd: string, args: any) => void calls.push([cmd, args]) } };
+    const a = links(render("at http://localhost:5173/ now"))[0];
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(calls).toEqual([]);
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+    expect(calls).toEqual([["open_url", { url: "http://localhost:5173/" }]]);
+  });
+
+  test("⌘ held marks the page so a hovered link underlines", () => {
+    dispatchEvent(new KeyboardEvent("keydown", { key: "Meta", metaKey: true }));
+    expect(document.documentElement.classList.contains("link-mod")).toBe(true);
+    dispatchEvent(new KeyboardEvent("keyup", { key: "Meta" }));
+    expect(document.documentElement.classList.contains("link-mod")).toBe(false);
+  });
+});

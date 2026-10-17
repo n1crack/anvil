@@ -129,5 +129,58 @@ export function colorize(text: string, s: Sgr = sgr()) {
     const styled = Object.values(s).some((v) => v != null && v !== false);
     out.append(styled || line.includes("\x1b") ? ansi(line, s) : stamped(line));
   });
-  return out;
+  return linkify(out);
 }
+
+// http(s) up to a space or quote, without the punctuation that ends a sentence.
+const URL_RE = /\bhttps?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]/g;
+
+/** Drawn output with its URLs as links, also when colors split one (vite's bold port in
+ * http://localhost:5173/). A link opens on ⌘-click (see below); a plain click selects. */
+export function linkify<T extends Node>(root: T): T {
+  const text = root.textContent ?? "";
+  if (!text.includes("http")) return root;
+  // From the last, so the text before each one stays where it was.
+  for (const m of [...text.matchAll(URL_RE)].reverse()) {
+    const texts: Text[] = [];
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walk.nextNode()) texts.push(walk.currentNode as Text);
+    const at = (pos: number, end: boolean): [Text, number] => {
+      let n = 0;
+      for (const t of texts) {
+        if (pos < n + t.length || (end && pos === n + t.length)) return [t, pos - n];
+        n += t.length;
+      }
+      return [texts.at(-1)!, texts.at(-1)!.length];
+    };
+    const range = document.createRange();
+    range.setStart(...at(m.index, false));
+    range.setEnd(...at(m.index + m[0].length, true));
+    const a = document.createElement("span");
+    a.className = "term-link";
+    a.dataset.url = m[0];
+    a.title = "⌘-click to open";
+    a.append(range.extractContents());
+    range.insertNode(a);
+  }
+  return root;
+}
+
+// ⌘ (Ctrl elsewhere) held: links underline on hover; ⌘-click opens one through open_url,
+// which refuses anything but https and local http; its reason shows as the link's tooltip.
+const held = (e: KeyboardEvent | MouseEvent) => document.documentElement.classList.toggle("link-mod", e.metaKey || e.ctrlKey);
+addEventListener("keydown", held);
+addEventListener("keyup", held);
+addEventListener("mouseover", held);
+addEventListener("blur", () => document.documentElement.classList.remove("link-mod"));
+addEventListener(
+  "click",
+  (e) => {
+    const a = (e.target as Element | null)?.closest?.(".term-link") as HTMLElement | null;
+    if (!a || !(e.metaKey || e.ctrlKey)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (window as any).__TAURI__.core.invoke("open_url", { url: a.dataset.url }).catch((err) => (a.title = String(err)));
+  },
+  true,
+);

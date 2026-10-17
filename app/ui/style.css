@@ -922,6 +922,8 @@ button.proc-name:hover { text-decoration: underline; }
   -webkit-user-select: text;
 }
 .console-out:empty::before { content: "No output yet"; color: #8d959f; }
+/* A URL in output: nothing special until ⌘ is held, then it reads as a link. */
+.link-mod .term-link:hover { text-decoration: underline; cursor: pointer; }
 .ansi-b { font-weight: 700; }
 .ansi0 { color: #6e7681; } .ansi1 { color: #ff7b72; } .ansi2 { color: #7ee787; } .ansi3 { color: #e3b341; }
 .ansi4 { color: #79c0ff; } .ansi5 { color: #d2a8ff; } .ansi6 { color: #76e3ea; } .ansi7 { color: #d7dce1; }
