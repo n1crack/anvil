@@ -14,14 +14,18 @@ Anvil. Build it from source as described in
 - **Application panel** with Start, Stop and Restart for apps with their own
   server, quick buttons for browser, Finder, Terminal and editor, and these
   tabs:
-  - **Overview:** type, runtime, folder, web root, disk, services in use and
-    Git (branch, changes, last commit, remote).
-  - **Logs:** the app's log files (Laravel, Symfony, app output, PHP-FPM) as
-    readable entries with level filters, search, follow, expandable context and
-    stack traces.
-  - **Packages:** framework versions, then each package manager's dependencies
-    (Composer, npm, pnpm, yarn, Cargo, Go, .NET) with the version the lock file
-    pins, the scripts, and a check for newer versions on demand.
+  - **Overview:** type, runtime, folder, web root, disk and services in use.
+    Services attached to the app also show as chips under its address.
+  - **Git** (repositories only): branch, changes, last commit, remote, and a
+    button for your git app (GitHub Desktop, Fork, Tower… or any app you pick
+    in Settings).
+  - **Logs:** every log file of the app side by side (Laravel, Symfony, app
+    output, PHP-FPM) as readable entries with level filters, search, follow,
+    expandable context and stack traces. Files over 100 MB open only when asked.
+  - **Packages:** framework versions and one search over each package manager's
+    dependencies (Composer, npm, pnpm, yarn, Cargo, Go, .NET) with the version
+    the lock file pins; development packages and scripts are folded away, and
+    newer versions are checked on demand.
   - **Resources:** disk breakdown with clean-up, processes and services.
   - **Settings:** type, PHP version and php.ini settings, or start command,
     port and "Start with Anvil".
@@ -52,7 +56,8 @@ icon. The app applies changes right away.
 | Open in browser | ⌘O |
 | Open in editor | ⌘E |
 | Open Terminal in the project | ⌘T |
-| Show the app's logs | ⌘L |
+| Logs tab | ⌘L |
+| Open in the git app | ⌘G |
 | Reload applications | ⌘R |
 | Settings | ⌘, |
 
