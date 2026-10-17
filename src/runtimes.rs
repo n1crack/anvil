@@ -186,17 +186,50 @@ pub fn install(id: &str, version: &str) -> Result<()> {
             Ok(())
         }
         _ => {
-            // Microsoft publishes no checksum for dotnet-install.sh; HTTPS is the only check.
-            let script = download("https://dot.net/v1/dotnet-install.sh", None)?;
-            run(Command::new("bash")
-                .arg(&script)
-                .args(["--channel", version, "--install-dir"])
-                .arg(root("dotnet"))
-                .arg("--no-path"))?;
-            let _ = fs::remove_file(script);
-            Ok(())
+            // The SDK archive from Microsoft's release list, which carries its SHA-512.
+            // (dotnet-install.sh has no published checksum and would run as a script.)
+            let meta: serde_json::Value = serde_json::from_str(&fetch_text(&format!(
+                "https://builds.dotnet.microsoft.com/dotnet/release-metadata/{version}/releases.json"
+            ))?)
+            .with_context(|| format!("No .NET {version} release list"))?;
+            let latest = meta["latest-sdk"]
+                .as_str()
+                .with_context(|| format!("No .NET {version} SDK"))?;
+            let rid = match (mac, arm) {
+                (true, true) => "osx-arm64",
+                (true, false) => "osx-x64",
+                (false, true) => "linux-arm64",
+                (false, false) => "linux-x64",
+            };
+            let name = format!("dotnet-sdk-{rid}.tar.gz");
+            let file = sdk_file(&meta, latest, &name)
+                .with_context(|| format!("No {name} for .NET SDK {latest}"))?;
+            fetch_tgz(&file.0, &root("dotnet"), false, Some(&file.1))
         }
     }
+}
+
+/// URL and SHA-512 of `name` for SDK `version` in a .NET releases.json. Only
+/// Microsoft's download host is accepted.
+fn sdk_file(meta: &serde_json::Value, version: &str, name: &str) -> Option<(String, String)> {
+    let releases = meta["releases"].as_array()?;
+    let sdk = releases
+        .iter()
+        .flat_map(|r| {
+            r["sdks"]
+                .as_array()
+                .cloned()
+                .unwrap_or_else(|| vec![r["sdk"].clone()])
+        })
+        .find(|s| s["version"] == version)?;
+    let file = sdk["files"]
+        .as_array()?
+        .iter()
+        .find(|f| f["name"] == name)?;
+    let url = file["url"].as_str()?;
+    let hash = file["hash"].as_str()?;
+    (url.starts_with("https://builds.dotnet.microsoft.com/") && hash.len() == 128)
+        .then(|| (url.to_string(), hash.to_string()))
 }
 
 pub fn uninstall(id: &str, version: &str) -> Result<()> {
@@ -285,6 +318,26 @@ pub fn info(id: &'static str, with_available: bool) -> RuntimeInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dotnet_sdk_from_release_list() {
+        let hash = "a".repeat(128);
+        let meta = serde_json::json!({ "releases": [
+            { "sdk": { "version": "9.0.100", "files": [] } },
+            { "sdk": { "version": "x" }, "sdks": [{ "version": "10.0.402", "files": [
+                { "name": "dotnet-sdk-osx-arm64.tar.gz",
+                  "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.402/dotnet-sdk-10.0.402-osx-arm64.tar.gz",
+                  "hash": hash },
+                { "name": "dotnet-sdk-osx-x64.tar.gz", "url": "https://evil.example/x.tar.gz", "hash": hash },
+            ]}]},
+        ]});
+        let (url, sum) = sdk_file(&meta, "10.0.402", "dotnet-sdk-osx-arm64.tar.gz").unwrap();
+        assert!(url.ends_with("dotnet-sdk-10.0.402-osx-arm64.tar.gz"));
+        assert_eq!(sum, hash);
+        // Another host, or a file the list doesn't have: refused.
+        assert!(sdk_file(&meta, "10.0.402", "dotnet-sdk-osx-x64.tar.gz").is_none());
+        assert!(sdk_file(&meta, "10.0.402", "dotnet-sdk-linux-x64.tar.gz").is_none());
+    }
 
     #[test]
     fn tool_folders_stay_in_anvil_home() {

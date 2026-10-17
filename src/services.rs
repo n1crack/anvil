@@ -31,6 +31,42 @@ pub fn versions(kind: &str) -> &'static [&'static str] {
     }
 }
 
+/// SHA-256 of each MySQL download, pinned: MySQL only publishes MD5, which
+/// catches a broken download but not a forged one. Taken from files whose MD5
+/// matched the published one. Add a row for every version offered above.
+const MYSQL_SHA256: [(&str, &str, &str); 6] = [
+    (
+        "9.7.2",
+        "arm64",
+        "78bd464c0ff6aacee0a19d12bceff45bd57c62813c3e606b72fab2703d3867a6",
+    ),
+    (
+        "9.7.2",
+        "x86_64",
+        "c290b3ad553a1d4e9831c4bd94e0107a6dc793d2c2a6e5eb37c2943d6a6b8670",
+    ),
+    (
+        "8.4.11",
+        "arm64",
+        "b96e00493bc3499b9ffd7f08d65c5d64933af0383a8287d9873b64f94c2d6009",
+    ),
+    (
+        "8.4.11",
+        "x86_64",
+        "90e8aea10698d01b978f0179e72e8d5e2cbe9f9bd5771e88b0b75d7c82244d3f",
+    ),
+    (
+        "8.0.46",
+        "arm64",
+        "6ca4a361a45f5019fbf6d500997986b4aaf6f0e30ff9c41179d1e8ecd635f3db",
+    ),
+    (
+        "8.0.46",
+        "x86_64",
+        "8590bc6c3203fe17f51f757dc9132fb755d1b73cbdad9d12a67f85025a3c3b8f",
+    ),
+];
+
 /// What a new service gets unless another version is picked (MySQL: the LTS).
 pub fn default_version(kind: &str) -> &'static str {
     match kind {
@@ -427,9 +463,12 @@ pub fn install(id: &str, version: &str) -> Result<()> {
                 let minor = version.rsplit_once('.').map_or(version, |m| m.0);
                 let file = format!("mysql-{version}-macos15-{arch}.tar.gz");
                 let url = format!("https://cdn.mysql.com/Downloads/MySQL-{minor}/{file}");
-                // MySQL only publishes MD5: catches a broken download, not a forged one.
-                let sum = published_sum(&format!("{url}.md5"), &file)?;
-                fetch_tgz(&url, d, true, Some(&sum))
+                let sum = MYSQL_SHA256
+                    .iter()
+                    .find(|(v, a, _)| *v == version && *a == arch)
+                    .map(|(_, _, s)| *s)
+                    .with_context(|| format!("No pinned checksum for {file}"))?;
+                fetch_tgz(&url, d, true, Some(sum))
             }
             "postgres" => {
                 let target = match (mac, arm) {
@@ -853,6 +892,19 @@ impl Drop for Services {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_mysql_version_has_pinned_checksums() {
+        for v in versions("mysql") {
+            for arch in ["arm64", "x86_64"] {
+                let row = MYSQL_SHA256.iter().find(|(pv, a, _)| pv == v && *a == arch);
+                assert!(
+                    row.is_some_and(|(_, _, s)| s.len() == 64),
+                    "MySQL {v} {arch}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn ports_and_ids() {

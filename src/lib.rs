@@ -23,6 +23,26 @@ use std::process::{Child, Command};
 use std::sync::Once;
 
 const CADDY_VERSION: &str = "2.11.7";
+/// SHA-512 of each Caddy download, from caddy_<version>_checksums.txt, pinned
+/// here so a changed file on the release page is refused. Update with the version.
+const CADDY_SHA512: [(&str, &str); 4] = [
+    (
+        "mac_arm64",
+        "68f592df8f0ec058fbdb9b137b64e9a0aa792d28c06e1e3b9ec12d0e7fb371683a54e73ef6d8e6d0dd70dc6b941a5b5d5b73faedd3f89de119ad2eb78bdc668e",
+    ),
+    (
+        "mac_amd64",
+        "147886811fa2320a8881c6116dc8cc3f0562e2f686509ccc60f55cf85dfd5ea78e9f5f770c75da13bf124a2536b72e887b975fefd58706de3dafb57483610e70",
+    ),
+    (
+        "linux_arm64",
+        "3db36ba90c7a6e8dda40ee3dd71fa08844c76b5fb08f61b31e5e78d2ed38e71c51dc7baed875e50d1ca1279196e84302967237386ae87c91ae9f2aaceada682e",
+    ),
+    (
+        "linux_amd64",
+        "a7a433a1b133efc3c8d10eb0b99d52a24b5ef5c322dc77f5282182b1c0402139ab83f3a99f0c52409df77d20123fb0b523edad8a66d8f5e49136197bf61ef0e7",
+    ),
+];
 const PHP_INDEX: &str = "https://dl.static-php.dev/static-php-cli/common/";
 
 #[derive(Serialize, Deserialize)]
@@ -608,12 +628,16 @@ pub fn ensure_caddy() -> Result<()> {
     println!("Downloading Caddy {CADDY_VERSION}…");
     let base = format!("https://github.com/caddyserver/caddy/releases/download/v{CADDY_VERSION}/");
     let file = format!("caddy_{CADDY_VERSION}_{plat}.tar.gz");
-    let sum = published_sum(&format!("{base}caddy_{CADDY_VERSION}_checksums.txt"), &file)?;
+    let sum = CADDY_SHA512
+        .iter()
+        .find(|(p, _)| *p == plat)
+        .map(|(_, s)| *s)
+        .with_context(|| format!("No pinned checksum for {file}"))?;
     fetch_tgz(
         &format!("{base}{file}"),
         &home().join("bin"),
         false,
-        Some(&sum),
+        Some(sum),
     )
 }
 
@@ -1040,6 +1064,14 @@ impl Drop for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caddy_checksums_cover_every_platform() {
+        for p in ["mac_arm64", "mac_amd64", "linux_arm64", "linux_amd64"] {
+            let row = CADDY_SHA512.iter().find(|(cp, _)| *cp == p);
+            assert!(row.is_some_and(|(_, s)| s.len() == 128), "Caddy {p}");
+        }
+    }
 
     fn site(name: &str, root: &str, php: Option<&str>) -> Site {
         Site {
