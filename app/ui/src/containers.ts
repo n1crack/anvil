@@ -321,6 +321,8 @@ late.containersTab = () => {
   drawContainers(selected);
   containersTick();
   if (box.isConnected) list.focus({ preventScroll: true });
+  // WebKit forgets a hidden pane's scroll position: put it back once it is laid out.
+  requestAnimationFrame(term.restore);
 };
 
 // Only while the tab is shown: the logs every second, the containers' states every two.

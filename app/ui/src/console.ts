@@ -45,5 +45,8 @@ export function termOut(cls: string) {
     t.top = out.scrollTop;
     t.atEnd = t.top + out.clientHeight >= out.scrollHeight - 4;
   };
+  // Output that arrives before the pane has its height (a tab still opening) would
+  // stay at the top: once it gets its size, or changes it, keep following the end.
+  new ResizeObserver(() => t.atEnd && out.clientHeight && (out.scrollTop = out.scrollHeight)).observe(out);
   return t;
 }

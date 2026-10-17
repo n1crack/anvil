@@ -642,6 +642,8 @@ late.devTab = () => {
   drawDev(selected);
   devTick();
   if (!main.hidden && box.isConnected) list.focus({ preventScroll: true });
+  // WebKit forgets a hidden pane's scroll position: put it back once it is laid out.
+  requestAnimationFrame(term.restore);
 };
 late.openDev = openDev;
 

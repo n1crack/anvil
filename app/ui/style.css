@@ -2643,11 +2643,10 @@ button.log-file:hover { text-decoration-color: currentColor; }
   font-size: 12px;
 }
 
-/* One content column in the app and service pane: header, tabs and panels end together. */
-#site > *,
+/* Every tab of an app or service uses the pane's full width, so switching tabs
+ * never changes where the content ends. */
+#site > * { max-width: none; }
 #setup { max-width: 720px; }
-/* The sticky header carries the pane's padding on both sides. */
-#site > .site-top { max-width: calc(720px + 72px); }
 #site .group,
 #site .env,
 #site .pkg-tools { max-width: none; }
