@@ -427,10 +427,11 @@ fn main() -> Result<()> {
             let mut svc = services::Services::default();
             for u in resources::services_used(&cfg, &s, &mut svc) {
                 println!(
-                    "  uses {:<12} port {:<6} {}",
+                    "  uses {:<12} port {:<6} {:?}{}",
                     u.label,
                     u.port.map_or("-".into(), |p| p.to_string()),
-                    u.anvil.map_or("not an Anvil service", |_| "Anvil service")
+                    u.source,
+                    u.detail.map_or(String::new(), |d| format!(" ({d})"))
                 );
             }
         }

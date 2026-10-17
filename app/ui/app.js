@@ -461,7 +461,10 @@ function renderOverviewResources(r) {
   const safe = r.items.filter((i) => i.safety === "safe").reduce((a, i) => a + i.bytes, 0);
   disk.textContent = safe ? `${bytes(r.total)}, ${bytes(safe)} can be cleaned up` : bytes(r.total);
   disk.classList.remove("muted");
-  svc.textContent = r.services.length ? r.services.map((x) => x.label).join(", ") : "None found in .env";
+  const src = { anvil: "Anvil", docker: "Docker", local: "local", remote: "remote", none: "not running" };
+  svc.textContent = r.services.length
+    ? r.services.map((x) => (x.port || x.host ? `${x.label} (${src[x.source]})` : x.label)).join(", ")
+    : "None found in .env";
   svc.classList.toggle("muted", !r.services.length);
 }
 
@@ -551,11 +554,16 @@ function renderResources(name) {
       const row = el("div", "row");
       const dt = el("dt");
       dt.append(el("span", null, sv.label));
-      const where = sv.anvil
-        ? `Anvil’s ${sv.anvil}, ${sv.running ? "running" : "stopped"}, port ${sv.port}, shared by apps using it`
-        : sv.port
-          ? `Port ${sv.port}, not an Anvil service`
-          : "";
+      const on = sv.port ? ` on port ${sv.port}` : "";
+      const where = {
+        anvil: `Anvil service ${sv.detail}, ${sv.running ? "running" : "stopped"}${on}, shared by apps using it`,
+        docker: sv.detail?.startsWith("compose service ")
+          ? `Docker Compose service ${sv.detail.slice(16)}`
+          : `Docker ${sv.detail ? `container ${sv.detail}` : "container"}${on}`,
+        local: `${sv.detail}${on} (not Anvil)`,
+        remote: `Remote: ${sv.detail}`,
+        none: sv.port ? `Nothing is listening on port ${sv.port}` : "",
+      }[sv.source];
       if (where) dt.append(el("small", "path", where));
       const dd = el("dd", "res-cells");
       if (sv.memory != null) dd.append(el("span", "muted", `${bytes(sv.memory)} memory`));
