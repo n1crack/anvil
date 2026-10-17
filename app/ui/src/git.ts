@@ -1,9 +1,13 @@
+// @ts-nocheck
+import { $, drawMeta, el, invoke, mode, open, renderSite, row, selected, showError, showTab, snap, tab } from "./app";
+import { late } from "./late";
+
 // Git: a button for the git app and a Git group in the Overview.
 
-const gitCache = new Map(); // site name -> info, null when not a repository
-let gitShown = null;
+export const gitCache = new Map(); // site name -> info, null when not a repository
+export let gitShown = null;
 
-async function loadGit(name) {
+export async function loadGit(name) {
   try {
     gitCache.set(name, await invoke("git_info", { site: name }));
   } catch (e) {
@@ -15,7 +19,7 @@ async function loadGit(name) {
   }
 }
 
-function commitAgo(secs) {
+export function commitAgo(secs) {
   const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
   const d = secs - Date.now() / 1000;
   for (const [unit, n] of [["year", 31536000], ["month", 2592000], ["week", 604800], ["day", 86400], ["hour", 3600], ["minute", 60]]) {
@@ -24,7 +28,7 @@ function commitAgo(secs) {
   return "just now";
 }
 
-function drawGit(name) {
+export function drawGit(name) {
   const root = $("#site");
   const panel = $('[data-panel="git"]', root);
   if (!panel) return;
@@ -94,3 +98,5 @@ window.addEventListener("focus", () => {
 
 // The first state may arrive before this file loads.
 if (snap && mode === "apps") renderSite();
+
+late.gitCache = gitCache;

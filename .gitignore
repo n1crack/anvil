@@ -1,2 +1,4 @@
 /target
 /.claude/
+app/ui/node_modules/
+app/ui/dist/

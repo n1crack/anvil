@@ -1,9 +1,11 @@
+// @ts-nocheck
+
 /* Terminal output, shared by the main window's console and the Processes window. */
 
 /** Terminal output as a terminal would leave it: progress bars redraw a line with \r
  * or \b; escape codes don't belong in plain text. With `colors`, SGR codes (colors,
  * bold) stay for `ansi` to draw. */
-function clean(text, colors = false) {
+export function clean(text, colors = false) {
   return text
     .replace(colors ? /\x1b\[(?![0-9;]*m)[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g : /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, "")
     .split("\n")
@@ -16,7 +18,7 @@ function clean(text, colors = false) {
 }
 
 /** `clean(text, true)` as nodes: colored and bold runs become spans (30–37, 90–97, 1). */
-function ansi(text) {
+export function ansi(text) {
   const out = document.createDocumentFragment();
   let fg = null;
   let bold = false;

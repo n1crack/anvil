@@ -1,27 +1,30 @@
+// @ts-nocheck
+import { clean } from "./term";
+
 /* The Processes window: everything Anvil runs, with usage, Restart/Stop (right-click)
  * and the selected row's log. Keys come from `activity`; the log is asked for by key. */
-const { invoke } = window.__TAURI__.core;
+export const { invoke } = window.__TAURI__.core;
 
-const $ = (sel, root = document) => root.querySelector(sel);
-let data = null;
-let drawn = ""; // what the table shows, to redraw only on a change
-let selected = null; // row key
-let logFrom = 0;
-let logToken = 0;
-let tailing = null; // token of the log request on its way
-let replace = true; // the next page replaces the log (new row, error shown, file rotated)
-const busy = new Set(); // keys with an action on its way
+export const $ = (sel, root = document) => root.querySelector(sel);
+export let data = null;
+export let drawn = ""; // what the table shows, to redraw only on a change
+export let selected = null; // row key
+export let logFrom = 0;
+export let logToken = 0;
+export let tailing = null; // token of the log request on its way
+export let replace = true; // the next page replaces the log (new row, error shown, file rotated)
+export const busy = new Set(); // keys with an action on its way
 // Folded application groups, kept across windows like the main list's folds.
-const folded = new Set(JSON.parse(localStorage.getItem("act-folded") ?? "[]"));
+export const folded = new Set(JSON.parse(localStorage.getItem("act-folded") ?? "[]"));
 
-function showError(msg) {
+export function showError(msg) {
   $("#error").textContent = msg ?? "";
   $("#error").hidden = !msg;
 }
 
-let loading = null; // the `activity` request on its way: a slow Docker must not stack them
+export let loading = null; // the `activity` request on its way: a slow Docker must not stack them
 
-function load() {
+export function load() {
   loading ??= (async () => {
     try {
       data = await invoke("activity");
@@ -38,17 +41,17 @@ function load() {
 
 window.refresh = load;
 
-const mb = (b) => `${(b / 1048576).toFixed(1)} MB`;
-const status = { running: "Running", starting: "Starting", crashed: "Crashed" };
+export const mb = (b) => `${(b / 1048576).toFixed(1)} MB`;
+export const status = { running: "Running", starting: "Starting", crashed: "Crashed" };
 
-function td(text, cls) {
+export function td(text, cls) {
   const c = document.createElement("td");
   if (cls) c.className = cls;
   c.textContent = text ?? "";
   return c;
 }
 
-function head(text, cls) {
+export function head(text, cls) {
   const tr = document.createElement("tr");
   tr.className = cls;
   const th = document.createElement("th");
@@ -59,7 +62,7 @@ function head(text, cls) {
 }
 
 /** An application's header: click to fold its rows away. */
-function appHead(a) {
+export function appHead(a) {
   const tr = head("", "act-app");
   const open = !folded.has(a.site);
   tr.setAttribute("aria-expanded", open);
@@ -76,7 +79,7 @@ function appHead(a) {
 }
 
 /** Which command a row's action goes to, by key form. */
-function run(key, action) {
+export function run(key, action) {
   if (key.startsWith("service:")) return invoke("service_run", { id: key.slice(8), action });
   if (key.startsWith("container:")) {
     const [site, service] = key.slice(10).split("/");
@@ -93,7 +96,7 @@ function run(key, action) {
   return invoke("app_run", { site: key, action });
 }
 
-async function act(key, action) {
+export async function act(key, action) {
   busy.add(key);
   render();
   try {
@@ -108,10 +111,10 @@ async function act(key, action) {
   await load();
 }
 
-const M = window.__TAURI__.menu;
+export const M = window.__TAURI__.menu;
 
 /** Right-click: Restart, Stop (Dismiss once it crashed) and Open in Browser, by row state. */
-async function rowMenu(r) {
+export async function rowMenu(r) {
   const items = [];
   if (r.actions && !busy.has(r.key)) {
     if (!r.key.includes("#")) items.push(M.MenuItem.new({ text: "Restart", action: () => act(r.key, "restart") }));
@@ -124,7 +127,7 @@ async function rowMenu(r) {
   if (items.length) (await M.Menu.new({ items: await Promise.all(items) })).popup();
 }
 
-function row(r, inner) {
+export function row(r, inner) {
   const tr = document.createElement("tr");
   tr.className = `act-row ${r.state}${inner ? " inner" : ""}`;
   tr.setAttribute("aria-selected", r.key === selected);
@@ -165,7 +168,7 @@ function row(r, inner) {
   return tr;
 }
 
-function render() {
+export function render() {
   if (!data) return;
   const keys = [...data.web, ...data.apps.flatMap((a) => a.rows), ...data.services].map((r) => r.key);
   if (selected && !keys.includes(selected)) select(null);
@@ -189,7 +192,7 @@ function render() {
   $(".act-table table").hidden = !keys.length;
 }
 
-function select(key) {
+export function select(key) {
   selected = key;
   logFrom = 0;
   replace = true;
@@ -201,12 +204,12 @@ function select(key) {
   if (key) tail();
 }
 
-const nameOf = (key) =>
+export const nameOf = (key) =>
   [...data.web, ...data.apps.flatMap((a) => a.rows), ...data.services].find((r) => r.key === key)?.name ?? key;
 
-const line = (e) => [e.time ? `${e.time} ${e.message}` : e.message, e.context, ...e.trace].filter(Boolean).join("\n");
+export const line = (e) => [e.time ? `${e.time} ${e.message}` : e.message, e.context, ...e.trace].filter(Boolean).join("\n");
 
-async function tail() {
+export async function tail() {
   const key = selected;
   const token = logToken;
   const log = $("#log");
@@ -254,10 +257,10 @@ window.addEventListener("focus", load);
 $("#log-close").onclick = () => select(null);
 
 // The splitter: drag to give the log more or less room; the width is remembered.
-const pane = $("#pane");
-const split = $("#split");
-const fit = (w) => Math.round(Math.max(260, Math.min(w, $(".act-main").clientWidth - 360 - split.offsetWidth)));
-const savedWidth = Number(localStorage.getItem("act-log-width"));
+export const pane = $("#pane");
+export const split = $("#split");
+export const fit = (w) => Math.round(Math.max(260, Math.min(w, $(".act-main").clientWidth - 360 - split.offsetWidth)));
+export const savedWidth = Number(localStorage.getItem("act-log-width"));
 if (savedWidth) pane.style.width = `${savedWidth}px`;
 split.onpointerdown = (e) => {
   e.preventDefault();

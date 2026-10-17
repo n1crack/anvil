@@ -2,7 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Anvil",
   "identifier": "dev.anvil.desktop",
-  "build": { "frontendDist": "ui" },
+  "build": {
+    "frontendDist": "ui/dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": { "script": "pnpm dev", "cwd": "ui" },
+    "beforeBuildCommand": { "script": "pnpm build", "cwd": "ui" }
+  },
   "app": {
     "withGlobalTauri": true,
     "macOSPrivateApi": true,

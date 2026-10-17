@@ -1,11 +1,15 @@
+// @ts-nocheck
+import { $, appIconInto, bytes, el, filter, filterNote, filterOf, invoke, mark, markBox, mode, open, renderMain, row, select, selected, setMode, showError, snap, toast } from "./app";
+import { late } from "./late";
+
 /* Services in the main window: list in the sidebar, details on the right, and
  * the Add Service sheet. Shares $, snap, invoke, el, toast and friends with app.js. */
 
-let services = [];
-let svcSelected = localStorage.getItem("service");
-const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
+export let services = [];
+export let svcSelected = localStorage.getItem("service");
+export const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
 
-async function serviceCall(cmd, args) {
+export async function serviceCall(cmd, args) {
   try {
     services = await invoke(cmd, args);
     showError(null);
@@ -36,16 +40,8 @@ window.renderSiteServices = (s, root) => {
 
 window.loadServices = () => serviceCall("services");
 
-function setMode(m) {
-  mode = m;
-  localStorage.setItem("mode", m);
-  filter = "";
-  $("#search").value = "";
-  renderModes();
-  renderMain();
-}
 
-function renderModes() {
+export function renderModes() {
   for (const b of document.querySelectorAll(".modes [role=tab]")) {
     b.setAttribute("aria-selected", b.dataset.mode === mode);
   }
@@ -61,13 +57,13 @@ function renderModes() {
 
 for (const b of document.querySelectorAll(".modes [role=tab]")) b.onclick = () => setMode(b.dataset.mode);
 
-function serviceMark(svc, cls = "mark") {
+export function serviceMark(svc, cls = "mark") {
   const m = el("span", `${cls} svc-mark svc-${svc.kind}`, ABBR[svc.kind] ?? "?");
   m.setAttribute("aria-hidden", "true");
   return m;
 }
 
-function serviceRow(svc) {
+export function serviceRow(svc) {
   const b = el("button", "item");
   b.dataset.name = svc.id;
   b.setAttribute("aria-current", svc.id === svcSelected);
@@ -83,7 +79,7 @@ function serviceRow(svc) {
   return b;
 }
 
-function renderServiceList() {
+export function renderServiceList() {
   const list = $("#list");
   list.replaceChildren();
   if (!services.length) {
@@ -108,7 +104,7 @@ function renderServiceList() {
   if (!count) list.append(el("p", "empty", filter ? `No services match “${filter}”.` : "No services match the filter."));
 }
 
-function selectService(id) {
+export function selectService(id) {
   svcSelected = id;
   localStorage.setItem("service", id);
   renderServiceList();
@@ -116,7 +112,7 @@ function selectService(id) {
   $(`.item[data-name="${CSS.escape(id)}"]`)?.focus();
 }
 
-function serviceKeys(e) {
+export function serviceKeys(e) {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
   const items = [...document.querySelectorAll("#list .item")].filter((b) => !b.closest(".closed"));
@@ -126,7 +122,7 @@ function serviceKeys(e) {
 }
 
 /** Editable list of chips: `values` shown, `add` control appended, `save` gets the new list. */
-function chips(root, values, label, save) {
+export function chips(root, values, label, save) {
   root.replaceChildren();
   for (const v of values) {
     const c = el("span", "chip", v.text ?? v);
@@ -146,7 +142,7 @@ function chips(root, values, label, save) {
   return root;
 }
 
-function renderService() {
+export function renderService() {
   const root = $("#site");
   if (!services.some((x) => x.id === svcSelected)) svcSelected = services[0]?.id;
   const svc = services.find((x) => x.id === svcSelected);
@@ -272,11 +268,11 @@ function renderService() {
   $(".svc-remove", root).onclick = () => removeService(svc);
 }
 
-const DB_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.75" rx="5.25" ry="2"/><path d="M2.75 3.75v8.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-8.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/></svg>`;
+export const DB_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.75" rx="5.25" ry="2"/><path d="M2.75 3.75v8.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-8.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/></svg>`;
 
 /** The line under the name, as an app's: kind · version · port · data size (once
  * an app's Resources measured it) · what is notable about its state. */
-function drawServiceMeta(svc, root) {
+export function drawServiceMeta(svc, root) {
   const parts = [svc.name, svc.version, `port ${svc.port}`];
   const use = [...resCache.values()].flatMap((r) => r?.services ?? []).find((u) => u.anvil === svc.id && u.data_bytes != null);
   if (use) parts.push(`data ${bytes(use.data_bytes)}`);
@@ -288,7 +284,7 @@ function drawServiceMeta(svc, root) {
 
 /** A row of a service's lists, in the Processes look: an optional icon, the
  * name, a muted detail, then buttons. */
-function svcLine(lead, name, detail, ...buttons) {
+export function svcLine(lead, name, detail, ...buttons) {
   const row = el("div", lead ? "proc svc-row with-icon" : "proc svc-row");
   if (lead) row.append(lead);
   row.append(el("span", "proc-name", name));
@@ -300,7 +296,7 @@ function svcLine(lead, name, detail, ...buttons) {
   return row;
 }
 
-async function copy(text, done) {
+export async function copy(text, done) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -316,7 +312,7 @@ async function copy(text, done) {
 }
 
 /** Remove a service; a second question decides whether its data goes too. */
-async function removeService(svc) {
+export async function removeService(svc) {
   // One question; the default button (Return) keeps the data, Escape cancels.
   const what = svc.kind === "mailpit" ? "caught mail" : svc.kind === "redis" ? "saved keys" : "databases";
   const answer = await window.__TAURI__.dialog.message(
@@ -334,7 +330,7 @@ async function removeService(svc) {
 }
 
 /** The service's newest log lines under its page; the Log button opens the whole file. */
-async function loadServiceLog(id) {
+export async function loadServiceLog(id) {
   let lines = [];
   try {
     lines = await invoke("service_log", { id });
@@ -357,10 +353,10 @@ setInterval(() => {
 
 /* ---------- Add Service sheet: kind, name, port, app and tags, like creating a container ---------- */
 
-let svcKinds = [];
-let svcKind = localStorage.getItem("serviceKind") ?? "mysql";
+export let svcKinds = [];
+export let svcKind = localStorage.getItem("serviceKind") ?? "mysql";
 
-async function openAddService() {
+export async function openAddService() {
   try {
     svcKinds = await invoke("service_kinds");
   } catch (e) {
@@ -395,7 +391,7 @@ async function openAddService() {
   $("#svc-name").select();
 }
 
-function fillService() {
+export function fillService() {
   const k = svcKinds.find((x) => x.kind === svcKind) ?? svcKinds[0];
   svcKind = k.kind;
   $("#svc-name").value = k.suggested_name;
@@ -418,7 +414,7 @@ function fillService() {
 }
 
 /** One quiet line under the name: what gets downloaded, the port and where data goes. */
-function noteService() {
+export function noteService() {
   const k = svcKinds.find((x) => x.kind === svcKind);
   const v = $("#svc-version").value;
   const name = $("#svc-name").value || "…";
@@ -430,7 +426,7 @@ function noteService() {
   $("#svc-note").textContent = `${fetch}Data in ~/.anvil/data/${name}`;
 }
 
-function setServiceBusy(on) {
+export function setServiceBusy(on) {
   $("#svc-create").disabled = on;
   $("#svc-create").textContent = on ? "Adding…" : "Add";
   for (const i of $("#svc-form").querySelectorAll("input, select")) i.disabled = on;
@@ -483,15 +479,15 @@ window.loadServices();
 
 /* ---------- What's inside: databases, keys, messages ---------- */
 
-const contents = new Map(); // service id -> last contents
-const chosenDb = {}; // service id -> database used in the .env lines
+export const contents = new Map(); // service id -> last contents
+export const chosenDb = {}; // service id -> database used in the .env lines
 
-function openClient(svc, client, database) {
+export function openClient(svc, client, database) {
   invoke("open_in_client", { id: svc.id, client, database: database ?? null }).catch((e) => showError(String(e)));
 }
 
 /** The .env lines, pointed at the chosen database. */
-function envFor(svc) {
+export function envFor(svc) {
   const db = chosenDb[svc.id];
   if (!db) return svc.env;
   return svc.env
@@ -501,10 +497,10 @@ function envFor(svc) {
     .join("\n");
 }
 
-const CONTENTS_TITLE = { mysql: "Databases", postgres: "Databases", redis: "Keys", mailpit: "Messages" };
-const SYSTEM_DBS = new Set(["information_schema", "mysql", "performance_schema", "sys", "postgres", "template1"]);
+export const CONTENTS_TITLE = { mysql: "Databases", postgres: "Databases", redis: "Keys", mailpit: "Messages" };
+export const SYSTEM_DBS = new Set(["information_schema", "mysql", "performance_schema", "sys", "postgres", "template1"]);
 
-async function renderContents(svc, root, action) {
+export async function renderContents(svc, root, action) {
   $(".svc-contents-title", root).textContent = CONTENTS_TITLE[svc.kind];
   const box = $(".svc-contents", root);
   if (!svc.running) {
@@ -527,7 +523,7 @@ async function renderContents(svc, root, action) {
   }
 }
 
-function drawContents(svc, root, c) {
+export function drawContents(svc, root, c) {
   const box = $(".svc-contents", root);
   const list = el("div", "group procs-list svc-list");
   const line = (name, value, ...buttons) => {
@@ -609,3 +605,12 @@ function drawContents(svc, root, c) {
   }
   box.replaceChildren(list);
 }
+
+late.services = () => services;
+late.renderServiceList = renderServiceList;
+late.selectService = selectService;
+late.serviceKeys = serviceKeys;
+late.renderService = renderService;
+late.copy = copy;
+late.openAddService = openAddService;
+late.renderModes = renderModes;

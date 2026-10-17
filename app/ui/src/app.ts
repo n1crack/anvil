@@ -1,33 +1,36 @@
-const { invoke } = window.__TAURI__.core;
+// @ts-nocheck
+import { late } from "./late";
 
-const $ = (sel, root = document) => root.querySelector(sel);
-let snap = null;
-let selected = localStorage.getItem("selected");
-let filter = "";
-// The sidebar shows applications or services; services.js draws the latter.
-let mode = localStorage.getItem("mode") === "services" ? "services" : "apps";
+export const { invoke } = window.__TAURI__.core;
+
+export const $ = (sel, root = document) => root.querySelector(sel);
+export let snap = null;
+export let selected = localStorage.getItem("selected");
+export let filter = "";
+// The sidebar shows applications or services; services.ts draws the latter.
+export let mode = localStorage.getItem("mode") === "services" ? "services" : "apps";
 // List filters per mode: a kind (or null for all) and running only.
-const filters = JSON.parse(localStorage.getItem("filters") ?? "{}");
-const filterOf = (m) => (filters[m] ??= { kind: null, running: false });
+export const filters = JSON.parse(localStorage.getItem("filters") ?? "{}");
+export const filterOf = (m) => (filters[m] ??= { kind: null, running: false });
 
-const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
+export const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 // A standard port (443, or 80 without HTTPS) isn't written out.
 // Sites whose HTTPS is being turned on or off (the web server reloads meanwhile).
-const securing = new Set();
+export const securing = new Set();
 
 // Compose projects and plain folders get no address from Anvil.
-const serves = (s) => !["compose", "folder"].includes(s.kind);
+export const serves = (s) => !["compose", "folder"].includes(s.kind);
 
-const url = (s) => {
+export const url = (s) => {
   const [scheme, port, std] = s.secure ? ["https", snap.https_port, 443] : ["http", snap.http_port, 80];
   return `${scheme}://${s.host}${port === std ? "" : `:${port}`}`;
 };
 
-const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+export const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
-let snapAt = 0; // when the last snapshot arrived
+export let snapAt = 0; // when the last snapshot arrived
 
-async function call(cmd, args) {
+export async function call(cmd, args) {
   try {
     snap = (await invoke(cmd, args)) ?? snap;
     snapAt = Date.now();
@@ -37,14 +40,14 @@ async function call(cmd, args) {
   }
 }
 
-function showError(msg) {
+export function showError(msg) {
   $("#error-text").textContent = msg ?? "";
   $("#error").hidden = !msg;
 }
 
-let toastTimer;
+export let toastTimer;
 /** A short confirmation at the bottom of the window. */
-function toast(msg, undo) {
+export function toast(msg, undo) {
   const t = $("#toast");
   t.textContent = msg;
   if (undo) {
@@ -74,9 +77,9 @@ window.refresh = () => {
 // [step, field in setup_status, label, what it does]
 // What setting up this Mac means, beyond PHP: local domains, ports 80/443, the HTTPS
 // certificate and the terminal commands. One button does them all, one password.
-const SETUP_FIELDS = ["resolver", "ports", "trusted", "shims"];
+export const SETUP_FIELDS = ["resolver", "ports", "trusted", "shims"];
 
-async function loadSetup(busy) {
+export async function loadSetup(busy) {
   let st;
   try {
     st = await invoke("setup_status");
@@ -123,7 +126,7 @@ async function loadSetup(busy) {
   }
 }
 
-function render() {
+export function render() {
   showError(snap.error);
 
   const power = $("#power");
@@ -137,20 +140,20 @@ function render() {
   renderMain();
 }
 
-function renderMain() {
+export function renderMain() {
   renderFilter();
   if (mode === "services") {
-    renderServiceList();
-    renderService();
+    late.renderServiceList();
+    late.renderService();
   } else {
     renderList();
     renderSite();
   }
 }
 
-const icons = new Map(); // site name -> data URL or null
+export const icons = new Map(); // site name -> data URL or null
 
-function mark(s) {
+export function mark(s) {
   const m = document.createElement("span");
   m.className = "mark";
   m.setAttribute("aria-hidden", "true");
@@ -167,15 +170,15 @@ function mark(s) {
   return m;
 }
 
-let sortBy = localStorage.getItem("sortBy") ?? "name";
+export let sortBy = localStorage.getItem("sortBy") ?? "name";
 // How the list is split after your own groups: by parked folder, by type, or not at all.
-let groupBy = localStorage.getItem("groupBy") ?? "folder";
+export let groupBy = localStorage.getItem("groupBy") ?? "folder";
 // Sidebar sections folded from their heading, by "mode:title".
-const folded = new Set(JSON.parse(localStorage.getItem("sections") ?? "[]"));
+export const folded = new Set(JSON.parse(localStorage.getItem("sections") ?? "[]"));
 
 /** A sidebar section: a heading with a count that folds the rows under it.
  * While searching every section stays open. */
-function listSection(key, title, rows, count) {
+export function listSection(key, title, rows, count) {
   const open = !!filter || !folded.has(key);
   const head = el("button", "section-head");
   head.setAttribute("aria-expanded", open);
@@ -198,10 +201,10 @@ function listSection(key, title, rows, count) {
   h.append(head);
   return [h, fold];
 }
-const collapsed = new Set(JSON.parse(localStorage.getItem("collapsed") ?? "[]"));
+export const collapsed = new Set(JSON.parse(localStorage.getItem("collapsed") ?? "[]"));
 
 // Fold a site's linked domains in place (no re-render), so the slide can animate.
-function toggle(name, open = collapsed.has(name)) {
+export function toggle(name, open = collapsed.has(name)) {
   if (open) collapsed.delete(name);
   else collapsed.add(name);
   localStorage.setItem("collapsed", JSON.stringify([...collapsed]));
@@ -214,7 +217,7 @@ function toggle(name, open = collapsed.has(name)) {
 
 /** A sidebar mark with its run state as a badge on the corner: `on`, `warm` (starting)
  * or `bad` (failed); none when stopped. Apps and services both use it. */
-function markBox(m, badge) {
+export function markBox(m, badge) {
   const box = el("span", "mark-box");
   box.append(m);
   if (badge) {
@@ -226,7 +229,7 @@ function markBox(m, badge) {
   return box;
 }
 
-function row(s, { child = false, kids = 0, path = true, kind: showKind = true } = {}) {
+export function row(s, { child = false, kids = 0, path = true, kind: showKind = true } = {}) {
   const b = document.createElement("button");
   b.className = child ? "item child" : "item";
   b.dataset.name = s.name;
@@ -326,19 +329,19 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
 
 /* ---------- Hover card ---------- */
 
-let hoverTimer = null;
-let cardMuted = null; // the row a context menu was opened on
-let cardFor = null; // the site whose card is shown or on its way
-const cardProcs = new Map(); // site name -> { at, req: promise of the `processes` overview }
+export let hoverTimer = null;
+export let cardMuted = null; // the row a context menu was opened on
+export let cardFor = null; // the site whose card is shown or on its way
+export const cardProcs = new Map(); // site name -> { at, req: promise of the `processes` overview }
 
-function hideCard() {
+export function hideCard() {
   clearTimeout(hoverTimer);
   hoverTimer = cardFor = null;
   $(".hover-card")?.remove();
 }
 
 /** A short summary next to the list: kind, address, what runs, branch and last edit. */
-function showCard(s, row) {
+export function showCard(s, row) {
   const card = el("div", "hover-card");
   card.setAttribute("role", "tooltip");
   const draw = () => {
@@ -352,7 +355,7 @@ function showCard(s, row) {
     const state = snap.app_states[s.name];
     if (up.length) lines.push(el("span", "hc-run", `${up.length} running: ${up.join(", ")}`));
     else if (state) lines.push(el("span", "hc-run", state === "running" ? "Running" : "Starting"));
-    const g = typeof gitCache === "undefined" ? null : gitCache.get(s.name);
+    const g = late.gitCache ? late.gitCache.get(s.name) : null;
     if (g && !g.error && g.branch) lines.push(el("span", "branch", g.branch));
     const secs = touchedOf(s, () => card.isConnected && draw());
     if (secs) lines.push(el("span", "muted", `edited ${ago(new Date(secs * 1000))}`));
@@ -375,7 +378,7 @@ function showCard(s, row) {
 }
 
 /** "Laravel only" with a Clear button above a filtered list. */
-function filterNote(m, label) {
+export function filterNote(m, label) {
   const f = filterOf(m);
   if (!f.kind && !f.running) return null;
   const what = [f.kind && label(f.kind), f.running && "running"].filter(Boolean).join(", ");
@@ -392,7 +395,7 @@ function filterNote(m, label) {
 }
 
 /** First run: one clear next step instead of an empty pane. */
-function welcome(root) {
+export function welcome(root) {
   const box = el("div", "welcome");
   const icon = el("img");
   icon.src = "icon.png";
@@ -414,7 +417,7 @@ function welcome(root) {
   root.replaceChildren(box);
 }
 
-function renderList() {
+export function renderList() {
   const list = $("#list");
   list.replaceChildren();
   const note = filterNote("apps", kindLabel);
@@ -502,10 +505,10 @@ function renderList() {
 
 /* ---------- Context menu ---------- */
 
-const M = window.__TAURI__.menu;
+export const M = window.__TAURI__.menu;
 
 /** Turn HTTPS on or off, showing it on the row until the web server has reloaded. */
-async function setSecure(s) {
+export async function setSecure(s) {
   securing.add(s.name);
   renderList();
   drawMeta();
@@ -518,7 +521,7 @@ async function setSecure(s) {
   }
 }
 
-async function siteMenu(s) {
+export async function siteMenu(s) {
   const sep = () => M.PredefinedMenuItem.new({ item: "Separator" });
   const groupOf = Object.keys(snap.groups).find((g) => snap.groups[g].includes(s.name));
   const groups = [...new Set(["Favorites", ...Object.keys(snap.groups)])];
@@ -547,7 +550,7 @@ async function siteMenu(s) {
   (await M.Menu.new({ items })).popup();
 }
 
-function setView(key, value) {
+export function setView(key, value) {
   if (key === "sortBy") sortBy = value;
   else groupBy = value;
   localStorage.setItem(key, value);
@@ -557,7 +560,7 @@ function setView(key, value) {
 /** Inline text prompt under the search field. Resolves to the text, or null when cancelled. */
 /** Inline text prompt under the search field. `preview` turns the text into what
  * it will create. Only Return or Esc ends it, so a stray click keeps the typing. */
-function ask(label, placeholder, preview) {
+export function ask(label, placeholder, preview) {
   const form = $("#ask");
   const input = $("#ask-input");
   const hint = $("#ask-hint");
@@ -589,22 +592,22 @@ function ask(label, placeholder, preview) {
   });
 }
 
-async function addAlias(s) {
+export async function addAlias(s) {
   const alias = await ask(`New domain for ${s.name}.${snap.tld}`, `e.g. admin.${s.name}`, (v) =>
     `Opens ${v.replace(new RegExp(`\\.${snap.tld}$`), "")}.${snap.tld}`);
   if (alias) await call("add_alias", { site: s.name, alias });
 }
 
-async function newGroup(s) {
+export async function newGroup(s) {
   const group = await ask(`Group for ${s.name}.${snap.tld}`, "Group name");
   if (group) await call("set_group", { site: s.name, group });
 }
 
-let tab = localStorage.getItem("tab") ?? "overview";
-const kindLabel = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
-const RUNTIME = { next: "Node.js", nuxt: "Node.js", vite: "Node.js", node: "Node.js", rust: "Rust", go: "Go", dotnet: ".NET", django: "Python", fastapi: "Python", flask: "Python" };
+export let tab = localStorage.getItem("tab") ?? "overview";
+export const kindLabel = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
+export const RUNTIME = { next: "Node.js", nuxt: "Node.js", vite: "Node.js", node: "Node.js", rust: "Rust", go: "Go", dotnet: ".NET", django: "Python", fastapi: "Python", flask: "Python" };
 
-function showTab(root, name) {
+export function showTab(root, name) {
   tab = name;
   localStorage.setItem("tab", name);
   // One stop in the Tab order; the arrow keys move between tabs.
@@ -620,7 +623,7 @@ function showTab(root, name) {
 }
 
 /** "just now", "5 min ago", "2 h ago", "3 d ago", then the date (header and logs). */
-function ago(d) {
+export function ago(d) {
   const s = Math.round((Date.now() - d) / 1000);
   if (s < 45) return "just now";
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
@@ -629,10 +632,10 @@ function ago(d) {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
 }
 
-const touchedCache = new Map(); // site name -> { at: ms when asked, secs: newest edit }
+export const touchedCache = new Map(); // site name -> { at: ms when asked, secs: newest edit }
 
 /** The newest edit (seconds) as known; asks again after 30 s and calls `done` with the answer. */
-function touchedOf(s, done) {
+export function touchedOf(s, done) {
   const t = touchedCache.get(s.name);
   if (!t || Date.now() - t.at > 30000) {
     touchedCache.set(s.name, { at: Date.now(), secs: t?.secs });
@@ -647,7 +650,7 @@ function touchedOf(s, done) {
 }
 
 /** The line under the name: address (+ aliases), type, last edit and git branch. */
-function drawMeta() {
+export function drawMeta() {
   const box = $("#site .meta");
   const s = snap?.sites.find((x) => x.name === selected);
   if (!box || !s) return;
@@ -691,13 +694,13 @@ function drawMeta() {
     parts.push(edited);
   }
   // git.js may not have loaded when the first state arrives.
-  const g = typeof gitCache === "undefined" ? null : gitCache.get(s.name);
+  const g = late.gitCache ? late.gitCache.get(s.name) : null;
   if (g && !g.error && g.branch) parts.push(el("span", "branch", g.branch));
   box.replaceChildren(...parts.flatMap((p, i) => (i ? [el("span", "sep", "·"), p] : [p])));
 }
 
 /** Every address of an app, each with its own Open. */
-function aliasPop(anchor, sites) {
+export function aliasPop(anchor, sites) {
   const pop = el("div", "alias-pop");
   const buttons = sites.map((a) => {
     const row = el("div", "alias-row");
@@ -715,7 +718,7 @@ function aliasPop(anchor, sites) {
 
 /** A small bubble under `anchor`, right-aligned with it. Esc or a click elsewhere
  * closes it; the close function is returned. */
-function popAt(anchor, pop, focus) {
+export function popAt(anchor, pop, focus) {
   document.querySelector(".pop")?.remove();
   pop.classList.add("pop");
   pop.setAttribute("role", "dialog");
@@ -735,10 +738,10 @@ function popAt(anchor, pop, focus) {
   return close;
 }
 
-const appIcons = new Map(); // app name -> promise of its icon as a data URL, or null
+export const appIcons = new Map(); // app name -> promise of its icon as a data URL, or null
 
 /** Finder, the terminal and the editor as their own colored icons; the outline stays when there is none. */
-function drawOpenWith(root) {
+export function drawOpenWith(root) {
   const label = (a) => a.split("/").pop().replace(/\.app$/, "");
   const apps = { finder: "Finder", terminal: label(snap.terminal ?? "Terminal"), editor: snap.editor && label(snap.editor) };
   for (const b of root.querySelectorAll(".open-with [data-open]")) {
@@ -752,14 +755,14 @@ function drawOpenWith(root) {
 }
 
 /** `box`'s content becomes the app's own icon once known; the outline stays otherwise. */
-function appIconInto(box, name) {
+export function appIconInto(box, name) {
   if (!appIcons.has(name)) appIcons.set(name, invoke("app_icon", { name }).catch(() => null));
   appIcons.get(name).then((src) => {
     if (src) box.replaceChildren(Object.assign(new Image(), { src, alt: "" }));
   });
 }
 
-function renderSite() {
+export function renderSite() {
   const root = $("#site");
   const s = snap.sites.find((x) => x.name === selected);
   if (!snap.sites.length) return welcome(root);
@@ -875,7 +878,7 @@ function renderSite() {
 }
 
 /** Django checks the host name and, behind HTTPS, the scheme: two settings it needs once. */
-function djangoHint(root) {
+export function djangoHint(root) {
   // Only in debug: in production another proxy decides what these headers may say.
   const lines = `if DEBUG:  # Anvil\n    ALLOWED_HOSTS += [".${snap.tld}", "localhost", "127.0.0.1"]\n    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`;
   const box = el("div", "django-hint");
@@ -885,14 +888,14 @@ function djangoHint(root) {
   );
   const env = el("div", "env");
   const copyBtn = el("button", null, "Copy");
-  copyBtn.onclick = () => copy(lines, "Copied the Django settings");
+  copyBtn.onclick = () => late.copy(lines, "Copied the Django settings");
   env.append(el("pre", null, lines), copyBtn);
   box.append(env);
   $('[data-panel="overview"] .group', root).after(box);
 }
 
 /** Next.js only works at .localhost until its config allows the domain suffix. */
-function nextHint(s, root) {
+export function nextHint(s, root) {
   const box = el("div", "next-hint");
   const use = el("button", null, `Use ${s.name}.${snap.tld}`);
   use.onclick = () => call("allow_next_origin", { site: s.name });
@@ -906,14 +909,14 @@ function nextHint(s, root) {
 
 /* ---------- Resources ---------- */
 
-const resCache = new Map(); // site name -> resources
-const SAFETY = {
+export const resCache = new Map(); // site name -> resources
+export const SAFETY = {
   safe: ["Safe to delete", "Nothing is lost"],
   rebuild: ["Rebuildable", "Delete to free space; it can be recreated"],
   keep: ["Keep", "Your code or data"],
 };
 
-function bytes(n) {
+export function bytes(n) {
   if (n == null) return "–";
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
@@ -924,7 +927,7 @@ function bytes(n) {
   return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
 }
 
-async function loadResources(name, force = false) {
+export async function loadResources(name, force = false) {
   if (!force && resCache.has(name)) return renderResources(name);
   if (force) resCache.delete(name);
   if (selected === name) renderResources(name);
@@ -936,14 +939,14 @@ async function loadResources(name, force = false) {
   if (selected === name) renderResources(name);
 }
 
-function el(tag, cls, text) {
+export function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text != null) e.textContent = text;
   return e;
 }
 
-function renderResources(name) {
+export function renderResources(name) {
   const body = $("#site .res-body");
   if (!body) return;
   const r = resCache.get(name);
@@ -1049,7 +1052,7 @@ function renderResources(name) {
         const go = el("button", "link", "Show service");
         go.onclick = () => {
           setMode("services");
-          selectService(sv.anvil);
+          late.selectService(sv.anvil);
         };
         dt.append(go);
       }
@@ -1064,7 +1067,7 @@ function renderResources(name) {
 }
 
 /** Confirm with a native dialog, then delete the items one by one. */
-async function cleanItems(name, items) {
+export async function cleanItems(name, items) {
   const total = items.reduce((a, i) => a + i.bytes, 0);
   const what = items.length === 1 ? `${items[0].label} (${items[0].path.startsWith("/") ? tilde(items[0].path) : items[0].path})` : `${items.length} items`;
   const how = items.length === 1 ? items[0].note : items.map((i) => `• ${i.label}: ${i.note}`).join("\n");
@@ -1088,17 +1091,17 @@ async function cleanItems(name, items) {
   loadResources(name, true);
 }
 
-const PHP_KINDS = new Set(["laravel", "statamic", "symfony", "php"]);
-const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet", "django", "fastapi", "flask"]);
+export const PHP_KINDS = new Set(["laravel", "statamic", "symfony", "php"]);
+export const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet", "django", "fastapi", "flask"]);
 
-function renderRun(s, root) {
+export function renderRun(s, root) {
   renderRunState(s, root);
   renderRunSettings(s, root);
 }
 
 /** The run error: safe to redraw while the user types elsewhere. The run box is
  * the Overview's (processes.js), for every process of the app. */
-function renderRunState(s, root) {
+export function renderRunState(s, root) {
   const error = snap.app_errors[s.name];
   const err = $(".run-error", root);
   err.textContent = error ?? "";
@@ -1110,7 +1113,7 @@ function renderRunState(s, root) {
   }
 }
 
-function renderRunSettings(s, root) {
+export function renderRunSettings(s, root) {
   // Language version: automatic (project file or newest) or pinned.
   const rtId = { next: "node", nuxt: "node", vite: "node", node: "node", rust: "rust", go: "go", dotnet: "dotnet", django: "python", fastapi: "python", flask: "python" }[s.kind];
   const versions = snap.runtimes?.[rtId] ?? [];
@@ -1161,7 +1164,7 @@ setInterval(async () => {
   if (s && PROCESS_KINDS.has(s.kind) && $(".run-box", root)) renderRunState(s, root);
 }, 1500);
 
-function select(name) {
+export function select(name) {
   selected = name;
   localStorage.setItem("selected", name);
   renderList();
@@ -1169,7 +1172,7 @@ function select(name) {
   $(`.item[data-name="${CSS.escape(name)}"]`)?.focus({ preventScroll: false });
 }
 
-async function open(target) {
+export async function open(target) {
   try {
     await invoke("open", { site: selected, target });
     toast({ browser: "Opened in your browser", finder: "Shown in Finder", root: "Shown in Finder", terminal: "Opened in Terminal", editor: `Opened in ${snap.editor}`, git: `Opened in ${snap.git_client}` }[target]);
@@ -1179,7 +1182,7 @@ async function open(target) {
 }
 
 /** Applications served, each folder once: an alias shares its app's folder. */
-function servedCount() {
+export function servedCount() {
   const parked = new Set(snap.sites.filter((s) => !s.linked).map((s) => s.path));
   return snap.sites.filter((s) => !s.linked || !parked.has(s.path)).length;
 }
@@ -1212,7 +1215,7 @@ $("#open-processes").onclick = () => invoke("show_processes");
 
 /* ---------- New application ---------- */
 
-const TEMPLATES = [
+export const TEMPLATES = [
   ["laravel", "Laravel", "PHP"],
   ["statamic", "Statamic", "PHP"],
   ["symfony", "Symfony", "PHP"],
@@ -1229,9 +1232,9 @@ const TEMPLATES = [
   ["fastapi", "FastAPI", "Python"],
   ["flask", "Flask", "Python"],
 ];
-let newKind = localStorage.getItem("newKind") ?? "laravel";
+export let newKind = localStorage.getItem("newKind") ?? "laravel";
 
-function openNewApp() {
+export function openNewApp() {
   const dlg = $("#new-app");
   const grid = $("#new-kinds");
   grid.replaceChildren();
@@ -1275,14 +1278,14 @@ function openNewApp() {
   name.focus();
 }
 
-function setBusy(busy) {
+export function setBusy(busy) {
   $("#new-create").disabled = busy;
   $("#new-create").textContent = busy ? "Creating…" : "Create";
   for (const i of $("#new-form").querySelectorAll("input, select")) i.disabled = busy;
 }
 
 /** Serve one existing project folder. Resolves to whether one was added. */
-async function addAppFolder() {
+export async function addAppFolder() {
   const path = await window.__TAURI__.dialog.open({ directory: true, title: "Choose a project folder" });
   if (!path) return false;
   try {
@@ -1325,7 +1328,7 @@ $("#new-form").onsubmit = async (e) => {
 };
 
 $("#add").onclick = async () => {
-  if (mode === "services") return openAddService();
+  if (mode === "services") return late.openAddService();
   const pick = (title) => window.__TAURI__.dialog.open({ directory: true, title });
   const menu = await M.Menu.new({
     items: await Promise.all([
@@ -1350,10 +1353,10 @@ $("#add").onclick = async () => {
 $("#filter").onclick = async () => {
   const apps = mode === "apps";
   const f = filterOf(mode);
-  const items = apps ? snap.sites.filter((s) => !s.linked) : services;
+  const items = apps ? snap.sites.filter((s) => !s.linked) : late.services();
   const counts = new Map();
   for (const x of items) counts.set(x.kind, (counts.get(x.kind) ?? 0) + 1);
-  const label = (k) => (apps ? kindLabel(k) : services.find((x) => x.kind === k).name);
+  const label = (k) => (apps ? kindLabel(k) : late.services().find((x) => x.kind === k).name);
   const set = (change) => {
     Object.assign(f, change);
     localStorage.setItem("filters", JSON.stringify(filters));
@@ -1388,7 +1391,7 @@ $("#filter").onclick = async () => {
 };
 
 /** The filter button lights up while a filter hides something. */
-function renderFilter() {
+export function renderFilter() {
   const f = filterOf(mode);
   const on = !!f.kind || f.running;
   const btn = $("#filter");
@@ -1415,7 +1418,7 @@ document.addEventListener("contextmenu", (e) => {
 
 $("#search").oninput = (e) => {
   filter = e.target.value.trim();
-  if (mode === "services") renderServiceList();
+  if (mode === "services") late.renderServiceList();
   else renderList();
 };
 
@@ -1423,7 +1426,7 @@ $("#search").oninput = (e) => {
 // The hover card goes when the list (or what holds it) scrolls; logs scrolling elsewhere don't count.
 document.addEventListener("scroll", (e) => e.target.contains?.($("#list")) && hideCard(), true);
 $("#list").onkeydown = (e) => {
-  if (mode === "services") return serviceKeys(e);
+  if (mode === "services") return late.serviceKeys(e);
   const cur = $(`.item[data-name="${CSS.escape(selected ?? "")}"]`);
   if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && cur?.hasAttribute("aria-expanded")) {
     e.preventDefault();
@@ -1443,12 +1446,12 @@ $("#error-close").onclick = () => showError(null);
 // Keyboard: ⌘1–9 tabs in order, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
 /* ---------- Shortcuts: the menu bar and the keyboard run the same actions ---------- */
 
-const TAB_KEYS = { 1: "overview", 2: "git", 3: "logs", 4: "packages", 5: "resources", 6: "settings" };
-let lastAction = { name: "", at: 0 };
+export const TAB_KEYS = { 1: "overview", 2: "git", 3: "logs", 4: "packages", 5: "resources", 6: "settings" };
+export let lastAction = { name: "", at: 0 };
 
 /** Run a menu action. The same key can reach both the page and the menu bar, so
  * a repeat within 300 ms is ignored. Returns whether it did something. */
-function runAction(name) {
+export function runAction(name) {
   if (lastAction.name === name && Date.now() - lastAction.at < 300) return true;
   const root = $("#site");
   const [kind, arg] = name.split(":");
@@ -1469,7 +1472,7 @@ function runAction(name) {
     else if (svcLog) svcLog.click();
     else done = false;
   } else if (name === "new") {
-    if (mode === "services") openAddService();
+    if (mode === "services") late.openAddService();
     else openNewApp();
   } else if (name === "park") {
     window.__TAURI__.dialog
@@ -1502,3 +1505,12 @@ document.addEventListener("keydown", (e) => {
 });
 
 window.refresh();
+
+export function setMode(m) {
+  mode = m;
+  localStorage.setItem("mode", m);
+  filter = "";
+  $("#search").value = "";
+  late.renderModes();
+  renderMain();
+}

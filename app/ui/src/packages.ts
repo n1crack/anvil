@@ -1,11 +1,14 @@
+// @ts-nocheck
+import { $, el, invoke, renderMain, row, selected, showError, snap } from "./app";
+
 /* Packages tab: an app's dependencies from its manifests and lock files.
  * Shares $, el, invoke, selected and showError with app.js. */
 
-const pkgCache = new Map(); // site name -> packages or { error }
-const pkgUpdates = new Map(); // site name -> updates, "checking" or { error }
-let pkgQuery = ""; // one search over every list
-const pkgView = new Map(); // site name -> the list shown: deps, dev, scripts or updates
-const REGISTRY = {
+export const pkgCache = new Map(); // site name -> packages or { error }
+export const pkgUpdates = new Map(); // site name -> updates, "checking" or { error }
+export let pkgQuery = ""; // one search over every list
+export const pkgView = new Map(); // site name -> the list shown: deps, dev, scripts or updates
+export const REGISTRY = {
   composer: "https://packagist.org/packages/",
   npm: "https://www.npmjs.com/package/",
   cargo: "https://crates.io/crates/",
@@ -26,7 +29,7 @@ window.renderPackages = async (s) => {
   }
 };
 
-async function checkUpdates(name) {
+export async function checkUpdates(name) {
   pkgUpdates.set(name, "checking");
   drawPackages(name);
   try {
@@ -38,7 +41,7 @@ async function checkUpdates(name) {
 }
 
 
-function drawPackages(name) {
+export function drawPackages(name) {
   const body = $("#site .pkg-body");
   if (!body) return;
   const p = pkgCache.get(name);
@@ -93,7 +96,7 @@ function drawPackages(name) {
   }
 }
 
-function updatesButton(name) {
+export function updatesButton(name) {
   const up = pkgUpdates.get(name);
   if (up === "checking") return el("span", "muted", "Checking…");
   const major = Array.isArray(up) ? up.filter((u) => u.level === "major").length : 0;
@@ -112,7 +115,7 @@ function updatesButton(name) {
 
 /** One list for every package manager, filtered by kind: dependencies,
  * development packages, scripts, or (after a check) what has updates. */
-function drawLists(body, name, ecosystems, updates) {
+export function drawLists(body, name, ecosystems, updates) {
   const needle = pkgQuery.trim().toLowerCase();
   const many = ecosystems.length > 1;
   const newer = new Map(updates.map((u) => [`${u.ecosystem}/${u.name}`, u]));
@@ -170,7 +173,7 @@ function drawLists(body, name, ecosystems, updates) {
   body.append(list);
 }
 
-function pkgRow(eco, x, update) {
+export function pkgRow(eco, x, update) {
   const row = el("div", "row");
   const dt = el("dt");
   const a = el("a", null, x.name);

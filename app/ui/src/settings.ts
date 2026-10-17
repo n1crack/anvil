@@ -1,10 +1,12 @@
-const { invoke } = window.__TAURI__.core;
+// @ts-nocheck
 
-const $ = (sel, root = document) => root.querySelector(sel);
-const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
-let s = null;
+export const { invoke } = window.__TAURI__.core;
 
-async function call(cmd, args) {
+export const $ = (sel, root = document) => root.querySelector(sel);
+export const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
+export let s = null;
+
+export async function call(cmd, args) {
   try {
     s = (await invoke(cmd, args)) ?? s;
     showError(null);
@@ -14,7 +16,7 @@ async function call(cmd, args) {
   }
 }
 
-function showError(msg) {
+export function showError(msg) {
   $("#error").textContent = msg ?? "";
   $("#error").hidden = !msg;
 }
@@ -25,10 +27,10 @@ window.refresh = () => {
 
 /* ---------- Languages ---------- */
 
-let runtimes = null;
-const installing = new Set(); // "id@version"
+export let runtimes = null;
+export const installing = new Set(); // "id@version"
 
-async function loadRuntimes() {
+export async function loadRuntimes() {
   try {
     runtimes = await invoke("runtimes");
     showError(null);
@@ -38,7 +40,7 @@ async function loadRuntimes() {
   renderRuntimes();
 }
 
-function renderRuntimes() {
+export function renderRuntimes() {
   if (!runtimes) return;
   const root = $("#runtime-list");
   root.replaceChildren();
@@ -113,7 +115,7 @@ function renderRuntimes() {
 
 /* ---------- Storage ---------- */
 
-function bytes(n) {
+export function bytes(n) {
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   while (n >= 1024 && i < u.length - 1) {
@@ -125,7 +127,7 @@ function bytes(n) {
 
 /** Size text runs from the normal text colour to red on a log scale:
  * 10 MB and below plain, 20 GB and above full red. Only the number changes. */
-function sizeColor(n) {
+export function sizeColor(n) {
   const lo = Math.log10(10 * 1024 ** 2);
   const hi = Math.log10(20 * 1024 ** 3);
   const t = Math.min(1, Math.max(0, (Math.log10(Math.max(n, 1)) - lo) / (hi - lo)));
@@ -133,13 +135,13 @@ function sizeColor(n) {
   return `color-mix(in oklab, var(--danger) ${Math.round(t ** 1.4 * 100)}%, var(--text))`;
 }
 
-const SAFETY_LABEL = { safe: "Safe to delete", rebuild: "Rebuildable", keep: "Keep" };
+export const SAFETY_LABEL = { safe: "Safe to delete", rebuild: "Rebuildable", keep: "Keep" };
 
-async function confirmDelete(title, message) {
+export async function confirmDelete(title, message) {
   return window.__TAURI__.dialog.ask(message, { title, kind: "warning", okLabel: "Delete", cancelLabel: "Cancel" });
 }
 
-async function loadAnvilStorage() {
+export async function loadAnvilStorage() {
   let st;
   try {
     st = await invoke("storage_anvil");
@@ -175,7 +177,7 @@ async function loadAnvilStorage() {
   }
 }
 
-function drawAnvilItem(list, i, withNote) {
+export function drawAnvilItem(list, i, withNote) {
   const row = document.createElement("div");
   row.className = "row";
   const info = document.createElement("span");
@@ -215,10 +217,10 @@ function drawAnvilItem(list, i, withNote) {
 
 /* Application sizes: the last measurement shows at once, and a new one fills
  * in row by row as each app is counted. */
-const sizes = new Map(); // app name -> { name, kind, total, safe, rebuild }
-let measuring = false;
-let measuredAt = 0; // Unix seconds of the shown numbers
-let drawQueued = false;
+export const sizes = new Map(); // app name -> { name, kind, total, safe, rebuild }
+export let measuring = false;
+export let measuredAt = 0; // Unix seconds of the shown numbers
+export let drawQueued = false;
 
 window.__TAURI__.event.listen("storage-app", (e) => {
   sizes.set(e.payload.name, e.payload);
@@ -231,7 +233,7 @@ window.__TAURI__.event.listen("storage-app", (e) => {
   }
 });
 
-async function loadAppSizes() {
+export async function loadAppSizes() {
   if (measuring) return;
   const last = await invoke("storage_last").catch(() => null);
   if (last && !sizes.size) {
@@ -243,7 +245,7 @@ async function loadAppSizes() {
   if (!last || Date.now() / 1000 - last[0] > 600) scanApps();
 }
 
-async function scanApps() {
+export async function scanApps() {
   measuring = true;
   const fresh = new Set();
   const stop = window.__TAURI__.event.listen("storage-app", (e) => fresh.add(e.payload.name));
@@ -261,7 +263,7 @@ async function scanApps() {
   drawSizes();
 }
 
-function drawSizes() {
+export function drawSizes() {
   const apps = [...sizes.values()].sort((a, b) => b.total - a.total);
   const sum = (k) => apps.reduce((a, x) => a + x[k], 0);
   const when = measuredAt ? agoText(measuredAt) : "";
@@ -315,7 +317,7 @@ function drawSizes() {
   }
 }
 
-function agoText(secs) {
+export function agoText(secs) {
   const s = Date.now() / 1000 - secs;
   if (s < 60) return "just now";
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
@@ -325,7 +327,7 @@ function agoText(secs) {
 
 $("#scan-apps").onclick = scanApps;
 
-function options(select, values, current, none) {
+export function options(select, values, current, none) {
   select.replaceChildren(new Option(none, ""));
   for (const v of values) select.add(new Option(v, v));
   // Keep a configured app selectable even if it isn't installed where we look.
@@ -333,7 +335,7 @@ function options(select, values, current, none) {
   select.value = current ?? "";
 }
 
-function render() {
+export function render() {
   // Hidden applications, each with Show.
   const hidden = s.hidden ?? [];
   $("#hidden-box").hidden = !hidden.length;
@@ -433,7 +435,7 @@ function render() {
   }
 }
 
-function button(text, onclick) {
+export function button(text, onclick) {
   const b = document.createElement("button");
   b.textContent = text;
   b.onclick = () => onclick(b);
@@ -474,7 +476,7 @@ for (const input of document.querySelectorAll("[data-ini]")) {
 }
 
 // Storage: Anvil's own files or the applications', one at a time.
-function showStorage(which) {
+export function showStorage(which) {
   localStorage.setItem("storageTab", which);
   for (const b of document.querySelectorAll("[data-storage]")) b.setAttribute("aria-selected", b.dataset.storage === which);
   for (const p of document.querySelectorAll("[data-storage-panel]")) p.hidden = p.dataset.storagePanel !== which;

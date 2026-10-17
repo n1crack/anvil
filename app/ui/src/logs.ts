@@ -1,25 +1,28 @@
+// @ts-nocheck
+import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, open, select, selected, showError, showTab, snap, tab, tilde, toast } from "./app";
+
 /* Logs tab: an app's log files, newest first. app.js calls logsTab() from showTab. */
 
-const LEVELS = [
+export const LEVELS = [
   ["all", "All"],
   ["error", "Errors"],
   ["warning", "Warnings"],
   ["info", "Info"],
   ["debug", "Debug"],
 ];
-const STEP = 500; // rows added to the page at a time
-const levelGroup = (l) =>
+export const STEP = 500; // rows added to the page at a time
+export const levelGroup = (l) =>
   ["emergency", "alert", "critical", "error", "fatal"].includes(l) ? "error"
     : l === "warning" || l === "warn" ? "warning"
       : l === "debug" ? "debug" : "info";
 
-const logSource = new Map(); // site name -> chosen source id
+export const logSource = new Map(); // site name -> chosen source id
 // An app's own output reads top to bottom like a terminal; log files show the newest first.
-const chrono = (v) => v.source?.id === "app";
-let lv = null; // the view: { site, node, ... }
-let followTimer = null;
+export const chrono = (v) => v.source?.id === "app";
+export let lv = null; // the view: { site, node, ... }
+export let followTimer = null;
 
-function logTime(t) {
+export function logTime(t) {
   if (!t) return null;
   // PHP-FPM writes 17-Oct-2026 09:05:35; WebKit only parses ISO-like dates.
   const MONTHS = "JanFebMarAprMayJunJulAugSepOctNovDec";
@@ -42,7 +45,7 @@ window.logsTab = (root, visible) => {
   if (lv.follow) follow(true);
 };
 
-function buildLogs(s) {
+export function buildLogs(s) {
   const node = el("div", "logs");
   node.innerHTML = `
     <div class="logs-files" role="tablist" aria-label="Log files"></div>
@@ -126,7 +129,7 @@ function buildLogs(s) {
   return v;
 }
 
-async function loadSources(v, s) {
+export async function loadSources(v, s) {
   try {
     v.sources = await invoke("log_sources", { site: v.site });
   } catch (e) {
@@ -141,7 +144,7 @@ async function loadSources(v, s) {
 }
 
 /** Every log file of the app side by side: name, size and when it last changed. */
-function drawFiles(v) {
+export function drawFiles(v) {
   const strip = $(".logs-files", v.node);
   strip.replaceChildren();
   // Shown even for one file: it says which log this is.
@@ -164,10 +167,10 @@ function drawFiles(v) {
 }
 
 // Above this a log isn't opened until asked: it's usually a forgotten single-file log.
-const LARGE_LOG = 100 * 1024 * 1024;
-const largeOk = new Set(); // "site/source" opened anyway this session
+export const LARGE_LOG = 100 * 1024 * 1024;
+export const largeOk = new Set(); // "site/source" opened anyway this session
 
-function showLarge(v) {
+export function showLarge(v) {
   const box = el("li", "logs-large");
   box.append(
     el("strong", null, `${v.source.label} is ${bytes(v.source.bytes)}`),
@@ -192,7 +195,7 @@ function showLarge(v) {
   $(".logs-bar", v.node).hidden = true;
 }
 
-function noSourcesText(s) {
+export function noSourcesText(s) {
   if (s.kind === "laravel" || s.kind === "statamic")
     return "No log files in storage/logs yet. They appear here once the app logs something, for example an exception or Log::info().";
   if (s.kind === "symfony") return "No log files in var/log yet. They appear here once the app logs something.";
@@ -201,16 +204,16 @@ function noSourcesText(s) {
   return "No logs yet. PHP errors show up here once a PHP version serves this app.";
 }
 
-function showEmpty(v, text) {
+export function showEmpty(v, text) {
   $(".logs-list", v.node).replaceChildren(el("li", "empty", text));
   $(".logs-status", v.node).textContent = "";
   $(".logs-more", v.node).hidden = true;
 }
 
-const filtered = (v) => v.level !== "all" || v.query;
+export const filtered = (v) => v.level !== "all" || v.query;
 
 /** First page for the current source and filters. */
-async function loadLogs(v, keepScroll = false) {
+export async function loadLogs(v, keepScroll = false) {
   const token = ++v.token;
   $(".logs-bar", v.node).hidden = !v.source;
   if (v.source.bytes >= LARGE_LOG && !largeOk.has(`${v.site}/${v.source.id}`)) return showLarge(v);
@@ -239,7 +242,7 @@ async function loadLogs(v, keepScroll = false) {
   if (chrono(v)) list.scrollTop = list.scrollHeight;
 }
 
-function fetchPage(v, before) {
+export function fetchPage(v, before) {
   const base = { site: v.site, source: v.source.id, before };
   return filtered(v)
     ? invoke("log_search", { ...base, query: v.query, level: v.level === "all" ? null : v.level })
@@ -247,7 +250,7 @@ function fetchPage(v, before) {
 }
 
 /** Load older: first rows already fetched, then the next page. */
-async function more(v) {
+export async function more(v) {
   if (v.shown >= v.entries.length && v.page.truncated) {
     const btn = $(".logs-more", v.node);
     btn.disabled = true;
@@ -267,7 +270,7 @@ async function more(v) {
   showMore(v);
 }
 
-function showMore(v) {
+export function showMore(v) {
   const list = $(".logs-list", v.node);
   const frag = document.createDocumentFragment();
   const next = v.entries.slice(v.shown, v.shown + STEP);
@@ -292,7 +295,7 @@ function showMore(v) {
   $(".logs-more", v.node).hidden = v.shown >= v.entries.length && !v.page?.truncated;
 }
 
-function status(v) {
+export function status(v) {
   const src = v.source;
   const n = v.shown;
   const text = filtered(v)
@@ -302,7 +305,7 @@ function status(v) {
   $(".logs-status", v.node).title = tilde(src.path);
 }
 
-function entryRow(v, e) {
+export function entryRow(v, e) {
   const li = el("li", `log lv-${levelGroup(e.level)}`);
   li.entry = e;
   const head = el("button", "log-head");
@@ -318,7 +321,7 @@ function entryRow(v, e) {
   return li;
 }
 
-function toggleEntry(v, li) {
+export function toggleEntry(v, li) {
   const head = $(".log-head", li);
   const open = head.getAttribute("aria-expanded") !== "true";
   head.setAttribute("aria-expanded", open);
@@ -354,12 +357,12 @@ function toggleEntry(v, li) {
 }
 
 /** Follow: check for new entries every 2 s while the tab is shown and the window focused. */
-function follow(on) {
+export function follow(on) {
   clearInterval(followTimer);
   followTimer = on ? setInterval(followTick, 2000) : null;
 }
 
-async function followTick() {
+export async function followTick() {
   const v = lv;
   if (!v?.source || !v.page || !v.node.isConnected || v.node.closest("[hidden]")) return follow(false);
   if (document.hidden || !document.hasFocus()) return;
@@ -394,7 +397,7 @@ async function followTick() {
   status(v);
 }
 
-async function clearLog(v) {
+export async function clearLog(v) {
   const src = v.source;
   const ok = await window.__TAURI__.dialog.ask(`Everything in ${tilde(src.path)} (${bytes(src.bytes)}) is deleted. This can’t be undone.`, {
     title: `Clear ${src.label}?`,
