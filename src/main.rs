@@ -55,7 +55,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AppCmd,
     },
-    /// Create a new application: laravel, statamic, symfony, php, static, next, nuxt, vite, node, rust, go, dotnet
+    /// Create a new application: laravel, statamic, symfony, php, static, next, nuxt, vite, node, rust, go, dotnet, django, fastapi, flask
     New {
         kind: String,
         name: String,

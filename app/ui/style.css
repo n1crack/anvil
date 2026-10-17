@@ -723,6 +723,8 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 .proc + .proc { border-top: 1px solid var(--line); }
+/* Running: a thin green line, like the dot, along the row's edge. */
+.proc.running { box-shadow: inset 2px 0 0 var(--ok); }
 .proc-name { padding: 0; border: 0; background: none; font-weight: 600; text-align: left; }
 .proc-name:hover { text-decoration: underline; }
 
