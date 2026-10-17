@@ -72,6 +72,14 @@ describe("processes", () => {
     expect(labels).toContain("Restart logs");
     expect(labels).toContain("Dismiss logs");
   });
+
+  test("open in the browser is an outline globe, not an emoji", async () => {
+    await select("shop");
+    const b = $('[aria-label="Open shop.test in the browser"]');
+    expect(b.querySelector("svg")).not.toBeNull();
+    expect(b.textContent).toBe("");
+    expect(b.title).toBe("https://shop.test");
+  });
 });
 
 describe("https", () => {

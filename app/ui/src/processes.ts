@@ -87,6 +87,9 @@ export function popup(menu, btn) {
 /** A pin outline in currentColor, for "Add to processes" and rows kept on top. */
 export const PIN = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4M6.75 2.5v4L4.5 9.25h7L9.25 6.5v-4M8 9.25v4.25" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
+/** A globe outline in currentColor, for "Open in the browser". */
+export const GLOBE = `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M1.75 8h12.5M8 1.75C6.1 3.45 5.25 5.55 5.25 8s.85 4.55 2.75 6.25M8 1.75c1.9 1.7 2.75 3.8 2.75 6.25s-.85 4.55-2.75 6.25"/></svg>`;
+
 export const setProc = (name, id, change) => loadProcs(name, "set_process", { id, ...change });
 
 /** An address's subdomain label and the fixed rest: ["docs", ".vuefinder.test"]. */
@@ -168,7 +171,7 @@ export function editField(name, r) {
   return form;
 }
 
-/** One line: dot, name, detail, then the on-top pin, the auto tag, 🌐, Restart and ■ (or ▶) and ⋯. */
+/** One line: dot, name, detail, then the on-top pin, the auto tag, the globe, Restart and ■ (or ▶) and ⋯. */
 export function procRow({ name, state, detail, error, title, busy, open, run, top, auto, web, menu, edit }: Record<string, any>) {
   const row = el("div", `proc ${state}`);
   const dot = el("span", `dot ${state === "running" ? "on" : state === "crashed" ? "bad" : ""}`);
@@ -188,7 +191,9 @@ export function procRow({ name, state, detail, error, title, busy, open, run, to
   if (auto) actions.append(Object.assign(el("span", "proc-tag", "auto"), { title: "Starts with Anvil" }));
   // Only something running has a page to open.
   if (web && state === "running") {
-    const b = procBtn("🌐", `Open ${name} in the browser`, () => invoke("open_url", { url: web }).catch((e) => showError(String(e))));
+    const b = procBtn("", `Open ${name} in the browser`, () => invoke("open_url", { url: web }).catch((e) => showError(String(e))));
+    b.innerHTML = GLOBE;
+    b.className = "proc-web";
     b.title = web;
     actions.append(b);
   }
