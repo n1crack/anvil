@@ -66,6 +66,14 @@ enum Cmd {
     /// Disk usage of an app, what is safe to delete, and the services it uses.
     /// Without an app: Anvil's own footprint and every app's size.
     Usage { site: Option<String> },
+    /// Delete items `anvil usage` lists for an app (by path), or with --safe every
+    /// item that is safe to delete; --safe without an app cleans every app
+    Clean {
+        site: Option<String>,
+        paths: Vec<String>,
+        #[arg(long)]
+        safe: bool,
+    },
     /// Download the web server and print one-time system setup commands
     Setup,
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
@@ -153,6 +161,10 @@ enum AppCmd {
         #[arg(action = clap::ArgAction::Set)]
         on: bool,
     },
+    /// Set the app type (e.g. `vite`), or leave it out to use the detected one
+    Type { site: String, kind: Option<String> },
+    /// Pin the app's private port, or leave it out for an automatic one
+    Port { site: String, port: Option<u16> },
 }
 
 #[derive(Subcommand)]
@@ -161,6 +173,10 @@ enum PhpCmd {
     Install { version: String },
     /// List installed versions
     List,
+    /// Remove an installed version
+    Uninstall { version: String },
+    /// Set a php.ini value for every site, or clear it by leaving out the value
+    Ini { key: String, value: Option<String> },
 }
 
 fn dir_or_cwd(p: Option<PathBuf>) -> Result<PathBuf> {
@@ -265,6 +281,60 @@ fn main() -> Result<()> {
         Cmd::Php {
             cmd: PhpCmd::Install { version },
         } => php_install(&mut cfg, &version)?,
+        Cmd::Php {
+            cmd: PhpCmd::Uninstall { version },
+        } => php_uninstall(&cfg, &version)?,
+        Cmd::Php {
+            cmd: PhpCmd::Ini { key, value },
+        } => set_global_ini(&mut cfg, &key, value.as_deref())?,
+        Cmd::Clean {
+            site: None,
+            safe: true,
+            ..
+        } => {
+            let (freed, failed) = resources::clean_all_safe(&sites(&cfg));
+            println!("Freed {:.1} MB", freed as f64 / 1_048_576.0);
+            for f in failed {
+                println!("  couldn't clean {f}");
+            }
+        }
+        Cmd::Clean { site: None, .. } => bail!("Name an app, or use --safe to clean every app"),
+        Cmd::Clean {
+            site: Some(site),
+            paths,
+            safe,
+        } => {
+            let s = sites(&cfg)
+                .into_iter()
+                .find(|s| s.name == site_name(&site))
+                .with_context(|| format!("No app named {site}"))?;
+            let running = apps::running_anywhere(&s.name);
+            let mut targets = paths;
+            if safe {
+                let (_, items) = resources::disk(&s);
+                targets.extend(
+                    items
+                        .into_iter()
+                        .filter(|i| i.bytes > 0 && i.safety == resources::Safety::Safe)
+                        .map(|i| i.path),
+                );
+            }
+            if targets.is_empty() {
+                bail!("Nothing to clean: pass paths from `anvil usage {site}`, or --safe");
+            }
+            let mut freed = 0;
+            for t in targets {
+                // Accept full paths inside the project as well as the relative ones `usage` prints.
+                let t = PathBuf::from(&t)
+                    .strip_prefix(&s.path)
+                    .map_or(t.clone(), |r| r.display().to_string());
+                match resources::clean(&s, &t, running) {
+                    Ok(b) => freed += b,
+                    Err(e) => println!("  {t}: {e:#}"),
+                }
+            }
+            println!("Freed {:.1} MB", freed as f64 / 1_048_576.0);
+        }
         Cmd::Php { cmd: PhpCmd::List } => {
             for v in installed_php() {
                 let mark = if cfg.php.as_deref() == Some(&v) {
@@ -405,6 +475,12 @@ fn main() -> Result<()> {
             AppCmd::Runtime { site, version } => set_site_runtime(&mut cfg, &site, version)?,
             AppCmd::Autostart { site, on } => {
                 set_site_app(&mut cfg, &site, None, None, None, Some(on))?
+            }
+            AppCmd::Type { site, kind } => {
+                set_site_app(&mut cfg, &site, Some(kind), None, None, None)?
+            }
+            AppCmd::Port { site, port } => {
+                set_site_app(&mut cfg, &site, None, None, Some(port), None)?
             }
         },
         Cmd::New { kind, name, dir } => {

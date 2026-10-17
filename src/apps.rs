@@ -179,6 +179,11 @@ fn pid_file(name: &str) -> PathBuf {
     home().join("run").join(format!("app-{name}.pids"))
 }
 
+/// Whether any Anvil (the app or `anvil start`) is running this app right now.
+pub fn running_anywhere(name: &str) -> bool {
+    fs::read_to_string(pid_file(name)).is_ok_and(|f| f.lines().skip(1).any(crate::alive))
+}
+
 /// Stop a whole process group: `npm run dev` leaves node children behind otherwise.
 fn terminate_group(child: &mut Child, grace: Duration) {
     let group = format!("-{}", child.id());
