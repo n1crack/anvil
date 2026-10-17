@@ -103,9 +103,7 @@ function renderServiceList() {
     const rows = services.filter((x) => x.category === cat && hit(x)).map(serviceRow);
     if (!rows.length) continue;
     count += rows.length;
-    const box = el("div", "rows");
-    box.append(...rows);
-    list.append(el("h2", null, cat), box);
+    list.append(...listSection(`services:${cat}`, cat, rows, rows.length));
   }
   if (!count) list.append(el("p", "empty", filter ? `No services match “${filter}”.` : "No services match the filter."));
 }
@@ -121,7 +119,7 @@ function selectService(id) {
 function serviceKeys(e) {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
-  const items = [...document.querySelectorAll("#list .item")];
+  const items = [...document.querySelectorAll("#list .item")].filter((b) => !b.closest(".closed"));
   const i = items.findIndex((b) => b.dataset.name === svcSelected);
   const next = items[i + (e.key === "ArrowDown" ? 1 : -1)];
   if (next) selectService(next.dataset.name);
