@@ -323,6 +323,7 @@ function showTab(root, name) {
   for (const b of root.querySelectorAll("[role=tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
   for (const p of root.querySelectorAll("[role=tabpanel]")) p.hidden = p.dataset.panel !== name;
   $(".res-reload", root).hidden = name !== "resources";
+  window.logsTab?.(root, name === "logs");
 }
 
 function renderSite() {
@@ -908,16 +909,16 @@ $("#list").onkeydown = (e) => {
 
 $("#error-close").onclick = () => showError(null);
 
-// Keyboard: ⌘1–3 tabs, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
+// Keyboard: ⌘1–9 tabs in order, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
 document.addEventListener("keydown", (e) => {
   if (!e.metaKey || e.shiftKey || e.altKey || e.target.closest("input, textarea, select")) {
     if (!(e.metaKey && ["f", ",", "r"].includes(e.key))) return;
   }
   const root = $("#site");
-  const tabKey = { 1: "overview", 2: "settings", 3: "resources" }[e.key];
-  if (tabKey && $(".tabs", root)) {
+  const tabKey = /^[1-9]$/.test(e.key) && root.querySelectorAll(".tabs [role=tab]")[e.key - 1];
+  if (tabKey) {
     e.preventDefault();
-    showTab(root, tabKey);
+    showTab(root, tabKey.dataset.tab);
     return;
   }
   const action = { o: "browser", e: "editor", t: "terminal", g: "git" }[e.key];

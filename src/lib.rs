@@ -6,6 +6,7 @@ pub mod create;
 pub mod databases;
 pub mod dns;
 pub mod git;
+pub mod logs;
 pub mod resources;
 pub mod runtimes;
 pub mod services;

@@ -76,6 +76,19 @@ enum Cmd {
     },
     /// Branch, changes, last commit and remote of an app (default: current folder)
     Git { site: Option<String> },
+    /// Recent log entries of an app, oldest first
+    Logs {
+        site: String,
+        /// A file name like laravel.log, "app" or "php-fpm" (default: the newest)
+        #[arg(long)]
+        source: Option<String>,
+        /// How many entries
+        #[arg(short, default_value_t = 20)]
+        n: usize,
+        /// Only error, warning, info or debug
+        #[arg(long)]
+        level: Option<String>,
+    },
     /// Download the web server and print one-time system setup commands
     Setup,
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
@@ -613,6 +626,54 @@ fn main() -> Result<()> {
             }
             if let Some(r) = g.remote {
                 println!("Remote   {r}");
+            }
+        }
+        Cmd::Logs {
+            site,
+            source,
+            n,
+            level,
+        } => {
+            let s = sites(&cfg)
+                .into_iter()
+                .find(|s| s.name == site_name(&site))
+                .with_context(|| format!("No app named {site}"))?;
+            let src = match source {
+                Some(id) => logs::find(&s, &id)?,
+                None => logs::sources(&s)
+                    .into_iter()
+                    .next()
+                    .with_context(|| format!("{} has no logs yet", s.name))?,
+            };
+            let path = PathBuf::from(&src.path);
+            let mut entries = Vec::new();
+            let mut before = None;
+            while entries.len() < n {
+                let page = match &level {
+                    Some(l) => logs::search(&path, "", Some(l), before, n - entries.len())?,
+                    None => logs::read(&path, before, logs::PAGE)?,
+                };
+                entries.extend(page.entries);
+                if !page.truncated || level.is_some() {
+                    break;
+                }
+                before = Some(page.start_offset);
+            }
+            entries.truncate(n);
+            for e in entries.iter().rev() {
+                let mut lines = e.message.lines();
+                println!(
+                    "{} {:<9} {}",
+                    e.time.as_deref().unwrap_or("-"),
+                    e.level.to_uppercase(),
+                    lines.next().unwrap_or("")
+                );
+                for l in lines {
+                    println!("    {l}");
+                }
+                if let Some(t) = e.trace.first() {
+                    println!("    {t} ({} frames)", e.trace.len());
+                }
             }
         }
         Cmd::Ini { site, key, value } => set_site_ini(&mut cfg, &site, &key, value.as_deref())?,

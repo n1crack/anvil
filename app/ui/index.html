@@ -90,8 +90,9 @@
 
     <div class="tabs" role="tablist" aria-label="Application">
       <button role="tab" data-tab="overview">Overview</button>
-      <button role="tab" data-tab="settings">Settings</button>
+      <button role="tab" data-tab="logs">Logs</button>
       <button role="tab" data-tab="resources">Resources</button>
+      <button role="tab" data-tab="settings">Settings</button>
       <button class="icon-btn res-reload" title="Measure again" aria-label="Measure resources again" hidden>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -107,6 +108,8 @@
         <div class="row"><dt>Services</dt><dd data-field="services" class="muted">Measuring…</dd></div>
       </dl>
     </section>
+
+    <section role="tabpanel" data-panel="logs" hidden></section>
 
     <section role="tabpanel" data-panel="settings" hidden>
       <dl class="group">
@@ -275,6 +278,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script src="app.js"></script>
   <script src="git.js"></script>
+  <script src="logs.js"></script>
   <script src="services.js"></script>
 </body>
 </html>
