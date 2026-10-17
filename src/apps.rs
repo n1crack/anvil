@@ -305,17 +305,22 @@ pub fn assign_ports(cfg: &Config, sites: &mut [Site]) {
         .filter(|s| runs_process(&s.kind) && s.port.is_none())
     {
         // ponytail: hash-derived ports can shift if a new app collides first; set a port in the app to pin it.
-        let hash = s
-            .name
-            .bytes()
-            .fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b));
-        let mut port = 41000 + (hash % 4000) as u16;
-        while taken.contains(&port) || cfg.https_port == port || cfg.http_port == port {
-            port += 1;
-        }
+        let port = hashed_port(&s.name, 41000, &taken, cfg);
         taken.push(port);
         s.port = Some(port);
     }
+}
+
+/// A stable port from `key` in `base..base + 4000`, moved up past `taken` and Anvil's own web ports.
+pub fn hashed_port(key: &str, base: u16, taken: &[u16], cfg: &Config) -> u16 {
+    let hash = key
+        .bytes()
+        .fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b));
+    let mut port = base + (hash % 4000) as u16;
+    while taken.contains(&port) || cfg.https_port == port || cfg.http_port == port {
+        port += 1;
+    }
+    port
 }
 
 pub fn log_file(name: &str) -> PathBuf {

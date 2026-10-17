@@ -839,6 +839,19 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             if site.secure {
                 s += &redirect(&names);
             }
+            // The app's other dev servers (a docs site) answer at <row>.<host>.
+            for row in processes::server_rows(cfg, site) {
+                let names = [row.host];
+                s += &format!(
+                    "\n{} {{\n\treverse_proxy 127.0.0.1:{}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
+                    addresses(site, &names),
+                    row.port,
+                    not_running_page(&names[0]),
+                );
+                if site.secure {
+                    s += &redirect(&names);
+                }
+            }
             continue;
         }
         // A quote, backslash or line break in the folder would end the quoted root and
@@ -1539,6 +1552,31 @@ mod tests {
             ..Config::default()
         };
         assert!(caddyfile(&local, &[app]).contains("\nhttp://web.localhost {\n\treverse_proxy"));
+
+        // A vite app's extra dev server gets its own address, honouring HTTPS.
+        let dir = std::env::temp_dir().join(format!("anvil-caddy-rows-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            r#"{"scripts":{"dev":"vite","docs:dev":"vitepress dev docs"}}"#,
+        )
+        .unwrap();
+        let mut vf = site("vuefinder", dir.to_str().unwrap(), None);
+        vf.kind = "vite".into();
+        vf.port = Some(41001);
+        let port = processes::server_rows(&cfg, &vf)[0].port;
+        let out = caddyfile(&cfg, &[vf.clone()]);
+        assert!(out.contains(&format!(
+            "\ndocs.vuefinder.test {{\n\treverse_proxy 127.0.0.1:{port}"
+        )));
+        assert!(out.contains("\nhttp://docs.vuefinder.test {\n\tredir https://{host}"));
+        vf.secure = false;
+        let out = caddyfile(&cfg, &[vf]);
+        assert!(out.contains(&format!(
+            "\nhttp://docs.vuefinder.test {{\n\treverse_proxy 127.0.0.1:{port}"
+        )));
+        assert_eq!(out.matches("\tredir ").count(), 0);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

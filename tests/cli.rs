@@ -457,7 +457,7 @@ fn caddyfile_for_a_few_sites() {
     write(&parked.join("plain/index.html"), "hi");
     write(
         &parked.join("front/package.json"),
-        r#"{"dependencies":{"next":"15.0.0"}}"#,
+        r#"{"dependencies":{"next":"15.0.0"},"scripts":{"dev":"next dev","docs:dev":"vitepress dev docs"}}"#,
     );
     // A quote in the folder name would end the quoted root in the Caddyfile.
     write(&parked.join("bad\"quote/index.html"), "hi");
@@ -486,6 +486,8 @@ fn caddyfile_for_a_few_sites() {
         ),
         "\nhttp://plain.test {\n\tredir https://{host}".into(),
         "\nhttp://front.test, http://front.localhost {\n\treverse_proxy 127.0.0.1:45123\n".into(),
+        // Its docs server has an address of its own.
+        "\nhttp://docs.front.localhost {\n\treverse_proxy 127.0.0.1:".into(),
     ] {
         assert!(file.contains(&line), "missing {line:?} in:\n{file}");
     }

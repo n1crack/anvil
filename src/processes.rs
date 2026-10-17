@@ -17,6 +17,15 @@ pub struct Process {
     pub source: &'static str,
     /// A long-running dev server, as opposed to a one-off command.
     pub server: bool,
+    /// The port a package.json server row is told to listen on (`$PORT`) and is proxied from.
+    pub port: Option<u16>,
+}
+
+/// An extra dev server of a non-PHP app, answering at `host`.
+pub struct ServerRow {
+    pub id: String,
+    pub host: String,
+    pub port: u16,
 }
 
 #[derive(Deserialize, Default)]
@@ -39,10 +48,11 @@ pub fn detect(site: &Site) -> Vec<Process> {
         .join("php")
         .join(site.php.as_deref().unwrap_or_default())
         .join("php");
-    detect_in(site, &php, &home().join("cache"))
+    let cfg = crate::load().unwrap_or_default();
+    detect_in(site, &php, &home().join("cache"), &cfg)
 }
 
-fn detect_in(site: &Site, php: &Path, cache: &Path) -> Vec<Process> {
+fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: &crate::Config) -> Vec<Process> {
     let own = fs::read_to_string(site.path.join(".anvil.toml"))
         .ok()
         .and_then(|t| toml::from_str::<ProjectFile>(&t).ok());
@@ -57,12 +67,14 @@ fn detect_in(site: &Site, php: &Path, cache: &Path) -> Vec<Process> {
                 command,
                 source: ".anvil.toml",
                 server: false,
+                port: None,
             })
             .collect();
     }
-    // Apps with their own server already run their dev command; only PHP apps get these.
+    // Apps with their own server already run their dev command; the rest of their
+    // dev servers (a docs site) are rows of their own.
     if !apps::is_php(&site.kind) {
-        return vec![];
+        return rows(cfg, site).into_iter().map(|(p, _)| p).collect();
     }
     if let Some(list) = laravel_dev_commands_cached(&site.path, php, cache) {
         return list
@@ -73,6 +85,7 @@ fn detect_in(site: &Site, php: &Path, cache: &Path) -> Vec<Process> {
                 command,
                 source: "artisan dev",
                 server: false,
+                port: None,
             })
             .collect();
     }
@@ -100,6 +113,7 @@ fn detect_in(site: &Site, php: &Path, cache: &Path) -> Vec<Process> {
             command,
             source: "composer.json",
             server: false,
+            port: None,
         })
         .collect();
     if !split.is_empty() {
@@ -113,6 +127,7 @@ fn detect_in(site: &Site, php: &Path, cache: &Path) -> Vec<Process> {
             command: "npm run dev".into(),
             source: "package.json",
             server: false,
+            port: None,
         }];
     }
     vec![]
@@ -216,6 +231,66 @@ fn laravel_dev_commands_cached(
     commands
 }
 
+/// The extra dev servers of a non-PHP app (everything but its own `dev`) with a
+/// stable port each and an address `<row>.<app host>`.
+pub fn server_rows(cfg: &crate::Config, site: &Site) -> Vec<ServerRow> {
+    rows(cfg, site).into_iter().map(|(_, r)| r).collect()
+}
+
+fn rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
+    if !apps::runs_process(&site.kind) {
+        return vec![];
+    }
+    let mut taken: Vec<u16> = cfg.sites.values().filter_map(|s| s.port).collect();
+    taken.extend(site.port);
+    for id in crate::services::instances(cfg) {
+        taken.push(crate::services::port(cfg, &id));
+        taken.extend(crate::services::web_port(cfg, &id));
+    }
+    let mut prefixes: Vec<String> = vec![];
+    package_scripts(&site.path)
+        .0
+        .into_iter()
+        .filter(|p| p.name != "dev")
+        .map(|mut p| {
+            // ponytail: ports of other apps' rows aren't known here; the 4000-wide hash makes a clash rare.
+            let port = apps::hashed_port(&format!("{}@{}", site.name, p.id), 45000, &taken, cfg);
+            taken.push(port);
+            // The first row to cut to a prefix keeps it; later ones use their full id.
+            let cut = process_id(p.name.split(':').next().unwrap_or_default());
+            let prefix = if prefixes.contains(&cut) {
+                p.id.clone()
+            } else {
+                cut
+            };
+            prefixes.push(prefix.clone());
+            p.port = Some(port);
+            let row = ServerRow {
+                id: p.id.clone(),
+                host: format!("{prefix}.{}", site.host),
+                port,
+            };
+            (p, row)
+        })
+        .collect()
+}
+
+/// A script that is itself `vite`, `vitepress` or `astro` (maybe through npx/yarn/pnpm
+/// exec), so `-- --port …` reaches it; a wrapper like `run-s` would take the flags itself.
+fn pins_port(command: &str) -> bool {
+    let words = shell_words(command);
+    let mut w = words.iter().map(String::as_str);
+    let first = match w.next() {
+        Some("npx" | "yarn") => w.next(),
+        Some("pnpm") => w.next().filter(|x| *x == "exec").and_then(|_| w.next()),
+        p => p,
+    };
+    matches!(first, Some("vite" | "vitepress" | "astro"))
+        && !words
+            .iter()
+            .any(|w| matches!(w.as_str(), "&&" | "||" | ";" | "|" | "&"))
+}
+
 /// A script name as an id: every char outside letters, digits, `-` and `_` becomes `-`.
 pub fn process_id(name: &str) -> String {
     name.chars()
@@ -290,9 +365,14 @@ pub fn package_scripts(dir: &Path) -> (Vec<Process>, Vec<String>) {
             servers.push(Process {
                 id: process_id(name),
                 name: name.clone(),
-                command: format!("npm run {name}"),
+                command: if pins_port(command) {
+                    format!("npm run {name} -- --port $PORT --strictPort --host 127.0.0.1")
+                } else {
+                    format!("npm run {name}")
+                },
                 source: "package.json",
                 server: true,
+                port: None,
             });
         } else {
             commands.push(name.clone());
@@ -665,7 +745,7 @@ mod tests {
         let cache = dir.parent().unwrap().join("cache");
         let mut s = site(&dir, "laravel");
         s.php = Some("8.4".into());
-        let names = |s: &Site| detect_in(s, &php, &cache);
+        let names = |s: &Site| detect_in(s, &php, &cache, &Default::default());
         let p = names(&s);
         assert_eq!(
             p.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
@@ -679,7 +759,10 @@ mod tests {
         assert_eq!(laravel_dev_commands_cached(&dir, &php, &cache), Some(want));
         // .anvil.toml still comes first.
         fs::write(dir.join(".anvil.toml"), "[processes]\nw = \"x\"\n").unwrap();
-        assert_eq!(detect_in(&s, &php, &cache)[0].source, ".anvil.toml");
+        assert_eq!(
+            detect_in(&s, &php, &cache, &Default::default())[0].source,
+            ".anvil.toml"
+        );
         fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 
@@ -723,5 +806,81 @@ mod tests {
         assert_eq!(laravel_dev_commands_cached(&dir, &other, &cache), None);
         assert_eq!(runs(), 2);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    fn vite_site(tag: &str, name: &str, scripts: &str) -> Site {
+        let dir = std::env::temp_dir().join(format!("anvil-rows-{tag}-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            format!(r#"{{"scripts":{scripts}}}"#),
+        )
+        .unwrap();
+        let mut s = site(&dir, "vite");
+        s.name = name.into();
+        s.host = format!("{name}.test");
+        s
+    }
+
+    #[test]
+    fn extra_servers_get_stable_distinct_ports() {
+        let scripts =
+            r#"{"dev":"vite","docs:dev":"vitepress dev docs","docs:site":"vitepress dev docs"}"#;
+        let (a, b) = (
+            vite_site("a", "vuefinder", scripts),
+            vite_site("b", "other", scripts),
+        );
+        let mut cfg = crate::Config::default();
+        cfg.services.entry("redis".into()).or_default().port = Some(46000);
+        let ra = server_rows(&cfg, &a);
+        // `dev` is the app itself; the first `docs` keeps the short host.
+        let hosts: Vec<_> = ra.iter().map(|r| r.host.as_str()).collect();
+        assert_eq!(hosts, ["docs.vuefinder.test", "docs-site.vuefinder.test"]);
+        assert_eq!(ra[0].id, "docs-dev");
+        let again = server_rows(&cfg, &a);
+        assert_eq!(
+            ra.iter().map(|r| r.port).collect::<Vec<_>>(),
+            again.iter().map(|r| r.port).collect::<Vec<_>>()
+        );
+        let rb = server_rows(&cfg, &b);
+        let ports: Vec<u16> = ra.iter().chain(&rb).map(|r| r.port).collect();
+        for p in &ports {
+            assert!(![cfg.http_port, cfg.https_port, 46000].contains(p));
+            assert!((45000..49000).contains(p));
+        }
+        // Rows of one app never share a port.
+        assert_ne!(ra[0].port, ra[1].port);
+        // A taken port is skipped, whatever the hash says.
+        let want = apps::hashed_port("vuefinder@docs-dev", 45000, &[], &cfg);
+        assert_eq!(want, ra[0].port);
+        assert_ne!(
+            apps::hashed_port("vuefinder@docs-dev", 45000, &[want], &cfg),
+            want
+        );
+        // The detected process carries the port and the vitepress flags.
+        let p = detect_in(&a, Path::new("php"), Path::new("cache"), &cfg);
+        assert_eq!(p.len(), 2);
+        assert_eq!(p[0].port, Some(ra[0].port));
+        assert_eq!(
+            p[0].command,
+            "npm run docs:dev -- --port $PORT --strictPort --host 127.0.0.1"
+        );
+        for s in [a, b] {
+            fs::remove_dir_all(s.path).unwrap();
+        }
+    }
+
+    #[test]
+    fn scripts_that_wrap_the_server_are_not_pinned() {
+        let s = vite_site("w", "wrap", r#"{"docs:dev":"run-s build-only docs:serve"}"#);
+        let p = detect_in(
+            &s,
+            Path::new("php"),
+            Path::new("cache"),
+            &Default::default(),
+        );
+        fs::remove_dir_all(&s.path).unwrap();
+        assert_eq!(p[0].command, "npm run docs:dev");
+        assert!(p[0].port.is_some());
     }
 }
