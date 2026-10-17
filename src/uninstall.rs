@@ -2,7 +2,7 @@
 //! only `--yes` removes it. Anything not recognisably Anvil's is left alone.
 
 use crate::style::{bold, commands, error, yellow};
-use crate::{Config, PF_ANCHOR, PORTS_LABEL, home, run};
+use crate::{Config, PF_ANCHOR, PORTS_LABEL, SYSTEM_KEYCHAIN, home, run, shims};
 use anyhow::{Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,6 +15,10 @@ pub enum Step {
     Ports(PathBuf),
     /// Anvil's certificate authority in the login keychain, by SHA-1.
     Authority(String),
+    /// The same in the System keychain (needs sudo).
+    SystemAuthority(String),
+    /// The lines in a shell rc file that put Anvil's shims on PATH.
+    PathBlock(PathBuf),
     /// A file or folder Anvil or its app made.
     Remove(PathBuf),
     /// Anvil's home folder. Last, and skipped when an earlier step failed:
@@ -31,6 +35,11 @@ impl Step {
             Step::Authority(_) => {
                 "Anvil's HTTPS certificate authority in your login keychain".into()
             }
+            Step::SystemAuthority(_) => {
+                "Anvil's HTTPS certificate authority in the System keychain (asks for your password)"
+                    .into()
+            }
+            Step::PathBlock(p) => format!("Anvil's PATH lines in {}", tilde(p)),
             Step::Remove(p) | Step::Home(p) => tilde(p),
         }
     }
@@ -74,16 +83,24 @@ fn login_keychain() -> PathBuf {
 pub fn plan(cfg: &Config) -> Vec<Step> {
     let mut steps = Vec::new();
 
-    let root = home().join("data/caddy/pki/authorities/local/root.crt");
+    let root = crate::root_cert();
     if let Some(sha1) = fingerprint(&root) {
-        let listed = Command::new("security")
-            .args(["find-certificate", "-a", "-Z"])
-            .arg(login_keychain())
-            .output()
-            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&sha1));
-        if listed {
-            steps.push(Step::Authority(sha1));
+        let listed = |keychain: &Path| {
+            Command::new("security")
+                .args(["find-certificate", "-a", "-Z"])
+                .arg(keychain)
+                .output()
+                .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&sha1))
+        };
+        if listed(&login_keychain()) {
+            steps.push(Step::Authority(sha1.clone()));
         }
+        if listed(Path::new(SYSTEM_KEYCHAIN)) {
+            steps.push(Step::SystemAuthority(sha1));
+        }
+    }
+    for f in shims::rc_files_with_block() {
+        steps.push(Step::PathBlock(f));
     }
 
     // Every tld Anvil was set up for, not only the current one.
@@ -134,10 +151,11 @@ pub fn plan(cfg: &Config) -> Vec<Step> {
 }
 
 /// What Anvil creates in its home folder.
-const ANVIL_ENTRIES: [&str; 11] = [
+const ANVIL_ENTRIES: [&str; 13] = [
     "bin",
     "build",
     "cache",
+    "composer",
     "config.toml",
     "data",
     "log",
@@ -145,6 +163,7 @@ const ANVIL_ENTRIES: [&str; 11] = [
     "run",
     "runtimes",
     "services",
+    "shims",
     ".DS_Store",
 ];
 
@@ -305,6 +324,15 @@ fn apply(steps: &[Step]) {
             Step::Authority(sha1) => run(Command::new("security")
                 .args(["delete-certificate", "-Z", sha1, "-t"])
                 .arg(login_keychain())),
+            Step::SystemAuthority(sha1) => run(Command::new("sudo").args([
+                "security",
+                "delete-certificate",
+                "-Z",
+                sha1,
+                "-t",
+                SYSTEM_KEYCHAIN,
+            ])),
+            Step::PathBlock(p) => shims::remove_path_block(p),
             Step::Resolver(p) => run(Command::new("sudo").arg("rm").arg("-f").arg(p)),
             Step::Ports(p) => run(Command::new("sudo").args([
                 "sh",
