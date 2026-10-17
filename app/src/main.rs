@@ -1430,9 +1430,17 @@ fn app_menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&item("reload", "Reload", Some("CmdOrCtrl+R"))?)
         .build()?;
     let application = SubmenuBuilder::new(handle, "Application")
-        .item(&item("open:browser", "Open in Browser", Some("CmdOrCtrl+O"))?)
+        .item(&item(
+            "open:browser",
+            "Open in Browser",
+            Some("CmdOrCtrl+O"),
+        )?)
         .item(&item("open:editor", "Open in Editor", Some("CmdOrCtrl+E"))?)
-        .item(&item("open:terminal", "Open Terminal", Some("CmdOrCtrl+T"))?)
+        .item(&item(
+            "open:terminal",
+            "Open Terminal",
+            Some("CmdOrCtrl+T"),
+        )?)
         .item(&item("open:git", "Open in Git App", Some("CmdOrCtrl+G"))?)
         .item(&item("logs", "Show Logs", Some("CmdOrCtrl+L"))?)
         .build()?;
@@ -1442,7 +1450,10 @@ fn app_menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .separator()
         .bring_all_to_front()
         .build()?;
-    Menu::with_items(handle, &[&anvil, &file, &edit, &view, &application, &window])
+    Menu::with_items(
+        handle,
+        &[&anvil, &file, &edit, &view, &application, &window],
+    )
 }
 
 fn on_app_menu(handle: &AppHandle, id: &str) {

@@ -208,6 +208,13 @@ fn dir_or_cwd(p: Option<PathBuf>) -> Result<PathBuf> {
 }
 
 fn start(cfg: &Config) -> Result<()> {
+    // On Ctrl-C / SIGTERM, stop everything cleanly (databases get time to flush).
+    // Set first: a signal during startup waits here instead of killing Anvil and
+    // leaving its children behind.
+    let (tx, rx) = std::sync::mpsc::channel();
+    ctrlc::set_handler(move || {
+        let _ = tx.send(());
+    })?;
     let mut services = services::Services::default();
     for (id, e) in services.start_enabled(cfg) {
         eprintln!("  {id}: {e}");
@@ -243,11 +250,6 @@ fn start(cfg: &Config) -> Result<()> {
         println!("  {} ({}) on 127.0.0.1:{}", s.id, s.name, s.port);
     }
 
-    // On Ctrl-C / SIGTERM, stop everything cleanly (databases get time to flush).
-    let (tx, rx) = std::sync::mpsc::channel();
-    ctrlc::set_handler(move || {
-        let _ = tx.send(());
-    })?;
     let pids = server.pids();
     std::thread::spawn(move || {
         let _ = rx.recv();
