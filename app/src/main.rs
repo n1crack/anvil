@@ -976,7 +976,15 @@ fn set_process(
             hidden,
             pinned,
         };
+        let routes = |c: &Config| {
+            anvil::processes::server_rows(c, &s)
+                .into_iter()
+                .map(|r| (r.id, r.host, r.port))
+                .collect::<Vec<_>>()
+        };
+        let before = routes(&cfg);
         anvil::processes::set_process(&mut cfg, &s.name, &id, change).map_err(err)?;
+        let reroute = routes(&cfg) != before;
         let key = anvil::processes::key(&s.name, &id);
         let was_running = app.apps.lock().unwrap().running(&key);
         // A hidden row is out of sight, so it doesn't keep running unseen.
@@ -994,9 +1002,15 @@ fn set_process(
                 app.app_errors.lock().unwrap().insert(key, err(e));
             }
         }
-        // Hiding or pinning a server row adds or drops its route.
-        if hidden.is_some() || pinned.is_some() {
-            sites_changed(&handle, &app, &cfg);
+        // Only a server row's route needs the web server reloaded, and that restart
+        // (Caddy, PHP-FPM) runs in the background so the click answers at once.
+        if reroute {
+            let handle = handle.clone();
+            std::thread::spawn(move || {
+                if let Ok(cfg) = anvil::load() {
+                    sites_changed(&handle, &handle.state::<App>(), &cfg);
+                }
+            });
         }
     }
     changed(&handle);
