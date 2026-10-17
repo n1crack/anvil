@@ -221,7 +221,8 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
   const text = document.createElement("span");
   text.className = "text";
   text.innerHTML = `<span class="name"></span><span class="sub"></span>`;
-  $(".name", text).textContent = s.host;
+  // The folder's name: not every project is a site, so no address in the list.
+  $(".name", text).textContent = s.name;
   // In a folder's section the path only repeats the heading; linked apps and groups keep it.
   if (path && !child) $(".sub", text).textContent = tilde(s.path) + "/";
   else $(".sub", text).remove();
