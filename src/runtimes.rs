@@ -232,6 +232,14 @@ pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
     let bin = match id {
         "node" => {
             e.push(("npm_config_cache".into(), d(cache.join("npm"))));
+            // Native modules: node-gyp keeps Node headers in ~/Library/Caches/node-gyp otherwise.
+            e.push(("npm_config_devdir".into(), d(cache.join("node-gyp"))));
+            // giget (Nuxt's template download) and others use ~/.cache otherwise.
+            e.push(("XDG_CACHE_HOME".into(), d(cache.join("xdg"))));
+            e.push(("COREPACK_HOME".into(), d(cache.join("corepack"))));
+            // Their telemetry keeps consent and ids in the user's home folder.
+            e.push(("NEXT_TELEMETRY_DISABLED".into(), "1".into()));
+            e.push(("NUXT_TELEMETRY_DISABLED".into(), "1".into()));
             root("node").join(version).join("bin")
         }
         "go" => {
@@ -277,6 +285,26 @@ pub fn info(id: &'static str, with_available: bool) -> RuntimeInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_folders_stay_in_anvil_home() {
+        for id in RUNTIMES {
+            for (k, v) in env(id, "1") {
+                if k != "PATH" && v.starts_with('/') {
+                    assert!(v.starts_with(&*home().to_string_lossy()), "{id}: {k}={v}");
+                }
+            }
+        }
+        let node: Vec<String> = env("node", "22").into_iter().map(|(k, _)| k).collect();
+        for k in [
+            "npm_config_cache",
+            "npm_config_devdir",
+            "XDG_CACHE_HOME",
+            "COREPACK_HOME",
+        ] {
+            assert!(node.iter().any(|n| n == k), "node env lacks {k}");
+        }
+    }
 
     #[test]
     fn versions_sort_numerically() {
