@@ -12,9 +12,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 /// Every kind Anvil knows, in detection order.
-pub const KINDS: [&str; 15] = [
+pub const KINDS: [&str; 16] = [
     "laravel", "statamic", "symfony", "php", "next", "nuxt", "vite", "node", "rust", "go",
-    "dotnet", "django", "fastapi", "flask", "static",
+    "dotnet", "django", "fastapi", "flask", "compose", "static",
 ];
 
 pub fn label(kind: &str) -> &'static str {
@@ -33,6 +33,7 @@ pub fn label(kind: &str) -> &'static str {
         "django" => "Django",
         "fastapi" => "FastAPI",
         "flask" => "Flask",
+        "compose" => "Docker Compose",
         _ => "Static",
     }
 }
@@ -105,6 +106,9 @@ pub fn detect(dir: &Path) -> &'static str {
         } else {
             "node"
         };
+    }
+    if crate::compose::file(dir).is_some() {
+        return "compose";
     }
     "static"
 }
@@ -640,7 +644,7 @@ mod tests {
 
     #[test]
     fn detects_kinds() {
-        let cases: [(&[(&str, &str)], &str); 16] = [
+        let cases: [(&[(&str, &str)], &str); 18] = [
             (
                 &[("artisan", ""), ("package.json", "{\"vite\":1}")],
                 "laravel",
@@ -669,6 +673,15 @@ mod tests {
                 "node",
             ),
             (&[("index.html", "")], "static"),
+            (&[("docker-compose.yml", ""), ("README.md", "")], "compose"),
+            (
+                &[
+                    ("artisan", ""),
+                    ("composer.json", "{}"),
+                    ("docker-compose.yml", ""),
+                ],
+                "laravel",
+            ),
             // Django with a frontend is still Django.
             (
                 &[

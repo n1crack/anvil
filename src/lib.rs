@@ -2,6 +2,7 @@
 //! Shared by the `anvil` CLI and the macOS app.
 
 pub mod apps;
+pub mod compose;
 pub mod create;
 pub mod databases;
 pub mod dns;
@@ -245,7 +246,7 @@ pub fn site_name(s: &str) -> String {
 /// The PHP version a site runs: PHP projects always get one (start fails if it's
 /// missing), static folders only when it's installed, apps with their own server never.
 fn site_php(kind: &str, version: Option<String>, installed: &[String]) -> Option<String> {
-    if apps::runs_process(kind) {
+    if apps::runs_process(kind) || kind == "compose" {
         return None;
     }
     version.filter(|v| kind != "static" || installed.contains(v))
@@ -291,7 +292,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             let command = custom
                 .clone()
                 .or_else(|| apps::default_command(&kind, &path));
-            let php_ok = !apps::runs_process(&kind);
+            let php_ok = !apps::runs_process(&kind) && kind != "compose";
             let runtime_version = apps::runtime(&kind).and_then(|rt| {
                 own.and_then(|s| s.runtime.clone())
                     .or_else(|| apps::runtime_version(rt, &path))
@@ -829,6 +830,10 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         list.join(", ")
     };
     for site in sites {
+        // Containers answer on their own ports; a compose project has nothing to serve.
+        if site.kind == "compose" {
+            continue;
+        }
         let mut names = vec![format!("{}.{}", site.name, cfg.tld)];
         if let (true, Some(port)) = (apps::runs_process(&site.kind), site.port) {
             // Dev servers that only trust localhost (Next.js) work at <name>.localhost too.
