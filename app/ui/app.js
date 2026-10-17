@@ -11,7 +11,8 @@ const filters = JSON.parse(localStorage.getItem("filters") ?? "{}");
 const filterOf = (m) => (filters[m] ??= { kind: null, running: false });
 
 const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
-const url = (s) => `https://${s.name}.${snap.tld}:${snap.https_port}`;
+// The standard HTTPS port needs no ":443".
+const url = (s) => `https://${s.name}.${snap.tld}${snap.https_port === 443 ? "" : `:${snap.https_port}`}`;
 
 async function call(cmd, args) {
   try {

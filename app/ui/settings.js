@@ -296,9 +296,10 @@ function options(select, values, current, none) {
 
 function render() {
   // Hidden applications, each with Show.
-  $("#hidden-box").hidden = !s.hidden.length;
+  const hidden = s.hidden ?? [];
+  $("#hidden-box").hidden = !hidden.length;
   $("#hidden-apps").replaceChildren(
-    ...s.hidden.map((name) => {
+    ...hidden.map((name) => {
       const row = document.createElement("div");
       row.className = "row";
       const label = document.createElement("span");
@@ -336,10 +337,8 @@ function render() {
   for (const o of git.options) if (o.value.includes("/")) o.text = o.value.split("/").pop().replace(/\.app$/, "");
   git.add(new Option("Other app…", "other"));
 
-  $("#tld").textContent = `.${s.tld}`;
-  $("#http").textContent = s.http_port;
-  $("#https").textContent = s.https_port;
-  $("#dns").textContent = s.dns_port;
+  $("#address").textContent = `https://name.${s.tld}${s.https_port === 443 ? "" : `:${s.https_port}`}`;
+  $("#ports").textContent = `HTTP on ${s.http_port}, DNS on ${s.dns_port}. Change them in config.toml.`;
   $("#config-dir").textContent = tilde(s.config_dir);
 
   // PHP versions

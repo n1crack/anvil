@@ -72,12 +72,9 @@
         </label>
       </div>
 
-      <h2>Domains and ports</h2>
+      <h2>Addresses</h2>
       <div class="group">
-        <div class="row"><span>Domain suffix</span><span id="tld" class="value"></span></div>
-        <div class="row"><span>HTTP port</span><span id="http" class="value"></span></div>
-        <div class="row"><span>HTTPS port</span><span id="https" class="value"></span></div>
-        <div class="row"><span>DNS port</span><span id="dns" class="value"></span></div>
+        <div class="row"><span>Applications answer at<small id="ports"></small></span><span id="address" class="value"></span></div>
         <div class="row">
           <span>Configuration files<small id="config-dir"></small></span>
           <button id="open-config">Show in Finder</button>
@@ -92,8 +89,8 @@
       <p class="hint">Each version is installed separately in Anvil’s folder and never touches your system.</p>
       <div id="versions" class="group"></div>
 
-      <h2>Defaults for all sites</h2>
-      <p class="hint">Empty fields use Anvil’s standard values shown in grey. Each site can override these.</p>
+      <h2>Defaults for all applications</h2>
+      <p class="hint">Empty fields use Anvil’s standard values, shown in grey. Each application can override these.</p>
       <div class="group" id="ini">
         <label class="row">
           <span>Memory limit</span>
