@@ -16,6 +16,20 @@ Until 1.0.0, minor versions may contain breaking changes.
   (`anvil https <site> [--off]` in the CLI). With HTTPS on, the http:// address
   redirects to https://.
 - The CLI uses color on a terminal; `NO_COLOR` turns it off.
+- An application's Overview lists each running piece on its own row, with its
+  own start, stop and restart buttons, its newest log line, and a click to open
+  its log. "Start all" and "Stop all" act on the whole application. A process
+  that crashes stays red and shows how it ended.
+- Laravel 13's `php artisan dev` processes (queue, logs, Vite) are read from the
+  application itself; the server is left out, since Anvil serves through PHP-FPM.
+- Extra `package.json` dev servers get their own address,
+  `<script>.<app>.<tld>` (for example `docs.vuefinder.test`).
+- One-off scripts appear as "Commands"; their output streams into the log.
+- Docker Compose projects are detected as their own kind, with their containers
+  as rows. Containers keep running when Anvil quits; Stop waits for the grace
+  period set in the compose file.
+- A Processes window (the button next to Settings) lists everything Anvil runs
+  with PID, port, CPU, memory and a live log.
 
 ### Changed
 
