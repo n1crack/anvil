@@ -74,6 +74,14 @@ fn process_log(site: &str, p: &crate::processes::Process) -> (String, PathBuf) {
     )
 }
 
+/// Source id and log file of a package.json command run once, by its id.
+fn once_log(site: &str, script: &str) -> (String, PathBuf) {
+    (
+        format!("once:{}", crate::processes::process_id(script)),
+        apps::log_file(&crate::processes::once_key(site, script)),
+    )
+}
+
 /// The log files an app has, newest modified first, then Anvil's own.
 pub fn sources(site: &Site) -> Vec<LogSource> {
     let dir = match site.kind.as_str() {
@@ -104,6 +112,11 @@ pub fn sources(site: &Site) -> Vec<LogSource> {
         let (id, path) = process_log(&site.name, &p);
         out.extend(source(&id, &p.name, &path));
     }
+    // Commands run once, once they have written something.
+    for script in crate::processes::package_scripts(&site.path).1 {
+        let (id, path) = once_log(&site.name, &script);
+        out.extend(source(&id, &script, &path));
+    }
     if let Some(v) = site.php.as_ref().filter(|_| apps::is_php(&site.kind)) {
         let path = home().join("log").join(format!("php-{v}-fpm.log"));
         out.extend(source("php-fpm", &format!("PHP-FPM {v}"), &path));
@@ -122,8 +135,13 @@ fn inside(path: &Path, root: &Path) -> bool {
 pub fn find(site: &Site, id: &str) -> Result<LogSource> {
     sources(site)
         .into_iter()
-        // A process is found by its id only: its name could be another log's label.
-        .find(|s| s.id == id || (!s.id.starts_with("proc:") && s.label.eq_ignore_ascii_case(id)))
+        // A process or command is found by its id only: its name could be another log's label.
+        .find(|s| {
+            s.id == id
+                || (!s.id.starts_with("proc:")
+                    && !s.id.starts_with("once:")
+                    && s.label.eq_ignore_ascii_case(id))
+        })
         .with_context(|| format!("{} has no log named {id}", site.name))
 }
 
@@ -531,6 +549,13 @@ mod tests {
         let (id, path) = process_log("shop", &p);
         assert_eq!(id, "proc:docs-dev");
         assert_eq!(path.file_name().unwrap(), "app-shop@docs-dev.log");
+    }
+
+    #[test]
+    fn once_log_is_named_by_id() {
+        let (id, path) = once_log("shop", "docs:dev");
+        assert_eq!(id, "once:docs-dev");
+        assert_eq!(path.file_name().unwrap(), "app-shop#docs-dev.log");
     }
 
     #[test]

@@ -462,7 +462,7 @@ impl Apps {
     /// `npm run <script>` once, as a process of the app (key `<site>#<id>`); its end
     /// is not a crash.
     pub fn run_once(&mut self, site: &Site, script: &str) -> Result<()> {
-        let key = format!("{}#{}", site.name, crate::processes::process_id(script));
+        let key = crate::processes::once_key(&site.name, script);
         if self.running(&key) {
             return Ok(());
         }

@@ -13,17 +13,21 @@ window.renderProcesses = (s) => {
   loadProcs(s.name);
 };
 
+/** Ask the backend; false when it failed (the error is shown). */
 async function loadProcs(name, cmd = "processes", args = {}) {
   const before = JSON.stringify(procCache.get(name));
+  let ok = true;
   procLoading.add(name);
   try {
     procCache.set(name, await invoke(cmd, { site: name, ...args }));
   } catch (e) {
     showError(String(e));
+    ok = false;
   }
   procLoading.delete(name);
   // Redraw only on a change, so focus and tooltips survive the polling.
   if (selected === name && JSON.stringify(procCache.get(name)) !== before) drawProcs(name);
+  return ok;
 }
 
 /** Docker can take minutes: the row says what it is doing until it is done. */
@@ -162,11 +166,20 @@ function drawProcs(name) {
     box.append(el("h3", "res-sub", "Commands"));
     const chips = el("div", "chips");
     for (const c of commands) {
-      const chip = el("button", "chip", c);
-      chip.title = `npm run ${c}`;
-      chip.onclick = () => {
-        loadProcs(name, "command_run", { script: c });
-        toast(`Running ${c}`);
+      // Running: a filling ring; then green or red for how the last run ended.
+      const mark = c.running ? "warm" : c.exit ? (c.exit.code === 0 ? "on" : "bad") : null;
+      const chip = el("button", "chip");
+      if (mark) chip.append(el("span", `dot ${mark}`));
+      chip.append(c.name);
+      chip.title = c.running
+        ? `npm run ${c.name} is running. Click to show its output.`
+        : `npm run ${c.name}${c.exit ? `, last run ${c.exit.code === 0 ? "succeeded" : "failed"}` : ""}. Click to run it.`;
+      chip.onclick = async () => {
+        if (!c.running) {
+          if (!(await loadProcs(name, "command_run", { script: c.name }))) return;
+          toast(`Running ${c.name}`);
+        }
+        window.showLog?.(name, `once:${c.id}`);
       };
       chips.append(chip);
     }
@@ -178,7 +191,7 @@ function drawProcs(name) {
 setInterval(() => {
   if (document.hidden || mode !== "apps" || !selected || tab !== "overview") return;
   const o = procCache.get(selected);
-  if (procLoading.has(selected) || !(o?.rows.length || o?.containers || o?.docker_error)) return;
+  if (procLoading.has(selected) || !(o?.rows.length || o?.commands.length || o?.containers || o?.docker_error)) return;
   loadProcs(selected);
 }, 2000);
 

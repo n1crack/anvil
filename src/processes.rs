@@ -44,15 +44,21 @@ pub fn project_file_error(site: &Site) -> Option<String> {
 
 /// An app's processes: `.anvil.toml`'s by name, a dev script's in its order.
 pub fn detect(site: &Site) -> Vec<Process> {
-    let php = home()
-        .join("php")
-        .join(site.php.as_deref().unwrap_or_default())
-        .join("php");
     // Only non-PHP apps need the config (for their rows' ports); no config, no rows.
     let cfg = (!apps::is_php(&site.kind))
         .then(|| crate::load().ok())
         .flatten();
-    detect_in(site, &php, &home().join("cache"), cfg.as_ref())
+    detect_with(site, cfg.as_ref())
+}
+
+/// `detect` with a config already loaded.
+pub fn detect_with(site: &Site, cfg: Option<&crate::Config>) -> Vec<Process> {
+    let php = home()
+        .join("php")
+        .join(site.php.as_deref().unwrap_or_default())
+        .join("php");
+    let cfg = cfg.filter(|_| !apps::is_php(&site.kind));
+    detect_in(site, &php, &home().join("cache"), cfg)
 }
 
 fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>) -> Vec<Process> {
@@ -572,6 +578,23 @@ pub fn log_file(site: &str, process: &str) -> PathBuf {
     apps::log_file(&key(site, process))
 }
 
+/// Key of a package.json command run once (`Apps::run_once`): `<site>#<id>`.
+pub fn once_key(site: &str, script: &str) -> String {
+    format!("{site}#{}", process_id(script))
+}
+
+/// Where an extra dev server row answers: its host, with the app's scheme and public port.
+pub fn address(cfg: &crate::Config, site: &Site, id: &str) -> Option<String> {
+    let row = server_rows(cfg, site).into_iter().find(|r| r.id == id)?;
+    Some(crate::site_url(
+        cfg,
+        &Site {
+            host: row.host,
+            ..site.clone()
+        },
+    ))
+}
+
 /// Anvil's PHP for the app and its newest Node.js, first on PATH, with Node's
 /// caches kept in Anvil's folder.
 pub fn env(site: &Site) -> Vec<(String, String)> {
@@ -927,6 +950,34 @@ mod tests {
         for s in [a, b] {
             fs::remove_dir_all(s.path).unwrap();
         }
+    }
+
+    #[test]
+    fn row_address_uses_its_host_and_the_apps_scheme() {
+        let mut s = vite_site(
+            "addr",
+            "vuefinder",
+            r#"{"dev":"vite","docs:dev":"vitepress dev docs"}"#,
+        );
+        // Ports nothing forwards, so they are written out.
+        let cfg = crate::Config {
+            http_port: 18080,
+            https_port: 18443,
+            ..Default::default()
+        };
+        assert_eq!(
+            address(&cfg, &s, "docs-dev").as_deref(),
+            Some("http://docs.vuefinder.test:18080")
+        );
+        s.secure = true;
+        assert_eq!(
+            address(&cfg, &s, "docs-dev").as_deref(),
+            Some("https://docs.vuefinder.test:18443")
+        );
+        // The app's own `dev` and unknown ids have no row address.
+        assert_eq!(address(&cfg, &s, "dev"), None);
+        assert_eq!(address(&cfg, &s, "nope"), None);
+        fs::remove_dir_all(&s.path).unwrap();
     }
 
     #[test]
