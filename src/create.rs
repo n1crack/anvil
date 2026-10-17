@@ -359,6 +359,8 @@ fn set_env(text: &str, pairs: &[(String, String)]) -> String {
 /// (Download, PHP dependencies, JS dependencies, Set up), and a failure ends it.
 pub fn create(kind: &str, name: &str, parent: &Path, opts: &Options) -> Result<PathBuf> {
     check_name(name)?;
+    // An earlier run's log goes, so a refusal below leaves none to read.
+    let _ = fs::remove_file(log_file(name));
     if !TEMPLATES.contains(&kind) {
         bail!("Anvil can't create {kind} applications");
     }
