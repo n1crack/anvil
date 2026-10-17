@@ -1451,6 +1451,14 @@ async fn runtimes() -> Res<Vec<anvil::runtimes::RuntimeInfo>> {
     .map_err(|e| e.to_string())
 }
 
+/// npm, pnpm, yarn and bun as the Node apps Anvil runs would find them.
+#[tauri::command]
+async fn package_managers() -> Res<Vec<anvil::runtimes::PackageManager>> {
+    tauri::async_runtime::spawn_blocking(anvil::runtimes::package_managers)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn runtime_install(handle: AppHandle, id: String, version: String) -> Res<()> {
     tauri::async_runtime::spawn_blocking(move || anvil::runtimes::install(&id, &version))
@@ -2911,6 +2919,7 @@ fn main() {
             clean_anvil,
             clean_all_safe,
             runtimes,
+            package_managers,
             runtime_install,
             runtime_uninstall
         ])

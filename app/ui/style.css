@@ -1126,28 +1126,161 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .settings .sidebar { background: color-mix(in srgb, var(--steel-pane) 70%, var(--steel-raised)); }
 
+/* A macOS source list: icon and name, a rounded neutral fill on the selected row. */
 .nav {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   padding: 0 10px;
 }
 
 .nav button {
-  height: 30px;
-  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--radius-s);
   background: none;
   text-align: left;
 }
 
+.nav button svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--muted);
+}
+
 .nav button:hover { background: var(--steel-hover); }
 
-.nav button[aria-current="true"] {
-  background: var(--selected);
+.nav button[aria-current="true"] { background: var(--selected); }
+
+.nav button[aria-current="true"] svg { color: var(--text); }
+
+/* A group's label: small, muted, not clickable. Empty, it only spaces groups apart. */
+.nav-head {
+  margin: 14px 0 3px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 11px;
   font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--select-mark);
 }
+
+.nav-head:empty { margin: 8px 0 0; }
+
+/* Versions: a check and "Default" on the default, missing ones muted with Install,
+ * Make default and Uninstall on hover; the row keeps its height either way. */
+.page .row.ver > .ver-name {
+  flex-direction: row;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.ver-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  margin-right: 8px;
+  color: var(--ok);
+}
+
+.ver-mark svg { width: 14px; height: 14px; }
+
+/* No default in the list (only PHP has one): no empty column for the check. */
+.versions:not(:has(.is-default)) .ver-mark { display: none; }
+
+.ver.missing .ver-label { color: var(--muted); }
+
+.ver-default {
+  margin-left: 8px;
+  color: var(--ok-text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ver .actions-inline { min-height: 26px; }
+
+.ver .on-hover { visibility: hidden; }
+
+.ver:hover .on-hover,
+.ver:focus-within .on-hover { visibility: visible; }
+
+.ver .spin-dot { color: var(--muted); }
+
+.page .hint.note {
+  max-width: 600px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/* Package managers: name, where it comes from, version. */
+.page .row.pm {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+}
+
+.pm-from {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page .row .pm-from small { margin: 0; }
+
+.pm-version { font-variant-numeric: tabular-nums; }
+
+.pm.missing .pm-name { color: var(--muted); }
+
+/* Storage › Applications: refresh, when, and Delete above the list, always there. */
+.storage-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 600px;
+  margin-bottom: 10px;
+}
+
+.page .storage-bar .icon-btn {
+  width: 26px;
+  padding: 0;
+  background: var(--steel-raised);
+}
+
+.page .storage-bar .icon-btn:disabled { opacity: 1; }
+
+#measured { font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.page #clean-all-safe {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.page #clean-all-safe:disabled { color: var(--muted); }
+
+#apps-hint { min-height: 2.8em; }
+
+.row.placeholder .bar {
+  display: inline-block;
+  width: 140px;
+  height: 9px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
+  vertical-align: middle;
+}
+
+.row.placeholder .bar.short { width: 90px; height: 7px; }
+
+.row.placeholder .bar.size { width: 48px; }
 
 .page {
   flex: 1;
@@ -1185,7 +1318,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   background: var(--steel-hover);
 }
 
-.storage-tabs button {
+.page .storage-tabs button {
   height: 26px;
   padding: 0 12px;
   border: 0;
@@ -1194,7 +1327,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   color: var(--muted);
 }
 
-.storage-tabs button[aria-selected="true"] { background: var(--selected); color: var(--text); }
+.page .storage-tabs button[aria-selected="true"] { background: var(--selected); color: var(--text); }
 .storage-tabs span { margin-left: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .page h2.storage-group {
@@ -1306,13 +1439,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   color: var(--text);
   text-decoration: underline;
   text-decoration-color: var(--line);
-}
-
-.runtime .versions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
 }
 
 .chip {

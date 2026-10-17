@@ -639,11 +639,11 @@ const mockHandle = (cmd, a) => {
         dns_port: 53,
         editor: "Zed",
         editors: ["Zed", "Visual Studio Code"],
-        php: [
-          { version: "8.4", installed: true, default: true },
-          { version: "8.3", installed: true, default: false },
-          { version: "8.2", installed: false, default: false },
-        ],
+        php: ["8.5", "8.4", "8.3", "8.2", "8.1", "8.0"].map((version) => ({
+          version,
+          installed: version === "8.5" || version === "8.4",
+          default: version === "8.4",
+        })),
         ini: { memory_limit: "512M", upload_max_filesize: "64M" },
         terminal: "Terminal",
         terminals: ["Terminal", "Ghostty"],
@@ -674,6 +674,25 @@ const mockHandle = (cmd, a) => {
       ];
       return { total: items.reduce((s, i) => s + i.bytes, 0), items };
     }
+    case "runtimes":
+      return [
+        { id: "node", name: "Node.js", installed: ["24", "22"], available: ["26", "24", "22", "20"] },
+        { id: "go", name: "Go", installed: [], available: ["1.27.2", "1.26.8"] },
+        { id: "rust", name: "Rust", installed: ["stable"], available: ["stable"] },
+        { id: "dotnet", name: ".NET", installed: ["10.0"], available: ["10.0", "9.0", "8.0"] },
+        { id: "python", name: "Python", installed: ["3.13"], available: ["3.14", "3.13", "3.12", "3.11"] },
+      ];
+    case "package_managers":
+      return [
+        { name: "npm", version: "11.6.2", path: "/Users/x/.anvil/runtimes/node/24/bin/npm", source: "Node.js 24" },
+        { name: "pnpm", version: "10.12.1", path: "/opt/homebrew/bin/pnpm", source: "Homebrew" },
+        { name: "yarn", version: null, path: null, source: null },
+        { name: "bun", version: "1.2.19", path: "/Users/x/.bun/bin/bun", source: "System" },
+      ];
+    case "storage_last":
+      return window.mockStorageLast ?? null;
+    case "clean_all_safe":
+      return [162529280, []];
     default:
       return null;
   }

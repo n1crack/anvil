@@ -28,7 +28,82 @@ window.refresh = () => {
 /* ---------- Languages ---------- */
 
 export let runtimes: any = null;
-export const installing = new Set<string>(); // "id@version"
+export const installing = new Set<string>(); // "id@version", "php@8.3" for PHP
+
+const CHECK = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.75" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+/** The page of each language Anvil installs besides PHP, and which version an
+ * app uses when it isn't pinned to one (as apps.rs and runtimes.rs decide). */
+export const LANGS = [
+  [
+    "node",
+    "Node.js",
+    "Apps use the version in .nvmrc or .node-version when it is installed, otherwise the newest. An app can pin one in its settings.",
+  ],
+  ["go", "Go", "Apps use the newest installed version unless an app pins one in its settings."],
+  ["rust", "Rust", "One toolchain, managed by rustup inside Anvil’s folder, serves every app."],
+  ["dotnet", ".NET", "The SDKs sit side by side; dotnet picks one per project (global.json), otherwise the newest."],
+  ["python", "Python", "uv picks one of these per project (.python-version, requires-python) unless an app pins one in its settings."],
+];
+
+// One page per language, the same shape as PHP's.
+for (const [id, name, note] of LANGS) {
+  const page = document.createElement("section");
+  page.id = id;
+  page.className = "page";
+  page.hidden = true;
+  page.innerHTML = `<h1></h1><p class="hint"></p><h2>Versions</h2><div class="group versions"><div class="row"><span class="muted">Loading versions…</span></div></div><p class="hint note"></p>`;
+  $("h1", page).textContent = name;
+  $(".hint", page).textContent =
+    `Installed into Anvil’s folder and used only for the apps Anvil runs; ${name} on your system stays untouched.`;
+  $(".note", page).textContent = note;
+  if (id === "node") {
+    page.insertAdjacentHTML(
+      "beforeend",
+      `<h2>Package managers</h2><div id="pms" class="group pms"><div class="row"><span class="muted">Looking…</span></div></div>` +
+        `<p class="hint note">Anvil starts Node apps with npm from the app’s Node version. A script that calls pnpm, yarn or bun gets the first one found on the app’s PATH, shown here.</p>`,
+    );
+  }
+  $("#storage").before(page);
+}
+
+/** Newest first, numerically: "22" > "9", "1.27.2" > "1.9". */
+const newest = (a: string, b: string) => b.localeCompare(a, undefined, { numeric: true });
+
+/** One row of a Versions list: muted with Install when missing, a check and
+ * "Default" on the default, Make default and Uninstall on hover otherwise. */
+export function versionRow(
+  label: string,
+  v: { installed: boolean; default?: boolean },
+  busy: boolean,
+  blocked: boolean,
+  act: { install: () => void; uninstall: () => void; makeDefault?: () => void },
+) {
+  const row = document.createElement("div");
+  row.className = `row ver${v.installed ? "" : " missing"}${v.default ? " is-default" : ""}`;
+  const name = document.createElement("span");
+  name.className = "ver-name";
+  name.innerHTML = `<span class="ver-mark">${v.default ? CHECK : ""}</span><span class="ver-label"></span>`;
+  $(".ver-label", name).textContent = label;
+  if (v.default) name.append(Object.assign(document.createElement("span"), { className: "ver-default", textContent: "Default" }));
+  const actions = document.createElement("span");
+  actions.className = "actions-inline";
+  if (busy) {
+    actions.innerHTML = `<span class="spin-dot"></span><span class="muted">Installing…</span>`;
+  } else if (!v.installed) {
+    const b = button("Install", act.install);
+    b.disabled = blocked;
+    actions.append(b);
+  } else if (!v.default) {
+    actions.classList.add("on-hover");
+    if (act.makeDefault) actions.append(button("Make default", act.makeDefault));
+    const u = button("Uninstall", act.uninstall);
+    u.title = `Uninstall ${label}`;
+    actions.append(u);
+  }
+  row.append(name, actions);
+  return row;
+}
 
 export async function loadRuntimes() {
   try {
@@ -37,86 +112,82 @@ export async function loadRuntimes() {
   } catch (e) {
     showError(String(e));
   }
-  renderRuntimes();
+  renderLanguages();
 }
 
-export function renderRuntimes() {
-  if (!runtimes) return;
-  const root = $("#runtime-list");
-  root.replaceChildren();
-  for (const rt of runtimes) {
-    const row = document.createElement("div");
-    row.className = "row runtime";
-    const info = document.createElement("span");
-    const title = document.createElement("strong");
-    title.textContent = rt.name;
-    const versions = document.createElement("span");
-    versions.className = "versions";
-    if (!rt.installed.length) {
-      const none = document.createElement("small");
-      none.textContent = "Not installed";
-      versions.append(none);
-    }
-    for (const v of rt.installed) {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = v;
-      const x = document.createElement("button");
-      x.textContent = "×";
-      x.title = `Uninstall ${rt.name} ${v}`;
-      x.setAttribute("aria-label", String(x.title));
-      x.onclick = async () => {
-        const ok = await window.__TAURI__.dialog.ask(
-          `Applications using it switch to another installed version, or stop starting until one is installed.`,
-          {
-            title: `Uninstall ${rt.name} ${v}?`,
-            kind: "warning",
-            okLabel: "Uninstall",
-            cancelLabel: "Cancel",
-          },
-        );
-        if (!ok) return;
-        try {
-          await invoke("runtime_uninstall", { id: rt.id, version: v });
-        } catch (e) {
-          showError(String(e));
-        }
-        loadRuntimes();
-      };
-      chip.append(x);
-      versions.append(chip);
-    }
-    info.append(title, versions);
-
-    const actions = document.createElement("span");
-    actions.className = "actions-inline";
-    const pick = document.createElement("select");
-    pick.setAttribute("aria-label", String(`${rt.name} version to install`));
-    for (const v of rt.available.filter((v) => !rt.installed.includes(v))) pick.add(new Option(v, v));
-    const key = () => `${rt.id}@${pick.value}`;
-    const install = button("Install", async () => {
-      const k = key();
-      installing.add(k);
-      renderRuntimes();
-      try {
-        await invoke("runtime_install", { id: rt.id, version: k.split("@")[1] });
-        showError(null);
-      } catch (e) {
-        showError(String(e));
-      }
-      installing.delete(k);
-      loadRuntimes();
-    });
-    const busyHere = [...installing].some((k) => k.startsWith(`${rt.id}@`));
-    if (busyHere) {
-      install.textContent = "Installing…";
-      install.disabled = true;
-      pick.disabled = true;
-    }
-    if (pick.options.length) actions.append(pick, install);
-    row.append(info, actions);
-    root.append(row);
+export function renderLanguages() {
+  for (const rt of runtimes ?? []) {
+    const list = $(`#${rt.id} .versions`);
+    if (!list) continue;
+    const all = [...new Set<string>([...rt.available, ...rt.installed])].sort(newest);
+    const blocked = [...installing].some((k) => k.startsWith(`${rt.id}@`));
+    list.replaceChildren(
+      ...all.map((v) =>
+        versionRow(`${rt.name} ${v}`, { installed: rt.installed.includes(v) }, installing.has(`${rt.id}@${v}`), blocked, {
+          install: () => installRuntime(rt.id, v),
+          uninstall: () => uninstallRuntime(rt, v),
+        }),
+      ),
+    );
+    if (!all.length) list.innerHTML = `<div class="row"><span class="muted">No versions found. Check the internet connection.</span></div>`;
   }
+}
+
+export async function installRuntime(id: string, version: string) {
+  const k = `${id}@${version}`;
+  installing.add(k);
+  renderLanguages();
+  try {
+    await invoke("runtime_install", { id, version });
+    showError(null);
+  } catch (e) {
+    showError(String(e));
+  }
+  installing.delete(k);
+  loadRuntimes();
+}
+
+export async function uninstallRuntime(rt, v: string) {
+  const ok = await window.__TAURI__.dialog.ask(
+    `Applications using it switch to another installed version, or stop starting until one is installed.`,
+    { title: `Uninstall ${rt.name} ${v}?`, kind: "warning", okLabel: "Uninstall", cancelLabel: "Cancel" },
+  );
+  if (!ok) return;
+  try {
+    await invoke("runtime_uninstall", { id: rt.id, version: v });
+  } catch (e) {
+    showError(String(e));
+  }
+  loadRuntimes();
+}
+
+/** npm, pnpm, yarn and bun: found or not, where from and which version. Read-only. */
+export async function loadPackageManagers() {
+  let pms;
+  try {
+    pms = await invoke("package_managers");
+  } catch (e) {
+    return showError(String(e));
+  }
+  $("#pms").replaceChildren(
+    ...pms.map((pm) => {
+      const row = document.createElement("div");
+      row.className = "row pm";
+      row.innerHTML = `<span class="pm-name"></span><span class="pm-from"></span><span class="pm-version"></span>`;
+      $(".pm-name", row).textContent = pm.name;
+      const from = $(".pm-from", row);
+      if (pm.path) {
+        from.textContent = pm.source?.startsWith("Node.js") ? `Bundled with ${pm.source}` : pm.source;
+        from.title = tilde(pm.path);
+        if (pm.source === "System") from.append(Object.assign(document.createElement("small"), { textContent: ` ${tilde(pm.path)}` }));
+      } else {
+        from.textContent = "Not found";
+        row.classList.add("missing");
+      }
+      $(".pm-version", row).textContent = pm.version ?? (pm.path ? "unknown" : "");
+      return row;
+    }),
+  );
 }
 
 /* ---------- Storage ---------- */
@@ -229,14 +300,21 @@ export function drawAnvilItem(list, i, withNote) {
 }
 
 /* Application sizes: the last measurement shows at once, and a new one fills
- * in row by row as each app is counted. */
+ * in row by row as each app is counted. The toolbar and the list hold their
+ * place from the start: while measuring the refresh icon spins, Delete waits
+ * disabled, and placeholder rows keep the list's height until numbers arrive. */
 export const sizes = new Map<string, any>(); // app name -> { name, kind, total, safe, rebuild }
 export let measuring = false;
+export let loading = true; // the last measurement not read yet
+export let deleting = false;
 export let measuredAt = 0; // Unix seconds of the shown numbers
 export let drawQueued = false;
+let fresh: Set<string> | null = null; // apps counted by the running measurement
+const PLACEHOLDERS = 6;
 
 window.__TAURI__.event.listen("storage-app", (e) => {
   sizes.set(e.payload.name, e.payload);
+  fresh?.add(e.payload.name);
   if (!drawQueued) {
     drawQueued = true;
     requestAnimationFrame(() => {
@@ -248,20 +326,22 @@ window.__TAURI__.event.listen("storage-app", (e) => {
 
 export async function loadAppSizes() {
   if (measuring) return;
+  drawSizes();
   const last = await invoke("storage_last").catch(() => null);
+  loading = false;
   if (last && !sizes.size) {
     measuredAt = last[0];
     for (const a of last[1]) sizes.set(a.name, a);
   }
-  drawSizes();
-  // Numbers younger than ten minutes are good enough; Measure Again is there.
+  // Numbers younger than ten minutes are good enough; the refresh button is there.
   if (!last || Date.now() / 1000 - last[0] > 600) scanApps();
+  else drawSizes();
 }
 
 export async function scanApps() {
+  if (measuring) return;
   measuring = true;
-  const fresh = new Set();
-  const stop = window.__TAURI__.event.listen("storage-app", (e) => fresh.add(e.payload.name));
+  fresh = new Set();
   drawSizes();
   try {
     await invoke("storage_apps");
@@ -271,45 +351,38 @@ export async function scanApps() {
   } catch (e) {
     showError(String(e));
   }
-  (await stop)();
+  fresh = null;
   measuring = false;
   drawSizes();
 }
 
+export const DELETE_ALL = "Delete Logs and Caches in All Apps";
+
 export function drawSizes() {
   const apps = [...sizes.values()].sort((a, b) => b.total - a.total);
   const sum = (k) => apps.reduce((a, x) => a + x[k], 0);
-  const when = measuredAt ? agoText(measuredAt) : "";
+  const busy = measuring || loading;
   $("#apps-size").textContent = apps.length ? bytes(sum("total")) : "";
   $("#apps-hint").textContent = !apps.length
     ? "Measuring every application…"
     : `${apps.length} applications use ${bytes(sum("total"))}. ${bytes(sum("safe"))} is logs and caches that can be deleted safely; ` +
-      `${bytes(sum("rebuild"))} is dependencies and builds that can be recreated. ` +
-      (measuring ? "Measuring again…" : `Measured ${when}.`);
-  $("#scan-apps").hidden = measuring;
+      `${bytes(sum("rebuild"))} is dependencies and builds that can be recreated.`;
+
+  const scan = $("#scan-apps");
+  scan.disabled = busy || deleting;
+  scan.classList.toggle("spinning", busy);
+  $("#measured").textContent = busy ? "Measuring…" : measuredAt ? `Measured ${agoText(measuredAt)}` : "";
 
   const all = $("#clean-all-safe");
-  all.hidden = measuring || !sum("safe");
-  all.textContent = `Delete Logs and Caches in All Apps (${bytes(sum("safe"))})`;
-  all.onclick = async () => {
-    const ok = await confirmDelete(
-      "Delete logs and caches in all applications?",
-      `Removes application logs, compiled views and caches (sessions too, which logs users out) in every app. Folders and .gitignore files stay. About ${bytes(sum("safe"))}.`,
-    );
-    if (!ok) return;
-    try {
-      const [freed, failed] = await invoke("clean_all_safe");
-      showError(failed.length ? `Freed ${bytes(freed)}. Couldn't clean: ${[...new Set(failed)].join(", ")}` : null);
-    } catch (e) {
-      showError(String(e));
-    }
-    scanApps();
-  };
+  const safe = sum("safe");
+  all.disabled = busy || deleting || !safe;
+  all.replaceChildren(busy || deleting || !safe ? DELETE_ALL : `${DELETE_ALL} (${bytes(safe)})`);
+  if (deleting) all.prepend(Object.assign(document.createElement("span"), { className: "spin-dot" }));
 
   const list = $("#app-sizes");
-  list.hidden = !apps.length;
   list.replaceChildren();
-  for (const a of apps.filter((a) => a.total > 0)) {
+  const shown = apps.filter((a) => a.total > 0);
+  for (const a of shown) {
     const row = document.createElement("div");
     row.className = "row";
     const info = document.createElement("span");
@@ -328,6 +401,15 @@ export function drawSizes() {
     row.append(info, size);
     list.append(row);
   }
+  // Not counted yet: grey bars where rows will be, so the page doesn't jump.
+  for (let i = busy ? shown.length : PLACEHOLDERS; i < PLACEHOLDERS; i++) {
+    const row = document.createElement("div");
+    row.className = "row placeholder";
+    // The same lines as a measured row, so it is just as tall.
+    row.innerHTML = `<span><span><i class="bar"></i></span><small><i class="bar short"></i></small></span><span class="size"><i class="bar size"></i></span>`;
+    list.append(row);
+  }
+  if (!busy && !shown.length) list.innerHTML = `<div class="row"><span class="muted">No applications take any space.</span></div>`;
 }
 
 export function agoText(secs) {
@@ -339,6 +421,24 @@ export function agoText(secs) {
 }
 
 $("#scan-apps").onclick = scanApps;
+$("#clean-all-safe").onclick = async () => {
+  const safe = [...sizes.values()].reduce((a, x) => a + x.safe, 0);
+  const ok = await confirmDelete(
+    "Delete logs and caches in all applications?",
+    `Removes application logs, compiled views and caches (sessions too, which logs users out) in every app. Folders and .gitignore files stay. About ${bytes(safe)}.`,
+  );
+  if (!ok) return;
+  deleting = true;
+  drawSizes();
+  try {
+    const [freed, failed] = await invoke("clean_all_safe");
+    showError(failed.length ? `Freed ${bytes(freed)}. Couldn't clean: ${[...new Set(failed)].join(", ")}` : null);
+  } catch (e) {
+    showError(String(e));
+  }
+  deleting = false;
+  scanApps();
+};
 
 export function options(select, values, current, none) {
   select.replaceChildren(new Option(none, ""));
@@ -423,24 +523,19 @@ export function render() {
   $("#config-dir").textContent = tilde(s.config_dir);
 
   // PHP versions
-  const versions = $("#versions");
-  versions.replaceChildren();
-  for (const v of s.php) {
-    const row = document.createElement("div");
-    row.className = "row";
-    const label = document.createElement("span");
-    label.textContent = `PHP ${v.version}`;
-    const actions = document.createElement("span");
-    actions.className = "actions-inline";
-    if (v.default) {
-      const tag = document.createElement("span");
-      tag.className = "tag";
-      tag.textContent = "Default";
-      actions.append(tag);
-    } else if (v.installed) {
-      actions.append(
-        button("Make default", () => call("set_default_php", { version: v.version })),
-        button("Uninstall", async () => {
+  const phpBusy = [...installing].some((k) => k.startsWith("php@"));
+  $("#versions").replaceChildren(
+    ...s.php.map((v) =>
+      versionRow(`PHP ${v.version}`, v, installing.has(`php@${v.version}`), phpBusy, {
+        install: async () => {
+          installing.add(`php@${v.version}`);
+          render();
+          await call("php_install", { version: v.version });
+          installing.delete(`php@${v.version}`);
+          render();
+        },
+        makeDefault: () => call("set_default_php", { version: v.version }),
+        uninstall: async () => {
           const ok = await window.__TAURI__.dialog.ask("Applications pinned to it fall back to the default PHP version.", {
             title: `Uninstall PHP ${v.version}?`,
             kind: "warning",
@@ -448,20 +543,10 @@ export function render() {
             cancelLabel: "Cancel",
           });
           if (ok) call("php_uninstall", { version: v.version });
-        }),
-      );
-    } else {
-      actions.append(
-        button("Install", async (b) => {
-          b.disabled = true;
-          b.textContent = "Installing…";
-          await call("php_install", { version: v.version });
-        }),
-      );
-    }
-    row.append(label, actions);
-    versions.append(row);
-  }
+        },
+      }),
+    ),
+  );
 
   for (const input of document.querySelectorAll<HTMLInputElement>("[data-ini]")) {
     if (document.activeElement !== input) input.value = s.ini[input.dataset.ini ?? ""] ?? "";
@@ -527,7 +612,8 @@ for (const b of document.querySelectorAll<HTMLElement>("[data-page]")) {
   b.onclick = () => {
     for (const other of document.querySelectorAll<HTMLElement>("[data-page]")) other.setAttribute("aria-current", String(other === b));
     for (const page of document.querySelectorAll<HTMLElement>(".page")) page.hidden = page.id !== b.dataset.page;
-    if (b.dataset.page === "languages" && !runtimes) loadRuntimes();
+    if (LANGS.some(([id]) => id === b.dataset.page) && !runtimes) loadRuntimes();
+    if (b.dataset.page === "node") loadPackageManagers();
     if (b.dataset.page === "storage") {
       loadAnvilStorage();
       loadAppSizes();
