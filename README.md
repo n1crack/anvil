@@ -157,7 +157,7 @@ open ../target/release/bundle/macos/Anvil.app
   - **Overview:** type, runtime, folder, web root, disk and services in use.
   - **Settings:** type, PHP version and php.ini settings, or start command, port and "Start with Anvil".
   - **Resources:** disk breakdown with clean-up, processes and services.
-- **Services** next to Applications in the sidebar: grouped by kind with a running dot and tags. Each service has Start, Stop and Restart, its ports, the applications that use it, tags, data folder and log, the `.env` lines to copy, and removal with or without its data. The + button (⌘N) adds one: kind, name, port, application and tags.
+- **Services** next to Applications in the sidebar: grouped by kind with a running dot and tags. Each service has Start, Stop and Restart, its ports, the applications that use it, tags, data folder and log, the `.env` lines to copy (pointed at a database you pick), what's inside (databases with sizes, create and drop; Redis keys and memory with Flush All; Mailpit messages with Delete All), buttons for database apps you have installed (TablePlus, Sequel Ace, Postico, DBeaver, DataGrip, Beekeeper Studio, RedisInsight), and removal with or without its data. The + button (⌘N) adds one: kind, name, port, application and tags.
 - **Settings window:**
   - **General:** site folders, launch at login, Dock icon, theme, editor and terminal, domain and ports.
   - **PHP:** install and remove versions, set the default, php.ini defaults for all applications.
@@ -212,6 +212,8 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil service list` | List added services and their state |
 | `anvil service add <kind> [name] [--port N] [--version V]` | Add `mysql`, `postgres`, `redis` or `mailpit`; downloads that version the first time |
 | `anvil service versions` | Versions each service offers, and which are installed |
+| `anvil service databases <name>` | What a running service holds: databases and sizes, Redis keys, Mailpit messages |
+| `anvil service create-db <name> <db>` / `drop-db <name> <db>` | Create or drop a MySQL or PostgreSQL database |
 | `anvil service remove <name> [--delete-data]` | Remove a service; its data is kept unless asked |
 | `anvil service tag <name> [tags…]` | Label a service, e.g. `queue`; no tags clears them |
 | `anvil service link <name> [apps…]` | The applications that use a service; they list it under their resources |

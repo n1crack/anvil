@@ -523,6 +523,8 @@ struct ServiceRow {
     #[serde(flatten)]
     info: anvil::services::ServiceInfo,
     error: Option<String>,
+    /// Installed database apps that can open it.
+    clients: Vec<&'static str>,
 }
 
 #[tauri::command]
@@ -537,6 +539,7 @@ fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
         .into_iter()
         .map(|info| ServiceRow {
             error: errors.get(&info.id).cloned(),
+            clients: anvil::databases::clients(info.kind),
             info,
         })
         .collect())
@@ -674,6 +677,49 @@ fn open_service(id: String, what: String) -> Res<()> {
         return Err(format!("Nothing there yet — start {id} first"));
     }
     anvil::run(Command::new("open").arg("-a").arg(app).arg(path)).map_err(err)
+}
+
+/// Databases, keys or messages in a running service.
+#[tauri::command]
+async fn service_contents(id: String) -> Res<anvil::databases::Contents> {
+    tauri::async_runtime::spawn_blocking(move || anvil::databases::contents(&anvil::load()?, &id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(err)
+}
+
+/// `action`: "create" or "drop" a database, or "empty" Redis/Mailpit.
+#[tauri::command]
+async fn service_data(
+    id: String,
+    action: String,
+    name: Option<String>,
+) -> Res<anvil::databases::Contents> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = anvil::load()?;
+        let name = name.unwrap_or_default();
+        match action.as_str() {
+            "create" => anvil::databases::create(&cfg, &id, &name)?,
+            "drop" => anvil::databases::drop_database(&cfg, &id, &name)?,
+            _ => anvil::databases::empty(&cfg, &id)?,
+        }
+        anvil::databases::contents(&cfg, &id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(err)
+}
+
+/// Open a service (or one of its databases) in an installed database app.
+#[tauri::command]
+fn open_in_client(id: String, client: String, database: Option<String>) -> Res<()> {
+    let cfg = anvil::load().map_err(err)?;
+    let kind = anvil::services::kind_of(&cfg, &id).map_err(err)?;
+    if !anvil::databases::clients(kind).contains(&client.as_str()) {
+        return Err(format!("{client} isn't installed"));
+    }
+    let url = anvil::databases::url(&cfg, &id, database.as_deref()).map_err(err)?;
+    anvil::run(Command::new("open").arg("-a").arg(&client).arg(url)).map_err(err)
 }
 
 #[tauri::command]
@@ -1227,6 +1273,9 @@ fn main() {
             set_service_port,
             install_service,
             service_kinds,
+            service_contents,
+            service_data,
+            open_in_client,
             service_run,
             set_service_tags,
             set_service_apps,

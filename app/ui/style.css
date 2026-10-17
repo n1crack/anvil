@@ -1278,3 +1278,28 @@ kbd {
   background: color-mix(in srgb, var(--heat) 22%, transparent);
   color: var(--heat-text);
 }
+
+.svc-contents .res-cells { gap: 12px; }
+.svc-contents .row:has(> input) { display: flex; gap: 8px; }
+.svc-contents .row > input {
+  flex: 1;
+  max-width: 260px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}
+.svc-contents button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--heat-text);
+}
+.svc-contents button.plain {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}

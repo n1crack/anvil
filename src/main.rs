@@ -93,6 +93,12 @@ enum ServiceCmd {
     },
     /// Versions each service offers, and which are installed
     Versions,
+    /// What a running service holds: databases, keys or messages
+    Databases { id: String },
+    /// Create a database in a running MySQL or PostgreSQL service
+    CreateDb { id: String, name: String },
+    /// Drop a database from a running MySQL or PostgreSQL service
+    DropDb { id: String, name: String },
     /// Remove a service; its data is kept unless --delete-data
     Remove {
         id: String,
@@ -319,6 +325,23 @@ fn main() -> Result<()> {
             ServiceCmd::Remove { id, delete_data } => services::remove(&mut cfg, &id, delete_data)?,
             ServiceCmd::Tag { id, tags } => services::set_tags(&mut cfg, &id, &tags)?,
             ServiceCmd::Link { id, apps } => services::set_apps(&mut cfg, &id, &apps)?,
+            ServiceCmd::Databases { id } => {
+                let c = anvil::databases::contents(&cfg, &id)?;
+                for (n, b) in c.databases {
+                    println!("{n:<32} {:>10} KB", b / 1024);
+                }
+                for (db, k) in c.keys {
+                    println!("{db:<8} {k} keys");
+                }
+                if let Some(m) = c.memory {
+                    println!("memory   {m}");
+                }
+                if let Some(m) = c.messages {
+                    println!("{m} messages");
+                }
+            }
+            ServiceCmd::CreateDb { id, name } => anvil::databases::create(&cfg, &id, &name)?,
+            ServiceCmd::DropDb { id, name } => anvil::databases::drop_database(&cfg, &id, &name)?,
             ServiceCmd::Versions => {
                 for kind in services::SERVICES {
                     let installed = services::installed_versions(kind);
