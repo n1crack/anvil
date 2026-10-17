@@ -25,9 +25,10 @@ Until 1.0.0, minor versions may contain breaking changes.
 - Extra `package.json` dev servers get their own address,
   `<script>.<app>.<tld>` (for example `docs.vuefinder.test`); "Edit address…"
   in the row's ⋯ menu changes the first part.
-- One-off scripts appear as "Commands", a compact list with each script's
-  command and how its last run went; recently run ones come first, and "Show
-  all" lists more than six. Their output streams into the log.
+- One-off scripts appear as "Commands", a compact list in package.json order
+  with each script's command and how its last run went; "Show all" lists more
+  than six. ▶ runs one after a confirmation, and its output streams into an
+  inline console.
 - Docker Compose projects are detected as their own kind, with their containers
   as rows. Containers keep running when Anvil quits; Stop waits for the grace
   period set in the compose file.
