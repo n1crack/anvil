@@ -748,6 +748,14 @@ impl Services {
         Ok(())
     }
 
+    /// Running services and their pids, to look at without holding on to `Services`.
+    pub fn pids(&mut self) -> BTreeMap<String, u32> {
+        let ids: Vec<String> = self.children.keys().cloned().collect();
+        ids.into_iter()
+            .filter_map(|id| self.pid(&id).map(|p| (id, p)))
+            .collect()
+    }
+
     pub fn pid(&mut self, id: &str) -> Option<u32> {
         self.running(id).then(|| self.children[id].id())
     }

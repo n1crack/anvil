@@ -591,6 +591,15 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             );
             continue;
         }
+        // A quote, backslash or line break in the folder would end the quoted root and
+        // break (or rewrite) the whole Caddyfile; such a folder isn't served.
+        if site
+            .root
+            .to_string_lossy()
+            .contains(['"', '\\', '\n', '\r'])
+        {
+            continue;
+        }
         s += &format!(
             "\n{0}.{1}, http://{0}.{1} {{\n\troot * \"{2}\"\n\tencode\n",
             site.name,
@@ -955,6 +964,10 @@ mod tests {
         assert!(out.contains("php-8.3.sock"));
         assert_eq!(out.matches("php_fastcgi").count(), 1);
         assert_eq!(site_name("My Shop.be"), "my-shop.be");
+
+        // A folder whose path could close the quoted root is left out, not spliced in.
+        let evil = [site("evil", "/s/a\"\n}\nimport /etc", None)];
+        assert!(!caddyfile(&cfg, &evil).contains("evil.test"));
     }
 
     #[test]

@@ -126,13 +126,13 @@ fn changed(handle: &AppHandle) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn state(app: State<App>) -> Res<Snapshot> {
     snapshot(&app)
 }
 
 /// Rescan parked folders; re-serve only if the set of sites changed.
-#[tauri::command]
+#[tauri::command(async)]
 fn refresh(handle: AppHandle, app: State<App>) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
     if running(&app) && anvil::needs_restart(&cfg) {
@@ -142,7 +142,7 @@ fn refresh(handle: AppHandle, app: State<App>) -> Res<Snapshot> {
     snapshot(&app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_running(handle: AppHandle, app: State<App>, on: bool) -> Res<Snapshot> {
     if on {
         start(&app, &anvil::load().map_err(err)?);
@@ -154,7 +154,7 @@ fn set_running(handle: AppHandle, app: State<App>, on: bool) -> Res<Snapshot> {
 }
 
 /// `version: None` puts the site back on the default PHP version.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_php(
     handle: AppHandle,
     app: State<App>,
@@ -191,7 +191,7 @@ fn start_app(app: &App, cfg: &Config, name: &str) {
     };
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn app_run(handle: AppHandle, app: State<App>, site: String, action: String) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
     if action != "start" {
@@ -273,7 +273,8 @@ async fn resources(handle: AppHandle, site: String) -> Res<anvil::resources::Res
         let app = handle.state::<App>();
         let pid = app.apps.lock().unwrap().pid(&s.name);
         let processes = anvil::resources::processes(&s, pid);
-        let services = anvil::resources::services_used(&cfg, &s, &mut app.services.lock().unwrap());
+        let live = app.services.lock().unwrap().pids();
+        let services = anvil::resources::services_used(&cfg, &s, &live);
         Ok(anvil::resources::Resources {
             total,
             items,
@@ -458,7 +459,7 @@ async fn storage_apps(handle: AppHandle) -> Res<Vec<anvil::resources::AppSize>> 
 }
 
 /// The last measurement, shown at once while a new one runs.
-#[tauri::command]
+#[tauri::command(async)]
 fn storage_last() -> Option<(u64, Vec<anvil::resources::AppSize>)> {
     anvil::resources::last_app_sizes()
 }
@@ -502,7 +503,7 @@ async fn runtime_install(handle: AppHandle, id: String, version: String) -> Res<
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn runtime_uninstall(handle: AppHandle, id: String, version: String) -> Res<()> {
     anvil::runtimes::uninstall(&id, &version).map_err(err)?;
     changed(&handle);
@@ -546,7 +547,7 @@ async fn create_app(
     Ok(site)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_create_log(name: String) -> Res<()> {
     anvil::run(
         Command::new("open")
@@ -557,7 +558,7 @@ fn open_create_log(name: String) -> Res<()> {
 }
 
 /// Serve one project folder; its name comes from the folder.
-#[tauri::command]
+#[tauri::command(async)]
 fn link_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<String> {
     let path = path.canonicalize().map_err(|e| e.to_string())?;
     let name = path
@@ -571,7 +572,7 @@ fn link_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
 }
 
 /// Serve every project inside a folder.
-#[tauri::command]
+#[tauri::command(async)]
 fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<()> {
     let path = path.canonicalize().map_err(|e| e.to_string())?;
     let mut cfg = anvil::load().map_err(err)?;
@@ -583,7 +584,7 @@ fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) -> Res<Snapshot> {
     let mut cfg = anvil::load().map_err(err)?;
     let path = anvil::sites(&cfg)
@@ -597,7 +598,7 @@ fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) ->
 }
 
 /// Unlinks linked names and hides parked folders. Never deletes files.
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
     let mut cfg = anvil::load().map_err(err)?;
     anvil::remove(&mut cfg, &site).map_err(err)?;
@@ -606,7 +607,7 @@ fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot
 }
 
 /// Pin an app to a language version (`None`: from the project, or the newest).
-#[tauri::command]
+#[tauri::command(async)]
 fn set_runtime(
     handle: AppHandle,
     app: State<App>,
@@ -624,7 +625,7 @@ fn set_runtime(
     snapshot(&app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_site_ini(
     handle: AppHandle,
     app: State<App>,
@@ -638,7 +639,7 @@ fn set_site_ini(
     snapshot(&app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_group(app: State<App>, site: String, group: Option<String>) -> Res<Snapshot> {
     let mut cfg = anvil::load().map_err(err)?;
     anvil::set_group(&mut cfg, &site, group.as_deref()).map_err(err)?;
@@ -656,7 +657,7 @@ struct ServiceRow {
     clients: Vec<&'static str>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
     let cfg = anvil::load().map_err(err)?;
     let errors = app.service_errors.lock().unwrap().clone();
@@ -684,7 +685,7 @@ fn start_service(app: &App, cfg: &Config, id: &str) {
 }
 
 /// Turning a service on also makes it start with Anvil, and vice versa.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_service(handle: AppHandle, app: State<App>, id: String, on: bool) -> Res<Vec<ServiceRow>> {
     let mut cfg = anvil::load().map_err(err)?;
     anvil::services::set_enabled(&mut cfg, &id, on).map_err(err)?;
@@ -698,7 +699,7 @@ fn set_service(handle: AppHandle, app: State<App>, id: String, on: bool) -> Res<
     services(app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_service_port(
     handle: AppHandle,
     app: State<App>,
@@ -742,7 +743,7 @@ async fn install_service(handle: AppHandle, id: String) -> Res<Vec<ServiceRow>> 
 }
 
 /// Start, stop or restart a service. Starting also makes it start with Anvil.
-#[tauri::command]
+#[tauri::command(async)]
 fn service_run(
     handle: AppHandle,
     app: State<App>,
@@ -764,7 +765,7 @@ fn service_run(
     services(app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_service_tags(
     handle: AppHandle,
     app: State<App>,
@@ -777,7 +778,7 @@ fn set_service_tags(
     services(app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_service_apps(
     handle: AppHandle,
     app: State<App>,
@@ -791,7 +792,7 @@ fn set_service_apps(
 }
 
 /// `what` is "log" (opens in Console) or "data" (shows the folder in Finder).
-#[tauri::command]
+#[tauri::command(async)]
 fn open_service(id: String, what: String) -> Res<()> {
     let cfg = anvil::load().map_err(err)?;
     if !cfg.services.contains_key(&id) {
@@ -840,7 +841,7 @@ async fn service_data(
 }
 
 /// Open a service (or one of its databases) in an installed database app.
-#[tauri::command]
+#[tauri::command(async)]
 fn open_in_client(id: String, client: String, database: Option<String>) -> Res<()> {
     let cfg = anvil::load().map_err(err)?;
     let kind = anvil::services::kind_of(&cfg, &id).map_err(err)?;
@@ -851,7 +852,7 @@ fn open_in_client(id: String, client: String, database: Option<String>) -> Res<(
     anvil::run(Command::new("open").arg("-a").arg(&client).arg(url)).map_err(err)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn service_kinds() -> Res<Vec<anvil::services::Kind>> {
     Ok(anvil::services::kinds(&anvil::load().map_err(err)?))
 }
@@ -895,7 +896,7 @@ async fn add_service(
     services(app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_service(
     handle: AppHandle,
     app: State<App>,
@@ -911,7 +912,7 @@ fn remove_service(
     services(app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_url(url: String) -> Res<()> {
     if !url.starts_with("http://127.0.0.1:") && !url.starts_with("https://") {
         return Err("Only local and https links can be opened".into());
@@ -1043,7 +1044,7 @@ fn update_dock(handle: &AppHandle) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn settings(handle: AppHandle) -> Res<Settings> {
     use tauri_plugin_autostart::ManagerExt;
     let cfg = anvil::load().map_err(err)?;
@@ -1093,7 +1094,7 @@ fn apply(
     settings(handle.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_path(handle: AppHandle, path: std::path::PathBuf) -> Res<Settings> {
     apply(
         &handle,
@@ -1108,7 +1109,7 @@ fn add_path(handle: AppHandle, path: std::path::PathBuf) -> Res<Settings> {
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_path(handle: AppHandle, path: std::path::PathBuf) -> Res<Settings> {
     apply(
         &handle,
@@ -1120,7 +1121,7 @@ fn remove_path(handle: AppHandle, path: std::path::PathBuf) -> Res<Settings> {
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_editor(handle: AppHandle, editor: Option<String>) -> Res<Settings> {
     apply(
         &handle,
@@ -1132,7 +1133,7 @@ fn set_editor(handle: AppHandle, editor: Option<String>) -> Res<Settings> {
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_terminal(handle: AppHandle, terminal: Option<String>) -> Res<Settings> {
     apply(
         &handle,
@@ -1144,7 +1145,7 @@ fn set_terminal(handle: AppHandle, terminal: Option<String>) -> Res<Settings> {
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_git_client(handle: AppHandle, git_client: Option<String>) -> Res<Settings> {
     // Any app can be picked by path ("Other app…"); it has to be a real .app bundle.
     if let Some(c) = git_client.as_deref().filter(|c| c.contains('/')) {
@@ -1163,7 +1164,7 @@ fn set_git_client(handle: AppHandle, git_client: Option<String>) -> Res<Settings
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_theme(handle: AppHandle, theme: Option<String>) -> Res<Settings> {
     apply_theme(&handle, theme.as_deref());
     apply(
@@ -1176,7 +1177,7 @@ fn set_theme(handle: AppHandle, theme: Option<String>) -> Res<Settings> {
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_dock_icon(handle: AppHandle, on: bool) -> Res<Settings> {
     let s = apply(
         &handle,
@@ -1190,7 +1191,7 @@ fn set_dock_icon(handle: AppHandle, on: bool) -> Res<Settings> {
     s
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_login(handle: AppHandle, on: bool) -> Res<Settings> {
     use tauri_plugin_autostart::ManagerExt;
     let auto = handle.autolaunch();
@@ -1198,18 +1199,18 @@ fn set_login(handle: AppHandle, on: bool) -> Res<Settings> {
     settings(handle)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_config_dir() -> Res<()> {
     anvil::run(Command::new("open").arg(anvil::home())).map_err(err)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_default_php(handle: AppHandle, version: String) -> Res<Settings> {
     apply(&handle, |cfg| anvil::set_default_php(cfg, &version), true)
 }
 
 /// `site: None` changes the default for every site.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_ini(
     handle: AppHandle,
     site: Option<String>,
@@ -1240,7 +1241,7 @@ async fn php_install(handle: AppHandle, version: String) -> Res<Settings> {
     settings(handle)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn php_uninstall(handle: AppHandle, version: String) -> Res<Settings> {
     apply(&handle, |cfg| anvil::php_uninstall(cfg, &version), false)
 }
@@ -1265,12 +1266,12 @@ fn open_settings(handle: &AppHandle) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn show_settings(handle: AppHandle) {
     open_settings(&handle);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open(site: String, target: String) -> Res<()> {
     let cfg = anvil::load().map_err(err)?;
     let s = anvil::sites(&cfg)
@@ -1298,7 +1299,7 @@ fn open(site: String, target: String) -> Res<()> {
 }
 
 /// The site's favicon as a data URL, so the webview never needs file access.
-#[tauri::command]
+#[tauri::command(async)]
 fn icon(site: String) -> Option<String> {
     use base64::Engine;
     let cfg = anvil::load().ok()?;
@@ -1569,14 +1570,20 @@ fn main() {
         ])
         .setup(|app| {
             if let Ok(cfg) = anvil::load() {
-                let state = app.state::<App>();
-                start(&state, &cfg);
-                let failed = state.services.lock().unwrap().start_enabled(&cfg);
-                state.service_errors.lock().unwrap().extend(failed);
-                for site in anvil::sites(&cfg).iter().filter(|s| s.autostart) {
-                    start_app(&state, &cfg, &site.name);
-                }
                 apply_theme(app.handle(), cfg.theme.as_deref());
+                // Starting everything (and the first web server download) happens in the
+                // background, so the window and menu bar icon appear right away.
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let state = handle.state::<App>();
+                    start(&state, &cfg);
+                    let failed = state.services.lock().unwrap().start_enabled(&cfg);
+                    state.service_errors.lock().unwrap().extend(failed);
+                    for site in anvil::sites(&cfg).iter().filter(|s| s.autostart) {
+                        start_app(&state, &cfg, &site.name);
+                    }
+                    changed(&handle);
+                });
             }
             // Template image: macOS recolours it for light and dark menu bars.
             TrayIconBuilder::with_id("anvil")
