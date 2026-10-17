@@ -102,6 +102,12 @@ enum Cmd {
     Trust,
     /// Run DNS, PHP-FPM and the web server in the foreground
     Start,
+    /// List what Anvil changed on this Mac (resolver files, keychain, login item,
+    /// ~/.anvil); with --yes, remove it all
+    Uninstall {
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -266,8 +272,13 @@ fn start(cfg: &Config) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let mut cfg = load()?;
-    match Cli::parse().cmd {
+    let cmd = Cli::parse().cmd;
+    // A broken config must not stop an uninstall.
+    let mut cfg = match (&cmd, load()) {
+        (Cmd::Uninstall { .. }, Err(_)) => Config::default(),
+        (_, cfg) => cfg?,
+    };
+    match cmd {
         Cmd::Park { path } => {
             let p = dir_or_cwd(path)?;
             if !cfg.paths.contains(&p) {
@@ -759,6 +770,7 @@ fn main() -> Result<()> {
             println!("Anvil's certificate authority is now trusted.");
         }
         Cmd::Start => start(&cfg)?,
+        Cmd::Uninstall { yes } => anvil::uninstall::uninstall(&cfg, yes)?,
     }
     Ok(())
 }

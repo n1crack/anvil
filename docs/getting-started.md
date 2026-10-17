@@ -79,10 +79,20 @@ Then open `https://<folder>.test:8443`. Plain HTTP works on port 8080 too.
 ## Uninstall
 
 1. Quit the app or stop `anvil start`.
-2. `rm -rf ~/.anvil` (this also deletes your service databases).
-3. `sudo rm /etc/resolver/test`
-4. Delete "Caddy Local Authority" from Keychain Access.
-5. Delete `Anvil.app` and run `cargo uninstall anvil`.
+2. Run `anvil uninstall` to see what Anvil changed on this Mac, then
+   `anvil uninstall --yes` to remove it. That covers the `/etc/resolver` files
+   Anvil wrote (macOS asks for your password), its certificate authority in your
+   login keychain, the login item, the app's folders in `~/Library` and
+   `~/.anvil`. `~/.anvil` holds your service databases too: back them up first
+   if you need them. Your projects are not touched.
+
+   It only removes what it can tell is Anvil's: a resolver file with other
+   lines (or an old DNS port) and a certificate authority trusted from a
+   `~/.anvil` that was already deleted stay; remove those by hand
+   (`/etc/resolver/<tld>`, "Caddy Local Authority" in Keychain Access). With
+   `ANVIL_HOME` set, that folder is only deleted if it holds nothing but
+   Anvil's own files.
+3. Delete `Anvil.app` and run `cargo uninstall anvil`.
 
 ## Next
 
