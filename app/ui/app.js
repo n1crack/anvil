@@ -424,6 +424,7 @@ function renderSite() {
   // Resources (also feeds the Overview's disk and services rows)
   $(".res-reload", root).onclick = () => loadResources(s.name, true);
   loadResources(s.name);
+  window.renderGit?.(s);
 }
 
 /* ---------- Resources ---------- */
@@ -688,7 +689,7 @@ function select(name) {
 async function open(target) {
   try {
     await invoke("open", { site: selected, target });
-    toast({ browser: "Opened in your browser", finder: "Shown in Finder", terminal: "Opened in Terminal", editor: `Opened in ${snap.editor}` }[target]);
+    toast({ browser: "Opened in your browser", finder: "Shown in Finder", terminal: "Opened in Terminal", editor: `Opened in ${snap.editor}`, git: `Opened in ${snap.git_client}` }[target]);
   } catch (e) {
     showError(String(e));
   }
@@ -907,7 +908,7 @@ $("#list").onkeydown = (e) => {
 
 $("#error-close").onclick = () => showError(null);
 
-// Keyboard: ⌘1–3 tabs, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘L log.
+// Keyboard: ⌘1–3 tabs, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
 document.addEventListener("keydown", (e) => {
   if (!e.metaKey || e.shiftKey || e.altKey || e.target.closest("input, textarea, select")) {
     if (!(e.metaKey && ["f", ",", "r"].includes(e.key))) return;
@@ -919,8 +920,9 @@ document.addEventListener("keydown", (e) => {
     showTab(root, tabKey);
     return;
   }
-  const action = { o: "browser", e: "editor", t: "terminal" }[e.key];
-  if (action && mode === "apps" && selected && (action !== "editor" || snap.editor)) {
+  const action = { o: "browser", e: "editor", t: "terminal", g: "git" }[e.key];
+  const off = { editor: !snap.editor, git: $(".git-btn", root)?.hidden !== false }[action];
+  if (action && mode === "apps" && selected && !off) {
     e.preventDefault();
     open(action);
     return;

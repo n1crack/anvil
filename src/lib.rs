@@ -5,6 +5,7 @@ pub mod apps;
 pub mod create;
 pub mod databases;
 pub mod dns;
+pub mod git;
 pub mod resources;
 pub mod runtimes;
 pub mod services;
@@ -48,6 +49,8 @@ pub struct Config {
     pub dock_icon: bool,
     /// Database, cache and mail services, by id (see `services::SERVICES`).
     pub services: BTreeMap<String, services::ServiceConfig>,
+    /// macOS git app, e.g. "Fork"; unset uses the first one installed.
+    pub git_client: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -93,6 +96,7 @@ impl Default for Config {
             theme: None,
             dock_icon: false,
             services: BTreeMap::new(),
+            git_client: None,
         }
     }
 }
