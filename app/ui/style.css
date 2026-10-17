@@ -2251,10 +2251,12 @@ body.activity {
 }
 .act-table td:first-child, .act-table thead th:first-child { padding-left: 16px; }
 
+/* Headers stand apart from rows: a faint tint and colored text, from the tokens so both themes hold. */
 .act-group th {
   padding: 14px 16px 4px;
   border-bottom: 1px solid var(--line);
-  color: var(--muted);
+  background: color-mix(in srgb, var(--heat) 6%, transparent);
+  color: color-mix(in srgb, var(--heat-text) 70%, var(--text));
   font-size: 11px;
   font-weight: 600;
   text-align: left;
@@ -2263,12 +2265,26 @@ body.activity {
 }
 
 
-.act-app th { padding: 8px 16px 4px; font-weight: 600; text-align: left; }
-.act-app:hover th { background: var(--steel-hover); }
+.act-app th {
+  padding: 8px 16px 4px;
+  background: var(--steel-hover);
+  color: color-mix(in srgb, var(--text) 85%, var(--muted));
+  font-weight: 600;
+  text-align: left;
+}
+.act-app:hover th { background: var(--selected); }
+/* A fixed square, so it turns around its own center and the name never moves. */
 .act-app .chevron {
-  display: inline-block;
-  width: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  line-height: 1;
+  vertical-align: -1px;
   color: var(--muted);
+  transform-origin: 50% 50%;
   transition: transform 0.15s ease;
 }
 .act-app[aria-expanded="true"] .chevron { transform: rotate(90deg); }
@@ -2278,23 +2294,15 @@ body.activity {
 
 .act-row:hover { background: var(--steel-hover); }
 .act-row[aria-selected="true"] { background: var(--selected); }
+.act-status .dot { display: inline-block; margin-right: 7px; vertical-align: 0; }
+.act-status .dot.amber { background: var(--heat-white); }
 .act-row.running .act-status { color: var(--ok-text); }
 .act-row.starting .act-status { color: var(--heat-white); }
 .act-row.crashed td { color: var(--danger); }
+.act-row.crashed .act-status .act-detail { color: var(--muted); }
 
 .act-name { font-weight: 500; }
 .act-detail { color: var(--muted); font-weight: 400; }
-
-.act-actions { width: 1%; text-align: right; }
-.act-actions button {
-  height: 22px;
-  margin-left: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-s);
-  background: var(--steel-raised);
-  font-size: 12px;
-}
 
 .act-empty { margin: 40px 0; color: var(--muted); text-align: center; }
 
@@ -2302,12 +2310,22 @@ body.activity {
 .act-pane {
   display: flex;
   flex-direction: column;
+  flex: none;
   width: 46%;
-  min-width: 280px;
-  border-left: 1px solid var(--line);
+  min-width: 260px;
+  max-width: calc(100% - 366px); /* the list keeps 360px and the splitter */
   background: var(--steel-raised);
 }
 .act-pane[hidden] { display: none; }
+
+/* Between the list and the log: drag to resize. */
+.act-split {
+  flex: none;
+  width: 6px;
+  cursor: col-resize;
+  border-right: 1px solid var(--line);
+}
+.act-split:hover, .act-split:active { background: color-mix(in srgb, var(--heat) 30%, transparent); }
 
 .act-pane-head {
   display: flex;
@@ -2335,6 +2353,7 @@ body.activity {
 
 @media (prefers-color-scheme: light) {
   .act-row.starting .act-status { color: #a15c00; }
+  .act-status .dot.amber { background: #d98a00; }
 }
 
 /* A small confirm bubble next to the button that asked. */

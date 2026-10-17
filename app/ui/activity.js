@@ -1,5 +1,5 @@
-/* The Processes window: everything Anvil runs, with usage, Restart/Stop and the
- * selected row's log. Keys come from `activity`; the log is asked for by key. */
+/* The Processes window: everything Anvil runs, with usage, Restart/Stop (right-click)
+ * and the selected row's log. Keys come from `activity`; the log is asked for by key. */
 const { invoke } = window.__TAURI__.core;
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -52,7 +52,7 @@ function head(text, cls) {
   const tr = document.createElement("tr");
   tr.className = cls;
   const th = document.createElement("th");
-  th.colSpan = 7;
+  th.colSpan = 6;
   th.textContent = text;
   tr.append(th);
   return tr;
@@ -108,16 +108,20 @@ async function act(key, action) {
   await load();
 }
 
-function btn(label, r, action) {
-  const b = document.createElement("button");
-  b.textContent = label;
-  b.setAttribute("aria-label", `${label} ${r.name}`);
-  b.disabled = busy.has(r.key);
-  b.onclick = (e) => {
-    e.stopPropagation();
-    act(r.key, action);
-  };
-  return b;
+const M = window.__TAURI__.menu;
+
+/** Right-click: Restart, Stop (Dismiss once it crashed) and Open in Browser, by row state. */
+async function rowMenu(r) {
+  const items = [];
+  if (r.actions && !busy.has(r.key)) {
+    if (!r.key.includes("#")) items.push(M.MenuItem.new({ text: "Restart", action: () => act(r.key, "restart") }));
+    items.push(M.MenuItem.new({ text: r.state === "crashed" ? "Dismiss" : "Stop", action: () => act(r.key, "stop") }));
+  }
+  if (r.web && r.state === "running") {
+    if (items.length) items.push(M.PredefinedMenuItem.new({ item: "Separator" }));
+    items.push(M.MenuItem.new({ text: "Open in Browser", action: () => invoke("open_url", { url: r.web }).catch((e) => showError(String(e))) }));
+  }
+  if (items.length) (await M.Menu.new({ items: await Promise.all(items) })).popup();
 }
 
 function row(r, inner) {
@@ -126,6 +130,11 @@ function row(r, inner) {
   tr.setAttribute("aria-selected", r.key === selected);
   tr.dataset.key = r.key;
   tr.onclick = () => select(r.key);
+  tr.oncontextmenu = (e) => {
+    e.preventDefault();
+    select(r.key);
+    rowMenu(r).catch((err) => showError(String(err)));
+  };
   const name = td(r.name, "act-name");
   if (r.detail && r.state !== "crashed") {
     const d = document.createElement("span");
@@ -133,32 +142,26 @@ function row(r, inner) {
     d.textContent = r.detail;
     name.append(" ", d);
   }
-  const crashed = r.state === "crashed";
+  // A dot and a short word; a crash keeps its exit detail, muted and as the dot's tooltip.
+  const st = td(null, "act-status");
+  const dot = document.createElement("span");
+  dot.className = `dot ${{ running: "on", starting: "amber", crashed: "bad" }[r.state] ?? ""}`;
+  st.append(dot, status[r.state] ?? r.state);
+  if (r.state === "crashed" && r.detail) {
+    dot.title = r.detail;
+    const d = document.createElement("span");
+    d.className = "act-detail";
+    d.textContent = r.detail;
+    st.append(" ", d);
+  }
   tr.append(
     name,
     td(r.pid),
     td(r.port),
     td(r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`),
     td(r.memory == null ? "" : mb(r.memory)),
-    td(crashed ? r.detail || status.crashed : status[r.state], "act-status"),
+    st,
   );
-  const actions = td(null, "act-actions");
-  if (r.web && r.state === "running") {
-    const b = document.createElement("button");
-    b.textContent = "🌐";
-    b.setAttribute("aria-label", `Open ${r.name} in the browser`);
-    b.title = r.web;
-    b.onclick = (e) => {
-      e.stopPropagation();
-      invoke("open_url", { url: r.web }).catch((err) => showError(String(err)));
-    };
-    actions.append(b);
-  }
-  if (r.actions) {
-    if (!r.key.includes("#")) actions.append(btn("Restart", r, "restart"));
-    actions.append(btn("Stop", r, "stop"));
-  }
-  tr.append(actions);
   return tr;
 }
 
@@ -192,7 +195,7 @@ function select(key) {
   replace = true;
   logToken++;
   $("#log").textContent = "";
-  $("#pane").hidden = !key;
+  $("#pane").hidden = $("#split").hidden = !key;
   $("#log-title").textContent = key ? `${nameOf(key)} · log` : "";
   render();
   if (key) tail();
@@ -249,6 +252,23 @@ setInterval(() => {
 }, 2000);
 window.addEventListener("focus", load);
 $("#log-close").onclick = () => select(null);
+
+// The splitter: drag to give the log more or less room; the width is remembered.
+const pane = $("#pane");
+const split = $("#split");
+const fit = (w) => Math.round(Math.max(260, Math.min(w, $(".act-main").clientWidth - 360 - split.offsetWidth)));
+const savedWidth = Number(localStorage.getItem("act-log-width"));
+if (savedWidth) pane.style.width = `${savedWidth}px`;
+split.onpointerdown = (e) => {
+  e.preventDefault();
+  split.setPointerCapture(e.pointerId);
+  const right = $(".act-main").getBoundingClientRect().right;
+  split.onpointermove = (m) => (pane.style.width = `${fit(right - m.clientX - split.offsetWidth / 2)}px`);
+  split.onpointerup = split.onlostpointercapture = () => {
+    split.onpointermove = split.onpointerup = split.onlostpointercapture = null;
+    localStorage.setItem("act-log-width", parseInt(pane.style.width));
+  };
+};
 
 // No browser context menu (Reload, Inspect…), as in the other windows.
 document.addEventListener("contextmenu", (e) => e.preventDefault());

@@ -15,12 +15,13 @@
   <div class="act-table">
     <table>
       <thead>
-        <tr><th>Name</th><th>PID</th><th>Port</th><th>CPU</th><th>Memory</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr>
+        <tr><th>Name</th><th>PID</th><th>Port</th><th>CPU</th><th>Memory</th><th>Status</th></tr>
       </thead>
       <tbody id="rows"></tbody>
     </table>
     <p id="empty" class="act-empty" hidden>Nothing is running</p>
   </div>
+  <div id="split" class="act-split" role="separator" aria-orientation="vertical" aria-label="Resize log" hidden></div>
   <aside id="pane" class="act-pane" hidden>
     <header class="act-pane-head">
       <span id="log-title"></span>
