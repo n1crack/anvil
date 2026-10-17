@@ -2163,6 +2163,30 @@ kbd {
 #site .env,
 #site .pkg-tools { max-width: none; }
 
+/* Watch and Logs take the whole pane, down to the window's bottom: the header and
+ * tabs widen with them, the panel fills the height and only the output scrolls. */
+#site:has(> :is([data-panel="watch"], [data-panel="logs"]):not([hidden])) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 20px;
+}
+#site:has(> :is([data-panel="watch"], [data-panel="logs"]):not([hidden])) > * { flex: none; max-width: none; }
+#site > :is([data-panel="watch"], [data-panel="logs"]):not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+[data-panel="watch"] > .watch { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+[data-panel="watch"] .watch-list { max-height: 100%; overflow-y: auto; }
+[data-panel="watch"] .watch-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+[data-panel="watch"] .watch-out { flex: 1; height: auto; min-height: 0; }
+[data-panel="logs"] > .logs { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+[data-panel="logs"] .logs > * { flex: none; }
+[data-panel="logs"] .logs > .logs-list:not(:has(> .empty, > .logs-large)) {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+}
+
 /* Attached services sit on the address line, so every header has the same height. */
 .site-services { display: inline-flex; vertical-align: middle; margin: 0 0 0 10px; }
 .site-name { overflow-wrap: break-word; }
