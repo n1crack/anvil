@@ -39,9 +39,12 @@ Anvil. Build it from source as described in
   - **Languages:** install and remove Node.js, Go, Rust and .NET.
   - **Storage:** Anvil's own footprint and every application's size.
   - **Shortcuts** and **About**.
-- **Menu bar menu:** Open Anvil, status, Start/Stop, Restart, Services and
-  Applications (tick to start or stop each one), Default PHP Version, Show
-  Anvil Logs in Finder, Settings and Quit.
+- **Menu bar menu:** Open Anvil, status, Start/Stop, Restart, Default PHP
+  Version, Show Anvil Logs in Finder, Settings and Quit. Applications and
+  services are started and stopped in the window.
+- **Serving button** (top right of the window): stopped, it starts Anvil;
+  serving, it opens a menu with how many applications are served, Restart and
+  Stop.
 
 Closing the window keeps Anvil running in the menu bar; quit from the menu bar
 icon. The app applies changes right away.

@@ -1515,57 +1515,6 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         Box::new(item("restart", "Restart", on, None)?),
         Box::new(sep()?),
     ];
-    // Services and apps with their own server, ticked while running; picking one toggles it.
-    let toggles =
-        |prefix: &str, list: Vec<(String, bool)>| -> tauri::Result<Vec<CheckMenuItem<Wry>>> {
-            list.into_iter()
-                .map(|(name, running)| {
-                    CheckMenuItem::with_id(
-                        handle,
-                        format!("{prefix}:{name}"),
-                        &name,
-                        true,
-                        running,
-                        None::<&str>,
-                    )
-                })
-                .collect()
-        };
-    let svc: Vec<(String, bool)> = {
-        let mut s = app.services.lock().unwrap();
-        anvil::services::instances(&cfg)
-            .into_iter()
-            .map(|id| {
-                let r = s.running(&id);
-                (id, r)
-            })
-            .collect()
-    };
-    let procs: Vec<(String, bool)> = {
-        let mut a = app.apps.lock().unwrap();
-        all.iter()
-            .filter(|s| anvil::apps::runs_process(&s.kind) && !s.linked)
-            .map(|s| (s.name.clone(), a.running(&s.name)))
-            .collect()
-    };
-    for (title, prefix, list) in [("Services", "svc", svc), ("Applications", "app", procs)] {
-        if list.is_empty() {
-            continue;
-        }
-        let running = list.iter().filter(|x| x.1).count();
-        let label = if running > 0 {
-            format!("{title} ({running} running)")
-        } else {
-            title.to_string()
-        };
-        let children = toggles(prefix, list)?;
-        let refs: Vec<&dyn IsMenuItem<Wry>> =
-            children.iter().map(|c| c as &dyn IsMenuItem<Wry>).collect();
-        items.push(Box::new(Submenu::with_items(handle, label, true, &refs)?));
-    }
-    if items.len() > 6 {
-        items.push(Box::new(sep()?));
-    }
     // PHP versions in one submenu, so the menu doesn't grow with every install.
     let php: Vec<CheckMenuItem<Wry>> = anvil::installed_php()
         .iter()
@@ -1620,25 +1569,6 @@ fn on_menu(handle: &AppHandle, id: &str) {
         }
         "settings" => open_settings(handle),
         "quit" => handle.exit(0),
-        _ if id.starts_with("svc:") || id.starts_with("app:") => {
-            let (prefix, name) = id.split_once(':').unwrap();
-            let Ok(cfg) = anvil::load() else { return };
-            if prefix == "svc" {
-                let running = app.services.lock().unwrap().running(name);
-                let mut cfg = cfg;
-                let _ = anvil::services::set_enabled(&mut cfg, name, !running);
-                if running {
-                    app.services.lock().unwrap().stop(name);
-                } else {
-                    start_service(&app, &cfg, name);
-                }
-            } else if app.apps.lock().unwrap().running(name) {
-                app.apps.lock().unwrap().stop(name);
-            } else {
-                start_app(&app, &cfg, name);
-            }
-            changed(handle);
-        }
         _ => {
             if let Some(v) = id.strip_prefix("php:")
                 && let Ok(mut cfg) = anvil::load()
