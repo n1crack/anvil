@@ -34,7 +34,7 @@ versions; the macOS app applies changes right away.
 
 | Command | Description |
 |---|---|
-| `anvil runtime list` | Installed and available Node.js, Go, Rust and .NET versions |
+| `anvil runtime list` | Installed and available Node.js, Go, Rust, .NET and Python versions |
 | `anvil runtime install <id> <version>` | e.g. `node 22`, `go 1.27.2`, `rust stable`, `dotnet 10.0` |
 | `anvil runtime uninstall <id> <version>` | Remove an installed version, e.g. `node 22` |
 | `anvil app command <site> [command]` | Set an app's start command; leave it out for the default |

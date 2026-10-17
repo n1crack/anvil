@@ -106,7 +106,7 @@ another folder.
 |---|---|
 | `config.toml` | Your settings |
 | `php/<version>/` | PHP binaries and `php.ini` |
-| `runtimes/<id>/` | Node.js, Go, Rust and .NET |
+| `runtimes/<id>/` | Node.js, Go, Rust, .NET, Python and uv |
 | `services/<kind>/<version>/` | MySQL, PostgreSQL, Redis and Mailpit programs, shared by every service of that version |
 | `data/<name>/` | Each service's data |
 | `data/caddy/` | Certificate authority and site certificates |

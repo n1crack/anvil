@@ -45,12 +45,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ServiceCmd,
     },
-    /// Language toolchains for apps that run their own server: node, go, rust, dotnet
+    /// Language toolchains for apps that run their own server: node, go, rust, dotnet, python
     Runtime {
         #[command(subcommand)]
         cmd: RuntimeCmd,
     },
-    /// Apps that run their own server (Node, Rust, Go, .NET)
+    /// Apps that run their own server (Node, Rust, Go, .NET, Python)
     App {
         #[command(subcommand)]
         cmd: AppCmd,

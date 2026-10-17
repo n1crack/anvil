@@ -1,6 +1,9 @@
-//! Language toolchains for apps that run their own server: Node.js, Go, Rust and
-//! .NET. Each lives inside `~/.anvil` and is only put on PATH for the apps Anvil
-//! runs, so system installs are never touched.
+//! Language toolchains for apps that run their own server: Node.js, Go, Rust,
+//! .NET and Python. Each lives inside `~/.anvil` and is only put on PATH for the
+//! apps Anvil runs, so system installs are never touched.
+//!
+//! Python comes through uv, which installs Python versions and runs projects
+//! with their dependencies, all inside Anvil's folder.
 
 use crate::{download, fetch_text, fetch_tgz, home, platform, published_sum, replace_dir, run};
 use anyhow::{Context, Result, bail};
@@ -9,7 +12,28 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub const RUNTIMES: [&str; 4] = ["node", "go", "rust", "dotnet"];
+pub const RUNTIMES: [&str; 5] = ["node", "go", "rust", "dotnet", "python"];
+
+/// uv, pinned with the SHA-256 its release publishes per platform.
+const UV_VERSION: &str = "0.13.1";
+const UV_SHA256: [(&str, &str); 4] = [
+    (
+        "aarch64-apple-darwin",
+        "cfe454573412ff7380d15fc7dae5997ab53ffce72fce0a78e91ddbc84001acd2",
+    ),
+    (
+        "x86_64-apple-darwin",
+        "bb7b805bdcf3d0bc8c74ceb94569e6b3e8aa35bd492acdbb9d46bf46d9d4ff6b",
+    ),
+    (
+        "aarch64-unknown-linux-gnu",
+        "9041c73c99fdc5892cf128140beb354eca9231d502068cc36e6cb53a8e59ad14",
+    ),
+    (
+        "x86_64-unknown-linux-gnu",
+        "eadd9d27c134ab5ac1ffd4473b97a741407f3ea238288f03121fc4deddf90220",
+    ),
+];
 
 #[derive(Serialize)]
 pub struct RuntimeInfo {
@@ -26,6 +50,7 @@ pub fn name(id: &str) -> &'static str {
         "node" => "Node.js",
         "go" => "Go",
         "rust" => "Rust",
+        "python" => "Python",
         _ => ".NET",
     }
 }
@@ -78,6 +103,19 @@ pub fn installed(id: &str) -> Vec<String> {
                 }
                 acc
             }),
+        // uv's folders: cpython-3.13.16-macos-aarch64-none (and a cpython-3.13-… link).
+        "python" => subdirs(&root("python"))
+            .into_iter()
+            .filter_map(|d| {
+                let v = d.strip_prefix("cpython-")?.split('-').next()?;
+                Some(v.split('.').take(2).collect::<Vec<_>>().join("."))
+            })
+            .fold(Vec::new(), |mut acc, v| {
+                if !acc.contains(&v) {
+                    acc.push(v);
+                }
+                acc
+            }),
         _ => subdirs(&root(id)),
     }
 }
@@ -111,7 +149,40 @@ pub fn available(id: &str) -> Result<Vec<String>> {
                 .collect()
         }
         "rust" => vec!["stable".into()],
+        "python" => ["3.14", "3.13", "3.12", "3.11"].map(String::from).to_vec(),
         _ => vec!["10.0".into(), "9.0".into(), "8.0".into()],
+    })
+}
+
+fn uv() -> PathBuf {
+    root("uv").join("uv")
+}
+
+/// uv itself, downloaded once and checked against its pinned checksum.
+fn ensure_uv(mac: bool, arm: bool) -> Result<()> {
+    if uv().exists() {
+        return Ok(());
+    }
+    let target = match (mac, arm) {
+        (true, true) => "aarch64-apple-darwin",
+        (true, false) => "x86_64-apple-darwin",
+        (false, true) => "aarch64-unknown-linux-gnu",
+        (false, false) => "x86_64-unknown-linux-gnu",
+    };
+    let sum = UV_SHA256
+        .iter()
+        .find(|(t, _)| *t == target)
+        .map(|(_, s)| *s)
+        .with_context(|| format!("No pinned checksum for uv on {target}"))?;
+    replace_dir(&root("uv"), |d| {
+        fetch_tgz(
+            &format!(
+                "https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-{target}.tar.gz"
+            ),
+            d,
+            true,
+            Some(sum),
+        )
     })
 }
 
@@ -166,6 +237,14 @@ pub fn install(id: &str, version: &str) -> Result<()> {
             replace_dir(&root("go").join(version), |d| {
                 fetch_tgz(&format!("https://go.dev/dl/{file}"), d, true, Some(&sum))
             })
+        }
+        // uv downloads Python (python-build-standalone) and checks it against
+        // the checksums built into uv.
+        "python" => {
+            ensure_uv(mac, arm)?;
+            run(Command::new(uv())
+                .args(["python", "install", version])
+                .envs(env("python", version)))
         }
         "rust" => {
             let target = match (mac, arm) {
@@ -269,6 +348,11 @@ pub fn uninstall(id: &str, version: &str) -> Result<()> {
     }
     match id {
         "rust" => fs::remove_dir_all(root("rust")),
+        "python" => {
+            return run(Command::new(uv())
+                .args(["python", "uninstall", version])
+                .envs(env("python", version)));
+        }
         "dotnet" => {
             // SDK folders are full versions (10.0.402); remove those of this channel.
             let sdk = root("dotnet").join("sdk");
@@ -316,6 +400,23 @@ pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
             e.push(("GOCACHE".into(), d(cache.join("go-build"))));
             e.push(("GOTOOLCHAIN".into(), "local".into()));
             goroot.join("bin")
+        }
+        "python" => {
+            // Every uv folder in Anvil's; only Pythons uv installed, never the system's.
+            for (k, v) in [
+                ("UV_PYTHON_INSTALL_DIR", root("python")),
+                ("UV_CACHE_DIR", cache.join("uv")),
+                ("UV_PYTHON_CACHE_DIR", cache.join("uv-python")),
+                ("UV_TOOL_DIR", cache.join("uv-tools")),
+                ("UV_TOOL_BIN_DIR", cache.join("uv-tools").join("bin")),
+                ("UV_PYTHON_BIN_DIR", cache.join("uv-python-bin")),
+            ] {
+                e.push((k.into(), d(v)));
+            }
+            e.push(("UV_MANAGED_PYTHON".into(), "1".into()));
+            e.push(("UV_PYTHON_INSTALL_BIN".into(), "0".into()));
+            e.push(("UV_PYTHON".into(), version.into()));
+            root("uv")
         }
         "rust" => {
             e.push(("RUSTUP_HOME".into(), d(root("rust").join("rustup"))));

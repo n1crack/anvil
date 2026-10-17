@@ -455,7 +455,7 @@ async function newGroup(s) {
 
 let tab = localStorage.getItem("tab") ?? "overview";
 const kindLabel = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
-const RUNTIME = { next: "Node.js", nuxt: "Node.js", vite: "Node.js", node: "Node.js", rust: "Rust", go: "Go", dotnet: ".NET" };
+const RUNTIME = { next: "Node.js", nuxt: "Node.js", vite: "Node.js", node: "Node.js", rust: "Rust", go: "Go", dotnet: ".NET", django: "Python", fastapi: "Python", flask: "Python" };
 
 function showTab(root, name) {
   tab = name;
@@ -543,6 +543,7 @@ function renderSite() {
   $('[data-field="root"]', root).textContent = tilde(s.root);
 
   if (process) renderRun(s, root);
+  if (s.kind === "django") djangoHint(root);
 
   // Settings
   const kindSel = $("#kind", root);
@@ -595,6 +596,22 @@ function renderSite() {
   window.renderGit?.(s);
   window.renderSiteServices?.(s, root);
   window.renderPackages?.(s, root);
+}
+
+/** Django checks the host name and, behind HTTPS, the scheme: two settings it needs once. */
+function djangoHint(root) {
+  const lines = `ALLOWED_HOSTS = [".${snap.tld}"]\nSECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`;
+  const box = el("div", "django-hint");
+  box.append(
+    el("h3", "res-sub", "Django settings"),
+    el("p", "muted", "Add to settings.py so Django accepts the address and trusts HTTPS from Anvil; without them it answers 400 Bad Request, and forms fail their CSRF check."),
+  );
+  const env = el("div", "env");
+  const copyBtn = el("button", null, "Copy");
+  copyBtn.onclick = () => copy(lines, "Copied the Django settings");
+  env.append(el("pre", null, lines), copyBtn);
+  box.append(env);
+  $('[data-panel="overview"] .group', root).after(box);
 }
 
 /* ---------- Resources ---------- */
@@ -780,7 +797,7 @@ async function cleanItems(name, items) {
 }
 
 const PHP_KINDS = new Set(["laravel", "statamic", "symfony", "php"]);
-const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet"]);
+const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet", "django", "fastapi", "flask"]);
 
 function renderRun(s, root) {
   renderRunState(s, root);
@@ -814,7 +831,7 @@ function renderRunState(s, root) {
 
 function renderRunSettings(s, root) {
   // Language version: automatic (project file or newest) or pinned.
-  const rtId = { next: "node", nuxt: "node", vite: "node", node: "node", rust: "rust", go: "go", dotnet: "dotnet" }[s.kind];
+  const rtId = { next: "node", nuxt: "node", vite: "node", node: "node", rust: "rust", go: "go", dotnet: "dotnet", django: "python", fastapi: "python", flask: "python" }[s.kind];
   const versions = snap.runtimes?.[rtId] ?? [];
   const rt = $("#app-runtime", root);
   $("#app-runtime-label", root).textContent = `${RUNTIME[s.kind]} version`;
@@ -822,7 +839,10 @@ function renderRunSettings(s, root) {
   rt.add(new Option(autoVersion ? `Automatic (${autoVersion})` : "Automatic", ""));
   for (const v of versions) rt.add(new Option(v, v));
   rt.value = s.runtime_pinned ? s.runtime_version : "";
-  rt.title = "Automatic uses .nvmrc or .node-version when the project has one, otherwise the newest installed";
+  const pinFile = { node: ".nvmrc or .node-version", python: ".python-version" }[rtId];
+  rt.title = pinFile
+    ? `Automatic uses ${pinFile} when the project has one, otherwise the newest installed`
+    : "Automatic uses the newest installed";
   rt.disabled = versions.length < 2;
   rt.onchange = () => call("set_runtime", { site: s.name, version: rt.value || null });
 

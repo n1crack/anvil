@@ -36,7 +36,7 @@ Anvil. Build it from source as described in
     terminal, domain and ports.
   - **PHP:** install and remove versions, set the default, php.ini defaults for
     all applications.
-  - **Languages:** install and remove Node.js, Go, Rust and .NET.
+  - **Languages:** install and remove Node.js, Go, Rust, .NET and Python.
   - **Storage:** Anvil's own footprint and every application's size.
   - **Shortcuts** and **About**.
 - **Menu bar menu:** Open Anvil, status, Start/Stop, Restart, Default PHP

@@ -12,9 +12,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 /// Every kind Anvil knows, in detection order.
-pub const KINDS: [&str; 12] = [
+pub const KINDS: [&str; 15] = [
     "laravel", "statamic", "symfony", "php", "next", "nuxt", "vite", "node", "rust", "go",
-    "dotnet", "static",
+    "dotnet", "django", "fastapi", "flask", "static",
 ];
 
 pub fn label(kind: &str) -> &'static str {
@@ -30,6 +30,9 @@ pub fn label(kind: &str) -> &'static str {
         "rust" => "Rust",
         "go" => "Go",
         "dotnet" => ".NET",
+        "django" => "Django",
+        "fastapi" => "FastAPI",
+        "flask" => "Flask",
         _ => "Static",
     }
 }
@@ -69,6 +72,22 @@ pub fn detect(dir: &Path) -> &'static str {
     if dotnet {
         return "dotnet";
     }
+    // Python before package.json: Django and friends often carry a frontend too.
+    if has("manage.py") && read(&dir.join("manage.py")).contains("django") {
+        return "django";
+    }
+    let py = format!(
+        "{}{}",
+        read(&dir.join("pyproject.toml")),
+        read(&dir.join("requirements.txt"))
+    )
+    .to_lowercase();
+    if py.contains("fastapi") {
+        return "fastapi";
+    }
+    if py.contains("flask") {
+        return "flask";
+    }
     if has("package.json") {
         let pkg = read(&dir.join("package.json"));
         return if pkg.contains("\"next\"") {
@@ -95,6 +114,7 @@ pub fn runtime(kind: &str) -> Option<&'static str> {
         "rust" => Some("rust"),
         "go" => Some("go"),
         "dotnet" => Some("dotnet"),
+        "django" | "fastapi" | "flask" => Some("python"),
         _ => None,
     }
 }
@@ -123,8 +143,49 @@ pub fn default_command(kind: &str, dir: &Path) -> Option<String> {
         "rust" => "cargo run".into(),
         "go" => "go run .".into(),
         "dotnet" => "dotnet run --urls http://127.0.0.1:$PORT".into(),
+        "django" => uv_run(dir, "django", "python manage.py runserver 127.0.0.1:$PORT"),
+        "fastapi" => uv_run(
+            dir,
+            "fastapi",
+            &format!(
+                "--with uvicorn uvicorn {}:app --host 127.0.0.1 --port $PORT --reload",
+                asgi_module(dir)
+            ),
+        ),
+        // Flask finds app.py or wsgi.py by itself.
+        "flask" => uv_run(
+            dir,
+            "flask",
+            "flask run --host 127.0.0.1 --port $PORT --debug",
+        ),
         _ => return None,
     })
+}
+
+/// `uv run` with the project's dependencies: a pyproject.toml project gets its
+/// own environment; requirements.txt goes into uv's cache, not the project; a
+/// project declaring neither gets just its framework.
+fn uv_run(dir: &Path, framework: &str, cmd: &str) -> String {
+    if dir.join("pyproject.toml").exists() {
+        format!("uv run {cmd}")
+    } else if dir.join("requirements.txt").exists() {
+        format!("uv run --with-requirements requirements.txt {cmd}")
+    } else {
+        format!("uv run --with {framework} {cmd}")
+    }
+}
+
+/// Where a FastAPI app's `app` lives: main.py, app/main.py or app.py.
+fn asgi_module(dir: &Path) -> &'static str {
+    if dir.join("main.py").exists() {
+        "main"
+    } else if dir.join("app/main.py").exists() {
+        "app.main"
+    } else if dir.join("app.py").exists() {
+        "app"
+    } else {
+        "main"
+    }
 }
 
 /// Pick the runtime version for a project: `.nvmrc` / `.node-version` for Node,
@@ -144,6 +205,18 @@ pub fn runtime_version(runtime: &str, dir: &Path) -> Option<String> {
             if installed.contains(&major) {
                 return Some(major);
             }
+        }
+    }
+    // uv's .python-version, e.g. 3.13 or 3.13.5.
+    if runtime == "python" {
+        let want: String = read(&dir.join(".python-version"))
+            .trim()
+            .split('.')
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(".");
+        if installed.contains(&want) {
+            return Some(want);
         }
     }
     installed.into_iter().next()
@@ -326,7 +399,7 @@ mod tests {
 
     #[test]
     fn detects_kinds() {
-        let cases: [(&[(&str, &str)], &str); 10] = [
+        let cases: [(&[(&str, &str)], &str); 14] = [
             (
                 &[("artisan", ""), ("package.json", "{\"vite\":1}")],
                 "laravel",
@@ -355,12 +428,40 @@ mod tests {
                 "node",
             ),
             (&[("index.html", "")], "static"),
+            // Django with a frontend is still Django.
+            (
+                &[
+                    ("manage.py", "from django.core.management import x"),
+                    ("package.json", "{\"vite\":1}"),
+                ],
+                "django",
+            ),
+            (&[("requirements.txt", "FastAPI==0.115\n")], "fastapi"),
+            (&[("pyproject.toml", "dependencies = [\"flask\"]")], "flask"),
+            (&[("manage.py", "print(1)")], "static"),
         ];
         for (files, want) in cases {
             let dir = project(files);
             assert_eq!(detect(&dir), want, "{files:?}");
             fs::remove_dir_all(dir).unwrap();
         }
+        // Python runs through uv with the project's dependencies, or just its framework.
+        let dir = project(&[("requirements.txt", "fastapi"), ("app/main.py", "")]);
+        let cmd = default_command("fastapi", &dir).unwrap();
+        assert!(
+            cmd.starts_with("uv run --with-requirements requirements.txt "),
+            "{cmd}"
+        );
+        assert!(
+            cmd.contains("uvicorn app.main:app --host 127.0.0.1 --port $PORT"),
+            "{cmd}"
+        );
+        fs::remove_dir_all(dir).unwrap();
+        let cmd = default_command("django", Path::new("/nonexistent")).unwrap();
+        assert!(
+            cmd.starts_with("uv run --with django python manage.py runserver 127.0.0.1:$PORT"),
+            "{cmd}"
+        );
         assert!(
             default_command("vite", Path::new("/"))
                 .unwrap()
