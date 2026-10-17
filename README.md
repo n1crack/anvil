@@ -13,7 +13,7 @@ Free and open source. Built for developers.
 
 ---
 
-Anvil turns the folders on your Mac into running applications at local domains like `myapp.test`, with HTTPS, isolated language runtimes, databases and per-application settings. No containers, no virtual machines and no changes to your system packages. Everything Anvil installs lives in `~/.anvil`; the only changes outside it are the ones you approve (a resolver file for the local domain, a trusted HTTPS certificate, an optional login item), and `anvil uninstall` removes them.
+Anvil turns the folders on your Mac into running applications at local domains like `myapp.test`, with HTTPS, isolated language runtimes, databases and per-application settings. No containers, no virtual machines and no changes to your system packages. Everything Anvil installs lives in `~/.anvil`, and so do the caches of the tools it runs; the only system changes are the ones you approve (a resolver file for the local domain, a trusted HTTPS certificate, an optional login item), and `anvil uninstall` removes them. The few exceptions, like Go's local telemetry counters, are listed in [Applications](docs/applications.md#languages).
 
 > **Status: early development.** The core works on macOS today. Expect breaking changes until 1.0.
 
