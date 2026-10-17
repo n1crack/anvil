@@ -1641,6 +1641,8 @@ kbd {
 }
 
 .logs-list .empty { margin: 24px 8px; }
+/* Nothing listed: no rule above the message, it would double the tabs' line. */
+.logs-list:has(> .empty, > .logs-large) { border-top: 0; }
 
 /* App output: its own scroll box that opens at the newest line, like a terminal. */
 .logs-list.chrono {
