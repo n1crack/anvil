@@ -6,6 +6,9 @@ let selected = localStorage.getItem("selected");
 let filter = "";
 // The sidebar shows applications or services; services.js draws the latter.
 let mode = localStorage.getItem("mode") === "services" ? "services" : "apps";
+// List filters per mode: a kind (or null for all) and running only.
+const filters = JSON.parse(localStorage.getItem("filters") ?? "{}");
+const filterOf = (m) => (filters[m] ??= { kind: null, running: false });
 
 const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 const url = (s) => `https://${s.name}.${snap.tld}:${snap.https_port}`;
@@ -51,6 +54,7 @@ function render() {
 }
 
 function renderMain() {
+  renderFilter();
   if (mode === "services") {
     renderServiceList();
     renderService();
@@ -178,7 +182,11 @@ function renderList() {
     : (a, b) => a.name.localeCompare(b.name);
 
   const q = filter.toLowerCase();
-  const hit = (s) => !q || `${s.name}.${snap.tld} ${s.path}`.toLowerCase().includes(q);
+  const f = filterOf("apps");
+  const hit = (s) =>
+    (!f.kind || s.kind === f.kind) &&
+    (!f.running || snap.app_states[s.name]) &&
+    (!q || `${s.name}.${snap.tld} ${s.path}`.toLowerCase().includes(q));
   let count = 0;
 
   const section = (title, sites, withChildren) => {
@@ -225,7 +233,10 @@ function renderList() {
   if (!count) {
     const p = document.createElement("p");
     p.className = "empty";
-    p.textContent = `No sites match “${filter}”.`;
+    const what = f.kind ? `${kindLabel(f.kind)} applications` : "applications";
+    p.textContent = filter
+      ? `No ${what} match “${filter}”.`
+      : `No ${f.running ? "running " : ""}${what}.`;
     list.append(p);
   }
 }
@@ -817,6 +828,46 @@ $("#add").onclick = async () => {
   });
   menu.popup();
 };
+
+/** Filter menu: the kinds present in the list, with counts, plus running only. */
+$("#filter").onclick = async () => {
+  const apps = mode === "apps";
+  const f = filterOf(mode);
+  const items = apps ? snap.sites.filter((s) => !s.linked) : services;
+  const counts = new Map();
+  for (const x of items) counts.set(x.kind, (counts.get(x.kind) ?? 0) + 1);
+  const label = (k) => (apps ? kindLabel(k) : services.find((x) => x.kind === k).name);
+  const set = (change) => {
+    Object.assign(f, change);
+    localStorage.setItem("filters", JSON.stringify(filters));
+    renderFilter();
+    renderMain();
+  };
+  const sep = () => M.PredefinedMenuItem.new({ item: "Separator" });
+  const kinds = [...counts.keys()].sort((a, b) => label(a).localeCompare(label(b)));
+  const menu = await M.Menu.new({
+    items: await Promise.all([
+      M.CheckMenuItem.new({ text: "All Types", checked: !f.kind, action: () => set({ kind: null }) }),
+      sep(),
+      ...kinds.map((k) =>
+        M.CheckMenuItem.new({ text: `${label(k)} (${counts.get(k)})`, checked: f.kind === k, action: () => set({ kind: k }) })),
+      sep(),
+      M.CheckMenuItem.new({ text: "Running Only", checked: f.running, action: () => set({ running: !f.running }) }),
+    ]),
+  });
+  menu.popup();
+};
+
+/** The filter button lights up while a filter hides something. */
+function renderFilter() {
+  const f = filterOf(mode);
+  const on = !!f.kind || f.running;
+  const btn = $("#filter");
+  btn.classList.toggle("active", on);
+  const what = mode === "apps" ? "applications" : "services";
+  btn.title = on ? `Filtered: ${[f.kind && "one type", f.running && "running only"].filter(Boolean).join(", ")}` : `Filter ${what}`;
+  btn.setAttribute("aria-label", btn.title);
+}
 
 $("#reload").onclick = async (e) => {
   const btn = e.currentTarget;

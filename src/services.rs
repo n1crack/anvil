@@ -17,9 +17,24 @@ use std::time::Duration;
 
 pub const SERVICES: [&str; 4] = ["mysql", "postgres", "redis", "mailpit"];
 
-const MYSQL_VERSION: &str = "8.4.11";
-const POSTGRES_VERSION: &str = "18.6.0";
-const MAILPIT_VERSION: &str = "v1.31.6";
+/// Versions offered per kind, newest first; checked against the download sites.
+/// Postgres comes from theseus-rs builds, Redis is built from download.redis.io.
+pub fn versions(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "mysql" => &["9.7.2", "8.4.11", "8.0.46"],
+        "postgres" => &["18.6.0", "17.11.0", "16.15.0", "15.19.0", "14.24.0"],
+        "redis" => &["8.10.2", "7.4.11", "7.2.16"],
+        _ => &["1.31.6"],
+    }
+}
+
+/// What a new service gets unless another version is picked (MySQL: the LTS).
+pub fn default_version(kind: &str) -> &'static str {
+    match kind {
+        "mysql" => "8.4.11",
+        k => versions(k)[0],
+    }
+}
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
@@ -28,6 +43,10 @@ pub struct ServiceConfig {
     /// the kind as the name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// Program version, fixed when the service is added: data folders don't
+    /// survive a major version change. Unset means the kind's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     /// Start with Anvil.
     pub enabled: bool,
     pub port: Option<u16>,
@@ -122,17 +141,53 @@ pub fn port(cfg: &Config, id: &str) -> u16 {
         .unwrap_or_else(|| kind_of(cfg, id).map_or(0, default_port))
 }
 
-fn dir(id: &str) -> PathBuf {
-    home().join("services").join(id)
+/// The version a service runs.
+pub fn version(cfg: &Config, id: &str) -> String {
+    cfg.services
+        .get(id)
+        .and_then(|s| s.version.clone())
+        .unwrap_or_else(|| kind_of(cfg, id).map_or("", default_version).to_string())
+}
+
+/// Programs live in `services/<kind>/<version>/`.
+fn dir(kind: &str, version: &str) -> PathBuf {
+    let root = home().join("services").join(kind);
+    migrate(&root);
+    root.join(version)
+}
+
+/// Before versions, a kind's program sat directly in `services/<kind>/`;
+/// move it into its version folder.
+fn migrate(root: &std::path::Path) {
+    let Ok(v) = fs::read_to_string(root.join("VERSION")) else {
+        return;
+    };
+    let v = v.trim();
+    if v.is_empty() || v.contains('/') || v.starts_with('.') {
+        return;
+    }
+    let tmp = root.with_extension("migrating");
+    let _ = fs::rename(root, &tmp)
+        .and_then(|_| fs::create_dir_all(root))
+        .and_then(|_| fs::rename(&tmp, root.join(v)));
+}
+
+/// Installed versions of a kind, newest first.
+pub fn installed_versions(kind: &str) -> Vec<String> {
+    versions(kind)
+        .iter()
+        .filter(|v| installed(kind, v))
+        .map(|v| v.to_string())
+        .collect()
 }
 
 pub fn data(id: &str) -> PathBuf {
     home().join("data").join(id)
 }
 
-fn binary(id: &str) -> PathBuf {
-    let d = dir(id);
-    match id {
+fn binary(kind: &str, version: &str) -> PathBuf {
+    let d = dir(kind, version);
+    match kind {
         "mysql" => d.join("bin/mysqld"),
         "postgres" => d.join("bin/postgres"),
         "redis" => d.join("bin/redis-server"),
@@ -174,6 +229,9 @@ pub struct Kind {
     pub name: &'static str,
     pub category: &'static str,
     pub installed: bool,
+    pub versions: &'static [&'static str],
+    pub default_version: &'static str,
+    pub installed_versions: Vec<String>,
     /// Name and port the Add Service sheet starts with.
     pub suggested_name: String,
     pub suggested_port: u16,
@@ -189,7 +247,10 @@ pub fn kinds(cfg: &Config) -> Vec<Kind> {
                 kind,
                 name: name(kind),
                 category: category(kind),
-                installed: installed(kind),
+                installed: installed(kind, default_version(kind)),
+                versions: versions(kind),
+                default_version: default_version(kind),
+                installed_versions: installed_versions(kind),
                 suggested_name: free_name(cfg, kind),
                 suggested_port: free_port(&taken, default_port(kind)),
             }
@@ -234,9 +295,9 @@ fn free_port(taken: &[u16], from: u16) -> u16 {
         .unwrap_or(from)
 }
 
-/// Whether a kind's program is installed.
-pub fn installed(kind: &str) -> bool {
-    binary(kind).exists()
+/// Whether a version of a kind's program is installed.
+pub fn installed(kind: &str, version: &str) -> bool {
+    binary(kind, version).exists()
 }
 
 /// Ports every other instance uses (service and web), for clash checks.
@@ -251,8 +312,14 @@ fn ports_taken(cfg: &Config, except: &str) -> Vec<u16> {
 
 /// Add a service: `name` defaults to the kind (`redis`, then `redis-2`…),
 /// `port` to its usual one or the next free. Returns the name.
-pub fn add(cfg: &mut Config, kind: &str, name: Option<&str>, port: Option<u16>) -> Result<String> {
-    let id = insert(cfg, kind, name, port)?;
+pub fn add(
+    cfg: &mut Config,
+    kind: &str,
+    name: Option<&str>,
+    port: Option<u16>,
+    version: Option<&str>,
+) -> Result<String> {
+    let id = insert(cfg, kind, name, port, version)?;
     save(cfg)?;
     Ok(id)
 }
@@ -269,8 +336,22 @@ fn check_name(id: &str) -> Result<()> {
     Ok(())
 }
 
-fn insert(cfg: &mut Config, kind: &str, name: Option<&str>, port: Option<u16>) -> Result<String> {
+fn insert(
+    cfg: &mut Config,
+    kind: &str,
+    name: Option<&str>,
+    port: Option<u16>,
+    version: Option<&str>,
+) -> Result<String> {
     check(kind)?;
+    let version = version.unwrap_or(default_version(kind));
+    if !versions(kind).contains(&version) {
+        bail!(
+            "Anvil offers {} {}",
+            self::name(kind),
+            versions(kind).join(", ")
+        );
+    }
     let id = name.map_or_else(|| free_name(cfg, kind), str::to_string);
     check_name(&id)?;
     if cfg.services.contains_key(&id) {
@@ -293,6 +374,7 @@ fn insert(cfg: &mut Config, kind: &str, name: Option<&str>, port: Option<u16>) -
             enabled: false,
             port: Some(port),
             web_port: web,
+            version: Some(version.into()),
             ..Default::default()
         },
     );
@@ -317,13 +399,16 @@ pub fn remove(cfg: &mut Config, id: &str, delete_data: bool) -> Result<()> {
     Ok(())
 }
 
-/// Download (or for Redis, build) a service into `~/.anvil/services/<id>`.
-pub fn install(id: &str) -> Result<()> {
+/// Download (or for Redis, build) a version into `~/.anvil/services/<kind>/<version>`.
+pub fn install(id: &str, version: &str) -> Result<()> {
     check(id)?;
+    if !versions(id).contains(&version) {
+        bail!("Anvil offers {} {}", name(id), versions(id).join(", "));
+    }
     let (_, caddy_plat) = platform()?;
     let mac = caddy_plat.starts_with("mac");
     let arm = caddy_plat.ends_with("arm64");
-    let d = dir(id);
+    let d = dir(id, version);
     let _ = fs::remove_dir_all(&d);
     let result = match id {
         "mysql" => {
@@ -332,10 +417,10 @@ pub fn install(id: &str) -> Result<()> {
                 bail!("MySQL install is macOS-only for now");
             }
             let arch = if arm { "arm64" } else { "x86_64" };
-            let minor = &MYSQL_VERSION[..3];
+            let minor = version.rsplit_once('.').map_or(version, |m| m.0);
             fetch_tgz(
                 &format!(
-                    "https://cdn.mysql.com/Downloads/MySQL-{minor}/mysql-{MYSQL_VERSION}-macos15-{arch}.tar.gz"
+                    "https://cdn.mysql.com/Downloads/MySQL-{minor}/mysql-{version}-macos15-{arch}.tar.gz"
                 ),
                 &d,
                 true,
@@ -350,19 +435,19 @@ pub fn install(id: &str) -> Result<()> {
             };
             fetch_tgz(
                 &format!(
-                    "https://github.com/theseus-rs/postgresql-binaries/releases/download/{POSTGRES_VERSION}/postgresql-{POSTGRES_VERSION}-{target}.tar.gz"
+                    "https://github.com/theseus-rs/postgresql-binaries/releases/download/{version}/postgresql-{version}-{target}.tar.gz"
                 ),
                 &d,
                 true,
             )
         }
-        "redis" => build_redis(&d),
+        "redis" => build_redis(&d, version),
         _ => {
             let os = if mac { "darwin" } else { "linux" };
             let arch = if arm { "arm64" } else { "amd64" };
             fetch_tgz(
                 &format!(
-                    "https://github.com/axllent/mailpit/releases/download/{MAILPIT_VERSION}/mailpit-{os}-{arch}.tar.gz"
+                    "https://github.com/axllent/mailpit/releases/download/v{version}/mailpit-{os}-{arch}.tar.gz"
                 ),
                 &d,
                 false,
@@ -373,15 +458,19 @@ pub fn install(id: &str) -> Result<()> {
         let _ = fs::remove_dir_all(&d);
     }
     result?;
-    fs::write(d.join("VERSION"), version_of(id))?;
+    fs::write(d.join("VERSION"), version)?;
     Ok(())
 }
 
 /// Redis publishes no macOS binaries, so build it (needs the Xcode command line tools).
-fn build_redis(prefix: &std::path::Path) -> Result<()> {
-    let src = home().join("build").join("redis");
+fn build_redis(prefix: &std::path::Path, version: &str) -> Result<()> {
+    let src = home().join("build").join(format!("redis-{version}"));
     let _ = fs::remove_dir_all(&src);
-    fetch_tgz("https://download.redis.io/redis-stable.tar.gz", &src, true)?;
+    fetch_tgz(
+        &format!("https://download.redis.io/releases/redis-{version}.tar.gz"),
+        &src,
+        true,
+    )?;
     let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
     // Only the server and CLI: the bundled modules need a newer GNU Make than macOS ships.
     run(Command::new("make")
@@ -405,21 +494,23 @@ fn build_redis(prefix: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-fn version_of(id: &str) -> String {
-    match id {
-        "mysql" => MYSQL_VERSION.into(),
-        "postgres" => POSTGRES_VERSION.into(),
-        "redis" => {
-            fs::read_to_string(dir(id).join("REDIS_VERSION")).unwrap_or_else(|_| "stable".into())
-        }
-        _ => MAILPIT_VERSION.trim_start_matches('v').into(),
+/// Download a service's program version if it isn't there yet.
+pub fn ensure_installed(cfg: &Config, id: &str) -> Result<()> {
+    let (kind, v) = (kind_of(cfg, id)?, version(cfg, id));
+    if installed(kind, &v) {
+        return Ok(());
     }
+    install(kind, &v)
 }
 
-pub fn uninstall(id: &str) -> Result<()> {
-    check(id)?;
-    // Data stays in ~/.anvil/data/<id> so a reinstall finds the databases again.
-    fs::remove_dir_all(dir(id)).with_context(|| format!("{} is not installed", name(id)))
+/// Remove one version of a program; service data is never touched.
+pub fn uninstall(kind: &str, version: &str) -> Result<()> {
+    check(kind)?;
+    if !versions(kind).contains(&version) {
+        bail!("Unknown {} version {version}", name(kind));
+    }
+    fs::remove_dir_all(dir(kind, version))
+        .with_context(|| format!("{} {version} is not installed", name(kind)))
 }
 
 /// Replace a service's tags; blanks and duplicates are dropped.
@@ -503,12 +594,12 @@ pub fn set_web_port(cfg: &mut Config, id: &str, port: Option<u16>) -> Result<()>
 }
 
 /// First start: create the data directory the way each server expects.
-fn init(kind: &str, id: &str, log: &fs::File) -> Result<()> {
+fn init(cfg: &Config, kind: &str, id: &str, log: &fs::File) -> Result<()> {
     let data = data(id);
     if data.exists() {
         return Ok(());
     }
-    let d = dir(kind);
+    let d = dir(kind, &version(cfg, id));
     let status = match kind {
         "mysql" => Command::new(d.join("bin/mysqld"))
             .arg("--no-defaults")
@@ -539,9 +630,10 @@ fn init(kind: &str, id: &str, log: &fs::File) -> Result<()> {
 
 fn command(cfg: &Config, id: &str) -> Command {
     let kind = kind_of(cfg, id).unwrap_or("redis");
-    let (d, data, run_dir) = (dir(kind), data(id), home().join("run"));
+    let v = version(cfg, id);
+    let (d, data, run_dir) = (dir(kind, &v), data(id), home().join("run"));
     let port = port(cfg, id).to_string();
-    let mut c = Command::new(binary(kind));
+    let mut c = Command::new(binary(kind, &v));
     match kind {
         "mysql" => {
             c.arg("--no-defaults")
@@ -609,8 +701,9 @@ impl Services {
         if self.running(id) {
             return Ok(());
         }
-        if !installed(kind) {
-            bail!("{} is not installed", name(kind));
+        let v = version(cfg, id);
+        if !installed(kind, &v) {
+            bail!("{} {v} is not installed", name(kind));
         }
         kill_orphans(&pid_file(id), false);
         let port = port(cfg, id);
@@ -626,7 +719,7 @@ impl Services {
             .create(true)
             .append(true)
             .open(log_file(id))?;
-        init(kind, id, &log)?;
+        init(cfg, kind, id, &log)?;
         let mut child = command(cfg, id)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
@@ -688,11 +781,11 @@ impl Services {
                     kind,
                     name: name(kind),
                     category: category(kind),
-                    version: version_of(kind),
+                    version: version(cfg, &id),
                     port,
                     web: web_port.map(|p| format!("http://127.0.0.1:{p}")),
                     web_port,
-                    installed: installed(kind),
+                    installed: installed(kind, &version(cfg, &id)),
                     enabled: cfg.services.get(&id).is_some_and(|s| s.enabled),
                     running,
                     suggested_port: suggest(port),
@@ -768,11 +861,11 @@ mod tests {
         let mut cfg = Config::default();
         assert!(instances(&cfg).is_empty());
         assert_eq!(
-            insert(&mut cfg, "redis", Some("redis"), Some(16379)).unwrap(),
+            insert(&mut cfg, "redis", Some("redis"), Some(16379), None).unwrap(),
             "redis"
         );
-        let id = insert(&mut cfg, "redis", Some("redis-2"), None).unwrap();
-        let auto = insert(&mut cfg, "redis", None, None).unwrap();
+        let id = insert(&mut cfg, "redis", Some("redis-2"), None, None).unwrap();
+        let auto = insert(&mut cfg, "redis", None, None, None).unwrap();
         assert!(
             auto.starts_with("redis-") && auto.matches('-').count() == 2,
             "{auto}"
@@ -782,10 +875,16 @@ mod tests {
         assert_eq!(kind_of(&cfg, &id).unwrap(), "redis");
         let p = port(&cfg, &id);
         assert_ne!(p, 16379);
-        assert!(insert(&mut cfg, "redis", Some("cache"), Some(p)).is_err()); // port taken
-        assert!(insert(&mut cfg, "redis", Some("redis-2"), None).is_err());
-        assert!(insert(&mut cfg, "redis", Some("../x"), None).is_err());
-        assert!(insert(&mut cfg, "mongodb", None, None).is_err());
+        assert!(insert(&mut cfg, "redis", Some("cache"), Some(p), None).is_err()); // port taken
+        assert!(insert(&mut cfg, "redis", Some("redis-2"), None, None).is_err());
+        assert!(insert(&mut cfg, "redis", Some("../x"), None, None).is_err());
+        assert!(insert(&mut cfg, "mongodb", None, None, None).is_err());
+        assert!(insert(&mut cfg, "redis", Some("old"), None, Some("6.0.0")).is_err());
+        let old = insert(&mut cfg, "redis", Some("old"), None, Some("7.2.16")).unwrap();
+        assert_eq!(version(&cfg, &old), "7.2.16");
+        assert_eq!(version(&cfg, &id), "8.10.2");
+        assert_eq!(command(&cfg, &old).get_program(), binary("redis", "7.2.16"));
+        cfg.services.remove(&old);
         assert!(check_port(&cfg, "redis", p).is_err());
         assert!(check_port(&cfg, "redis-2", p).is_ok());
 
@@ -795,10 +894,10 @@ mod tests {
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
         assert!(args.iter().any(|a| a.ends_with("data/redis-2")));
-        assert_eq!(command(&cfg, &id).get_program(), binary("redis"));
+        assert_eq!(command(&cfg, &id).get_program(), binary("redis", "8.10.2"));
 
-        let a = insert(&mut cfg, "mailpit", Some("mail-a"), None).unwrap();
-        let b = insert(&mut cfg, "mailpit", Some("mail-b"), None).unwrap();
+        let a = insert(&mut cfg, "mailpit", Some("mail-a"), None, None).unwrap();
+        let b = insert(&mut cfg, "mailpit", Some("mail-b"), None, None).unwrap();
         assert_ne!(web_port(&cfg, &a), web_port(&cfg, &b));
         assert_eq!(instances(&cfg), ["mail-a", "mail-b", "redis", "redis-2"]);
     }

@@ -54,7 +54,7 @@ function serviceRow(svc) {
   b.dataset.name = svc.id;
   b.setAttribute("aria-current", svc.id === svcSelected);
   const text = el("span", "text");
-  text.append(el("span", "name", svc.id), el("span", "sub", `${svc.name} on port ${svc.port}`));
+  text.append(el("span", "name", svc.id), el("span", "sub", `${svc.name} ${svc.version} on port ${svc.port}`));
   const end = el("span", "end");
   for (const t of svc.tags.slice(0, 2)) end.append(el("span", "tag", t));
   const dot = el("span", `dot ${svc.running ? "on" : ""}`);
@@ -77,7 +77,11 @@ function renderServiceList() {
     return;
   }
   const q = filter.toLowerCase();
-  const hit = (x) => !q || [x.id, x.name, x.port, ...x.tags, ...x.apps].join(" ").toLowerCase().includes(q);
+  const f = filterOf("services");
+  const hit = (x) =>
+    (!f.kind || x.kind === f.kind) &&
+    (!f.running || x.running) &&
+    (!q || [x.id, x.name, x.version, x.port, ...x.tags, ...x.apps].join(" ").toLowerCase().includes(q));
   let count = 0;
   for (const cat of [...new Set(services.map((x) => x.category))]) {
     const rows = services.filter((x) => x.category === cat && hit(x)).map(serviceRow);
@@ -87,7 +91,7 @@ function renderServiceList() {
     box.append(...rows);
     list.append(el("h2", null, cat), box);
   }
-  if (!count) list.append(el("p", "empty", `No services match “${filter}”.`));
+  if (!count) list.append(el("p", "empty", filter ? `No services match “${filter}”.` : "No services match the filter."));
 }
 
 function selectService(id) {
@@ -308,16 +312,25 @@ function fillService() {
   svcKind = k.kind;
   $("#svc-name").value = k.suggested_name;
   $("#svc-port").value = k.suggested_port;
+  const ver = $("#svc-version");
+  ver.replaceChildren();
+  for (const v of k.versions) {
+    const tags = [v === k.default_version && "recommended", k.installed_versions.includes(v) && "installed"].filter(Boolean);
+    ver.add(new Option(tags.length ? `${v} (${tags.join(", ")})` : v, v));
+  }
+  ver.value = k.default_version;
+  ver.disabled = k.versions.length < 2;
   noteService();
   $("#svc-error").hidden = true;
 }
 
 function noteService() {
   const k = svcKinds.find((x) => x.kind === svcKind);
-  $("#svc-note").textContent = !k.installed
+  const v = $("#svc-version").value;
+  $("#svc-note").textContent = !k.installed_versions.includes(v)
     ? k.kind === "redis"
-      ? "Redis is built from source the first time, about a minute."
-      : `${k.name} is downloaded the first time.`
+      ? `Redis ${v} is built from source the first time, about a minute.`
+      : `${k.name} ${v} is downloaded the first time.`
     : `Its data goes in ~/.anvil/data/${$("#svc-name").value || "…"}`;
 }
 
@@ -327,6 +340,7 @@ function setServiceBusy(on) {
   for (const i of $("#svc-form").querySelectorAll("input, select")) i.disabled = on;
 }
 
+$("#svc-version").onchange = noteService;
 $("#svc-cancel").onclick = () => $("#new-service").close();
 $("#svc-name").oninput = (e) => {
   e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-");
@@ -343,6 +357,7 @@ $("#svc-form").onsubmit = async (e) => {
       kind: svcKind,
       name: name || null,
       port: Number.isNaN(port) ? null : port,
+      version: $("#svc-version").value || null,
       tags: $("#svc-tags").value.split(",").map((t) => t.trim()).filter(Boolean),
       apps: app ? [app] : [],
     });
