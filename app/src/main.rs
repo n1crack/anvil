@@ -1328,6 +1328,7 @@ fn open(site: String, target: String) -> Res<()> {
     match target.as_str() {
         "browser" => cmd.arg(format!("https://{}.{}:{}", s.name, cfg.tld, cfg.https_port)),
         "finder" => cmd.arg(&s.path),
+        "root" => cmd.arg(&s.root),
         "terminal" => cmd
             .args(["-a", cfg.terminal.as_deref().unwrap_or("Terminal")])
             .arg(&s.path),
