@@ -33,6 +33,11 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Changed
 
+- An application's Overview lists all its processes, its own server or site
+  first, each with Browser, Start/Stop/Restart, an editable command and "Start
+  with Anvil". One Start/Stop at the top runs them all; scripts can be pinned
+  from Commands. Clicking a row or a command shows its output in an inline
+  console. The Processes window gets the same Browser button.
 - New applications are served over plain HTTP; Settings › "HTTPS for new
   applications" changes that. Applications that existed before keep HTTPS.
 - Next.js apps open at `<name>.localhost` until their `next.config` allows the
@@ -42,6 +47,7 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Fixed
 
+- The Add Alias and New Group prompts and the new-database field took no typing.
 - Next.js dev servers listened on every network interface; they now listen on
   127.0.0.1 only.
 

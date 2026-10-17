@@ -143,6 +143,18 @@ function row(r, inner) {
     td(crashed ? r.detail || status.crashed : status[r.state], "act-status"),
   );
   const actions = td(null, "act-actions");
+  if (r.web) {
+    const b = document.createElement("button");
+    b.textContent = "🌐";
+    b.setAttribute("aria-label", `Open ${r.name} in the browser`);
+    b.title = r.state === "running" ? r.web : "Not running";
+    b.disabled = r.state !== "running";
+    b.onclick = (e) => {
+      e.stopPropagation();
+      invoke("open_url", { url: r.web }).catch((err) => showError(String(err)));
+    };
+    actions.append(b);
+  }
   if (r.actions) {
     if (!r.key.includes("#")) actions.append(btn("Restart", r, "restart"));
     actions.append(btn("Stop", r, "stop"));

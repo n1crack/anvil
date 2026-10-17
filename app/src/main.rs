@@ -425,6 +425,8 @@ struct Row {
     detail: Option<String>,
     /// Whether Stop/Restart apply to it.
     actions: bool,
+    /// The page the 🌐 button opens (as in the app's Overview).
+    web: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -451,6 +453,7 @@ fn row(key: String, name: String, state: &'static str, actions: bool) -> Row {
         state,
         detail: None,
         actions,
+        web: None,
     }
 }
 
@@ -563,12 +566,14 @@ fn activity(app: State<App>) -> Res<Activity> {
                 let mut r = if rest.is_empty() {
                     let mut r = row(key.clone(), site.name.clone(), "running", true);
                     r.port = site.port;
+                    r.web = Some(anvil::site_url(&cfg, site));
                     r
                 } else {
                     let id = &rest[1..];
                     let shown = scripts.get(key).cloned().unwrap_or_else(|| name(id));
                     let mut r = row(key.clone(), shown, "running", true);
                     r.port = found(id).and_then(|p| p.port);
+                    r.web = found(id).and_then(|p| row_web(&cfg, site, p));
                     r
                 };
                 // A server is starting until its port answers.
