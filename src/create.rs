@@ -1,7 +1,7 @@
 //! Create a new application from a template, using Anvil's own PHP, Composer and
 //! language toolchains so nothing is needed on the system.
 
-use crate::{apps, home, run, runtimes};
+use crate::{apps, download, home, published_sum, runtimes};
 use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,11 +24,11 @@ pub fn needs(kind: &str) -> Option<&'static str> {
 fn composer() -> Result<PathBuf> {
     let phar = home().join("bin").join("composer.phar");
     if !phar.exists() {
+        let url = "https://getcomposer.org/download/latest-stable/composer.phar";
+        let sum = published_sum(&format!("{url}.sha256"), "composer.phar")?;
+        let tmp = download(url, Some(&sum))?;
         fs::create_dir_all(phar.parent().unwrap())?;
-        run(Command::new("curl")
-            .args(["-fsSL", "-o"])
-            .arg(&phar)
-            .arg("https://getcomposer.org/download/latest-stable/composer.phar"))?;
+        fs::rename(tmp, &phar)?;
     }
     Ok(phar)
 }
