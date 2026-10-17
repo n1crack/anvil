@@ -714,15 +714,14 @@ function renderResources(name) {
   for (const i of r.items.filter((i) => i.bytes > 0)) {
     const row = el("div", "row");
     const dt = el("dt");
-    dt.append(el("span", null, i.label));
+    // A swatch says keep, rebuild or safe, in the legend's colours; the words are in its tooltip.
+    const label = el("span");
+    const sw = el("i", `swatch ${i.safety}`);
+    sw.title = `${SAFETY[i.safety][0]}: ${i.note}`;
+    label.append(sw, i.label);
+    dt.append(label);
     if (i.path) dt.append(el("small", "path", i.path.startsWith("/") ? tilde(i.path) : i.path));
     const dd = el("dd", "res-cells");
-    // Only items you can act on carry a tag; "keep" would be on every row.
-    if (i.safety !== "keep") {
-      const tag = el("span", `safety ${i.safety}`, SAFETY[i.safety][0]);
-      tag.title = i.note;
-      dd.append(tag);
-    }
     dd.append(el("span", "size", bytes(i.bytes)));
     if (i.safety !== "keep") {
       const del = el("button", "del", "Delete");
