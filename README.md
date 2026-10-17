@@ -18,7 +18,7 @@ Anvil turns the folders on your Mac into running applications at local domains l
 - Local domains, per-site HTTPS, standard ports
 - Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt, Vite, Node.js, Rust, Go, .NET, Django, FastAPI, Flask and Docker Compose detected automatically
 - PHP 8.0 – 8.5 and php.ini settings per application
-- Dev processes per application (queue, Vite, log tailer…) with their live output
+- Dev processes and Docker Compose containers per application, with their live output
 - Terminal commands that follow each application's PHP and Node.js versions
 - Services, logs, dependencies, Git status and disk clean-up per application
 - A native macOS app and a CLI
