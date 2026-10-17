@@ -334,7 +334,6 @@ async function openAddService() {
   for (const s of snap.sites.filter((s) => !s.linked)) app.add(new Option(`${s.name}.${snap.tld}`, s.name));
   // Adding from an application's page? Start with that application.
   app.value = mode === "apps" && selected ? selected : "";
-  $("#svc-tags").value = "";
   fillService();
   setServiceBusy(false);
   $("#new-service").showModal();
@@ -345,7 +344,6 @@ function fillService() {
   const k = svcKinds.find((x) => x.kind === svcKind) ?? svcKinds[0];
   svcKind = k.kind;
   $("#svc-name").value = k.suggested_name;
-  $("#svc-port").value = k.suggested_port;
   const ver = $("#svc-version");
   ver.replaceChildren();
   for (const v of k.versions) {
@@ -358,14 +356,17 @@ function fillService() {
   $("#svc-error").hidden = true;
 }
 
+/** One quiet line under the name: what gets downloaded, the port and where data goes. */
 function noteService() {
   const k = svcKinds.find((x) => x.kind === svcKind);
   const v = $("#svc-version").value;
-  $("#svc-note").textContent = !k.installed_versions.includes(v)
-    ? k.kind === "redis"
-      ? `Redis ${v} is built from source the first time, about a minute.`
-      : `${k.name} ${v} is downloaded the first time.`
-    : `Its data goes in ~/.anvil/data/${$("#svc-name").value || "…"}`;
+  const name = $("#svc-name").value || "…";
+  const fetch = k.installed_versions.includes(v)
+    ? ""
+    : k.kind === "redis"
+      ? `Redis ${v} is built from source first (about a minute). `
+      : `${k.name} ${v} is downloaded first. `;
+  $("#svc-note").textContent = `${fetch}Port ${k.suggested_port}, data in ~/.anvil/data/${name}`;
 }
 
 function setServiceBusy(on) {
@@ -382,7 +383,6 @@ $("#svc-name").oninput = (e) => {
 };
 $("#svc-form").onsubmit = async (e) => {
   e.preventDefault();
-  const port = parseInt($("#svc-port").value, 10);
   const name = $("#svc-name").value.trim();
   const app = $("#svc-app").value;
   setServiceBusy(true);
@@ -390,9 +390,9 @@ $("#svc-form").onsubmit = async (e) => {
     services = await invoke("add_service", {
       kind: svcKind,
       name: name || null,
-      port: Number.isNaN(port) ? null : port,
+      port: null,
       version: $("#svc-version").value || null,
-      tags: $("#svc-tags").value.split(",").map((t) => t.trim()).filter(Boolean),
+      tags: [],
       apps: app ? [app] : [],
     });
     $("#new-service").close();
