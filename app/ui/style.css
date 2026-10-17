@@ -944,8 +944,9 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .swatch { width: 8px; height: 8px; border-radius: 2px; }
 .swatch.keep { background: var(--cold); }
-.swatch.rebuild { background: var(--heat-deep); }
-.swatch.safe { background: var(--heat-white); }
+/* Orange marks what Clean up removes; rebuildable is neutral, not an alarm. */
+.swatch.rebuild { background: color-mix(in srgb, var(--muted) 55%, transparent); }
+.swatch.safe { background: var(--heat); }
 
 .res-bar {
   display: flex;
@@ -959,8 +960,8 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .res-bar .seg { flex-basis: 0; min-width: 3px; }
 .res-bar .keep { background: var(--cold); }
-.res-bar .rebuild { background: var(--heat-deep); }
-.res-bar .safe { background: var(--heat-white); }
+.res-bar .rebuild { background: color-mix(in srgb, var(--muted) 55%, transparent); }
+.res-bar .safe { background: var(--heat); }
 
 .res-list .row { grid-template-columns: 1fr auto; }
 
@@ -999,13 +1000,10 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-weight: 600;
 }
 
-.safety.safe { background: rgba(255, 209, 102, 0.14); color: var(--heat-white); }
+.safety.safe { background: color-mix(in srgb, var(--heat) 16%, transparent); color: var(--heat-text); }
 .safety.rebuild { background: var(--steel-raised); color: var(--text); }
 .safety.keep { background: var(--steel-raised); color: var(--muted); }
 
-@media (prefers-color-scheme: light) {
-  .safety.safe { color: #8a5a00; }
-}
 
 .res-cells .del,
 .clean-all {
@@ -1022,11 +1020,10 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .clean-all { color: var(--text); }
 
-/* Delete appears on the row you point at (or tab into), like Finder's hover actions. */
-.res-cells .del { visibility: hidden; width: 60px; }
+/* Delete stays visible, quiet, so first-time users find it. */
+.res-cells .del { width: 60px; }
 .res-cells .del-space { width: 60px; }
-.res-list .row:hover .del,
-.res-list .row:focus-within .del { visibility: visible; }
+
 
 .page .size {
   min-width: 64px;
