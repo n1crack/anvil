@@ -191,6 +191,82 @@ fn start_app(app: &App, cfg: &Config, name: &str) {
     };
 }
 
+/// One of an app's other processes, as the window shows it.
+#[derive(Serialize)]
+struct ProcessRow {
+    #[serde(flatten)]
+    process: anvil::processes::Process,
+    running: bool,
+    /// The newest line it wrote.
+    last: Option<String>,
+    error: Option<String>,
+}
+
+fn process_rows(app: &App, site: &Site) -> Vec<ProcessRow> {
+    let errors = app.app_errors.lock().unwrap();
+    anvil::processes::detect(site)
+        .into_iter()
+        .map(|p| {
+            let key = anvil::processes::key(&site.name, &p.name);
+            let last = anvil::logs::read(
+                &anvil::processes::log_file(&site.name, &p.name),
+                None,
+                8 * 1024,
+            )
+            .ok()
+            .and_then(|page| page.entries.into_iter().next())
+            .map(|e| e.message.lines().next().unwrap_or("").to_string());
+            ProcessRow {
+                running: app.apps.lock().unwrap().running(&key),
+                error: errors.get(&key).cloned(),
+                last,
+                process: p,
+            }
+        })
+        .collect()
+}
+
+fn find_site(name: &str) -> Res<Site> {
+    let cfg = anvil::load().map_err(err)?;
+    anvil::sites(&cfg)
+        .into_iter()
+        .find(|s| s.name == name)
+        .ok_or_else(|| format!("No app named {name}"))
+}
+
+#[tauri::command(async)]
+fn processes(app: State<App>, site: String) -> Res<Vec<ProcessRow>> {
+    Ok(process_rows(&app, &find_site(&site)?))
+}
+
+/// Start, stop or restart one process, or all of them when `name` is None.
+#[tauri::command(async)]
+fn process_run(
+    app: State<App>,
+    site: String,
+    name: Option<String>,
+    action: String,
+) -> Res<Vec<ProcessRow>> {
+    let s = find_site(&site)?;
+    for p in anvil::processes::detect(&s)
+        .into_iter()
+        .filter(|p| name.as_deref().is_none_or(|n| n == p.name))
+    {
+        let key = anvil::processes::key(&s.name, &p.name);
+        if action != "start" {
+            app.apps.lock().unwrap().stop(&key);
+            app.app_errors.lock().unwrap().remove(&key);
+        }
+        if action != "stop" {
+            let started = app.apps.lock().unwrap().start_process(&s, &p);
+            if let Err(e) = started {
+                app.app_errors.lock().unwrap().insert(key, err(e));
+            }
+        }
+    }
+    Ok(process_rows(&app, &s))
+}
+
 #[tauri::command(async)]
 fn app_run(handle: AppHandle, app: State<App>, site: String, action: String) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
@@ -1642,6 +1718,8 @@ fn main() {
             git_info,
             set_theme,
             set_tld,
+            processes,
+            process_run,
             set_dock_icon,
             set_login,
             open_config_dir,

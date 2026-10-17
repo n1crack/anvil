@@ -91,6 +91,11 @@ pub fn sources(site: &Site) -> Vec<LogSource> {
     if apps::runs_process(&site.kind) {
         out.extend(source("app", "App output", &apps::log_file(&site.name)));
     }
+    // The app's other processes, once they have written something.
+    for p in crate::processes::detect(site) {
+        let path = crate::processes::log_file(&site.name, &p.name);
+        out.extend(source(&format!("proc:{}", p.name), &p.name, &path));
+    }
     if let Some(v) = site.php.as_ref().filter(|_| apps::is_php(&site.kind)) {
         let path = home().join("log").join(format!("php-{v}-fpm.log"));
         out.extend(source("php-fpm", &format!("PHP-FPM {v}"), &path));

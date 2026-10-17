@@ -93,6 +93,30 @@ anvil runtime list
 anvil runtime install node 22
 ```
 
+## Processes
+
+Besides the site, an app often needs a few programs running while you work on
+it: a queue worker, a log tailer, Vite. The **Processes** group in an app's
+Overview lists them, with each one's newest line and Start/Stop; a name opens
+its output in the Logs tab. They run with Anvil's PHP and newest Node.js, and
+stop when Anvil quits.
+
+Anvil reads them from, in this order:
+
+1. `.anvil.toml` in the project, for any kind of app:
+
+   ```toml
+   [processes]
+   queue = "php artisan queue:listen"
+   vite = "npm run dev"
+   ```
+
+2. For PHP apps, Laravel's `composer run dev` script: each command it starts
+   with `concurrently`, named by its `--names`. `php artisan serve` is left out
+   because Anvil already serves the site.
+3. For PHP apps without such a script, `npm run dev` when `package.json` has a
+   `dev` script.
+
 ## New applications
 
 Create a project from a template with `anvil new <kind> <name>` or the New

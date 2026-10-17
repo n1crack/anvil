@@ -423,5 +423,12 @@ async function clearLog(v) {
   loadLogs(v);
 }
 
+/** Open the Logs tab on one of the app's sources (e.g. "proc:queue"). */
+window.showLog = (site, source) => {
+  logSource.set(site, source);
+  if (lv?.site === site) lv = null;
+  showTab($("#site"), "logs");
+};
+
 // app.js may have drawn the tab before this file loaded.
 if (tab === "logs") window.logsTab($("#site"), true);
