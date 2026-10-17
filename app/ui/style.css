@@ -74,6 +74,11 @@ button, select, input { font: inherit; color: inherit; }
   outline-offset: 2px;
 }
 
+/* Inside clipped containers (list groups, grouped rows) the ring is drawn inward. */
+.rows :focus-visible,
+.group :focus-visible,
+.logs-list :focus-visible { outline-offset: -2px; }
+
 .visually-hidden {
   position: absolute;
   width: 1px; height: 1px;
