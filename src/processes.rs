@@ -169,6 +169,15 @@ fn apply_settings(
     procs
 }
 
+/// package.json's scripts by name, as written there.
+pub fn script_texts(dir: &Path) -> std::collections::BTreeMap<String, String> {
+    fs::read_to_string(dir.join("package.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|j| serde_json::from_value(j["scripts"].clone()).ok())
+        .unwrap_or_default()
+}
+
 /// The package.json command scripts `keep` accepts, as rows in file order, each with
 /// whether the script pins its own port.
 fn pinned_scripts(dir: &Path, keep: &dyn Fn(&str) -> bool) -> Vec<(Process, bool)> {

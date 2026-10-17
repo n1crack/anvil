@@ -225,6 +225,8 @@ struct CommandChip {
     name: String,
     /// Its log source is `once:<id>`.
     id: String,
+    /// The script as package.json has it.
+    command: String,
     running: bool,
     /// How the last run ended, once it has.
     exit: Option<anvil::apps::Exit>,
@@ -370,6 +372,7 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
             HiddenRow { id, name }
         })
         .collect();
+    let texts = anvil::processes::script_texts(&site.path);
     let commands = {
         let mut apps = app.apps.lock().unwrap();
         scripts
@@ -379,6 +382,7 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
                 let running = apps.running(&key);
                 CommandChip {
                     id: anvil::processes::process_id(&name),
+                    command: texts.get(&name).cloned().unwrap_or_default(),
                     exit: apps.finished(&key).filter(|_| !running),
                     running,
                     name,

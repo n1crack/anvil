@@ -24,7 +24,9 @@ Until 1.0.0, minor versions may contain breaking changes.
   application itself; the server is left out, since Anvil serves through PHP-FPM.
 - Extra `package.json` dev servers get their own address,
   `<script>.<app>.<tld>` (for example `docs.vuefinder.test`).
-- One-off scripts appear as "Commands"; their output streams into the log.
+- One-off scripts appear as "Commands", a compact list with each script's
+  command and how its last run went; recently run ones come first, and "Show
+  all" lists more than six. Their output streams into the log.
 - Docker Compose projects are detected as their own kind, with their containers
   as rows. Containers keep running when Anvil quits; Stop waits for the grace
   period set in the compose file.

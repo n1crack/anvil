@@ -182,6 +182,47 @@ function procRow({ name, state, detail, error, title, busy, open, run, auto, web
   return row;
 }
 
+const CMD_MAX = 6; // commands listed before "Show all"
+
+/** "now", "5m", "2h", "3d" since unix seconds `at`. */
+function ago(at) {
+  const s = Date.now() / 1000 - at;
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+/** One package.json command: name, script, then 📌 and ▶ on hover and how the last run went.
+ * A click runs it (or, while running, shows it) in the console. */
+function cmdRow(name, c) {
+  const row = el("div", "proc cmd");
+  const run = async () => {
+    if (!c.running && !(await loadProcs(name, "command_run", { script: c.name }))) return;
+    openConsole(name, `once:${c.id}`, `npm run ${c.name}`);
+  };
+  row.onclick = run;
+  row.title = c.running ? `npm run ${c.name} is running. Click to show its output.` : `npm run ${c.name}. Click to run it.`;
+  const script = el("span", "proc-last", c.command);
+  row.append(el("span", "proc-name", c.name), script);
+  const actions = el("span", "proc-actions cmd-hover");
+  const pin = procBtn("📌", `Add ${c.name} to processes`, () => setProc(name, c.id, { pinned: true }));
+  pin.title = "Add to processes";
+  actions.append(pin);
+  if (!c.running) actions.append(Object.assign(procBtn("▶", `Run ${c.name}`, run), { title: "Run" }));
+  const result = el("span", "cmd-result");
+  if (c.running) {
+    result.append(el("span", "dot warm"));
+    result.title = "Running";
+  } else if (c.exit) {
+    const ok = c.exit.code === 0;
+    result.append(el("span", ok ? "cmd-ok" : "cmd-bad", ok ? "✓" : "✗"), ` ${ago(c.exit.at)}`);
+    result.title = `${ok ? "Succeeded" : "Failed"} ${new Date(c.exit.at * 1000).toLocaleString()}`;
+  }
+  row.append(actions, result);
+  return row;
+}
+
 /** The header: how many run, and Start/Stop for all; a PHP site alone says whether it's served. */
 function drawRunBox(name, rows, containers) {
   const box = $("#site .run-box");
@@ -296,29 +337,25 @@ function drawProcs(name) {
   }
 
   if (commands.length) {
-    box.append(el("h3", "res-sub", "Commands"));
-    const chips = el("div", "chips");
-    for (const c of commands) {
-      // Running: a filling ring; then green or red for how the last run ended.
-      const mark = c.running ? "warm" : c.exit ? (c.exit.code === 0 ? "on" : "bad") : null;
-      const wrap = el("span", "chip-wrap");
-      const chip = el("button", "chip");
-      if (mark) chip.append(el("span", `dot ${mark}`));
-      chip.append(c.name);
-      chip.title = c.running
-        ? `npm run ${c.name} is running. Click to show its output.`
-        : `npm run ${c.name}${c.exit ? `, last run ${c.exit.code === 0 ? "succeeded" : "failed"}` : ""}. Click to run it.`;
-      chip.onclick = async () => {
-        if (!c.running && !(await loadProcs(name, "command_run", { script: c.name }))) return;
-        openConsole(name, `once:${c.id}`, `npm run ${c.name}`);
+    const head = el("div", "procs-head");
+    head.append(el("h3", "res-sub", "Commands"));
+    const key = `anvil.commands.all.${name}`;
+    const all = localStorage.getItem(key) === "1";
+    if (commands.length > CMD_MAX) {
+      const more = el("button", "proc-link", all ? "Show fewer" : `Show all (${commands.length})`);
+      more.onclick = () => {
+        localStorage.setItem(key, all ? "0" : "1");
+        drawProcs(name);
       };
-      const pin = procBtn("📌", `Add ${c.name} to processes`, () => setProc(name, c.id, { pinned: true }));
-      pin.className = "chip-pin";
-      pin.title = "Add to processes";
-      wrap.append(chip, pin);
-      chips.append(wrap);
+      head.append(more);
     }
-    box.append(chips);
+    box.append(head);
+    // Recently run first, then package.json's order (the sort is stable).
+    const when = (c) => (c.running ? Infinity : c.exit?.at ?? 0);
+    const sorted = [...commands].sort((a, b) => (when(a) === when(b) ? 0 : when(b) > when(a) ? 1 : -1));
+    const list = el("div", "group procs-list");
+    for (const c of all ? sorted : sorted.slice(0, CMD_MAX)) list.append(cmdRow(name, c));
+    box.append(list);
   }
   focus?.focus();
 }
