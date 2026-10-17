@@ -73,7 +73,15 @@ pub fn set_process(
     id: &str,
     change: ProcessChange,
 ) -> anyhow::Result<()> {
-    apply_process_change(cfg.sites.entry(site.into()).or_default(), id, change)?;
+    // A new entry is only added once the change is accepted.
+    match cfg.sites.get_mut(site) {
+        Some(s) => apply_process_change(s, id, change)?,
+        None => {
+            let mut s = crate::SiteConfig::default();
+            apply_process_change(&mut s, id, change)?;
+            cfg.sites.insert(site.into(), s);
+        }
+    }
     crate::save(cfg)
 }
 
@@ -423,6 +431,11 @@ fn rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
             .get(&site.name)
             .is_some_and(|s| s.processes.get(id).is_some_and(|p| p.pinned))
     };
+    let hidden = |id: &str| {
+        cfg.sites
+            .get(&site.name)
+            .is_some_and(|s| s.processes.get(id).is_some_and(|p| p.hidden))
+    };
     let mut procs = package_scripts(&site.path).0;
     procs.retain(|p| p.name != "dev");
     procs.extend(
@@ -452,6 +465,8 @@ fn rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
             };
             (p, row)
         })
+        // Dropped after ports and prefixes are given out, so the other rows keep theirs.
+        .filter(|(p, _)| !hidden(&p.id))
         .collect()
 }
 
@@ -1280,6 +1295,38 @@ echo '{DEV_JSON}'
 
     fn settings(cfg: &mut crate::Config, site: &str, id: &str, change: ProcessChange) {
         apply_process_change(cfg.sites.entry(site.into()).or_default(), id, change).unwrap();
+    }
+
+    #[test]
+    fn hidden_server_rows_lose_their_route() {
+        let scripts =
+            r#"{"dev":"vite","docs:dev":"vitepress dev docs","docs:site":"vitepress dev docs"}"#;
+        let s = vite_site("hide", "vuefinder", scripts);
+        let mut cfg = crate::Config::default();
+        let before = server_rows(&cfg, &s);
+        let hide = ProcessChange {
+            hidden: Some(true),
+            ..Default::default()
+        };
+        settings(&mut cfg, "vuefinder", &process_id("docs:dev"), hide);
+        let after = server_rows(&cfg, &s);
+        assert_eq!(after.len(), 1);
+        // The other row keeps its port and host.
+        let kept = before.iter().find(|r| r.id == after[0].id).unwrap();
+        assert_eq!(after[0].id, process_id("docs:site"));
+        assert_eq!((after[0].port, &after[0].host), (kept.port, &kept.host));
+    }
+
+    #[test]
+    fn rejected_settings_leave_no_empty_app_entry() {
+        let mut cfg = crate::Config::default();
+        assert!(set_process(&mut cfg, "shop", "", ProcessChange::default()).is_err());
+        let empty = ProcessChange {
+            command: Some(Some("  ".into())),
+            ..Default::default()
+        };
+        assert!(set_process(&mut cfg, "shop", "queue", empty).is_err());
+        assert!(cfg.sites.is_empty());
     }
 
     #[test]

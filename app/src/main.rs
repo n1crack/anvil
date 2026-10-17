@@ -196,11 +196,18 @@ fn start_app(app: &App, cfg: &Config, name: &str) {
     };
 }
 
-/// One of an app's other processes, as the window shows it.
+/// One of an app's processes, as the window shows it: the app's own server or
+/// site first (`main`, id `""`), then the others.
 #[derive(Serialize)]
 struct ProcessRow {
     #[serde(flatten)]
     process: anvil::processes::Process,
+    /// `server` (the app's own dev server), `site` (served by Anvil, no Start/Stop of
+    /// its own) or `process`.
+    kind: &'static str,
+    main: bool,
+    /// Where the Browser button opens it; `None` when it serves no page (a PHP app's Vite).
+    web: Option<String>,
     running: bool,
     /// The newest line it wrote.
     last: Option<String>,
@@ -232,41 +239,105 @@ struct Overview {
     /// The compose file's services; `None` without a compose file.
     containers: Option<Vec<anvil::compose::Container>>,
     docker_error: Option<String>,
+    /// Rows hidden in the app's settings, to bring back.
+    hidden: Vec<HiddenRow>,
+}
+
+#[derive(Serialize)]
+struct HiddenRow {
+    id: String,
+    name: String,
+}
+
+/// The app's own row: the dev server it runs, or the site Anvil serves (a PHP or
+/// static app, running while the web server is). A Compose project has none.
+fn main_row(cfg: &Config, site: &Site, serving: bool, running: bool) -> Option<ProcessRow> {
+    let server = anvil::apps::runs_process(&site.kind);
+    if !server && site.kind == "compose" {
+        return None;
+    }
+    let command = site.command.clone().unwrap_or_default();
+    let name = match command.split_once("npm run ") {
+        _ if !server => site.host.clone(),
+        Some((_, rest)) => rest.split_whitespace().next().unwrap_or("server").into(),
+        None => "server".into(),
+    };
+    Some(ProcessRow {
+        process: anvil::processes::Process {
+            name,
+            command: if server { command } else { String::new() },
+            source: "anvil",
+            server: true,
+            port: site.port.filter(|_| server),
+            autostart: server && site.autostart,
+            edited: server && site.command_custom,
+            ..Default::default()
+        },
+        kind: if server { "server" } else { "site" },
+        main: true,
+        web: Some(anvil::site_url(cfg, site)),
+        running: if server { running } else { serving },
+        last: None,
+        error: None,
+        address: None,
+        pid: None,
+        crashed: None,
+    })
+}
+
+/// Where a process row opens: only the extra dev servers of non-PHP apps serve
+/// pages (`address` has none for PHP apps); a PHP app's Vite only serves its assets.
+fn row_web(cfg: &Config, site: &Site, p: &anvil::processes::Process) -> Option<String> {
+    p.port
+        .and_then(|_| anvil::processes::address(cfg, site, &p.id))
 }
 
 fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
     // Detecting may run PHP: do it before taking the locks.
     let detected = anvil::processes::detect_with(site, Some(cfg));
+    let serving = running(app);
     let errors = app.app_errors.lock().unwrap();
     let mut apps = app.apps.lock().unwrap();
     let crashed = apps.crashed();
-    detected
-        .into_iter()
-        .map(|p| {
-            let key = anvil::processes::key(&site.name, &p.id);
-            let last = anvil::logs::read(
-                &anvil::processes::log_file(&site.name, &p.id),
-                None,
-                8 * 1024,
-            )
-            .ok()
-            .and_then(|page| page.entries.into_iter().next())
-            .map(|e| e.message.lines().next().unwrap_or("").to_string());
-            ProcessRow {
-                running: apps.running(&key),
-                pid: apps.pid(&key),
-                crashed: crashed
-                    .iter()
-                    .find(|(k, _)| *k == key)
-                    .map(|(_, e)| e.clone()),
-                error: errors.get(&key).cloned(),
-                last,
-                // Only extra servers of non-PHP apps have an address of their own.
-                address: p
-                    .port
-                    .and_then(|_| anvil::processes::address(cfg, site, &p.id)),
-                process: p,
+    let main = main_row(cfg, site, serving, apps.running(&site.name));
+    let rows = detected.into_iter().map(|p| {
+        let web = row_web(cfg, site, &p);
+        ProcessRow {
+            running: apps.running(&anvil::processes::key(&site.name, &p.id)),
+            kind: "process",
+            main: false,
+            address: web.clone(),
+            web,
+            last: None,
+            error: None,
+            pid: None,
+            crashed: None,
+            process: p,
+        }
+    });
+    let rows: Vec<ProcessRow> = main.into_iter().chain(rows).collect();
+    rows.into_iter()
+        .map(|mut r| {
+            // The site row is the web server's; it has no process, log or errors of its own.
+            if r.kind == "site" {
+                return r;
             }
+            let key = if r.main {
+                site.name.clone()
+            } else {
+                anvil::processes::key(&site.name, &r.process.id)
+            };
+            r.last = anvil::logs::read(&anvil::apps::log_file(&key), None, 8 * 1024)
+                .ok()
+                .and_then(|page| page.entries.into_iter().next())
+                .map(|e| e.message.lines().next().unwrap_or("").to_string());
+            r.pid = apps.pid(&key);
+            r.crashed = crashed
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, e)| e.clone());
+            r.error = errors.get(&key).cloned();
+            r
         })
         .collect()
 }
@@ -280,7 +351,25 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
             Err(e) => (None, Some(err(e))),
         },
     };
-    let scripts = anvil::processes::package_scripts(&site.path).1;
+    let (servers, scripts) = anvil::processes::package_scripts(&site.path);
+    // ponytail: a hidden row's name is found among package.json scripts, else its id
+    // (artisan dev's names are their ids); the full detection drops hidden rows.
+    let hidden = cfg
+        .sites
+        .get(&site.name)
+        .map(anvil::processes::hidden)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|id| {
+            let name = servers
+                .iter()
+                .map(|p| p.name.clone())
+                .chain(scripts.iter().cloned())
+                .find(|n| anvil::processes::process_id(n) == id)
+                .unwrap_or_else(|| id.clone());
+            HiddenRow { id, name }
+        })
+        .collect();
     let commands = {
         let mut apps = app.apps.lock().unwrap();
         scripts
@@ -302,6 +391,7 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
         commands,
         containers,
         docker_error,
+        hidden,
     }
 }
 
@@ -743,6 +833,28 @@ fn container_log(site: String, service: String) -> Res<String> {
     anvil::compose::logs(&s.path, &service).map_err(err)
 }
 
+/// Start the processes marked Start with Anvil. Only apps that still exist and rows
+/// still detected (not removed, renamed or hidden) start.
+fn autostart_processes(app: &App, cfg: &Config) {
+    let wanted = |s: &Site| {
+        cfg.sites
+            .get(&s.name)
+            .is_some_and(|c| c.processes.values().any(|p| p.autostart))
+    };
+    for site in anvil::sites(cfg).into_iter().filter(wanted) {
+        for p in anvil::processes::detect_with(&site, Some(cfg))
+            .into_iter()
+            .filter(|p| p.autostart)
+        {
+            let started = app.apps.lock().unwrap().start_process(&site, &p, &cfg.tld);
+            if let Err(e) = started {
+                let key = anvil::processes::key(&site.name, &p.id);
+                app.app_errors.lock().unwrap().insert(key, err(e));
+            }
+        }
+    }
+}
+
 fn run_app(app: &App, cfg: &Config, site: &str, action: &str) {
     if action != "start" {
         app.apps.lock().unwrap().stop(site);
@@ -812,6 +924,79 @@ fn set_app(
     }
     changed(&handle);
     snapshot(&app)
+}
+
+/// Change one row's settings: its command (`reset` goes back to the detected one),
+/// Start with Anvil, hidden or pinned. The app's own row (`id` "") maps onto `set_app`
+/// and can't be hidden. A running row whose command changed restarts.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
+fn set_process(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    id: String,
+    command: Option<String>,
+    reset: Option<bool>,
+    autostart: Option<bool>,
+    hidden: Option<bool>,
+    pinned: Option<bool>,
+) -> Res<Overview> {
+    if !id.is_empty() && !plain(&id, false) {
+        return Err(format!("Not a process: {id}"));
+    }
+    let (mut cfg, s) = find_site_cfg(&site)?;
+    let command = if reset == Some(true) {
+        Some(None)
+    } else {
+        command.map(Some)
+    };
+    let restart = command.is_some();
+    if id.is_empty() {
+        if hidden == Some(true) {
+            return Err("The app's own row can't be hidden".into());
+        }
+        if !anvil::apps::runs_process(&s.kind) {
+            return Err(format!("Anvil serves {site}; it has no command of its own"));
+        }
+        anvil::set_site_app(&mut cfg, &s.name, None, command, None, autostart).map_err(err)?;
+        if restart && app.apps.lock().unwrap().running(&s.name) {
+            app.apps.lock().unwrap().stop(&s.name);
+            start_app(&app, &cfg, &s.name);
+        }
+    } else {
+        let change = anvil::processes::ProcessChange {
+            command,
+            autostart,
+            hidden,
+            pinned,
+        };
+        anvil::processes::set_process(&mut cfg, &s.name, &id, change).map_err(err)?;
+        let key = anvil::processes::key(&s.name, &id);
+        let was_running = app.apps.lock().unwrap().running(&key);
+        // A hidden row is out of sight, so it doesn't keep running unseen.
+        if was_running && (restart || hidden == Some(true)) {
+            app.apps.lock().unwrap().stop(&key);
+            app.app_errors.lock().unwrap().remove(&key);
+        }
+        if was_running && restart && hidden != Some(true) {
+            let p = anvil::processes::detect_with(&s, Some(&cfg))
+                .into_iter()
+                .find(|p| p.id == id);
+            if let Some(p) = p
+                && let Err(e) = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld)
+            {
+                app.app_errors.lock().unwrap().insert(key, err(e));
+            }
+        }
+        // Hiding or pinning a server row adds or drops its route.
+        if hidden.is_some() || pinned.is_some() {
+            sites_changed(&handle, &app, &cfg);
+        }
+    }
+    changed(&handle);
+    let (cfg, s) = find_site_cfg(&site)?;
+    Ok(overview(&app, &cfg, &s))
 }
 
 /// Disk, processes and services for one app. Sizing big folders takes a moment,
@@ -2345,6 +2530,7 @@ fn main() {
             open_url,
             app_run,
             set_app,
+            set_process,
             resources,
             packages,
             package_updates,
@@ -2378,6 +2564,7 @@ fn main() {
                     for site in anvil::sites(&cfg).iter().filter(|s| s.autostart) {
                         start_app(&state, &cfg, &site.name);
                     }
+                    autostart_processes(&state, &cfg);
                     changed(&handle);
                 });
             }
@@ -2453,5 +2640,94 @@ mod tests {
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
+    }
+
+    fn site(name: &str, kind: &str, dir: &std::path::Path) -> Site {
+        Site {
+            name: name.into(),
+            host: format!("{name}.test"),
+            secure: false,
+            path: dir.into(),
+            root: dir.into(),
+            php: None,
+            php_pinned: false,
+            ini: Default::default(),
+            linked: false,
+            parked_in: None,
+            modified: 0,
+            kind: kind.into(),
+            kind_detected: kind.into(),
+            command: None,
+            command_custom: false,
+            port: None,
+            autostart: false,
+            runtime_version: None,
+            runtime_pinned: false,
+        }
+    }
+
+    #[test]
+    fn main_row_is_the_dev_server_or_the_served_site() {
+        let cfg = Config::default();
+        let dir = std::env::temp_dir();
+        let mut v = site("vuefinder", "vite", &dir);
+        v.command = anvil::apps::default_command("vite", &dir);
+        v.port = Some(3000);
+        v.autostart = true;
+        let r = main_row(&cfg, &v, false, true).unwrap();
+        assert_eq!((r.kind, r.process.name.as_str()), ("server", "dev"));
+        assert_eq!(r.process.id, "");
+        assert_eq!(r.process.command, v.command.clone().unwrap());
+        assert_eq!(r.web, Some(anvil::site_url(&cfg, &v)));
+        assert!(r.main && r.running && r.process.autostart && !r.process.edited);
+        // A custom command that isn't an npm script is just the server.
+        v.command = Some("cargo run".into());
+        v.command_custom = true;
+        let r = main_row(&cfg, &v, false, false).unwrap();
+        assert_eq!(r.process.name, "server");
+        assert!(r.process.edited && !r.running);
+
+        // A PHP app's row is the site Anvil serves: running while the web server is.
+        let mut l = site("shop", "laravel", &dir);
+        l.autostart = true;
+        let r = main_row(&cfg, &l, true, false).unwrap();
+        assert_eq!((r.kind, r.process.name.as_str()), ("site", "shop.test"));
+        assert_eq!(r.web, Some(anvil::site_url(&cfg, &l)));
+        assert!(r.running && r.process.command.is_empty() && !r.process.autostart);
+        assert!(!main_row(&cfg, &l, false, true).unwrap().running);
+        assert_eq!(
+            main_row(&cfg, &site("s", "static", &dir), true, false)
+                .unwrap()
+                .kind,
+            "site"
+        );
+        assert!(main_row(&cfg, &site("c", "compose", &dir), true, true).is_none());
+    }
+
+    #[test]
+    fn only_extra_servers_of_non_php_apps_open_in_the_browser() {
+        let cfg = Config::default();
+        let dir = std::env::temp_dir().join(format!("anvil-web-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("package.json"),
+            r#"{"scripts":{"dev":"vite","docs:dev":"vitepress dev docs"}}"#,
+        )
+        .unwrap();
+        let v = site("vuefinder", "vite", &dir);
+        let docs = anvil::processes::detect_with(&v, Some(&cfg))
+            .into_iter()
+            .find(|p| p.name == "docs:dev")
+            .unwrap();
+        let web = row_web(&cfg, &v, &docs).unwrap();
+        assert!(web.contains("docs.vuefinder.test"), "{web}");
+        // The same row in a PHP app is Vite serving assets: no page of its own.
+        let l = site("shop", "laravel", &dir);
+        assert_eq!(row_web(&cfg, &l, &docs), None);
+        let worker = anvil::processes::Process {
+            id: "queue".into(),
+            ..Default::default()
+        };
+        assert_eq!(row_web(&cfg, &v, &worker), None);
     }
 }
