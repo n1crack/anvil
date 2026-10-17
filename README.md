@@ -112,14 +112,16 @@ Node.js, Go, Rust (through rustup) and .NET are installed into `~/.anvil/runtime
 
 ### Services
 
-| Service | Default port |
+Nothing runs until you add it. Add a service by picking its kind, a name and a port, and add as many of each as you need: two MySQL servers for two projects, a separate Redis for queues, a second Mailpit inbox.
+
+| Service | Usual port |
 |---|---|
 | MySQL 8.4 | 3306 |
 | PostgreSQL 18 | 5432 |
 | Redis (built from source) | 6379 |
-| Mailpit | 1025 (SMTP), web inbox on 8025 (change it with `anvil service port mailpit --web <port>`) |
+| Mailpit | 1025 (SMTP), web inbox on 8025 (change it with `anvil service port <name> --web <port>`) |
 
-Services listen on 127.0.0.1 only and keep their data in `~/.anvil/data/<id>`. Enabled services start with Anvil. When a port is taken by another program, the app suggests the next free one. MySQL starts with a `root` user without a password; PostgreSQL with a `postgres` user and trust authentication. Uninstalling a service keeps its data, so a reinstall finds your databases again.
+When the usual port is taken, by another service or another program, the next free one is suggested. Each kind's program is downloaded the first time you add one and shared after that; every service keeps its own data in `~/.anvil/data/<name>` and its own log. Services listen on 127.0.0.1 only, and turned-on services start with Anvil. MySQL starts with a `root` user without a password; PostgreSQL with a `postgres` user and trust authentication. Removing a service keeps its data unless you ask to delete it, so adding the same name again finds your databases.
 
 ### New applications
 
@@ -154,7 +156,7 @@ open ../target/release/bundle/macos/Anvil.app
   - **General:** site folders, launch at login, Dock icon, theme, editor and terminal, domain and ports.
   - **PHP:** install and remove versions, set the default, php.ini defaults for all applications.
   - **Languages:** install and remove Node.js, Go, Rust and .NET.
-  - **Services:** install, turn on and off, change ports, open the Mailpit inbox.
+  - **Services:** add services like containers (kind, name, port), turn them on and off, change ports, open a Mailpit inbox, remove them with or without their data.
   - **Storage:** Anvil's own footprint and every application's size.
   - **Shortcuts** and **About**.
 - **Menu bar menu:** status, Start/Stop, Restart, switch the default PHP version, Logs, Settings and Quit.
@@ -202,11 +204,12 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil app command <site> [command]` | Set an app's start command; leave it out for the default |
 | `anvil app autostart <site> <true\|false>` | Start the app whenever Anvil starts |
 | `anvil app runtime <site> [version]` | Pin the language version (e.g. `24` for Node); leave it out for automatic |
-| `anvil service list` | List services and their state |
-| `anvil service install <id>` | Install `mysql`, `postgres`, `redis` or `mailpit` |
-| `anvil service uninstall <id>` | Remove a service's program; its data is kept |
-| `anvil service enable <id>` / `disable <id>` | Start the service with Anvil, or not |
-| `anvil service port <id> [port] [--web [port]]` | Set the port; leave it out for the default. `--web` sets Mailpit's inbox port (no value resets it) |
+| `anvil service list` | List added services and their state |
+| `anvil service add <kind> [name] [--port N]` | Add `mysql`, `postgres`, `redis` or `mailpit`; downloads the program the first time |
+| `anvil service remove <name> [--delete-data]` | Remove a service; its data is kept unless asked |
+| `anvil service uninstall <kind>` | Remove a program no service uses anymore |
+| `anvil service enable <name>` / `disable <name>` | Start the service with Anvil, or not |
+| `anvil service port <name> [port] [--web [port]]` | Set the port; leave it out for the usual one. `--web` sets Mailpit's inbox port (no value resets it) |
 | `anvil usage [site]` | Disk usage of one application, or of Anvil and all applications |
 | `anvil setup` | Download the web server and print the one-time DNS command |
 | `anvil start` | Run Anvil in the foreground (Ctrl-C to stop) |
@@ -242,8 +245,14 @@ port = 41500
 autostart = true
 
 [services.mysql]
+kind = "mysql"
 enabled = true
-port = 3307
+port = 3306
+
+[services.queue]
+kind = "redis"
+enabled = true
+port = 6380
 ```
 
 If you change `tld` or `dns_port`, update `/etc/resolver/<tld>` to match.
@@ -267,8 +276,8 @@ Anvil generates the web server and PHP-FPM configuration from your sites and sup
 | `~/.anvil/config.toml` | Your settings |
 | `~/.anvil/php/<version>/` | PHP binaries and `php.ini` |
 | `~/.anvil/runtimes/<id>/` | Node.js, Go, Rust and .NET |
-| `~/.anvil/services/<id>/` | MySQL, PostgreSQL, Redis and Mailpit programs |
-| `~/.anvil/data/<id>/` | Service data |
+| `~/.anvil/services/<kind>/` | MySQL, PostgreSQL, Redis and Mailpit programs, shared by every service of that kind |
+| `~/.anvil/data/<name>/` | Each service's data |
 | `~/.anvil/data/caddy/` | Certificate authority and site certificates |
 | `~/.anvil/bin/` | Web server and Composer |
 | `~/.anvil/cache/` | Package and build caches for the languages and Composer |

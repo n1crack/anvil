@@ -45,7 +45,7 @@ pub struct ServiceUse {
     pub label: String,
     pub port: Option<u16>,
     /// The Anvil service on that port, if any.
-    pub anvil: Option<&'static str>,
+    pub anvil: Option<String>,
     pub running: bool,
     /// Size of the service's data folder (shared by every app using it).
     pub data_bytes: Option<u64>,
@@ -581,7 +581,8 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
     }
 
     let table = ps();
-    let data_sizes = du(&services::SERVICES
+    let ids = services::instances(cfg);
+    let data_sizes = du(&ids
         .iter()
         .map(|id| home().join("data").join(id))
         .collect::<Vec<_>>());
@@ -589,18 +590,23 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
         .into_iter()
         .map(|(label, port)| {
             let anvil = port.and_then(|p| {
-                services::SERVICES
-                    .into_iter()
-                    .find(|id| services::installed(id) && services::port(cfg, id) == p)
+                ids.iter()
+                    .find(|id| {
+                        services::kind_of(cfg, id).is_ok_and(services::installed)
+                            && services::port(cfg, id) == p
+                    })
+                    .cloned()
             });
             let proc = anvil
+                .as_deref()
                 .and_then(|id| svc.pid(id))
                 .and_then(|pid| table.iter().find(|p| p.pid == pid));
             ServiceUse {
                 memory: proc.map(|p| p.rss),
                 cpu: proc.map(|p| p.cpu),
-                running: anvil.is_some_and(|id| svc.running(id)),
+                running: anvil.as_deref().is_some_and(|id| svc.running(id)),
                 data_bytes: anvil
+                    .as_deref()
                     .and_then(|id| data_sizes.get(&home().join("data").join(id)).copied()),
                 label,
                 port,
@@ -650,11 +656,14 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
             h.join("services").join(id),
             "Services",
             Safety::Keep,
-            "Uninstall it in Settings › Services",
+            "Shared by every service of this kind; `anvil service uninstall` removes it once unused",
         ));
+    }
+    // Every instance's data, including ones removed from Anvil (kept on purpose).
+    for id in dirs(h.join("data")).into_iter().filter(|d| d != "caddy") {
         entries.push((
             format!("{id} data"),
-            h.join("data").join(id),
+            h.join("data").join(&id),
             "Data",
             Safety::Keep,
             "Your databases and mail",

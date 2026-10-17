@@ -538,7 +538,7 @@ function renderResources(name) {
       const dt = el("dt");
       dt.append(el("span", null, sv.label));
       const where = sv.anvil
-        ? `Anvil, ${sv.running ? "running" : "stopped"}, port ${sv.port}, shared by apps using it`
+        ? `Anvil’s ${sv.anvil}, ${sv.running ? "running" : "stopped"}, port ${sv.port}, shared by apps using it`
         : sv.port
           ? `Port ${sv.port}, not an Anvil service`
           : "";

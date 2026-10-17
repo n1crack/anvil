@@ -252,6 +252,12 @@ const loadServices = () => serviceCall("services");
 function renderServices() {
   const root = $("#service-list");
   root.replaceChildren();
+  if (!services.length) {
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.textContent = "No services yet. Add MySQL, PostgreSQL, Redis or Mailpit; each one gets its own port and data.";
+    root.append(p);
+  }
   const categories = [...new Set(services.map((x) => x.category))];
   for (const cat of categories) {
     const h = document.createElement("h2");
@@ -272,10 +278,10 @@ function serviceRow(svc) {
   title.className = "service-title";
   title.innerHTML = `<span class="dot" aria-hidden="true"></span><strong></strong><span class="muted"></span>`;
   $(".dot", title).classList.toggle("on", svc.running);
-  $("strong", title).textContent = svc.name;
-  $(".muted", title).textContent = svc.installed ? svc.version : "";
+  $("strong", title).textContent = svc.id;
+  $(".muted", title).textContent = `${svc.name} ${svc.installed ? svc.version : ""}`;
   const status = document.createElement("small");
-  if (busy.has(svc.id)) status.textContent = svc.id === "redis" ? "Building from source, about a minute…" : "Downloading…";
+  if (busy.has(svc.id)) status.textContent = svc.kind === "redis" ? "Building from source, about a minute…" : "Downloading…";
   else if (svc.error) status.textContent = svc.error;
   else if (svc.running) status.textContent = `Running on 127.0.0.1:${svc.port}`;
   else if (svc.installed) status.textContent = "Stopped";
@@ -312,7 +318,7 @@ function serviceRow(svc) {
     const port = document.createElement("input");
     port.value = svc.port;
     port.inputMode = "numeric";
-    port.setAttribute("aria-label", `${svc.name} port`);
+    port.setAttribute("aria-label", `${svc.id} port`);
     port.onchange = () => {
       const n = parseInt(port.value, 10);
       serviceCall("set_service_port", { id: svc.id, port: Number.isNaN(n) ? null : n });
@@ -334,16 +340,122 @@ function serviceRow(svc) {
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
     toggle.setAttribute("role", "switch");
-    toggle.setAttribute("aria-label", `Run ${svc.name}`);
+    toggle.setAttribute("aria-label", `Run ${svc.id}`);
     toggle.checked = svc.running || (svc.enabled && !svc.error);
     toggle.onchange = () => serviceCall("set_service", { id: svc.id, on: toggle.checked });
-    const remove = button("Uninstall", () => serviceCall("uninstall_service", { id: svc.id }));
-    remove.title = "Removes the program; your data stays in Anvil’s data folder";
-    actions.append(toggle, remove);
+    actions.append(toggle);
   }
+  actions.append(button("Remove", () => removeService(svc)));
   row.append(info, actions);
   return row;
 }
+
+/** Remove a service; a second question decides whether its data goes too. */
+async function removeService(svc) {
+  const { ask } = window.__TAURI__.dialog;
+  const sure = await ask(`${svc.id} stops and is removed from Anvil.`, {
+    title: `Remove ${svc.id}?`,
+    kind: "warning",
+    okLabel: "Remove",
+    cancelLabel: "Cancel",
+  });
+  if (!sure) return;
+  const what = svc.kind === "mailpit" ? "caught mail" : svc.kind === "redis" ? "saved keys" : "databases";
+  const wipe = await ask(`Keep its ${what} to find them again if you add ${svc.id} later, or delete them for good.`, {
+    title: `Keep ${svc.id}’s data?`,
+    kind: "warning",
+    okLabel: "Delete Data",
+    cancelLabel: "Keep Data",
+  });
+  serviceCall("remove_service", { id: svc.id, deleteData: wipe });
+}
+
+/* Add Service sheet: pick a kind, name and port, like creating a container. */
+let svcKinds = [];
+let svcKind = "mysql";
+
+async function openAddService() {
+  try {
+    svcKinds = await invoke("service_kinds");
+  } catch (e) {
+    showError(String(e));
+    return;
+  }
+  const grid = $("#svc-kinds");
+  grid.replaceChildren();
+  for (const k of svcKinds) {
+    const label = document.createElement("label");
+    label.className = "kind-card";
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "svc-kind";
+    radio.value = k.kind;
+    radio.checked = k.kind === svcKind;
+    radio.onchange = () => {
+      svcKind = k.kind;
+      fillService();
+    };
+    const strong = document.createElement("strong");
+    strong.textContent = k.name;
+    const small = document.createElement("small");
+    small.textContent = k.category;
+    label.append(radio, strong, small);
+    grid.append(label);
+  }
+  fillService();
+  setServiceBusy(false);
+  $("#new-service").showModal();
+  $("#svc-name").focus();
+}
+
+function fillService() {
+  const k = svcKinds.find((x) => x.kind === svcKind) ?? svcKinds[0];
+  $("#svc-name").value = k.suggested_name;
+  $("#svc-port").value = k.suggested_port;
+  noteService();
+  $("#svc-error").hidden = true;
+}
+
+function noteService() {
+  const k = svcKinds.find((x) => x.kind === svcKind) ?? svcKinds[0];
+  $("#svc-note").textContent = !k.installed
+    ? k.kind === "redis"
+      ? "Redis is built from source the first time, about a minute."
+      : `${k.name} is downloaded the first time.`
+    : `Its data goes in Anvil’s data/${$("#svc-name").value || "…"} folder.`;
+}
+
+function setServiceBusy(on) {
+  $("#svc-create").disabled = on;
+  $("#svc-create").textContent = on ? "Adding…" : "Add";
+  for (const i of $("#svc-form").querySelectorAll("input")) i.disabled = on;
+}
+
+$("#add-service").onclick = openAddService;
+$("#svc-cancel").onclick = () => $("#new-service").close();
+$("#svc-name").oninput = (e) => {
+  e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  noteService();
+};
+$("#svc-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const port = parseInt($("#svc-port").value, 10);
+  setServiceBusy(true);
+  try {
+    services = await invoke("add_service", {
+      kind: svcKind,
+      name: $("#svc-name").value.trim() || null,
+      port: Number.isNaN(port) ? null : port,
+    });
+    $("#new-service").close();
+    renderServices();
+  } catch (err) {
+    $("#svc-error").textContent = String(err);
+    $("#svc-error").hidden = false;
+    setServiceBusy(false);
+  }
+};
+
 
 function options(select, values, current, none) {
   select.replaceChildren(new Option(none, ""));

@@ -536,7 +536,7 @@ fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
         .info(&cfg)
         .into_iter()
         .map(|info| ServiceRow {
-            error: errors.get(info.id).cloned(),
+            error: errors.get(&info.id).cloned(),
             info,
         })
         .collect())
@@ -594,8 +594,8 @@ fn set_service_port(
 /// Downloads (and for Redis, compiles) off the main thread, then starts it.
 #[tauri::command]
 async fn install_service(handle: AppHandle, id: String) -> Res<Vec<ServiceRow>> {
-    let job = id.clone();
-    tauri::async_runtime::spawn_blocking(move || anvil::services::install(&job))
+    let kind = anvil::services::kind_of(&anvil::load().map_err(err)?, &id).map_err(err)?;
+    tauri::async_runtime::spawn_blocking(move || anvil::services::install(kind))
         .await
         .map_err(|e| e.to_string())?
         .map_err(err)?;
@@ -608,11 +608,50 @@ async fn install_service(handle: AppHandle, id: String) -> Res<Vec<ServiceRow>> 
 }
 
 #[tauri::command]
-fn uninstall_service(handle: AppHandle, app: State<App>, id: String) -> Res<Vec<ServiceRow>> {
-    app.services.lock().unwrap().stop(&id);
+fn service_kinds() -> Res<Vec<anvil::services::Kind>> {
+    Ok(anvil::services::kinds(&anvil::load().map_err(err)?))
+}
+
+/// Like creating a container: downloads the program the first time, then starts it.
+#[tauri::command]
+async fn add_service(
+    handle: AppHandle,
+    kind: String,
+    name: Option<String>,
+    port: Option<u16>,
+) -> Res<Vec<ServiceRow>> {
     let mut cfg = anvil::load().map_err(err)?;
-    anvil::services::set_enabled(&mut cfg, &id, false).map_err(err)?;
-    anvil::services::uninstall(&id).map_err(err)?;
+    let id = anvil::services::add(&mut cfg, &kind, name.as_deref(), port).map_err(err)?;
+    if !anvil::services::installed(&kind) {
+        let job = kind.clone();
+        let installed =
+            tauri::async_runtime::spawn_blocking(move || anvil::services::install(&job))
+                .await
+                .map_err(|e| e.to_string())?;
+        if let Err(e) = installed {
+            let _ = anvil::services::remove(&mut cfg, &id, false);
+            return Err(err(e));
+        }
+    }
+    anvil::services::set_enabled(&mut cfg, &id, true).map_err(err)?;
+    let app = handle.state::<App>();
+    start_service(&app, &cfg, &id);
+    changed(&handle);
+    services(app)
+}
+
+#[tauri::command]
+fn remove_service(
+    handle: AppHandle,
+    app: State<App>,
+    id: String,
+    delete_data: bool,
+) -> Res<Vec<ServiceRow>> {
+    // Stop first so the data folder isn't in use when it's deleted.
+    app.services.lock().unwrap().stop(&id);
+    app.service_errors.lock().unwrap().remove(&id);
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::services::remove(&mut cfg, &id, delete_data).map_err(err)?;
     changed(&handle);
     services(app)
 }
@@ -1109,7 +1148,9 @@ fn main() {
             set_service,
             set_service_port,
             install_service,
-            uninstall_service,
+            service_kinds,
+            add_service,
+            remove_service,
             open_url,
             app_run,
             set_app,
