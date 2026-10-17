@@ -179,22 +179,18 @@ button, select, input { font: inherit; color: inherit; }
   position: sticky;
   top: 0;
   z-index: 1;
-  margin: 0 -4px;
-  padding: 10px 8px 6px;
+  margin: 0;
+  padding: 10px 4px 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
-  background: color-mix(in srgb, var(--steel-pane) 55%, transparent);
+  background: color-mix(in srgb, var(--steel-pane) 15%, transparent);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
   backdrop-filter: blur(16px) saturate(1.4);
 }
 
 .list .rows + h2 { margin-top: 8px; }
 
-/* On the light sidebar a tinted band reads as a stripe; let the blur do the work. */
-@media (prefers-color-scheme: light) {
-  .list h2 { background: color-mix(in srgb, var(--steel-pane) 15%, transparent); }
-}
 
 .empty .empty-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 
@@ -254,10 +250,16 @@ button, select, input { font: inherit; color: inherit; }
 
 .kids.closed { grid-template-rows: 0fr; }
 
+/* An alias: the arrow, the name and "alias"; no mark, so two columns. */
 .item.child {
   --indent: 26px;
-  min-height: 46px;
+  grid-template-columns: 1fr auto;
+  min-height: 34px;
 }
+
+.item.child .name { font-weight: 400; }
+.item .alias { color: var(--muted); font-size: 11px; }
+.item.compact { min-height: 40px; padding-top: 4px; padding-bottom: 4px; }
 
 .item .branch {
   position: absolute;
