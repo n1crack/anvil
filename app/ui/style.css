@@ -1051,6 +1051,15 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   animation: toast-in 0.18s ease-out;
 }
 
+.toast button {
+  margin-left: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+}
+
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 6px); } }
 
 kbd {

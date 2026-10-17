@@ -29,12 +29,20 @@ function showError(msg) {
 
 let toastTimer;
 /** A short confirmation at the bottom of the window. */
-function toast(msg) {
+function toast(msg, undo) {
   const t = $("#toast");
   t.textContent = msg;
+  if (undo) {
+    const b = el("button", null, "Undo");
+    b.onclick = () => {
+      t.hidden = true;
+      undo();
+    };
+    t.append(b);
+  }
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 2400);
+  toastTimer = setTimeout(() => (t.hidden = true), undo ? 6000 : 2400);
 }
 
 window.refresh = () => {
@@ -298,7 +306,10 @@ async function siteMenu(s) {
   }
   items.push(await M.MenuItem.new({
     text: s.linked ? "Remove Link" : "Hide from Anvil",
-    action: () => call("remove_site", { site: s.name }),
+    action: async () => {
+      await call("remove_site", { site: s.name });
+      if (!s.linked) toast(`Hid ${s.name}.${snap.tld}`, () => call("unhide_site", { site: s.name }));
+    },
   }));
   (await M.Menu.new({ items })).popup();
 }

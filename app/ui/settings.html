@@ -26,10 +26,15 @@
     <section id="general" class="page">
       <h1>General</h1>
 
-      <h2>Site folders</h2>
-      <p class="hint">Every folder inside these becomes a site.</p>
+      <h2>Application folders</h2>
+      <p class="hint">Every project inside these folders becomes an application.</p>
       <div id="paths" class="group"></div>
       <div class="below"><button id="add-path">Add Folder…</button></div>
+      <div id="hidden-box" hidden>
+        <h2>Hidden applications</h2>
+        <p class="hint">Hidden from Anvil and not served; their settings are kept.</p>
+        <div id="hidden-apps" class="group"></div>
+      </div>
 
       <h2>App</h2>
       <div class="group">

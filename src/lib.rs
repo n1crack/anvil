@@ -276,15 +276,25 @@ pub fn link(cfg: &mut Config, name: &str, path: PathBuf) -> Result<String> {
 
 /// Remove a site from Anvil: linked names are unlinked, parked folders are hidden.
 /// Never touches files on disk.
+/// Remove a link, or hide a parked app. A hidden app keeps its settings, so
+/// showing it again (`unhide`) brings everything back.
 pub fn remove(cfg: &mut Config, name: &str) -> Result<()> {
     if cfg.links.remove(name).is_none() {
-        cfg.hidden.push(name.into());
+        if !cfg.hidden.iter().any(|h| h == name) {
+            cfg.hidden.push(name.into());
+        }
+        return save(cfg);
     }
     cfg.sites.remove(name);
     for members in cfg.groups.values_mut() {
         members.retain(|m| m != name);
     }
     cfg.groups.retain(|g, m| !m.is_empty() || g == "Favorites");
+    save(cfg)
+}
+
+pub fn unhide(cfg: &mut Config, name: &str) -> Result<()> {
+    cfg.hidden.retain(|h| h != name);
     save(cfg)
 }
 

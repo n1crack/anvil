@@ -64,6 +64,10 @@ function renderRuntimes() {
       x.title = `Uninstall ${rt.name} ${v}`;
       x.setAttribute("aria-label", x.title);
       x.onclick = async () => {
+        const ok = await window.__TAURI__.dialog.ask(`Applications using it switch to another installed version, or stop starting until one is installed.`, {
+          title: `Uninstall ${rt.name} ${v}?`, kind: "warning", okLabel: "Uninstall", cancelLabel: "Cancel",
+        });
+        if (!ok) return;
         try {
           await invoke("runtime_uninstall", { id: rt.id, version: v });
         } catch (e) {
@@ -288,6 +292,21 @@ function options(select, values, current, none) {
 }
 
 function render() {
+  // Hidden applications, each with Show.
+  $("#hidden-box").hidden = !s.hidden.length;
+  $("#hidden-apps").replaceChildren(
+    ...s.hidden.map((name) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("span");
+      label.textContent = name;
+      row.append(label, button("Show", async () => {
+        await invoke("unhide_site", { site: name }).catch((e) => showError(String(e)));
+        call("settings");
+      }));
+      return row;
+    }),
+  );
   // Site folders
   const paths = $("#paths");
   paths.replaceChildren();
@@ -338,7 +357,12 @@ function render() {
     } else if (v.installed) {
       actions.append(
         button("Make default", () => call("set_default_php", { version: v.version })),
-        button("Uninstall", () => call("php_uninstall", { version: v.version })),
+        button("Uninstall", async () => {
+          const ok = await window.__TAURI__.dialog.ask("Applications pinned to it fall back to the default PHP version.", {
+            title: `Uninstall PHP ${v.version}?`, kind: "warning", okLabel: "Uninstall", cancelLabel: "Cancel",
+          });
+          if (ok) call("php_uninstall", { version: v.version });
+        }),
       );
     } else {
       actions.append(button("Install", async (b) => {
