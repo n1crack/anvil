@@ -64,29 +64,29 @@
         <span class="mark big" aria-hidden="true"></span>
         <div>
           <h1 class="site-name"></h1>
-          <a class="site-url" href="#"></a>
-          <div class="site-services"></div>
+          <div class="site-meta"><span class="meta"></span><span class="site-services"></span></div>
         </div>
       </div>
-      <div class="run-box" hidden>
-        <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text" aria-live="polite"></span></span>
-        <button data-all="start" aria-label="Start the app and all its processes">Start</button>
-        <button data-all="stop" aria-label="Stop the app and all its processes">Stop</button>
+      <div class="head-side">
+        <div class="run-box" hidden>
+          <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text" aria-live="polite"></span></span>
+          <button data-all="start" aria-label="Start the app and all its processes">Start</button>
+          <button data-all="stop" aria-label="Stop the app and all its processes">Stop</button>
+        </div>
+        <div class="open-with">
+          <button data-open="finder">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>
+          </button>
+          <button data-open="terminal">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3"/></svg>
+          </button>
+          <button data-open="editor" hidden>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.75 13.25 5.5 6 12.75H3.25V10z"/></svg>
+          </button>
+        </div>
       </div>
     </header>
     <p class="run-error error" hidden></p>
-
-    <div class="quick">
-      <button data-open="finder" title="Show in Finder">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>Finder
-      </button>
-      <button data-open="terminal" title="Open Terminal here">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3"/></svg>Terminal
-      </button>
-      <button data-open="editor" class="editor-btn" hidden>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.75 13.25 5.5 6 12.75H3.25V10z"/></svg><span>Editor</span>
-      </button>
-    </div>
 
     <div class="tabs" role="tablist" aria-label="Application">
       <button role="tab" data-tab="overview">Overview</button>

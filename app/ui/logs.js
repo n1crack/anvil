@@ -29,15 +29,6 @@ function logTime(t) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function ago(d) {
-  const s = Math.round((Date.now() - d) / 1000);
-  if (s < 45) return "just now";
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-  if (s < 7 * 86400) return `${Math.round(s / 86400)} d ago`;
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
-}
-
 window.logsTab = (root, visible) => {
   const panel = $('[data-panel="logs"]', root);
   if (!visible || !panel) return follow(false);

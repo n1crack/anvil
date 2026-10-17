@@ -229,9 +229,11 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
   // The folder's name: not every project is a site, so no address in the list.
   $(".name", text).textContent = s.name;
   // HTTPS shows as a lock after the name; it's turned on and off from the right-click menu.
+  // While it changes only a spinner shows: words would be cut off here; the header says them.
   if (securing.has(s.name)) {
-    const busy = el("span", "securing", s.secure ? "HTTP…" : "HTTPS…");
-    busy.prepend(el("span", "spin-dot"));
+    const busy = el("span", "securing");
+    busy.append(el("span", "spin-dot"));
+    busy.title = s.secure ? "Turning off HTTPS…" : "Turning on HTTPS…";
     $(".name", text).append(busy);
   } else if (s.secure) {
     const lock = el("span", "lock");
@@ -429,11 +431,13 @@ const M = window.__TAURI__.menu;
 async function setSecure(s) {
   securing.add(s.name);
   renderList();
+  drawMeta();
   try {
     await call("set_secure", { site: s.name, on: !s.secure });
   } finally {
     securing.delete(s.name);
     renderList();
+    drawMeta();
   }
 }
 
@@ -538,6 +542,135 @@ function showTab(root, name) {
   if (name === "resources" && selected) loadResources(selected);
 }
 
+/** "just now", "5 min ago", "2 h ago", "3 d ago", then the date (header and logs). */
+function ago(d) {
+  const s = Math.round((Date.now() - d) / 1000);
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  if (s < 7 * 86400) return `${Math.round(s / 86400)} d ago`;
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+}
+
+const touchedCache = new Map(); // site name -> { at: ms when asked, secs: newest edit }
+
+/** The line under the name: address (+ aliases), type, last edit and git branch. */
+function drawMeta() {
+  const box = $("#site .meta");
+  const s = snap?.sites.find((x) => x.name === selected);
+  if (!box || !s) return;
+  const parts = [];
+  if (serves(s)) {
+    const addr = el("span", "addr");
+    const link = el("a", "site-url", url(s).replace("https://", ""));
+    link.href = "#";
+    link.onclick = (e) => { e.preventDefault(); if (snap.running) open("browser"); };
+    // A stopped server can't answer: the address looks and acts off.
+    link.classList.toggle("off", !snap.running);
+    link.title = snap.running ? "Open in browser (⌘O)" : "Start Anvil to open this address";
+    if (s.secure && !securing.has(s.name)) {
+      const lock = el("span", "lock");
+      lock.innerHTML = LOCK;
+      lock.title = "HTTPS";
+      addr.append(lock);
+    }
+    addr.append(link);
+    if (securing.has(s.name)) {
+      const busy = el("span", "securing", s.secure ? "Turning off HTTPS…" : "Turning on HTTPS…");
+      busy.prepend(el("span", "spin-dot"));
+      addr.append(busy);
+    }
+    // Aliases are linked names for the same folder (the rows under it in the list).
+    const aliases = s.linked ? [] : snap.sites.filter((k) => k.linked && k.path === s.path);
+    if (aliases.length) {
+      const chip = el("button", "alias-chip", `+${aliases.length}`);
+      chip.title = "All addresses";
+      chip.onclick = () => aliasPop(chip, [s, ...aliases]);
+      addr.append(chip);
+    }
+    parts.push(addr);
+  }
+  parts.push(el("span", null, kindLabel(s.kind)));
+  const t = touchedCache.get(s.name);
+  if (!t || Date.now() - t.at > 30000) {
+    touchedCache.set(s.name, { at: Date.now(), secs: t?.secs });
+    invoke("touched", { site: s.name })
+      .catch(() => null)
+      .then((secs) => {
+        touchedCache.set(s.name, { at: Date.now(), secs });
+        if (selected === s.name) drawMeta();
+      });
+  }
+  if (t?.secs) {
+    const d = new Date(t.secs * 1000);
+    const edited = el("span", null, `edited ${ago(d)}`);
+    edited.title = `Last file change ${d.toLocaleString()}`;
+    parts.push(edited);
+  }
+  // git.js may not have loaded when the first state arrives.
+  const g = typeof gitCache === "undefined" ? null : gitCache.get(s.name);
+  if (g && !g.error && g.branch) parts.push(el("span", "branch", g.branch));
+  box.replaceChildren(...parts.flatMap((p, i) => (i ? [el("span", "sep", "·"), p] : [p])));
+}
+
+/** Every address of an app, each with its own Open. */
+function aliasPop(anchor, sites) {
+  const pop = el("div", "alias-pop");
+  const buttons = sites.map((a) => {
+    const row = el("div", "alias-row");
+    const go = el("button", null, "Open");
+    go.onclick = () => {
+      close();
+      invoke("open_url", { url: url(a) }).catch((e) => showError(String(e)));
+    };
+    row.append(el("span", "alias-url", url(a).replace("https://", "")), go);
+    pop.append(row);
+    return go;
+  });
+  const close = popAt(anchor, pop, buttons[0]);
+}
+
+/** A small bubble under `anchor`, right-aligned with it. Esc or a click elsewhere
+ * closes it; the close function is returned. */
+function popAt(anchor, pop, focus) {
+  document.querySelector(".pop")?.remove();
+  pop.classList.add("pop");
+  pop.setAttribute("role", "dialog");
+  const close = () => {
+    pop.remove();
+    document.removeEventListener("mousedown", outside, true);
+  };
+  const outside = (e) => !pop.contains(e.target) && close();
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") close();
+  });
+  const r = anchor.getBoundingClientRect();
+  Object.assign(pop.style, { top: `${r.bottom + window.scrollY + 6}px`, right: `${document.documentElement.clientWidth - r.right}px` });
+  document.body.append(pop);
+  document.addEventListener("mousedown", outside, true);
+  focus.focus();
+  return close;
+}
+
+const appIcons = new Map(); // app name -> promise of its icon as a data URL, or null
+
+/** Finder, the terminal and the editor as their own colored icons; the outline stays when there is none. */
+function drawOpenWith(root) {
+  const label = (a) => a.split("/").pop().replace(/\.app$/, "");
+  const apps = { finder: "Finder", terminal: label(snap.terminal ?? "Terminal"), editor: snap.editor && label(snap.editor) };
+  for (const b of root.querySelectorAll(".open-with [data-open]")) {
+    const name = apps[b.dataset.open];
+    b.hidden = !name;
+    if (!name) continue;
+    b.title = `Open in ${name}${b.dataset.open === "editor" ? " (⌘E)" : ""}`;
+    b.setAttribute("aria-label", b.title);
+    if (!appIcons.has(name)) appIcons.set(name, invoke("app_icon", { name }).catch(() => null));
+    appIcons.get(name).then((src) => {
+      if (src) b.replaceChildren(Object.assign(new Image(), { src, alt: "" }));
+    });
+  }
+}
+
 function renderSite() {
   const root = $("#site");
   const s = snap.sites.find((x) => x.name === selected);
@@ -551,21 +684,8 @@ function renderSite() {
   root.replaceChildren($("#site-tpl").content.cloneNode(true));
   $(".site-name", root).textContent = s.name;
   $(".site-title .mark", root).replaceWith(Object.assign(mark(s), { className: "mark big" }));
-  const link = $(".site-url", root);
-  link.hidden = !serves(s);
-  link.textContent = url(s).replace("https://", "");
-  link.onclick = (e) => { e.preventDefault(); if (snap.running) open("browser"); };
-  // A stopped server can't answer: the address looks and acts off.
-  link.classList.toggle("off", !snap.running);
-  link.title = snap.running ? "Open in browser (⌘O)" : "Start Anvil to open this address";
-
-  const editor = $(".editor-btn", root);
-  if (snap.editor) {
-    editor.hidden = false;
-    // The tile says what it does; which app is in the tooltip, so tiles stay one width.
-    editor.title = `Open in ${snap.editor} (⌘E)`;
-    $("span", editor).textContent = "Editor";
-  }
+  drawMeta();
+  drawOpenWith(root);
   for (const b of root.querySelectorAll("[data-open]")) b.onclick = () => open(b.dataset.open);
   for (const el of root.querySelectorAll(".php-only")) el.hidden = process;
   for (const el of root.querySelectorAll(".process-only")) el.hidden = !process;

@@ -9,7 +9,10 @@ async function loadGit(name) {
   } catch (e) {
     gitCache.set(name, { error: String(e) });
   }
-  if (selected === name) drawGit(name);
+  if (selected === name) {
+    drawGit(name);
+    drawMeta();
+  }
 }
 
 function commitAgo(secs) {

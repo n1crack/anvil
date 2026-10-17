@@ -208,27 +208,13 @@ function agoShort(at) {
  * A click runs it (or, while running, shows it) in the console. */
 /** A small confirm bubble under `anchor`: Enter or Run confirms, Esc or a click elsewhere cancels. */
 function confirmPop(anchor, text, label, onYes) {
-  document.querySelector(".pop-confirm")?.remove();
   const pop = el("div", "pop-confirm");
-  pop.setAttribute("role", "dialog");
   const yes = el("button", "primary", label);
   const no = el("button", null, "Cancel");
   pop.append(el("span", null, text), no, yes);
-  const close = () => {
-    pop.remove();
-    document.removeEventListener("mousedown", outside, true);
-  };
-  const outside = (e) => !pop.contains(e.target) && close();
+  const close = popAt(anchor, pop, yes);
   yes.onclick = (e) => { e.stopPropagation(); close(); onYes(); };
   no.onclick = (e) => { e.stopPropagation(); close(); };
-  pop.onkeydown = (e) => {
-    if (e.key === "Escape") close();
-  };
-  const r = anchor.getBoundingClientRect();
-  Object.assign(pop.style, { top: `${r.bottom + window.scrollY + 6}px`, right: `${document.documentElement.clientWidth - r.right}px` });
-  document.body.append(pop);
-  document.addEventListener("mousedown", outside, true);
-  yes.focus();
 }
 
 function cmdRow(name, c) {
