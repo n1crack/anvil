@@ -1893,50 +1893,22 @@ fn set_service_apps(
     services(app)
 }
 
-/// `what` is "log" (opens in Console) or "data" (shows the folder in Finder).
+/// `what` is "data": the service's data folder in Finder.
 #[tauri::command(async)]
 fn open_service(id: String, what: String) -> Res<()> {
     let cfg = anvil::load().map_err(err)?;
     if !cfg.services.contains_key(&id) {
         return Err(format!("There's no service called {id}"));
     }
-    let (path, app) = if what == "log" {
-        (anvil::services::log_file(&id), "Console")
-    } else {
-        (anvil::services::data(&id), "Finder")
-    };
+    // The log is in the Processes window (show_processes with the service's key).
+    if what != "data" {
+        return Err(format!("Can't open {what}"));
+    }
+    let path = anvil::services::data(&id);
     if !path.exists() {
         return Err(format!("Nothing there yet — start {id} first"));
     }
-    anvil::run(Command::new("open").arg("-a").arg(app).arg(path)).map_err(err)
-}
-
-/// The newest lines of a service's log as written (colour codes removed), oldest
-/// first; none when it hasn't written one. Reads only the file's last 16 KB.
-#[tauri::command(async)]
-fn service_log(id: String) -> Res<Vec<String>> {
-    use std::io::{Read, Seek, SeekFrom};
-    let cfg = anvil::load().map_err(err)?;
-    if !cfg.services.contains_key(&id) {
-        return Err(format!("No service named {id}"));
-    }
-    let Ok(mut f) = std::fs::File::open(anvil::services::log_file(&id)) else {
-        return Ok(vec![]);
-    };
-    let len = f.metadata().map_err(|e| e.to_string())?.len();
-    let start = len.saturating_sub(16 * 1024);
-    f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-    let text = String::from_utf8_lossy(&buf);
-    // From the middle of the file, the first line is likely cut: skip it.
-    let lines: Vec<String> = text
-        .lines()
-        .skip(usize::from(start > 0))
-        .map(anvil::logs::strip_ansi)
-        .filter(|l| !l.trim().is_empty())
-        .collect();
-    Ok(lines[lines.len().saturating_sub(8)..].to_vec())
+    anvil::run(Command::new("open").arg("-a").arg("Finder").arg(path)).map_err(err)
 }
 
 /// Databases, keys or messages in a running service.
@@ -2882,7 +2854,6 @@ fn main() {
             containers_run,
             once_stop,
             container_log,
-            service_log,
             set_dock_icon,
             set_trim_app_logs,
             set_login,

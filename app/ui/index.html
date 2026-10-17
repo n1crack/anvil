@@ -215,13 +215,16 @@
           <button data-svc="stop">Stop</button>
         </div>
         <div class="open-with">
+          <button data-svc-open="client" hidden>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.75" rx="5.25" ry="2"/><path d="M2.75 3.75v8.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-8.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/></svg>
+          </button>
           <button data-svc-open="inbox" title="Open the Mailpit inbox" aria-label="Open the Mailpit inbox" hidden>
             <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5"/><path d="m2.5 4.5 5.5 4 5.5-4"/></svg>
           </button>
           <button data-svc-open="data">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>
           </button>
-          <button data-svc-open="log" title="Open the service’s log" aria-label="Open the service’s log">
+          <button data-svc-open="log">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.75 1.75h6l2.5 2.5v10h-8.5z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
           </button>
         </div>
@@ -230,30 +233,26 @@
     <p class="run-error error" hidden></p>
     </div>
 
-    <div class="procs-head"><h3 class="res-sub svc-contents-title">Databases</h3></div>
+    <div class="procs-head svc-contents-head"><h3 class="res-sub">Databases</h3></div>
     <div class="svc-contents"></div>
-
-    <div class="procs-head svc-clients-head" hidden><h3 class="res-sub">Open with</h3></div>
-    <div class="group procs-list svc-list svc-clients" hidden></div>
+    <div class="svc-clients" hidden></div>
 
     <dl class="group svc-settings">
       <div class="row"><dt><label for="svc-port-edit">Port</label></dt><dd><input id="svc-port-edit" inputmode="numeric"></dd></div>
       <div class="row svc-web" hidden><dt><label for="svc-web-edit">Inbox port</label></dt><dd><input id="svc-web-edit" inputmode="numeric"></dd></div>
-      <div class="row row-top"><dt>Applications</dt><dd class="chips svc-apps"></dd></div>
-      <div class="row row-top"><dt>Tags</dt><dd class="chips svc-tags"></dd></div>
+      <div class="row"><dt>Applications</dt><dd class="chips svc-apps"></dd></div>
+      <div class="row"><dt>Tags</dt><dd class="chips svc-tags"></dd></div>
     </dl>
 
-    <h3 class="res-sub connect-head">Connect <select class="svc-db" aria-label="Database for the .env lines" hidden></select></h3>
-    <p class="muted svc-env-hint">Paste into an application’s <code>.env</code>.</p>
+    <h3 class="res-sub connect-head">Connect <span class="muted">.env</span> <select class="svc-db" aria-label="Database for the .env lines" hidden></select></h3>
     <div class="env">
       <pre class="svc-env"></pre>
-      <button class="svc-copy">Copy</button>
+      <button class="icon-btn svc-copy" title="Copy the .env lines" aria-label="Copy the .env lines">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.5"/><path d="M10.75 5.25v-2a1 1 0 0 0-1-1h-6.5a1 1 0 0 0-1 1v6.5a1 1 0 0 0 1 1h2"/></svg>
+      </button>
     </div>
 
-    <h3 class="res-sub">Log</h3>
-    <div class="group procs-list svc-list svc-log" tabindex="0" aria-label="Newest log lines"><div class="proc svc-line"><span class="proc-last">Reading…</span></div></div>
-
-    <div class="below"><button class="svc-remove">Remove Service…</button></div>
+    <div class="below"><button class="link-quiet svc-remove">Remove Service…</button></div>
   </template>
 
   <dialog id="new-service" class="sheet" aria-labelledby="svc-title">

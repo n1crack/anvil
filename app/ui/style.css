@@ -696,7 +696,9 @@ button, select, input { font: inherit; color: inherit; }
   color: var(--muted);
 }
 .open-with button:hover { background: var(--steel-hover); color: var(--text); }
-.open-with button:disabled { opacity: 0.45; }
+.open-with button:disabled,
+.open-with button[aria-disabled="true"] { opacity: 0.45; }
+.open-with button[aria-disabled="true"]:hover { background: none; color: var(--muted); }
 .open-with img { width: 26px; height: 26px; }
 .open-with svg {
   width: 18px;
@@ -1755,8 +1757,6 @@ kbd {
   -webkit-user-select: text;
 }
 
-.env button,
-.svc-remove,
 .run-error .link {
   height: 26px;
   padding: 0 12px;
@@ -1765,11 +1765,41 @@ kbd {
   background: var(--steel-raised);
 }
 
-.svc-env-hint { margin: 0 0 8px; }
+/* Connect: the .env lines with a small copy icon in the corner. */
+.env { position: relative; padding: 8px 40px 8px 12px; }
+.env .svc-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+.env .svc-copy:hover { background: var(--steel-hover); color: var(--text); }
+.env .svc-copy svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
+.connect-head .muted { font-weight: 400; }
 
-/* A service's lists (contents, clients, log lines) in the Processes look. */
-.proc.svc-row { grid-template-columns: auto 1fr auto; }
-.proc.svc-row.with-icon { grid-template-columns: 22px auto 1fr auto; }
+/* A service's lists (contents) in the Processes look, a little tighter. */
+.proc.svc-row { grid-template-columns: auto 1fr auto; min-height: 34px; padding: 4px 14px; }
+/* Redis: one summary line that opens to the keys per database. */
+button.proc.svc-summary { width: 100%; border: 0; background: none; color: var(--text); font: inherit; text-align: left; }
+.proc.svc-summary { grid-template-columns: 10px 1fr; }
+div.proc.svc-summary { grid-template-columns: 1fr; }
+.svc-summary .chevron { width: 10px; height: 10px; fill: none; stroke: var(--muted); stroke-width: 1.5; transition: transform 0.12s; }
+.svc-summary[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+.proc.svc-sub { padding-left: 36px; }
+/* Several database apps: one quiet row of them. */
+.svc-clients { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; }
+.svc-clients[hidden] { display: none; }
+.svc-clients .muted { margin-right: 4px; }
+.svc-clients button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); font-size: 12px; }
 .proc.svc-row.muted .proc-name { font-weight: 400; color: var(--muted); }
 .proc.svc-new { grid-template-columns: minmax(0, 260px) auto; justify-content: space-between; }
 .svc-new input { height: 24px; padding: 0 8px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); }
@@ -1778,13 +1808,13 @@ kbd {
 .svc-row .hover-only { visibility: hidden; }
 .svc-row:hover .hover-only,
 .svc-row:focus-within .hover-only { visibility: visible; }
-.svc-icon { display: grid; place-items: center; width: 22px; height: 22px; color: var(--muted); }
-.svc-icon img { width: 22px; height: 22px; }
-.svc-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; }
-.proc.svc-line { grid-template-columns: minmax(0, 1fr); min-height: 28px; padding: 3px 14px; }
-.svc-log { margin-bottom: 8px; }
-.svc-settings { margin-top: 20px; }
-.svc-remove { margin-top: 16px; color: var(--danger); }
+/* Port, Applications, Tags: one card, rows shorter than a settings page's. */
+.svc-settings { margin-top: 16px; }
+.svc-settings .row { min-height: 36px; padding: 4px 14px; }
+.svc-settings .row input { height: 24px; }
+/* Remove: a quiet text button at the end. */
+.svc-remove { margin-top: 4px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; }
+.svc-remove:hover { color: var(--danger); }
 #svc-port-edit, #svc-web-edit { max-width: 100px; }
 .res-list dt .link {
   align-self: flex-start;
@@ -2383,8 +2413,6 @@ button.log-file:hover { text-decoration-color: currentColor; }
    same. Primary (orange) buttons and the sheets' own buttons stay as they are. */
 .run-box button,
 .empty .empty-actions button,
-.env button,
-.svc-remove,
 .run-error .link,
 .logs-bar > button:not(.icon-btn),
 .logs-more,
@@ -2404,8 +2432,6 @@ button.log-file:hover { text-decoration-color: currentColor; }
 }
 
 .run-box button:hover,
-.env button:hover,
-.svc-remove:hover,
 .logs-more:hover,
 .logs-large-actions button:hover,
 .res-cells .del:hover,

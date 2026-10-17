@@ -656,11 +656,6 @@ const mockHandle = (cmd, a) => {
     case "services":
     case "service_run":
       return mockServices;
-    case "service_log":
-      return [
-        "2026-10-17T10:00:01 [Note] mysqld: ready for connections.",
-        "2026-10-17T10:00:01 [Note] Version: '8.4.2'  socket: '/tmp/mysql.sock'  port: 3306",
-      ];
     case "service_contents":
       return {
         databases: [
@@ -670,7 +665,7 @@ const mockHandle = (cmd, a) => {
           ["sys", 40960],
         ],
         keys: [["db0", 12]],
-        memory: "1.2 MB",
+        memory: "911.12K",
         messages: 3,
       };
     case "once_stop":

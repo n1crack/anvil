@@ -588,8 +588,74 @@ describe("audit fixes", () => {
     expect(copy.textContent).toBe("Copied");
     expect($("#toast").hidden).toBe(true);
     await wait(1600);
-    expect(copy.textContent).toBe("Copy");
+    // The copy icon again.
+    expect(copy.textContent!.trim()).toBe("");
+    expect(copy.querySelector("svg")).not.toBeNull();
     $('.modes [data-mode="apps"]').click();
+  });
+});
+
+describe("service page", () => {
+  const show = async (id: string) => {
+    $('.modes [data-mode="services"]').click();
+    await wait(40);
+    $(`#list [data-name="${id}"]`).click();
+    await wait(80);
+  };
+  const log = () => $('[data-svc-open="log"]');
+
+  test("no Log section; the log icon opens Processes on that service, or says Not running", async () => {
+    await show("cache");
+    expect($$("#site .res-sub").map((h) => h.textContent)).not.toContain("Log");
+    expect($("#site .svc-log")).toBeNull();
+    expect(log().title).toBe("Show the log in Processes");
+    log().click();
+    await wait();
+    expect(calls("show_processes").at(-1)![1]).toEqual({ select: "service:cache" });
+    const n = calls("show_processes").length;
+    await show("postgres");
+    expect(log().title).toBe("Not running");
+    expect(log().getAttribute("aria-disabled")).toBe("true");
+    log().click();
+    await wait();
+    expect(calls("show_processes")).toHaveLength(n);
+  });
+
+  test("Redis: keys and memory on one line that opens to the keys", async () => {
+    await show("cache");
+    const sum = $(".svc-summary");
+    expect(sum.textContent).toBe("12 keys · 911 KB memory");
+    expect($$(".svc-contents .proc").length).toBe(1);
+    sum.click();
+    await wait();
+    expect($(".svc-summary").getAttribute("aria-expanded")).toBe("true");
+    expect($$(".svc-sub .proc-name").map((n) => n.textContent)).toEqual(["db0"]);
+    expect($(".svc-sub .danger").textContent).toBe("Flush All…");
+    expect($(".svc-contents-head").hidden).toBe(true);
+  });
+
+  test("MySQL: Databases kept; one client is an icon in the header, several a row", async () => {
+    await show("mysql");
+    expect($(".svc-contents-head").hidden).toBe(false);
+    expect($$(".svc-contents .proc-name").map((n) => n.textContent)).toContain("shop");
+    const client = $('[data-svc-open="client"]');
+    expect([client.hidden, client.title]).toEqual([false, "Open in TablePlus"]);
+    expect($(".svc-clients").hidden).toBe(true);
+    client.click();
+    await wait();
+    expect(calls("open_in_client").at(-1)![1]).toEqual({ id: "mysql", client: "TablePlus", database: null });
+    const svc = w.mockServices.find((s) => s.id === "mysql");
+    svc.clients = ["TablePlus", "Sequel Ace"];
+    w.loadServices();
+    await show("cache");
+    await show("mysql");
+    expect($('[data-svc-open="client"]').hidden).toBe(true);
+    expect($$(".svc-clients button").map((b) => b.textContent)).toEqual(["TablePlus", "Sequel Ace"]);
+    svc.clients = ["TablePlus"];
+    w.loadServices();
+    expect($(".svc-remove").textContent).toBe("Remove Service…");
+    $('.modes [data-mode="apps"]').click();
+    await wait(40);
   });
 });
 
