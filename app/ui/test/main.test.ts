@@ -408,6 +408,146 @@ describe("dev", () => {
   });
 });
 
+describe("containers", () => {
+  const tabBtn = () => $('.tabs [data-tab="containers"]');
+  const item = (key: string) => $(`.containers .dev-item[data-key="${key}"]`);
+  const lines = () => $$('[data-panel="containers"] .dev-line').map((l) => l.textContent);
+  const keyDown = (key: string) => $(".containers .dev-list").dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  let saved: any;
+
+  test("the Overview has one Containers line with a dot each, which opens the tab", async () => {
+    saved = structuredClone(w.mockOv.stack);
+    await select("stack");
+    const line = $(".procs .dev-summary");
+    expect(line.querySelector(".dev-summary-title")!.textContent).toBe("Containers");
+    expect(line.querySelector(".dev-summary-state")!.textContent).toBe("3 of 4 running");
+    expect([...line.querySelectorAll(".dot")].map((d) => d.className)).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
+    expect($$(".procs .proc, .procs .proc-log")).toHaveLength(0);
+    expect($('.tabs [data-tab="dev"]').hidden).toBe(true);
+    expect(tabBtn().hidden).toBe(false);
+    line.click();
+    await wait(80);
+    expect(tabBtn().getAttribute("aria-selected")).toBe("true");
+  });
+
+  test("the list: All, then each service with its state, port and health", async () => {
+    expect($$(".containers .dev-item").map((i) => i.dataset.key)).toEqual(["all", "web", "db", "cache", "worker"]);
+    const dot = (k: string) => item(k).firstElementChild!.className;
+    expect([dot("web"), dot("db"), dot("cache"), dot("worker")]).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
+    expect(item("db").querySelector(".dev-exit")!.textContent).toBe(":5432 · healthy");
+    expect(item("worker").querySelector(".dev-exit")!.textContent).toBe("exited (1)");
+    // Start, as in Dev: something is down. No Run nor Configure.
+    expect($$(".containers .dev-bar button").map((b) => b.className)).toEqual(["dev-all dev-start"]);
+  });
+
+  test("All merges the logs by time, each line tagged with its service in its color", async () => {
+    await wait(50);
+    const l = lines();
+    expect(l[0]).toBe("db     │ PostgreSQL init process complete; ready for start up.");
+    expect(l[1]).toBe("web    │ /docker-entrypoint.sh: Configuration complete; ready for start up");
+    expect(l.at(-1)).toBe('web    │ 172.18.0.1 - - [17/Oct/2026:10:00:12 +0000] "GET /favicon.ico HTTP/1.1" 404 153');
+    const tag = $$('[data-panel="containers"] .dev-tag').find((t) => t.textContent!.startsWith("db "))!;
+    expect(tag.className).toBe("dev-tag pc1");
+    // Then only what came since the last line read.
+    const n = calls("container_log").length;
+    await wait(1100);
+    const since = calls("container_log")
+      .slice(n)
+      .find(([, a]) => a.service === "web")![1];
+    expect(since.since).toBe(w.mockContainerLogs.web.at(-1).split(" ")[0]);
+    expect(lines()).toHaveLength(l.length);
+  });
+
+  test("one container: its log, colored; keys start, stop, restart and clear", async () => {
+    item("worker").click();
+    await wait(50);
+    expect(lines()).toEqual(["Starting queue worker", "Error: connect ECONNREFUSED 172.18.0.3:6379", "exited with code 1"]);
+    expect($('[data-panel="containers"] .dev-out span.ansi1').textContent).toBe("Error:");
+    expect($('[data-panel="containers"] .dev-head .dev-cmd').textContent).toBe("exited (1)");
+    const n = calls("container_run").length;
+    keyDown("x"); // already stopped: nothing
+    keyDown("s");
+    await wait(50);
+    keyDown("r");
+    keyDown("x"); // still restarting: nothing
+    await wait(50);
+    keyDown("x");
+    await wait(50);
+    expect(
+      calls("container_run")
+        .slice(n)
+        .map(([, a]) => [a.service, a.action]),
+    ).toEqual([
+      ["worker", "start"],
+      ["worker", "restart"],
+      ["worker", "stop"],
+    ]);
+    keyDown("c");
+    expect(lines()).toEqual([]);
+    keyDown("ArrowUp");
+    await wait(50);
+    expect($(".containers .dev-item[aria-selected=true]").dataset.key).toBe("cache");
+  });
+
+  test("a right-click offers Stop, Restart and Open in Browser on its port", async () => {
+    item("web").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait();
+    const menu = w.mockMenu as any[];
+    expect(menu.map((i) => i.text ?? i.item)).toEqual(["Stop", "Restart", "Separator", "Open in Browser"]);
+    menu.at(-1).action();
+    await wait();
+    expect(calls("open_url").at(-1)![1]).toEqual({ url: "http://localhost:8080" });
+  });
+
+  test("Start and Stop in the toolbar run compose for the project, never down; q stops all", async () => {
+    const n = calls("containers_run").length;
+    w.mockDelay = { containers_run: 60 };
+    $(".containers .dev-bar .dev-all").click();
+    await wait(10);
+    expect($(".containers .dev-bar .dev-all").textContent).toBe("Starting…");
+    expect($(".containers .dev-bar .spin-dot")).not.toBeNull();
+    await wait(120);
+    w.mockDelay = {};
+    expect($(".containers .dev-bar .dev-all").textContent).toBe("Stop");
+    keyDown("q");
+    await wait(50);
+    expect(
+      calls("containers_run")
+        .slice(n)
+        .map(([, a]) => a.action),
+    ).toEqual(["start", "stop"]);
+    expect(JSON.stringify(w.mockCalls)).not.toMatch(/"down"|"rm"/);
+  });
+
+  test("⌘3 and the header's state open Containers when the app has no Dev", async () => {
+    $('.tabs [data-tab="overview"]').click();
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "3", metaKey: true, bubbles: true }));
+    await wait();
+    expect(tabBtn().getAttribute("aria-selected")).toBe("true");
+    $('.tabs [data-tab="overview"]').click();
+    ($("#site .run-box .state") as HTMLElement).click();
+    await wait();
+    expect(tabBtn().getAttribute("aria-selected")).toBe("true");
+    w.mockOv.stack = saved;
+    $('.tabs [data-tab="overview"]').click();
+    await select("shop");
+    expect(tabBtn().hidden).toBe(true);
+  });
+
+  test("stamped: docker's times sort as text; only lines after `since`", async () => {
+    const { stamped } = await import("../src/containers");
+    const raw = "2026-10-17T10:00:01.5Z a\n2026-10-17T10:00:01.123456789Z b\ncontinued\n2026-10-17T10:00:02Z c\n";
+    expect(stamped(raw, null).map((l) => [l.at, l.text])).toEqual([
+      ["2026-10-17T10:00:01.500000000", "a"],
+      ["2026-10-17T10:00:01.123456789", "b"],
+      ["2026-10-17T10:00:01.123456789", "continued"],
+      ["2026-10-17T10:00:02.000000000", "c"],
+    ]);
+    expect(stamped(raw, "2026-10-17T10:00:01.5Z").map((l) => l.text)).toEqual(["c"]);
+    expect(stamped("", "2026-10-17T10:00:01.5Z")).toEqual([]);
+  });
+});
+
 describe("audit fixes", () => {
   test("a folder shows no lock nor 'Runs on', even with an old HTTPS flag", async () => {
     await select("notes");

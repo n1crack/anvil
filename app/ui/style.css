@@ -866,6 +866,7 @@ button, select, input { font: inherit; color: inherit; }
 .proc.running { box-shadow: inset 2px 0 0 var(--ok); }
 .proc.crashed { box-shadow: inset 2px 0 0 var(--danger); }
 .dot.bad { background: var(--danger); }
+.dot.amber { background: var(--amber); }
 .proc-name { padding: 0; border: 0; background: none; font-weight: 600; text-align: left; }
 button.proc-name:hover { text-decoration: underline; }
 
@@ -1005,6 +1006,9 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-tag { flex: none; white-space: pre; }
 .dev-text { min-width: 0; }
 .dev-text:empty::before { content: "\200b"; }
+/* Containers: the list has room for each one's port and health. */
+.containers .dev-main { grid-template-columns: 200px minmax(0, 1fr); }
+.containers .dev-exit { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
 
 /* Run ▾: the app's scripts, each with its script muted. */
 .dev-run-menu { display: flex; flex-direction: column; min-width: 240px; max-width: 460px; max-height: 360px; padding: 4px; overflow-y: auto; }

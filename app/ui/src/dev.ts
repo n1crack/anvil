@@ -11,7 +11,7 @@ import { type Sgr, clean, colorize, sgr } from "./term";
  * script, listed below the processes until dismissed; Configure edits the processes. */
 
 export const devSel = new Map<string, string>(); // site name -> "all", "app", "proc:<id>" or "once:<id>"
-const COLORS = 6; // name colors pc0…pc5 (blue, purple, pink, orange, green, cyan), as concurrently gives them
+export const COLORS = 6; // name colors pc0…pc5 (blue, purple, pink, orange, green, cyan), as concurrently gives them
 const MAX_LINES = 5000; // lines kept on screen
 
 type Item = { key: string; name: string; color: string; running: boolean; crashed: boolean; row?: ProcessRow; run?: CommandChip };
@@ -262,14 +262,14 @@ const ICONS = {
   start: '<path d="M4.5 3v10l8.5-5z"/>',
   stop: '<rect x="4" y="4" width="8" height="8" rx="1"/>',
 };
-function icon(name: keyof typeof ICONS) {
+export function icon(name: keyof typeof ICONS) {
   const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   s.setAttribute("viewBox", "0 0 16 16");
   s.setAttribute("aria-hidden", "true");
   s.innerHTML = ICONS[name];
   return s;
 }
-const barBtn = (cls: string, ico: Element, label: string) => {
+export const barBtn = (cls: string, ico: Element, label: string) => {
   const b = el("button", cls);
   b.append(ico, el("span", null, label));
   return b;
@@ -411,8 +411,9 @@ export function drawDev(name: string) {
   syncEmpty();
 }
 
-/** One line of output, its style carried on in `s`; in All, tagged with its process. */
-function line(x: Item, text: string, s: Sgr, width: number) {
+/** One line of output, its style carried on in `s`; in All (`width` ≥ 0), tagged with its
+ * process's name in its color. Also the Containers tab's. */
+export function line(x: Pick<Item, "key" | "name" | "color">, text: string, s: Sgr, width: number) {
   const d = el("div", "dev-line");
   d.dataset.key = x.key;
   // The text in its own column, so a wrapped line stays right of the tag.

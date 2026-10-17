@@ -929,10 +929,12 @@ fn containers_run(app: State<App>, site: String, action: String) -> Res<Overview
     Ok(overview(&app, &cfg, &s))
 }
 
+/// The Containers tab's log of one service: timestamped lines, the newest 500 or those
+/// since `since`.
 #[tauri::command(async)]
-fn container_log(site: String, service: String) -> Res<String> {
+fn container_log(site: String, service: String, since: Option<String>) -> Res<String> {
     let s = find_site(&site)?;
-    anvil::compose::logs(&s.path, &service).map_err(err)
+    anvil::compose::logs_since(&s.path, &service, since.as_deref()).map_err(err)
 }
 
 /// Start the processes marked Start with Anvil. Only apps that still exist and rows

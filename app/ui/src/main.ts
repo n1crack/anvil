@@ -7,3 +7,4 @@ import "./services";
 import "./packages";
 import "./processes";
 import "./dev";
+import "./containers";

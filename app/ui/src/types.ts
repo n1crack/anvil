@@ -105,6 +105,8 @@ export interface Container {
   state: string;
   health: string | null;
   ports: number[];
+  /** How an exited container ended. */
+  exit_code: number | null;
 }
 
 export interface Overview {

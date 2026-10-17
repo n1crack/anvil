@@ -675,6 +675,7 @@ export function showTab(root, name) {
   $(".res-reload", root).hidden = name !== "resources";
   window.logsTab?.(root, name === "logs");
   if (name === "dev") late.devTab?.();
+  if (name === "containers") late.containersTab?.();
   // Measuring (du, lsof, docker) only happens when someone looks at it.
   if (name === "resources" && selected) loadResources(selected);
 }
@@ -1578,8 +1579,11 @@ export function runAction(name) {
   const [kind, arg] = name.split(":");
   let done = true;
   if (kind === "tab") {
-    const t = $(`.tabs [data-tab="${arg}"]`, root);
-    if (t && !t.hidden) showTab(root, arg);
+    // ⌘3 is Dev, or Containers for an app without Dev.
+    const visible = (t) => $(`.tabs [data-tab="${t}"]`, root)?.hidden === false;
+    const to = arg === "dev" && !visible("dev") ? "containers" : arg;
+    const t = $(`.tabs [data-tab="${to}"]`, root);
+    if (t && !t.hidden) showTab(root, to);
     else done = false;
   } else if (kind === "open") {
     const off = { editor: !snap.editor, git: $(".git-btn", root)?.hidden !== false, browser: !snap.running }[arg];
