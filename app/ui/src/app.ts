@@ -811,7 +811,7 @@ export function drawOpenWith(root) {
     if (!name) continue;
     b.title = `Open in ${name}${b.dataset.open === "editor" ? " (⌘E)" : ""}`;
     b.setAttribute("aria-label", String(b.title));
-    appIconInto(b, name);
+    // Plain outline icons here, like the rest of the toolbar; the app's name is in the tooltip.
   }
 }
 
