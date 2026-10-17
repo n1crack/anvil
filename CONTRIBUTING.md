@@ -29,7 +29,6 @@ Use `ANVIL_HOME=/tmp/anvil-dev` to keep a development run away from your real
   `src/main.rs`
 - `app/`: the `anvil-app` crate, the Tauri 2 app; the UI in `app/ui` is plain
   HTML, CSS and JavaScript without a build step
-- `SIGNING.md`: how releases get signed
 
 User documentation lives on the website, [anvil.tr/docs](https://anvil.tr/docs), from its own repository; see [Architecture](https://anvil.tr/docs/architecture).
 
@@ -82,9 +81,6 @@ no `version` on purpose).
 
 Without the script: edit the version in `Cargo.toml`, run
 `cargo update --workspace`, and add the changelog heading and link by hand.
-
-The changelog links use `OWNER` as a placeholder until the repository has its
-public home; replace it then.
 
 ## License
 

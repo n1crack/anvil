@@ -111,5 +111,5 @@ The first public release of Anvil, a macOS development environment.
   run a program; a folder whose path would break the web server config is not
   served.
 
-[Unreleased]: https://github.com/OWNER/anvil/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/OWNER/anvil/releases/tag/v0.1.0
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/n1crack/anvil/releases/tag/v0.1.0

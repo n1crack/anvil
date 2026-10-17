@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Anvil is in early development. Security fixes go into the latest release only.
+Security fixes go into the latest release.
 
 ## Reporting a vulnerability
 
@@ -29,8 +29,8 @@ Anvil is meant for your own machine only:
   anything but local development.
 - `anvil trust` adds Caddy's local certificate authority to your login keychain.
   Its private key lives in `~/.anvil/data/caddy`; anyone who can read that
-  folder can issue certificates your Mac trusts. Remove the authority from
-  Keychain Access when you uninstall Anvil.
+  folder can issue certificates your Mac trusts. `anvil uninstall` removes the
+  authority again.
 - Anvil downloads PHP, Caddy, language toolchains and service programs over
   HTTPS from their upstream projects, and checks each download against the
   checksum its publisher lists before unpacking or running it:
