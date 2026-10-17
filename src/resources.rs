@@ -550,7 +550,8 @@ pub fn disk(site: &Site) -> (u64, Vec<DiskItem>) {
     (total, items)
 }
 
-struct Ps {
+/// One row of `ps`.
+pub struct Ps {
     pid: u32,
     ppid: u32,
     pgid: u32,
@@ -559,7 +560,7 @@ struct Ps {
     command: String,
 }
 
-fn ps() -> Vec<Ps> {
+pub fn ps() -> Vec<Ps> {
     let out = Command::new("ps")
         .args(["-A", "-o", "pid=,ppid=,pgid=,rss=,%cpu=,command="])
         .output();
@@ -578,6 +579,20 @@ fn ps() -> Vec<Ps> {
             })
         })
         .collect()
+}
+
+/// CPU % and RSS bytes of a process group (`group`), or of a pid and its children.
+pub fn usage(table: &[Ps], pid: u32, group: bool) -> (f32, u64) {
+    table
+        .iter()
+        .filter(|p| {
+            if group {
+                p.pgid == pid
+            } else {
+                p.pid == pid || p.ppid == pid
+            }
+        })
+        .fold((0.0, 0), |(c, m), p| (c + p.cpu, m + p.rss))
 }
 
 pub fn processes(site: &Site, app_pid: Option<u32>) -> Vec<Process> {
@@ -1247,6 +1262,27 @@ pub fn clean(site: &Site, path: &str, app_running: bool) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_sums_a_group() {
+        let p = |pid, ppid, pgid, rss, cpu| Ps {
+            pid,
+            ppid,
+            pgid,
+            rss,
+            cpu,
+            command: String::new(),
+        };
+        let mb = 1024 * 1024;
+        let table = [
+            p(10, 1, 10, 100 * mb, 30.0),
+            p(11, 10, 10, 20 * mb, 5.0),
+            p(99, 1, 99, 500 * mb, 50.0),
+        ];
+        assert_eq!(usage(&table, 10, true), (35.0, 120 * mb));
+        assert_eq!(usage(&table, 10, false), (35.0, 120 * mb));
+        assert_eq!(usage(&table, 99, false), (50.0, 500 * mb));
+    }
 
     #[test]
     fn clean_keeps_data_and_gitignores() {

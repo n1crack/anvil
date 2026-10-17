@@ -276,7 +276,7 @@ fn start(cfg: &Config) -> Result<()> {
         let _ = rx.recv();
         // Stopping the web server ends `server.wait()` below.
         let _ = Command::new("kill")
-            .arg(pids.last().unwrap().to_string())
+            .arg(pids.last().unwrap().1.to_string())
             .status();
     });
     server.wait()?;

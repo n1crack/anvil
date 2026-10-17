@@ -319,6 +319,296 @@ fn find_site_cfg(name: &str) -> Res<(Config, Site)> {
     Ok((cfg, site))
 }
 
+/// One line of the Processes window.
+#[derive(Serialize)]
+struct Row {
+    /// What `activity_log` takes: `web:caddy`, `<site>`, `<site>@<id>`, `service:<id>`...
+    key: String,
+    name: String,
+    pid: Option<u32>,
+    port: Option<u16>,
+    /// `None` for containers (Docker does the accounting) and for crashed rows.
+    cpu: Option<f32>,
+    memory: Option<u64>,
+    /// `running`, `starting` or `crashed`.
+    state: &'static str,
+    detail: Option<String>,
+    /// Whether Stop/Restart apply to it.
+    actions: bool,
+}
+
+#[derive(Serialize)]
+struct AppGroup {
+    site: String,
+    rows: Vec<Row>,
+}
+
+#[derive(Serialize)]
+struct Activity {
+    web: Vec<Row>,
+    apps: Vec<AppGroup>,
+    services: Vec<Row>,
+}
+
+fn row(key: String, name: String, state: &'static str, actions: bool) -> Row {
+    Row {
+        key,
+        name,
+        pid: None,
+        port: None,
+        cpu: None,
+        memory: None,
+        state,
+        detail: None,
+        actions,
+    }
+}
+
+/// Fill in pid, CPU and memory from the `ps` table.
+fn measured(mut r: Row, table: &[anvil::resources::Ps], pid: u32, group: bool) -> Row {
+    let (cpu, memory) = anvil::resources::usage(table, pid, group);
+    r.pid = Some(pid);
+    r.cpu = Some(cpu);
+    r.memory = Some(memory);
+    r
+}
+
+fn exit_detail(e: &anvil::apps::Exit) -> String {
+    match e.code {
+        Some(c) => format!("Exited with code {c}"),
+        None => "Ended by a signal".into(),
+    }
+}
+
+fn listening(port: u16) -> bool {
+    std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+}
+
+/// Everything Anvil runs: the web server, apps with their processes and containers, services.
+#[tauri::command(async)]
+fn activity(app: State<App>) -> Res<Activity> {
+    let cfg = anvil::load().map_err(err)?;
+    let sites = anvil::sites(&cfg);
+    // Quick snapshots, each lock released before anything slow.
+    let web_pids = app
+        .server
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| s.pids())
+        .unwrap_or_default();
+    let (listed, crashed) = {
+        let mut apps = app.apps.lock().unwrap();
+        (apps.list(), apps.crashed())
+    };
+    let (infos, service_pids) = {
+        let mut services = app.services.lock().unwrap();
+        (services.info(&cfg), services.pids())
+    };
+
+    // Docker is only asked about apps with a compose file, all at once.
+    let containers: Vec<_> = std::thread::scope(|scope| {
+        let jobs: Vec<_> = sites
+            .iter()
+            .filter(|s| anvil::compose::file(&s.path).is_some())
+            .map(|s| (s, scope.spawn(|| anvil::compose::containers(&s.path))))
+            .collect();
+        jobs.into_iter()
+            .filter_map(|(s, j)| Some((s, j.join().ok()?.ok()?)))
+            .collect()
+    });
+
+    let table = anvil::resources::ps();
+    let web = web_pids
+        .into_iter()
+        .map(|(label, pid)| {
+            let key = match label
+                .strip_prefix("PHP ")
+                .and_then(|l| l.strip_suffix(" FPM"))
+            {
+                Some(v) => format!("web:php-{v}"),
+                None => "web:caddy".into(),
+            };
+            measured(row(key, label, "running", false), &table, pid, false)
+        })
+        .collect();
+
+    let services = infos
+        .iter()
+        .filter_map(|i| {
+            let pid = *service_pids.get(&i.id)?;
+            let mut r = row(format!("service:{}", i.id), i.name.into(), "running", true);
+            r.port = Some(i.port);
+            r.detail = (i.id != i.kind).then(|| i.id.clone());
+            Some(measured(r, &table, pid, false))
+        })
+        .collect();
+
+    let mut groups = vec![];
+    for site in &sites {
+        let mut rows = vec![];
+        let mine = |key: &str| {
+            key.strip_prefix(site.name.as_str())
+                .filter(|rest| rest.is_empty() || rest.starts_with(['@', '#']))
+                .map(str::to_string)
+        };
+        let live: Vec<_> = listed
+            .iter()
+            .filter_map(|(k, pid, _)| Some((k, *pid, mine(k)?)))
+            .collect();
+        let dead: Vec<_> = crashed
+            .iter()
+            .filter_map(|(k, e)| Some((k, e, mine(k)?)))
+            .collect();
+        if !live.is_empty() || !dead.is_empty() {
+            // Names come from detection, which may run PHP.
+            let detected = anvil::processes::detect_with(site, Some(&cfg));
+            let found = |id: &str| detected.iter().find(|p| p.id == id);
+            let name = |id: &str| found(id).map_or_else(|| id.to_string(), |p| p.name.clone());
+            for (key, pid, rest) in live {
+                let mut r = if rest.is_empty() {
+                    let mut r = row(key.clone(), site.name.clone(), "running", true);
+                    r.port = site.port;
+                    r
+                } else {
+                    let id = &rest[1..];
+                    let mut r = row(key.clone(), name(id), "running", true);
+                    r.port = found(id).and_then(|p| p.port);
+                    r
+                };
+                // A server is starting until its port answers.
+                if r.port.is_some_and(|p| !listening(p)) {
+                    r.state = "starting";
+                }
+                rows.push(measured(r, &table, pid, true));
+            }
+            for (key, exit, rest) in dead {
+                let shown = if rest.is_empty() {
+                    site.name.clone()
+                } else {
+                    name(&rest[1..])
+                };
+                let mut r = row(key.clone(), shown, "crashed", true);
+                r.detail = Some(exit_detail(exit));
+                rows.push(r);
+            }
+        }
+        for (_, list) in containers.iter().filter(|(s, _)| s.name == site.name) {
+            for c in list.iter().filter(|c| c.state == "running") {
+                let state = if c.health.as_deref() == Some("starting") {
+                    "starting"
+                } else {
+                    "running"
+                };
+                let key = format!("container:{}/{}", site.name, c.service);
+                let mut r = row(key, c.service.clone(), state, true);
+                r.port = c.ports.first().copied();
+                r.detail = c.health.clone();
+                rows.push(r);
+            }
+        }
+        if !rows.is_empty() {
+            groups.push(AppGroup {
+                site: site.name.clone(),
+                rows,
+            });
+        }
+    }
+    Ok(Activity {
+        web,
+        apps: groups,
+        services,
+    })
+}
+
+/// What a log key from the UI names. Only the listed forms; never a path.
+#[derive(Debug, PartialEq)]
+enum LogKey<'a> {
+    Caddy,
+    Php(&'a str),
+    App(&'a str),
+    Process(&'a str, &'a str),
+    Once(&'a str, &'a str),
+    Service(&'a str),
+    Container(&'a str, &'a str),
+}
+
+fn plain(s: &str, dots: bool) -> bool {
+    !s.is_empty()
+        && !s.starts_with("..")
+        && s != "."
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || (dots && c == '.'))
+}
+
+fn parse_log_key(key: &str) -> Res<LogKey<'_>> {
+    let parsed = if key == "web:caddy" {
+        Some(LogKey::Caddy)
+    } else if let Some(v) = key.strip_prefix("web:php-") {
+        (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.') && !v.contains(".."))
+            .then_some(LogKey::Php(v))
+    } else if let Some(id) = key.strip_prefix("service:") {
+        plain(id, false).then_some(LogKey::Service(id))
+    } else if let Some(rest) = key.strip_prefix("container:") {
+        rest.split_once('/')
+            .filter(|(s, c)| plain(s, true) && plain(c, true))
+            .map(|(s, c)| LogKey::Container(s, c))
+    } else if let Some((s, id)) = key.split_once('@') {
+        (plain(s, true) && plain(id, false)).then_some(LogKey::Process(s, id))
+    } else if let Some((s, id)) = key.split_once('#') {
+        (plain(s, true) && plain(id, false)).then_some(LogKey::Once(s, id))
+    } else {
+        plain(key, true).then_some(LogKey::App(key))
+    };
+    parsed.ok_or_else(|| format!("Not a log: {key}"))
+}
+
+/// New log content for a row of the Processes window, by key (see `parse_log_key`).
+#[tauri::command(async)]
+fn activity_log(key: String, from: u64) -> Res<anvil::logs::Page> {
+    let log = anvil::home().join("log");
+    let file = match parse_log_key(&key)? {
+        LogKey::Caddy => log.join("caddy.log"),
+        LogKey::Php(v) => log.join(format!("php-{v}-fpm.log")),
+        LogKey::Service(id) => anvil::services::log_file(id),
+        LogKey::App(site) => {
+            find_site(site)?;
+            anvil::apps::log_file(site)
+        }
+        LogKey::Process(site, id) => {
+            find_site(site)?;
+            anvil::processes::log_file(site, id)
+        }
+        LogKey::Once(site, id) => {
+            find_site(site)?;
+            anvil::apps::log_file(&anvil::processes::once_key(site, id))
+        }
+        LogKey::Container(site, service) => {
+            let text = anvil::compose::logs(&find_site(site)?.path, service).map_err(err)?;
+            // ponytail: no incremental tail for containers; the whole text again unless its size is unchanged.
+            let end = text.len() as u64;
+            let mut entries: Vec<_> = anvil::logs::split(&text)
+                .into_iter()
+                .map(anvil::logs::entry)
+                .collect();
+            entries.reverse();
+            if from == end {
+                entries.clear();
+            }
+            return Ok(anvil::logs::Page {
+                entries,
+                start_offset: 0,
+                end_offset: end,
+                truncated: false,
+            });
+        }
+    };
+    if !file.exists() {
+        return Ok(anvil::logs::Page::default());
+    }
+    anvil::logs::tail(&file, from).map_err(err)
+}
+
 #[tauri::command(async)]
 fn processes(app: State<App>, site: String) -> Res<Overview> {
     let (cfg, s) = find_site_cfg(&site)?;
@@ -1911,6 +2201,8 @@ fn main() {
         .manage(App::default())
         .invoke_handler(tauri::generate_handler![
             state,
+            activity,
+            activity_log,
             refresh,
             set_running,
             set_php,
@@ -2047,4 +2339,38 @@ fn main() {
             RunEvent::Reopen { .. } => show(handle),
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_keys_are_parsed_and_paths_rejected() {
+        assert_eq!(parse_log_key("web:caddy"), Ok(LogKey::Caddy));
+        assert_eq!(parse_log_key("web:php-8.4"), Ok(LogKey::Php("8.4")));
+        assert_eq!(parse_log_key("my.app"), Ok(LogKey::App("my.app")));
+        assert_eq!(parse_log_key("a@dev"), Ok(LogKey::Process("a", "dev")));
+        assert_eq!(parse_log_key("a#build"), Ok(LogKey::Once("a", "build")));
+        assert_eq!(parse_log_key("service:redis"), Ok(LogKey::Service("redis")));
+        assert_eq!(
+            parse_log_key("container:a/db"),
+            Ok(LogKey::Container("a", "db"))
+        );
+        for bad in [
+            "../etc/passwd",
+            "/tmp/x",
+            "container:a/../b",
+            "web:../x",
+            "web:php-..",
+            "a@../x",
+            "a#/x",
+            "service:../x",
+            "..",
+            "",
+            "container:a/b/c",
+        ] {
+            assert!(parse_log_key(bad).is_err(), "{bad}");
+        }
+    }
 }

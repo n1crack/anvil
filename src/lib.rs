@@ -1192,6 +1192,8 @@ pub(crate) fn terminate(child: &mut Child, grace: std::time::Duration) {
 /// Running PHP-FPM pools and the web server.
 pub struct Server {
     children: Vec<Child>,
+    /// What each child is, parallel to `children`.
+    labels: Vec<String>,
 }
 
 impl Server {
@@ -1213,7 +1215,10 @@ impl Server {
         }
         state_dirs()?;
 
-        let mut server = Server { children: vec![] };
+        let mut server = Server {
+            children: vec![],
+            labels: vec![],
+        };
         for v in &versions {
             for site in &sites {
                 if let Some(sock) = fpm_socket(site) {
@@ -1223,6 +1228,7 @@ impl Server {
             let _ = fs::remove_file(home().join("run").join(format!("php-{v}.sock")));
             let conf = home().join("run").join(format!("php-{v}-fpm.conf"));
             fs::write(&conf, fpm_conf(v, &cfg.ini, &sites))?;
+            server.labels.push(format!("PHP {v} FPM"));
             server.children.push(
                 Command::new(php_dir(v).join("php-fpm"))
                     .arg("-y")
@@ -1237,6 +1243,7 @@ impl Server {
         let file = home().join("run").join("Caddyfile");
         fs::write(&file, caddyfile(cfg, &sites))?;
         let log = fs::File::create(home().join("log").join("caddy.log"))?;
+        server.labels.push("Caddy".into());
         server.children.push(
             caddy_cmd()
                 .args(["run", "--adapter", "caddyfile", "--config"])
@@ -1246,7 +1253,7 @@ impl Server {
         );
 
         let pids: Vec<String> = std::iter::once(std::process::id())
-            .chain(server.pids())
+            .chain(server.pids().into_iter().map(|(_, p)| p))
             .map(|p| p.to_string())
             .collect();
         fs::write(pid_file(), pids.join("\n"))?;
@@ -1268,8 +1275,13 @@ impl Server {
         Ok(server)
     }
 
-    pub fn pids(&self) -> Vec<u32> {
-        self.children.iter().map(Child::id).collect()
+    /// Each child's label (`Caddy`, `PHP 8.4 FPM`) and pid; Caddy is last.
+    pub fn pids(&self) -> Vec<(String, u32)> {
+        self.labels
+            .iter()
+            .cloned()
+            .zip(self.children.iter().map(Child::id))
+            .collect()
     }
 
     /// Blocks until the web server exits.
