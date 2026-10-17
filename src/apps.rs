@@ -671,7 +671,7 @@ impl Apps {
         // The trailing argument is $0: it tags the shell with Anvil's home so a
         // crashed Anvil's leftovers can be recognised and cleaned up.
         let tag = format!("anvil:{}:{key}", self.home.display());
-        let command = with_js_install(dir, command);
+        let command = with_js_install(dir, &command);
         let child = Command::new("/bin/sh")
             .args(["-c", &command, &tag])
             .current_dir(dir)
