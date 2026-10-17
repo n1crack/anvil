@@ -2373,3 +2373,6 @@ body.activity {
 .pop-confirm .primary:hover,
 .setup .setup-go:hover,
 .welcome .primary:hover { background: color-mix(in srgb, var(--text) 20%, transparent); }
+
+/* A removed service's data was kept: said once over the list. */
+.svc-kept { margin: 2px 4px 8px; font-size: 12px; }

@@ -17,15 +17,16 @@ import {
   setMode,
   showError,
   snap,
-  toast,
 } from "./app";
 import { late } from "./late";
 
 /* Services in the main window: list in the sidebar, details on the right, and
- * the Add Service sheet. Shares $, snap, invoke, el, toast and friends with app.js. */
+ * the Add Service sheet. Shares $, snap, invoke, el and friends with app.js. */
 
 export let services: ServiceRow[] = [];
 export let svcSelected = localStorage.getItem("service");
+// After a removal that kept the data: a muted line over the list says where it is.
+export let keptNote = "";
 export const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
 
 export async function serviceCall(cmd: string, args?: Record<string, unknown>) {
@@ -104,6 +105,7 @@ export function serviceRow(svc) {
 export function renderServiceList() {
   const list = $("#list");
   list.replaceChildren();
+  if (keptNote) list.append(el("p", "muted svc-kept", keptNote));
   if (!services.length) {
     list.append(el("p", "empty", "No services yet."));
     return;
@@ -360,8 +362,8 @@ export async function removeService(svc) {
   );
   if (answer !== "Remove, Keep Data" && answer !== "Remove and Delete Data" && answer !== "Yes" && answer !== "No") return;
   const wipe = answer === "Remove and Delete Data" || answer === "No";
+  keptNote = wipe ? "" : `Kept ${svc.id}’s ${what} for when you add ${svc.id} again.`;
   await serviceCall("remove_service", { id: svc.id, deleteData: wipe });
-  toast(wipe ? `Removed ${svc.id} and its data` : `Removed ${svc.id}; its data is kept`);
 }
 
 /** The service's newest log lines under its page; the Log button opens the whole file. */
@@ -494,6 +496,7 @@ $("#svc-form").onsubmit = async (e) => {
       apps: app ? [app] : [],
     });
     $("#new-service").close();
+    keptNote = "";
     svcSelected = name;
     localStorage.setItem("service", name);
     if (mode !== "services") setMode("services");
