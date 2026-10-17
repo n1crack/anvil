@@ -140,7 +140,7 @@ Anvil measures each application's disk use and sorts it into three groups:
 - **Rebuildable:** dependencies and builds such as `node_modules`, `vendor`, `target` or `.next`. A command brings them back.
 - **Keep:** your code and data, such as `storage/app` or a SQLite database. Anvil never deletes these.
 
-In the app you can clean an application item by item, or clean the safe items of every application at once. Rebuildable items can only be deleted while the application is stopped. `anvil usage` shows the same numbers in the terminal, along with the services an application's `.env` points at.
+In the app you can clean an application item by item, or clean the safe items of every application at once. Rebuildable items can only be deleted while the application is stopped. `anvil usage` shows the same numbers in the terminal, along with the services an application's `.env` points at, and `anvil clean` deletes them.
 
 ## The app
 
@@ -200,6 +200,8 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil new <kind> <name> [--in <dir>]` | Create an application from a template (default location: the first parked folder) |
 | `anvil php install <version>` | Install the latest release of a PHP version, e.g. `8.4` |
 | `anvil php list` | List installed PHP versions |
+| `anvil php uninstall <version>` | Remove an installed PHP version |
+| `anvil php ini <key> [value]` | Set a php.ini value for every site; leave out the value to clear it |
 | `anvil use <version>` | Set the default PHP version |
 | `anvil use <version> --site <name>` | Set the PHP version for one site |
 | `anvil ini <site> <key> [value]` | Set a php.ini value for one site; leave out the value to clear it |
@@ -208,6 +210,8 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil runtime uninstall <id> <version>` | Remove a language version |
 | `anvil app command <site> [command]` | Set an app's start command; leave it out for the default |
 | `anvil app autostart <site> <true\|false>` | Start the app whenever Anvil starts |
+| `anvil app type <site> [kind]` | Set the app type, or leave it out to use the detected one |
+| `anvil app port <site> [port]` | Pin the app's private port, or leave it out for an automatic one |
 | `anvil app runtime <site> [version]` | Pin the language version (e.g. `24` for Node); leave it out for automatic |
 | `anvil service list` | List added services and their state |
 | `anvil service add <kind> [name] [--port N] [--version V]` | Add `mysql`, `postgres`, `redis` or `mailpit`; downloads that version the first time |
@@ -221,6 +225,7 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil service enable <name>` / `disable <name>` | Start the service with Anvil, or not |
 | `anvil service port <name> [port] [--web [port]]` | Set the port; leave it out for the usual one. `--web` sets Mailpit's inbox port (no value resets it) |
 | `anvil usage [site]` | Disk usage of one application, or of Anvil and all applications |
+| `anvil clean <site> [paths…] [--safe]` | Delete items `anvil usage` lists, or every safe-to-delete item; `anvil clean --safe` does it for every app. Rebuildable items wait until the app is stopped |
 | `anvil setup` | Download the web server and print the one-time DNS command |
 | `anvil start` | Run Anvil in the foreground (Ctrl-C to stop) |
 | `anvil trust` | Trust Anvil's certificate authority in your keychain |
