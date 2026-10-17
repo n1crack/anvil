@@ -391,11 +391,11 @@ button, select, input { font: inherit; color: inherit; }
 
 .item[aria-expanded="true"] .chevron { transform: rotate(90deg); }
 
-/* Selection stays neutral; heat is reserved for the running state. */
+/* Selection: a neutral background and one thin line of colour, nothing louder.
+ * --heat-text keeps the line visible in the light theme too. */
 .item[aria-current="true"] {
   background: var(--selected);
-  /* A thin line of colour marks where you are, nothing louder. */
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--heat) 75%, transparent);
+  box-shadow: inset 2px 0 0 var(--heat-text);
 }
 
 .empty {
@@ -806,7 +806,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .nav button[aria-current="true"] {
   background: var(--selected);
   font-weight: 600;
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--heat) 75%, transparent);
+  box-shadow: inset 2px 0 0 var(--heat-text);
 }
 
 .page {
