@@ -12,6 +12,9 @@ const filterOf = (m) => (filters[m] ??= { kind: null, running: false });
 
 const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 // A standard port (443, or 80 without HTTPS) isn't written out.
+// Sites whose HTTPS is being turned on or off (the web server reloads meanwhile).
+const securing = new Set();
+
 // Compose projects and plain folders get no address from Anvil.
 const serves = (s) => !["compose", "folder"].includes(s.kind);
 
@@ -226,7 +229,11 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
   // The folder's name: not every project is a site, so no address in the list.
   $(".name", text).textContent = s.name;
   // HTTPS shows as a lock after the name; it's turned on and off from the right-click menu.
-  if (s.secure) {
+  if (securing.has(s.name)) {
+    const busy = el("span", "securing", s.secure ? "HTTP…" : "HTTPS…");
+    busy.prepend(el("span", "spin-dot"));
+    $(".name", text).append(busy);
+  } else if (s.secure) {
     const lock = el("span", "lock");
     lock.innerHTML = LOCK;
     lock.title = "HTTPS";
@@ -418,6 +425,18 @@ function renderList() {
 
 const M = window.__TAURI__.menu;
 
+/** Turn HTTPS on or off, showing it on the row until the web server has reloaded. */
+async function setSecure(s) {
+  securing.add(s.name);
+  renderList();
+  try {
+    await call("set_secure", { site: s.name, on: !s.secure });
+  } finally {
+    securing.delete(s.name);
+    renderList();
+  }
+}
+
 async function siteMenu(s) {
   const sep = () => M.PredefinedMenuItem.new({ item: "Separator" });
   const groupOf = Object.keys(snap.groups).find((g) => snap.groups[g].includes(s.name));
@@ -426,7 +445,7 @@ async function siteMenu(s) {
   const items = [];
   if (serves(s)) {
     items.push(
-      await M.CheckMenuItem.new({ text: "HTTPS", checked: s.secure, action: () => call("set_secure", { site: s.name, on: !s.secure }) }),
+      await M.CheckMenuItem.new({ text: "HTTPS", checked: s.secure, action: () => setSecure(s) }),
       await sep(),
     );
   }
