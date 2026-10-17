@@ -6,7 +6,7 @@ use crate::{download, fetch_text, fetch_tgz, home, platform, published_sum, repl
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub const RUNTIMES: [&str; 4] = ["node", "go", "rust", "dotnet"];
@@ -204,9 +204,38 @@ pub fn install(id: &str, version: &str) -> Result<()> {
             let name = format!("dotnet-sdk-{rid}.tar.gz");
             let file = sdk_file(&meta, latest, &name)
                 .with_context(|| format!("No {name} for .NET SDK {latest}"))?;
-            fetch_tgz(&file.0, &root("dotnet"), false, Some(&file.1))
+            // Unpack aside, then move in what isn't there yet: an interrupted
+            // install leaves no half SDK, and other channels' files stay as they are.
+            let tmp = home().join("build").join("dotnet-sdk");
+            let _ = fs::remove_dir_all(&tmp);
+            let mut channels = installed("dotnet");
+            channels.push(version.to_string());
+            newest_first(&mut channels);
+            let ok = fetch_tgz(&file.0, &tmp, false, Some(&file.1))
+                .and_then(|_| merge_new(&tmp, &root("dotnet"), channels[0] == version));
+            let _ = fs::remove_dir_all(&tmp);
+            ok
         }
     }
+}
+
+/// Move what `src` has and `dst` lacks into `dst`, folder by folder; files
+/// at the top (the `dotnet` host, licences) are replaced only by the newest
+/// channel. `sdk` goes last, so a found SDK always has its runtime.
+fn merge_new(src: &Path, dst: &Path, newest: bool) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    let mut entries: Vec<_> = fs::read_dir(src)?.flatten().map(|e| e.path()).collect();
+    entries.sort_by_key(|p| p.file_name().is_some_and(|n| n == "sdk"));
+    for from in entries {
+        let to = dst.join(from.file_name().context("no file name")?);
+        let dir = from.is_dir();
+        if to.symlink_metadata().is_err() || (newest && !dir) {
+            fs::rename(&from, &to)?;
+        } else if dir && to.is_dir() {
+            merge_new(&from, &to, false)?;
+        }
+    }
+    Ok(())
 }
 
 /// URL and SHA-512 of `name` for SDK `version` in a .NET releases.json. Only
@@ -267,8 +296,13 @@ pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
             e.push(("npm_config_cache".into(), d(cache.join("npm"))));
             // Native modules: node-gyp keeps Node headers in ~/Library/Caches/node-gyp otherwise.
             e.push(("npm_config_devdir".into(), d(cache.join("node-gyp"))));
-            // giget (Nuxt's template download) and others use ~/.cache otherwise.
-            e.push(("XDG_CACHE_HOME".into(), d(cache.join("xdg"))));
+            // giget (Nuxt's templates) and yarn use ~/.cache, pnpm ~/.local/state,
+            // unless the user points them elsewhere; their choice stands.
+            for (var, dir) in [("XDG_CACHE_HOME", "xdg"), ("XDG_STATE_HOME", "xdg-state")] {
+                if std::env::var_os(var).is_none() {
+                    e.push((var.into(), d(cache.join(dir))));
+                }
+            }
             e.push(("COREPACK_HOME".into(), d(cache.join("corepack"))));
             // Their telemetry keeps consent and ids in the user's home folder.
             e.push(("NEXT_TELEMETRY_DISABLED".into(), "1".into()));
@@ -320,6 +354,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dotnet_merge_keeps_what_is_there() {
+        let base = std::env::temp_dir().join(format!("anvil-merge-{}", std::process::id()));
+        let (src, dst) = (base.join("new"), base.join("dotnet"));
+        for d in ["sdk/10.0.402", "shared/App/10.0.13"] {
+            fs::create_dir_all(src.join(d)).unwrap();
+        }
+        fs::write(src.join("dotnet"), "new host").unwrap();
+        fs::write(src.join("shared/App/10.0.13/a"), "new").unwrap();
+        fs::create_dir_all(dst.join("shared/App/9.0.1")).unwrap();
+        fs::write(dst.join("dotnet"), "old host").unwrap();
+        // An older channel keeps the host; existing versions are left alone.
+        merge_new(&src, &dst, false).unwrap();
+        assert_eq!(fs::read_to_string(dst.join("dotnet")).unwrap(), "old host");
+        assert!(dst.join("sdk/10.0.402").is_dir());
+        assert!(dst.join("shared/App/9.0.1").is_dir());
+        assert_eq!(
+            fs::read_to_string(dst.join("shared/App/10.0.13/a")).unwrap(),
+            "new"
+        );
+        fs::write(src.join("dotnet"), "newest host").unwrap();
+        merge_new(&src, &dst, true).unwrap();
+        assert_eq!(
+            fs::read_to_string(dst.join("dotnet")).unwrap(),
+            "newest host"
+        );
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn dotnet_sdk_from_release_list() {
         let hash = "a".repeat(128);
         let meta = serde_json::json!({ "releases": [
@@ -349,12 +412,7 @@ mod tests {
             }
         }
         let node: Vec<String> = env("node", "22").into_iter().map(|(k, _)| k).collect();
-        for k in [
-            "npm_config_cache",
-            "npm_config_devdir",
-            "XDG_CACHE_HOME",
-            "COREPACK_HOME",
-        ] {
+        for k in ["npm_config_cache", "npm_config_devdir", "COREPACK_HOME"] {
             assert!(node.iter().any(|n| n == k), "node env lacks {k}");
         }
     }
