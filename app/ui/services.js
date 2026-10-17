@@ -175,7 +175,7 @@ function renderService() {
   $(".svc-what", root).textContent = svc.installed ? `${svc.name} ${svc.version}` : `${svc.name}, not installed`;
 
   $(".run-box .dot", root).className = `dot ${svc.running ? "on" : ""}`;
-  $(".state-text", root).textContent = svc.running ? `Running on port ${svc.port}` : "Stopped";
+  $(".state-text", root).textContent = svc.running ? "Running" : "Stopped";
   $('[data-svc="start"]', root).hidden = svc.running;
   $('[data-svc="restart"]', root).hidden = !svc.running;
   $('[data-svc="stop"]', root).hidden = !svc.running;
@@ -237,7 +237,7 @@ function renderService() {
   const saveTags = (tags) => serviceCall("set_service_tags", { id: svc.id, tags });
   const tagsBox = chips($(".svc-tags", root), svc.tags, "tag", saveTags);
   const tagInput = el("input");
-  tagInput.placeholder = svc.tags.length ? "Add tag" : "Add a tag, e.g. queue";
+  tagInput.placeholder = "Add tag";
   tagInput.setAttribute("aria-label", "Add a tag");
   tagInput.spellcheck = false;
   tagInput.onkeydown = (e) => {
@@ -249,7 +249,7 @@ function renderService() {
   };
   tagsBox.append(tagInput);
 
-  $(".svc-data", root).textContent = `~/.anvil/data/${svc.id}`;
+  $('[data-svc-open="data"]', root).title = `Show ~/.anvil/data/${svc.id} in Finder`;
   const env = envFor(svc);
   $(".svc-env", root).textContent = env;
   $(".svc-copy", root).onclick = () => copy(env, `Copied ${svc.id}’s settings`);
@@ -481,20 +481,27 @@ function drawContents(svc, root, c) {
     window.__TAURI__.dialog.ask(message, { title, kind: "warning", okLabel: ok, cancelLabel: "Cancel" });
 
   if (svc.kind === "mysql" || svc.kind === "postgres") {
+    // The Connect lines can point at one of the databases.
+    const pick = $(".svc-db", root);
+    const own = c.databases.map(([n]) => n).filter((n) => !SYSTEM_DBS.has(n));
+    pick.replaceChildren(new Option("No database", ""), ...own.map((n) => new Option(n, n)));
+    pick.value = own.includes(chosenDb[svc.id]) ? chosenDb[svc.id] : "";
+    pick.hidden = !own.length;
+    pick.onchange = () => {
+      chosenDb[svc.id] = pick.value || undefined;
+      const env = envFor(svc);
+      $(".svc-env", root).textContent = env;
+      $(".svc-copy", root).onclick = () => copy(env, `Copied ${svc.id}’s settings`);
+    };
     const system = c.databases.filter(([n]) => SYSTEM_DBS.has(n));
     for (const [name, size] of c.databases.filter(([n]) => !SYSTEM_DBS.has(n))) {
-      const used = chosenDb[svc.id] === name;
       const buttons = [];
       {
-        buttons.push(act(used ? "In .env" : "Use in .env", () => {
-          chosenDb[svc.id] = used ? undefined : name;
-          renderService();
-        }));
         if (svc.clients[0]) buttons.push(act("Open", () => openClient(svc, svc.clients[0], name)));
         buttons.push(act("Drop…", async () => {
           if (await confirm(`Drop ${name}?`, `Every table in ${name} is deleted. This can’t be undone.`, "Drop"))
             renderContents(svc, root, { id: svc.id, action: "drop", name });
-        }, "link danger"));
+        }, "link danger hover-only"));
       }
       line(name, bytes(size), ...buttons);
     }

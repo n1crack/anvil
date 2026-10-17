@@ -1810,3 +1810,20 @@ kbd {
 /* Attached services sit on the address line, so every header has the same height. */
 .site-services { display: inline-flex; vertical-align: middle; margin: 0 0 0 10px; }
 .site-name { overflow-wrap: break-word; }
+
+/* Destructive row actions show on the row you point at or tab into. */
+.res-list .row .hover-only { visibility: hidden; }
+.res-list .row:hover .hover-only,
+.res-list .row:focus-within .hover-only { visibility: visible; }
+
+.connect-head { display: flex; align-items: center; gap: 10px; }
+.connect-head select {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 400;
+}
