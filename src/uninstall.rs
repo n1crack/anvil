@@ -155,6 +155,13 @@ pub fn home_problem(h: &Path, user: &Path, projects: &[PathBuf]) -> Option<Strin
     if user.canonicalize().is_ok_and(|u| u.starts_with(&h)) {
         return Some("it is your home folder or holds it".into());
     }
+    // Something only Anvil makes must be there, not just nothing foreign.
+    if !["config.toml", "run", "data"]
+        .iter()
+        .any(|e| h.join(e).exists())
+    {
+        return Some("it has none of Anvil's own files".into());
+    }
     let Ok(entries) = fs::read_dir(&h) else {
         return Some("it can't be read".into());
     };
@@ -209,10 +216,16 @@ fn anvil_process(cmd: &str, home: &str) -> bool {
     exe == "anvil-app" || (exe == "anvil" && words.next() == Some("start")) || cmd.contains(home)
 }
 
-pub fn uninstall(cfg: &Config, yes: bool) -> Result<()> {
+/// `config_ok` false: config.toml couldn't be read, so the projects that must
+/// not be inside ~/.anvil are unknown and it is kept.
+pub fn uninstall(cfg: &Config, config_ok: bool, yes: bool) -> Result<()> {
     let h = home();
     let user = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-    let problem = home_problem(&h, &user, &projects(cfg));
+    let problem = if config_ok {
+        home_problem(&h, &user, &projects(cfg))
+    } else {
+        Some("its config.toml couldn't be read, so Anvil can't tell where your projects are".into())
+    };
     let steps: Vec<Step> = plan(cfg)
         .into_iter()
         .filter(|s| !(matches!(s, Step::Home(_)) && problem.is_some()))
@@ -357,6 +370,10 @@ mod tests {
         assert!(home_problem(&user, &user, &[]).is_some());
         assert!(home_problem(&base, &user, &[]).is_some());
         assert!(home_problem(Path::new("/"), &user, &[]).is_some());
+        // Nothing foreign is not enough: a folder with only bin/ isn't Anvil's.
+        let bin_only = base.join("local");
+        fs::create_dir_all(bin_only.join("bin")).unwrap();
+        assert!(home_problem(&bin_only, &user, &[]).is_some());
         // A link to it is not followed.
         std::os::unix::fs::symlink(&h, base.join("link")).unwrap();
         assert!(home_problem(&base.join("link"), &user, &[]).is_some());
