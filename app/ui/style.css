@@ -1089,7 +1089,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .res-legend .key { display: inline-flex; align-items: center; gap: 6px; }
 
-.swatch { width: 8px; height: 8px; border-radius: 2px; }
+.swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; }
 .swatch.keep { background: var(--cold); }
 /* Orange marks what Clean up removes; rebuildable is neutral, not an alarm. */
 .swatch.rebuild { background: color-mix(in srgb, var(--muted) 55%, transparent); }
@@ -1618,7 +1618,7 @@ kbd {
 .lv-warning .log-level { background: rgba(255, 209, 102, 0.14); color: var(--heat-white); }
 /* Only warnings and errors get a badge; the everyday levels are quiet text. */
 .lv-info .log-level,
-.lv-debug .log-level { background: none; color: var(--muted); font-weight: 500; opacity: 0.8; }
+.lv-debug .log-level { background: none; color: var(--muted); font-weight: 500; }
 
 @media (prefers-color-scheme: light) {
   .lv-warning .log-level { color: #8a5a00; }
@@ -1703,9 +1703,11 @@ kbd {
 .logs-list.chrono .log:last-child { border-bottom: 0; }
 .logs-more:has(+ .logs-list.chrono) { margin: 0 auto 10px; }
 
-/* No timestamps anywhere: no empty time column, and only lines that stand out get a badge. */
+/* No timestamps anywhere: no empty time column, and app output, where every line
+ * would say info, hides the everyday level; the column keeps lines aligned. */
 .logs-list.untimed .log-time { display: none; }
-.logs-list.untimed .lv-info .log-level { visibility: hidden; }
+.logs-list.untimed .lv-info .log-level,
+.logs-list.untimed .lv-debug .log-level { visibility: hidden; }
 
 /* ---------- Packages ---------- */
 

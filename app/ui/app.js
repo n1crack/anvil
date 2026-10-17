@@ -341,7 +341,8 @@ function renderList() {
     (!q || `${s.name}.${snap.tld} ${s.path} ${kindLabel(s.kind)}`.toLowerCase().includes(q));
   let count = 0;
 
-  const section = (title, sites, withChildren, path = true, kind = true) => {
+  // `key` remembers the fold; folders and Linked keep their old keys.
+  const section = (title, sites, withChildren, path = true, kind = true, key = `apps:${title}`) => {
     const rows = [];
     for (const s of [...sites].sort(order)) {
       const kids = withChildren ? byPath.get(s.path) ?? [] : [];
@@ -361,7 +362,7 @@ function renderList() {
     }
     if (!rows.length) return;
     count += rows.length;
-    list.append(...listSection(`apps:${title}`, title, rows, rows.filter((r) => r.classList.contains("item")).length));
+    list.append(...listSection(key, title, rows, rows.filter((r) => r.classList.contains("item")).length));
   };
 
   // User groups first (Favorites leads), then one section per parked folder, then linked folders.
@@ -369,14 +370,14 @@ function renderList() {
   const groupNames = Object.keys(snap.groups).sort((a, b) =>
     a === "Favorites" ? -1 : b === "Favorites" ? 1 : a.localeCompare(b));
   for (const g of groupNames) {
-    section(g, parked.filter((s) => snap.groups[g].includes(s.name)), true);
+    section(g, parked.filter((s) => snap.groups[g].includes(s.name)), true, true, true, `apps:group:${g}`);
   }
   const rest = [...parked, ...linked].filter((s) => !grouped.has(s.name));
   if (groupBy === "type") {
     const kinds = [...new Set(rest.map((s) => s.kind))].sort((a, b) => kindLabel(a).localeCompare(kindLabel(b)));
-    for (const k of kinds) section(kindLabel(k), rest.filter((s) => s.kind === k), true, true, false);
+    for (const k of kinds) section(kindLabel(k), rest.filter((s) => s.kind === k), true, true, false, `apps:type:${k}`);
   } else if (groupBy === "none") {
-    section("Applications", rest, true);
+    section("Applications", rest, true, true, true, "apps:all");
   } else {
     const dirs = [...new Set(parked.map((s) => s.parked_in))].sort();
     for (const dir of dirs) {
@@ -722,7 +723,10 @@ function renderResources(name) {
     // A swatch says keep, rebuild or safe, in the legend's colours; the words are in its tooltip.
     const label = el("span");
     const sw = el("i", `swatch ${i.safety}`);
-    sw.title = `${SAFETY[i.safety][0]}: ${i.note}`;
+    sw.setAttribute("role", "img");
+    sw.setAttribute("aria-label", SAFETY[i.safety][0]);
+    // The whole name carries the explanation: a bigger target than the swatch.
+    label.title = `${SAFETY[i.safety][0]}: ${i.note}`;
     label.append(sw, i.label);
     dt.append(label);
     if (i.path) dt.append(el("small", "path", i.path.startsWith("/") ? tilde(i.path) : i.path));
