@@ -169,28 +169,68 @@ async function loadAnvilStorage() {
   }
 }
 
+/* Application sizes: the last measurement shows at once, and a new one fills
+ * in row by row as each app is counted. */
+const sizes = new Map(); // app name -> { name, kind, total, safe, rebuild }
+let measuring = false;
+let measuredAt = 0; // Unix seconds of the shown numbers
+let drawQueued = false;
+
+window.__TAURI__.event.listen("storage-app", (e) => {
+  sizes.set(e.payload.name, e.payload);
+  if (!drawQueued) {
+    drawQueued = true;
+    requestAnimationFrame(() => {
+      drawQueued = false;
+      drawSizes();
+    });
+  }
+});
+
+async function loadAppSizes() {
+  if (measuring) return;
+  const last = await invoke("storage_last").catch(() => null);
+  if (last && !sizes.size) {
+    measuredAt = last[0];
+    for (const a of last[1]) sizes.set(a.name, a);
+  }
+  drawSizes();
+  // Numbers younger than ten minutes are good enough; Measure Again is there.
+  if (!last || Date.now() / 1000 - last[0] > 600) scanApps();
+}
+
 async function scanApps() {
-  const btn = $("#scan-apps");
-  btn.disabled = true;
-  btn.textContent = "Measuring…";
-  let apps;
+  measuring = true;
+  const fresh = new Set();
+  const stop = window.__TAURI__.event.listen("storage-app", (e) => fresh.add(e.payload.name));
+  drawSizes();
   try {
-    apps = await invoke("storage_apps");
+    await invoke("storage_apps");
+    // Apps that are gone since the last measurement drop out.
+    for (const name of [...sizes.keys()]) if (!fresh.has(name)) sizes.delete(name);
+    measuredAt = Date.now() / 1000;
   } catch (e) {
     showError(String(e));
   }
-  btn.disabled = false;
-  btn.textContent = "Measure again";
-  if (!apps) return;
+  (await stop)();
+  measuring = false;
+  drawSizes();
+}
 
+function drawSizes() {
+  const apps = [...sizes.values()].sort((a, b) => b.total - a.total);
   const sum = (k) => apps.reduce((a, x) => a + x[k], 0);
-  $("#apps-hint").textContent =
-    `${apps.length} applications use ${bytes(sum("total"))}. ${bytes(sum("safe"))} is logs and caches that can be deleted safely; ` +
-    `${bytes(sum("rebuild"))} is dependencies and builds that can be recreated. Open an application to clean it item by item.`;
+  const when = measuredAt ? agoText(measuredAt) : "";
+  $("#apps-hint").textContent = !apps.length
+    ? "Measuring every application…"
+    : `${apps.length} applications use ${bytes(sum("total"))}. ${bytes(sum("safe"))} is logs and caches that can be deleted safely; ` +
+      `${bytes(sum("rebuild"))} is dependencies and builds that can be recreated. ` +
+      (measuring ? "Measuring again…" : `Measured ${when}.`);
+  $("#scan-apps").hidden = measuring;
 
   const all = $("#clean-all-safe");
-  all.hidden = !sum("safe");
-  all.textContent = `Delete logs and caches in all apps (${bytes(sum("safe"))})`;
+  all.hidden = measuring || !sum("safe");
+  all.textContent = `Delete Logs and Caches in All Apps (${bytes(sum("safe"))})`;
   all.onclick = async () => {
     const ok = await confirmDelete(
       "Delete logs and caches in all applications?",
@@ -207,7 +247,7 @@ async function scanApps() {
   };
 
   const list = $("#app-sizes");
-  list.hidden = false;
+  list.hidden = !apps.length;
   list.replaceChildren();
   for (const a of apps.filter((a) => a.total > 0)) {
     const row = document.createElement("div");
@@ -227,6 +267,14 @@ async function scanApps() {
     row.append(info, size);
     list.append(row);
   }
+}
+
+function agoText(secs) {
+  const s = Date.now() / 1000 - secs;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
 }
 
 $("#scan-apps").onclick = scanApps;
@@ -352,7 +400,10 @@ for (const b of document.querySelectorAll("[data-page]")) {
     for (const other of document.querySelectorAll("[data-page]")) other.setAttribute("aria-current", other === b);
     for (const page of document.querySelectorAll(".page")) page.hidden = page.id !== b.dataset.page;
     if (b.dataset.page === "languages" && !runtimes) loadRuntimes();
-    if (b.dataset.page === "storage") loadAnvilStorage();
+    if (b.dataset.page === "storage") {
+      loadAnvilStorage();
+      loadAppSizes();
+    }
   };
 }
 

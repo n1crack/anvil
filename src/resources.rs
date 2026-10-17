@@ -1058,7 +1058,7 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
     Ok(freed)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, serde::Deserialize, Clone)]
 pub struct AppSize {
     pub name: String,
     pub kind: String,
@@ -1067,41 +1067,70 @@ pub struct AppSize {
     pub rebuild: u64,
 }
 
-/// Sizes of every app at once (one `du` run), biggest first.
-pub fn all_apps(sites: &[Site]) -> Vec<AppSize> {
-    let mut paths = vec![];
-    for s in sites
+/// One entry per project folder: extra linked domains share their app's folder.
+fn unique_apps(sites: &[Site]) -> Vec<&Site> {
+    let mut seen = std::collections::BTreeSet::new();
+    sites
         .iter()
         .filter(|s| !s.linked || !sites.iter().any(|o| !o.linked && o.path == s.path))
-    {
-        paths.push(s.path.clone());
-        paths.extend(rules_for(s).iter().map(|r| s.path.join(r.0)));
-    }
-    let sizes = du(&paths);
-    let mut seen = std::collections::BTreeSet::new();
-    let mut out: Vec<AppSize> = sites
-        .iter()
         .filter(|s| seen.insert(s.path.clone()))
-        .filter_map(|s| {
-            let total = *sizes.get(&s.path)?;
-            let sum = |want: Safety| -> u64 {
-                rules_for(s)
-                    .iter()
-                    .filter(|r| r.3 == want)
-                    .filter_map(|r| sizes.get(&s.path.join(r.0)))
-                    .sum()
-            };
-            Some(AppSize {
-                name: s.name.clone(),
-                kind: s.kind.clone(),
-                total,
-                safe: sum(Safety::Safe),
-                rebuild: sum(Safety::Rebuild),
-            })
-        })
+        .collect()
+}
+
+fn app_size(s: &Site) -> Option<AppSize> {
+    let rules = rules_for(s);
+    let mut paths = vec![s.path.clone()];
+    paths.extend(rules.iter().map(|r| s.path.join(r.0)));
+    let sizes = du(&paths);
+    let sum = |want: Safety| -> u64 {
+        rules
+            .iter()
+            .filter(|r| r.3 == want)
+            .filter_map(|r| sizes.get(&s.path.join(r.0)))
+            .sum()
+    };
+    Some(AppSize {
+        name: s.name.clone(),
+        kind: s.kind.clone(),
+        total: *sizes.get(&s.path)?,
+        safe: sum(Safety::Safe),
+        rebuild: sum(Safety::Rebuild),
+    })
+}
+
+/// Sizes of every app, biggest first. `each` hears about every app as soon as
+/// it is measured, so a list can fill in while the rest are still counted.
+pub fn all_apps(sites: &[Site], mut each: impl FnMut(&AppSize)) -> Vec<AppSize> {
+    let mut out: Vec<AppSize> = unique_apps(sites)
+        .into_iter()
+        .filter_map(app_size)
+        .inspect(|a| each(a))
         .collect();
     out.sort_by_key(|a| std::cmp::Reverse(a.total));
     out
+}
+
+/// Keep a measurement so the next look starts from it.
+pub fn save_app_sizes(sizes: &[AppSize]) {
+    let _ = std::fs::create_dir_all(home().join("cache"));
+    let _ = serde_json::to_vec(sizes).map(|j| std::fs::write(sizes_file(), j));
+}
+
+fn sizes_file() -> PathBuf {
+    home().join("cache").join("app-sizes.json")
+}
+
+/// The last measurement and when it was taken (Unix seconds), if any.
+pub fn last_app_sizes() -> Option<(u64, Vec<AppSize>)> {
+    let f = sizes_file();
+    let when = std::fs::metadata(&f)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some((when, serde_json::from_slice(&std::fs::read(f).ok()?).ok()?))
 }
 
 /// Delete the "safe" items (logs, caches) of every app. Returns bytes freed and
@@ -1383,7 +1412,7 @@ mod tests {
         let (_, items) = disk(&site);
         assert_eq!(safety(&items, ".venv"), Some(Safety::Rebuild));
         assert_eq!(safety(&items, "__pycache__"), Some(Safety::Safe));
-        assert!(all_apps(std::slice::from_ref(&site))[0].safe > 0);
+        assert!(all_apps(std::slice::from_ref(&site), |_| {})[0].safe > 0);
         let (freed, failed) = clean_all_safe(std::slice::from_ref(&site));
         assert!(freed > 0 && failed.is_empty());
         assert!(!site.path.join("__pycache__").exists());

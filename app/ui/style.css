@@ -181,6 +181,22 @@ button, select, input { font: inherit; color: inherit; }
 
 .list .rows + h2 { margin-top: 8px; }
 
+/* On the light sidebar a tinted band reads as a stripe; let the blur do the work. */
+@media (prefers-color-scheme: light) {
+  .list h2 { background: color-mix(in srgb, var(--steel-pane) 15%, transparent); }
+}
+
+.empty .empty-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+.empty .empty-actions button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  color: var(--text);
+}
+
 /* Inset grouped list: one container, hairlines that start at the text column. */
 .rows {
   border-radius: var(--radius-m);

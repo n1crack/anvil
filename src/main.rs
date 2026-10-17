@@ -542,7 +542,8 @@ fn main() -> Result<()> {
                     i.label
                 );
             }
-            let all = resources::all_apps(&sites(&cfg));
+            let all = resources::all_apps(&sites(&cfg), |_| {});
+            resources::save_app_sizes(&all);
             let sum = |f: fn(&resources::AppSize) -> u64| mb(all.iter().map(f).sum());
             println!(
                 "Applications: {} ({} safe to delete, {} rebuildable)",
