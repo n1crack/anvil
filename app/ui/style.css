@@ -1841,3 +1841,37 @@ kbd {
 .logs-menu { font-size: 16px; line-height: 1; }
 
 #ask-hint { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+
+/* One secondary button: every plain action in the app and service panes looks the
+   same. Primary (orange) buttons and the sheets' own buttons stay as they are. */
+.run-box button,
+.empty .empty-actions button,
+.env button,
+.svc-remove,
+.run-error .link,
+.logs-bar > button:not(.icon-btn),
+.logs-more,
+.logs-large-actions button,
+.res-cells .del,
+.clean-all,
+.svc-contents button.plain,
+.git-btn,
+.pkg-check {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  font-size: 13px;
+}
+
+.run-box button:hover,
+.env button:hover,
+.svc-remove:hover,
+.logs-more:hover,
+.logs-large-actions button:hover,
+.res-cells .del:hover,
+.clean-all:hover,
+.svc-contents button.plain:hover,
+.git-btn:hover,
+.pkg-check:hover { border-color: var(--cold); }
