@@ -641,21 +641,31 @@ fn process_run(
     name: Option<String>,
     action: String,
 ) -> Res<Overview> {
+    if name.as_deref().is_some_and(|n| !plain(n, false)) {
+        return Err(format!("Not a process: {name:?}"));
+    }
     let (cfg, s) = find_site_cfg(&site)?;
     if name.is_none() && anvil::apps::runs_process(&s.kind) {
         run_app(&app, &cfg, &s.name, &action);
         changed(&handle);
     }
-    for p in anvil::processes::detect_with(&s, Some(&cfg))
-        .into_iter()
-        .filter(|p| name.as_deref().is_none_or(|n| n == p.id))
-    {
-        let key = anvil::processes::key(&s.name, &p.id);
-        if action != "start" {
+    if action != "start" {
+        // By key, not detection: a row whose script was renamed or removed still stops.
+        let keys = match &name {
+            Some(n) => vec![anvil::processes::key(&s.name, n)],
+            None => app.apps.lock().unwrap().process_keys(&s.name),
+        };
+        for key in keys {
             app.apps.lock().unwrap().stop(&key);
             app.app_errors.lock().unwrap().remove(&key);
         }
-        if action != "stop" {
+    }
+    if action != "stop" {
+        for p in anvil::processes::detect_with(&s, Some(&cfg))
+            .into_iter()
+            .filter(|p| name.as_deref().is_none_or(|n| n == p.id))
+        {
+            let key = anvil::processes::key(&s.name, &p.id);
             let started = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld);
             if let Err(e) = started {
                 app.app_errors.lock().unwrap().insert(key, err(e));
@@ -1138,14 +1148,10 @@ fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) ->
 /// Unlinks linked names and hides parked folders. Never deletes files.
 #[tauri::command(async)]
 fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
-    // Its processes stop with it: afterwards nothing could reach them.
-    if let Ok(s) = find_site(&site) {
-        for p in anvil::processes::detect(&s) {
-            app.apps
-                .lock()
-                .unwrap()
-                .stop(&anvil::processes::key(&site, &p.id));
-        }
+    // Its processes and commands stop with it: afterwards nothing could reach them.
+    let keys = app.apps.lock().unwrap().process_keys(&site);
+    for key in keys {
+        app.apps.lock().unwrap().stop(&key);
     }
     let mut cfg = anvil::load().map_err(err)?;
     anvil::remove(&mut cfg, &site).map_err(err)?;

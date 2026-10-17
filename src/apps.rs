@@ -441,6 +441,20 @@ impl Apps {
             .collect()
     }
 
+    /// Every running or crashed process of `site`, `<site>@…` and `<site>#…`, whether
+    /// or not detection still lists it (a renamed script, an edited `.anvil.toml`).
+    pub fn process_keys(&self, site: &str) -> Vec<String> {
+        let mine = |k: &&String| {
+            k.strip_prefix(site)
+                .is_some_and(|rest| rest.starts_with(['@', '#']))
+        };
+        let mut keys: Vec<String> = self.children.keys().filter(mine).cloned().collect();
+        keys.extend(self.exits.keys().filter(mine).cloned());
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
     /// How a `run_once` command ended, once it has.
     pub fn finished(&mut self, key: &str) -> Option<Exit> {
         self.running(key);
@@ -886,6 +900,32 @@ mod tests {
         apps.stop("shop@boom");
         assert!(apps.crashed().is_empty());
         assert!(apps.list().is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn lists_every_process_of_a_site_detected_or_not() {
+        let dir = project(&[("keys/x", "")]);
+        let mut apps = Apps::in_home(dir.join("home"));
+        let site = site_at(&dir);
+        // Neither id is detected in `dir` (no package.json, no .anvil.toml).
+        apps.start_process(&site, &proc("gone", "sleep 30"), "test")
+            .unwrap();
+        apps.start_process(&site, &proc("boom", "exit 2"), "test")
+            .unwrap();
+        let mut other = site_at(&dir);
+        other.name = "shopping".into();
+        apps.start_process(&other, &proc("w", "sleep 30"), "test")
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(apps.process_keys("shop"), ["shop@boom", "shop@gone"]);
+        for k in apps.process_keys("shop") {
+            apps.stop(&k);
+        }
+        assert!(apps.process_keys("shop").is_empty());
+        assert!(apps.crashed().is_empty());
+        assert_eq!(apps.process_keys("shopping"), ["shopping@w"]);
+        apps.stop("shopping@w");
         fs::remove_dir_all(dir).unwrap();
     }
 
