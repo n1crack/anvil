@@ -13,7 +13,7 @@ pub struct Process {
     pub id: String,
     pub name: String,
     pub command: String,
-    /// Where it was found: `.anvil.toml`, `composer.json` or `package.json`.
+    /// Where it was found: `.anvil.toml`, `artisan dev`, `composer.json` or `package.json`.
     pub source: &'static str,
     /// A long-running dev server, as opposed to a one-off command.
     pub server: bool,
@@ -35,6 +35,14 @@ pub fn project_file_error(site: &Site) -> Option<String> {
 
 /// An app's processes: `.anvil.toml`'s by name, a dev script's in its order.
 pub fn detect(site: &Site) -> Vec<Process> {
+    let php = home()
+        .join("php")
+        .join(site.php.as_deref().unwrap_or_default())
+        .join("php");
+    detect_in(site, &php, &home().join("cache"))
+}
+
+fn detect_in(site: &Site, php: &Path, cache: &Path) -> Vec<Process> {
     let own = fs::read_to_string(site.path.join(".anvil.toml"))
         .ok()
         .and_then(|t| toml::from_str::<ProjectFile>(&t).ok());
@@ -55,6 +63,18 @@ pub fn detect(site: &Site) -> Vec<Process> {
     // Apps with their own server already run their dev command; only PHP apps get these.
     if !apps::is_php(&site.kind) {
         return vec![];
+    }
+    if let Some(list) = laravel_dev_commands_cached(&site.path, php, cache) {
+        return list
+            .into_iter()
+            .map(|(name, command)| Process {
+                id: process_id(&name),
+                name,
+                command,
+                source: "artisan dev",
+                server: false,
+            })
+            .collect();
     }
     let json = |file: &str| -> serde_json::Value {
         fs::read_to_string(site.path.join(file))
@@ -96,6 +116,103 @@ pub fn detect(site: &Site) -> Vec<Process> {
         }];
     }
     vec![]
+}
+
+const DEV_COMMANDS: &str = "vendor/laravel/framework/src/Illuminate/Foundation/DevCommands.php";
+
+/// What `composer run dev` / `php artisan dev` would start, asked of Laravel 13 itself
+/// (minus `server`, which Anvil already runs). `None` when it can't be asked.
+pub fn laravel_dev_commands(dir: &Path, php: &Path) -> Option<Vec<(String, String)>> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    if !dir.join(DEV_COMMANDS).is_file() {
+        return None;
+    }
+    let script = r#"require 'vendor/autoload.php'; $app = require 'bootstrap/app.php'; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); echo json_encode(array_map(fn($c) => ['name' => $c['name'], 'command' => $c['command']], \Illuminate\Foundation\DevCommands::commands()));"#;
+    let mut child = Command::new(php)
+        .args(["-r", script])
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        match child.try_wait().ok()? {
+            Some(s) => break s,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    };
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    if !status.success() {
+        return None;
+    }
+    let list: Vec<serde_json::Value> = serde_json::from_str(out.trim()).ok()?;
+    Some(
+        list.iter()
+            .filter_map(|c| Some((c["name"].as_str()?, c["command"].as_str()?)))
+            .filter(|(n, _)| *n != "server")
+            .map(|(n, c)| (n.to_string(), c.to_string()))
+            .collect(),
+    )
+}
+
+/// `laravel_dev_commands`, remembered until composer.lock or app/Providers changes
+/// (booting Laravel costs a few hundred ms).
+fn laravel_dev_commands_cached(
+    dir: &Path,
+    php: &Path,
+    cache: &Path,
+) -> Option<Vec<(String, String)>> {
+    use std::hash::{Hash, Hasher};
+    if !dir.join(DEV_COMMANDS).is_file() {
+        return None;
+    }
+    let mtime = |p: PathBuf| {
+        fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos() as u64)
+    };
+    let stamp = [
+        mtime(dir.join("composer.lock")),
+        mtime(dir.join("app/Providers")),
+    ];
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    dir.hash(&mut h);
+    let file = cache.join(format!("devcommands-{:x}.json", h.finish()));
+    #[derive(Serialize, Deserialize)]
+    struct Cached {
+        stamp: [u64; 2],
+        commands: Vec<(String, String)>,
+    }
+    if let Some(c) = fs::read_to_string(&file)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Cached>(&t).ok())
+        .filter(|c| c.stamp == stamp)
+    {
+        return Some(c.commands);
+    }
+    let commands = laravel_dev_commands(dir, php)?;
+    let _ = fs::create_dir_all(cache);
+    let _ = fs::write(
+        &file,
+        serde_json::to_string(&Cached {
+            stamp,
+            commands: commands.clone(),
+        })
+        .ok()?,
+    );
+    Some(commands)
 }
 
 /// A script name as an id: every char outside letters, digits, `-` and `_` becomes `-`.
@@ -513,5 +630,74 @@ mod tests {
         let p = detect(&site(&dir, "next"));
         assert_eq!((p.len(), p[0].source), (1, ".anvil.toml"));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A `php` that ignores its arguments and runs `body`, in its own temp dir.
+    fn fake_php(tag: &str, body: &str) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("anvil-lv-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("app/vendor/laravel/framework/src/Illuminate/Foundation"))
+            .unwrap();
+        fs::write(root.join("app").join(DEV_COMMANDS), "<?php").unwrap();
+        let php = root.join("php");
+        fs::write(&php, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
+        (root.join("app"), php)
+    }
+
+    const DEV_JSON: &str = r#"[{"name":"server","command":"php artisan serve"},{"name":"queue","command":"php artisan queue:listen --tries=1 --timeout=0"},{"name":"logs","command":"php artisan pail --timeout=0"},{"name":"vite","command":"pnpm run dev"}]"#;
+
+    #[test]
+    fn laravel_list_drops_server() {
+        let (dir, php) = fake_php("ok", &format!("echo '{DEV_JSON}'"));
+        let want: Vec<(String, String)> = vec![
+            (
+                "queue".into(),
+                "php artisan queue:listen --tries=1 --timeout=0".into(),
+            ),
+            ("logs".into(), "php artisan pail --timeout=0".into()),
+            ("vite".into(), "pnpm run dev".into()),
+        ];
+        assert_eq!(laravel_dev_commands(&dir, &php), Some(want.clone()));
+        // Cached: a second ask doesn't need PHP, and detect uses it as the second source.
+        let cache = dir.parent().unwrap().join("cache");
+        let mut s = site(&dir, "laravel");
+        s.php = Some("8.4".into());
+        let names = |s: &Site| detect_in(s, &php, &cache);
+        let p = names(&s);
+        assert_eq!(
+            p.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["queue", "logs", "vite"]
+        );
+        assert_eq!(
+            (p[0].source, p[0].server, p[0].id.as_str()),
+            ("artisan dev", false, "queue")
+        );
+        fs::write(&php, "#!/bin/sh\nexit 1\n").unwrap();
+        assert_eq!(laravel_dev_commands_cached(&dir, &php, &cache), Some(want));
+        // .anvil.toml still comes first.
+        fs::write(dir.join(".anvil.toml"), "[processes]\nw = \"x\"\n").unwrap();
+        assert_eq!(detect_in(&s, &php, &cache)[0].source, ".anvil.toml");
+        fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn laravel_list_falls_back() {
+        let (dir, php) = fake_php("bad", "exit 1");
+        assert_eq!(laravel_dev_commands(&dir, &php), None);
+        fs::write(&php, "#!/bin/sh\necho not json\n").unwrap();
+        assert_eq!(laravel_dev_commands(&dir, &php), None);
+        fs::write(&php, "#!/bin/sh\nexec sleep 10\n").unwrap();
+        let t = std::time::Instant::now();
+        assert_eq!(laravel_dev_commands(&dir, &php), None);
+        assert!(t.elapsed().as_secs() < 6);
+        // No DevCommands.php: PHP isn't run at all.
+        let marker = dir.parent().unwrap().join("ran");
+        fs::write(&php, format!("#!/bin/sh\ntouch {}\n", marker.display())).unwrap();
+        fs::remove_file(dir.join(DEV_COMMANDS)).unwrap();
+        assert_eq!(laravel_dev_commands(&dir, &php), None);
+        assert!(!marker.exists());
+        fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 }
