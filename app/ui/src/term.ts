@@ -1,4 +1,3 @@
-
 /* Terminal output, shared by the main window's console and the Processes window. */
 
 /** Terminal output as a terminal would leave it: progress bars redraw a line with \r
@@ -6,7 +5,12 @@
  * bold) stay for `ansi` to draw. */
 export function clean(text, colors = false) {
   return text
-    .replace(colors ? /\x1b\[(?![0-9;]*m)[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g : /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, "")
+    .replace(
+      colors
+        ? /\x1b\[(?![0-9;]*m)[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g
+        : /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g,
+      "",
+    )
     .split("\n")
     .map((l) => {
       l = l.slice(l.lastIndexOf("\r", l.length - 2) + 1).replace(/\r$/, "");

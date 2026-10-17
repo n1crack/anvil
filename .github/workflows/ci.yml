@@ -32,14 +32,23 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
+      # The app crate embeds app/ui/dist, so the UI is built before clippy and tests.
+      - name: UI (types, lint, format, tests, build)
+        working-directory: app/ui
+        run: |
+          npm install --global pnpm@12.14.0
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm lint
+          pnpm fmt:check
+          pnpm test
+          pnpm build
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
         run: cargo test --workspace --locked
-
-      - name: Check UI scripts
-        run: for f in app/ui/*.js; do node --check "$f"; done
 
       # The version lives only in Cargo.toml; the app bundle inherits it when
       # tauri.conf.json has no "version" field.

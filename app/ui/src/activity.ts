@@ -66,7 +66,8 @@ export function appHead(a) {
   const tr = head("", "act-app");
   const open = !folded.has(a.site);
   tr.setAttribute("aria-expanded", String(open));
-  (tr.firstChild as HTMLElement).innerHTML = `<span class="chevron" aria-hidden="true">›</span><span class="act-site"></span><span class="act-count"></span>`;
+  (tr.firstChild as HTMLElement).innerHTML =
+    `<span class="chevron" aria-hidden="true">›</span><span class="act-site"></span><span class="act-count"></span>`;
   $(".act-site", tr).textContent = a.site;
   $(".act-count", tr).textContent = open ? "" : a.rows.length;
   tr.onclick = () => {
@@ -122,7 +123,9 @@ export async function rowMenu(r) {
   }
   if (r.web && r.state === "running") {
     if (items.length) items.push(M.PredefinedMenuItem.new({ item: "Separator" }));
-    items.push(M.MenuItem.new({ text: "Open in Browser", action: () => invoke("open_url", { url: r.web }).catch((e) => showError(String(e))) }));
+    items.push(
+      M.MenuItem.new({ text: "Open in Browser", action: () => invoke("open_url", { url: r.web }).catch((e) => showError(String(e))) }),
+    );
   }
   if (items.length) (await M.Menu.new({ items: await Promise.all(items) })).popup();
 }
@@ -157,14 +160,7 @@ export function row(r, inner?: boolean) {
     d.textContent = r.detail;
     st.append(" ", d);
   }
-  tr.append(
-    name,
-    td(r.pid),
-    td(r.port),
-    td(r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`),
-    td(r.memory == null ? "" : mb(r.memory)),
-    st,
-  );
+  tr.append(name, td(r.pid), td(r.port), td(r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`), td(r.memory == null ? "" : mb(r.memory)), st);
   return tr;
 }
 

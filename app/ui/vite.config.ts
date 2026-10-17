@@ -18,5 +18,11 @@ export default defineConfig({
     },
   },
   test: { environment: "happy-dom", include: ["test/**/*.test.ts"] },
-  lint: { ignorePatterns: ["dist/**"] },
+  // Only the code is formatted; the HTML and CSS keep their hand layout.
+  fmt: { printWidth: 140, ignorePatterns: ["dist/**", "pnpm-lock.yaml", "*.html", "*.css"] },
+  lint: {
+    ignorePatterns: ["dist/**"],
+    // Terminal output is made of control characters: matching them is the point.
+    overrides: [{ files: ["src/term.ts"], rules: { "no-control-regex": "off" } }],
+  },
 });

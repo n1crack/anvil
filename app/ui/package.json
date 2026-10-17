@@ -2,11 +2,13 @@
   "name": "anvil-ui",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.14.0",
   "scripts": {
     "dev": "vp dev",
     "build": "vp build",
     "check": "vp check",
+    "lint": "vp lint",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check",
     "test": "vp test run",
     "typecheck": "tsc --noEmit"
   },
@@ -14,5 +16,6 @@
     "happy-dom": "^21.0.3",
     "typescript": "^7.0.2",
     "vite-plus": "^1.3.0"
-  }
+  },
+  "packageManager": "pnpm@12.14.0"
 }

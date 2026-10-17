@@ -1,4 +1,4 @@
-import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, open, select, selected, showError, showTab, snap, tab, tilde, toast } from "./app";
+import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, selected, showError, showTab, snap, tab, tilde, toast } from "./app";
 
 /* Logs tab: an app's log files, newest first. app.js calls logsTab() from showTab. */
 
@@ -11,9 +11,13 @@ export const LEVELS = [
 ];
 export const STEP = 500; // rows added to the page at a time
 export const levelGroup = (l) =>
-  ["emergency", "alert", "critical", "error", "fatal"].includes(l) ? "error"
-    : l === "warning" || l === "warn" ? "warning"
-      : l === "debug" ? "debug" : "info";
+  ["emergency", "alert", "critical", "error", "fatal"].includes(l)
+    ? "error"
+    : l === "warning" || l === "warn"
+      ? "warning"
+      : l === "debug"
+        ? "debug"
+        : "info";
 
 export const logSource = new Map<string, string>(); // site name -> chosen source id
 // An app's own output reads top to bottom like a terminal; log files show the newest first.
@@ -173,9 +177,13 @@ export function showLarge(v) {
   const box = el("li", "logs-large");
   box.append(
     el("strong", null, `${v.source.label} is ${bytes(v.source.bytes)}`),
-    el("p", "muted", v.site && v.source.label.endsWith(".log")
-      ? "A log this big slows searches and fills the disk. Laravel keeps adding to a single file unless LOG_STACK=daily (or LOG_CHANNEL=daily) is set, which keeps one file per day."
-      : "A log this big slows searches and fills the disk."),
+    el(
+      "p",
+      "muted",
+      v.site && v.source.label.endsWith(".log")
+        ? "A log this big slows searches and fills the disk. Laravel keeps adding to a single file unless LOG_STACK=daily (or LOG_CHANNEL=daily) is set, which keeps one file per day."
+        : "A log this big slows searches and fills the disk.",
+    ),
   );
   const actions = el("div", "logs-large-actions");
   const show = el("button", null, "Show Latest Entries");
@@ -285,9 +293,12 @@ export function showMore(v) {
   }
   v.shown += next.length;
   if (!v.entries.length) {
-    showEmpty(v, filtered(v)
-      ? `Nothing matches${v.page.truncated ? ` in the newest ${bytes(v.page.end_offset - v.page.start_offset)}` : ""}.`
-      : "This log is empty.");
+    showEmpty(
+      v,
+      filtered(v)
+        ? `Nothing matches${v.page.truncated ? ` in the newest ${bytes(v.page.end_offset - v.page.start_offset)}` : ""}.`
+        : "This log is empty.",
+    );
   } else {
     status(v);
   }
@@ -310,7 +321,7 @@ export function entryRow(v, e) {
   const head = el("button", "log-head");
   head.setAttribute("aria-expanded", "false");
   const d = logTime(e.time);
-  const time = el("span", "log-time", d ? ago(d) : e.time ?? "");
+  const time = el("span", "log-time", d ? ago(d) : (e.time ?? ""));
   if (d) time.title = d.toLocaleString();
   const badge = el("span", "log-level", e.level);
   const msg = el("span", "log-msg", e.message.split("\n", 1)[0] || "(empty)");
@@ -378,9 +389,11 @@ export async function followTick() {
   v.tailFrom = page.end_offset;
   v.source.bytes = page.end_offset;
   const q = v.query.toLowerCase();
-  const fresh = page.entries.filter((e) =>
-    (v.level === "all" || levelGroup(e.level) === v.level) &&
-    (!q || [e.message, e.context ?? "", ...e.trace].join("\n").toLowerCase().includes(q)));
+  const fresh = page.entries.filter(
+    (e) =>
+      (v.level === "all" || levelGroup(e.level) === v.level) &&
+      (!q || [e.message, e.context ?? "", ...e.trace].join("\n").toLowerCase().includes(q)),
+  );
   if (!fresh.length) return;
   const list = $(".logs-list", v.node);
   if (!v.entries.length) list.replaceChildren();

@@ -1,8 +1,6 @@
 import type { Overview } from "./types";
 import { ansi, clean } from "./term";
-import { $, M, call, el, invoke, mode, open, popAt, renderSite, row, selected, showError, snap, tab } from "./app";
-import { more } from "./logs";
-import { services } from "./services";
+import { $, M, call, el, invoke, mode, popAt, renderSite, selected, showError, snap, tab } from "./app";
 
 /* Processes: an app's own server (or the site Anvil serves), queue worker, log tailer,
  * extra dev servers, one-off commands and Docker Compose containers, first in the
@@ -223,8 +221,15 @@ export function confirmPop(anchor, text, label, onYes) {
   const no = el("button", null, "Cancel");
   pop.append(el("span", null, text), no, yes);
   const close = popAt(anchor, pop, yes);
-  yes.onclick = (e) => { e.stopPropagation(); close(); onYes(); };
-  no.onclick = (e) => { e.stopPropagation(); close(); };
+  yes.onclick = (e) => {
+    e.stopPropagation();
+    close();
+    onYes();
+  };
+  no.onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
 }
 
 /** One package.json command: name, script, then the pin (on hover) and ▶, then how the
@@ -303,7 +308,9 @@ export function drawRunBox(name, rows, containers) {
   stop.onclick = () => all("stop");
   // Hover the state: which run (and which crashed), with their address or command.
   const shown = [
-    ...own.filter((r) => r.running || r.crashed).map((r) => [r.running ? "on" : "bad", r.name, r.address ?? (r.port ? `:${r.port}` : r.command)]),
+    ...own
+      .filter((r) => r.running || r.crashed)
+      .map((r) => [r.running ? "on" : "bad", r.name, r.address ?? (r.port ? `:${r.port}` : r.command)]),
     ...containers.filter(up).map((c) => ["on", c.service, "container"]),
   ];
   const state = $(".state", box);
@@ -362,20 +369,30 @@ export function drawProcs(name) {
       const editing = procEdit?.site === name && procEdit.id === r.id;
       const edit = editing ? editField(name, r) : null;
       if (edit) focus = $("input", edit);
-      list.append(procRow({
-        name: r.name,
-        state: r.running ? "running" : r.crashed ? "crashed" : "stopped",
-        detail: exit ?? where ?? r.command,
-        error: r.error,
-        title: site ? (r.running ? "Served by Anvil" : "Start Anvil to serve it") : `${r.command}\nFrom ${r.source}. Click to show its output.`,
-        open: site ? null : () => openConsole(name, r.main ? "app" : `proc:${r.id}`, r.command || r.name),
-        run: site ? null : r.main ? (action) => call("app_run", { site: name, action }) : (action) => loadProcs(name, "process_run", { name: r.id, action }),
-        top: r.top && !r.main,
-        auto: r.autostart,
-        web: r.web,
-        menu: site ? null : (btn) => procMenu(name, r, btn),
-        edit,
-      }));
+      list.append(
+        procRow({
+          name: r.name,
+          state: r.running ? "running" : r.crashed ? "crashed" : "stopped",
+          detail: exit ?? where ?? r.command,
+          error: r.error,
+          title: site
+            ? r.running
+              ? "Served by Anvil"
+              : "Start Anvil to serve it"
+            : `${r.command}\nFrom ${r.source}. Click to show its output.`,
+          open: site ? null : () => openConsole(name, r.main ? "app" : `proc:${r.id}`, r.command || r.name),
+          run: site
+            ? null
+            : r.main
+              ? (action) => call("app_run", { site: name, action })
+              : (action) => loadProcs(name, "process_run", { name: r.id, action }),
+          top: r.top && !r.main,
+          auto: r.autostart,
+          web: r.web,
+          menu: site ? null : (btn) => procMenu(name, r, btn),
+          edit,
+        }),
+      );
     }
     box.append(list);
   }
@@ -391,15 +408,17 @@ export function drawProcs(name) {
       const up = (c) => c.state === "running";
       for (const c of containers) {
         const key = `${name}/${c.service}`;
-        list.append(procRow({
-          name: c.service,
-          state: up(c) ? "running" : "stopped",
-          detail: [...c.ports.map((p) => `:${p}`), c.health ?? c.state].join(" · "),
-          title: "Click to show its log",
-          busy: procBusy.get(key),
-          open: () => toggleContainerLog(name, c.service),
-          run: (action) => containerRun(name, [c.service], action, c.service),
-        }));
+        list.append(
+          procRow({
+            name: c.service,
+            state: up(c) ? "running" : "stopped",
+            detail: [...c.ports.map((p) => `:${p}`), c.health ?? c.state].join(" · "),
+            title: "Click to show its log",
+            busy: procBusy.get(key),
+            open: () => toggleContainerLog(name, c.service),
+            run: (action) => containerRun(name, [c.service], action, c.service),
+          }),
+        );
         if (procLogs.has(key)) list.append(el("pre", "proc-log", procLogs.get(key)));
       }
       box.append(list);
@@ -478,7 +497,11 @@ export function drawConsole(name) {
     const stop = {
       app: () => call("app_run", { site: name, action: "stop" }),
       proc: () => loadProcs(name, "process_run", { name: id, action: "stop" }),
-      once: () => invoke("once_stop", { site: name, id }).then(() => loadProcs(name), (e) => showError(String(e))),
+      once: () =>
+        invoke("once_stop", { site: name, id }).then(
+          () => loadProcs(name),
+          (e) => showError(String(e)),
+        ),
     }[kind];
     actions.append(procBtn("■ Stop", `Stop ${con.label}`, stop));
   } else if (chip) {

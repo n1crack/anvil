@@ -1,5 +1,25 @@
 import type { ServiceRow } from "./types";
-import { $, appIconInto, listSection, resCache, bytes, el, filter, filterNote, filterOf, invoke, mark, markBox, mode, open, renderMain, row, select, selected, setMode, showError, snap, toast } from "./app";
+import {
+  $,
+  appIconInto,
+  listSection,
+  resCache,
+  bytes,
+  el,
+  filter,
+  filterNote,
+  filterOf,
+  invoke,
+  markBox,
+  mode,
+  renderMain,
+  select,
+  selected,
+  setMode,
+  showError,
+  snap,
+  toast,
+} from "./app";
 import { late } from "./late";
 
 /* Services in the main window: list in the sidebar, details on the right, and
@@ -17,7 +37,11 @@ export async function serviceCall(cmd: string, args?: Record<string, unknown>) {
     showError(String(e));
   }
   if (mode === "services") renderMain();
-  else if (selected) window.renderSiteServices(snap?.sites.find((s) => s.name === selected), $("#site"));
+  else if (selected)
+    window.renderSiteServices(
+      snap?.sites.find((s) => s.name === selected),
+      $("#site"),
+    );
   renderModes();
 }
 
@@ -39,7 +63,6 @@ window.renderSiteServices = (s, root) => {
 };
 
 window.loadServices = () => serviceCall("services");
-
 
 export function renderModes() {
   for (const b of document.querySelectorAll<HTMLElement>(".modes [role=tab]")) {
@@ -95,7 +118,7 @@ export function renderServiceList() {
     (!f.running || x.running) &&
     (!q || [x.id, x.name, x.version, x.port, ...x.tags, ...x.apps].join(" ").toLowerCase().includes(q));
   let count = 0;
-  for (const cat of [...new Set(services.map((x) => x.category))]) {
+  for (const cat of new Set(services.map((x) => x.category))) {
     const rows = services.filter((x) => x.category === cat && hit(x)).map(serviceRow);
     if (!rows.length) continue;
     count += rows.length;
@@ -152,7 +175,11 @@ export function renderService() {
     add.onclick = openAddService;
     box.append(
       el("h1", null, "No services yet"),
-      el("p", "muted", "Add MySQL, PostgreSQL, Redis or Mailpit. Each one gets its own name, port and data, and you can add as many as you need."),
+      el(
+        "p",
+        "muted",
+        "Add MySQL, PostgreSQL, Redis or Mailpit. Each one gets its own name, port and data, and you can add as many as you need.",
+      ),
       add,
     );
     root.replaceChildren(box);
@@ -189,8 +216,7 @@ export function renderService() {
   appIconInto(data, "Finder");
   inbox.onclick = () => invoke("open_url", { url: svc.web }).catch((e) => showError(String(e)));
   for (const what of ["data", "log"]) {
-    $(`[data-svc-open="${what}"]`, root).onclick = () =>
-      invoke("open_service", { id: svc.id, what }).catch((e) => showError(String(e)));
+    $(`[data-svc-open="${what}"]`, root).onclick = () => invoke("open_service", { id: svc.id, what }).catch((e) => showError(String(e)));
   }
   loadServiceLog(svc.id);
 
@@ -220,7 +246,12 @@ export function renderService() {
   const appChips = svc.apps.map((a) => ({
     text: known.has(a) ? `${a}.${snap.tld}` : `${a} (gone)`,
     value: a,
-    onclick: known.has(a) ? () => { setMode("apps"); select(a); } : null,
+    onclick: known.has(a)
+      ? () => {
+          setMode("apps");
+          select(a);
+        }
+      : null,
   }));
   const saveApps = (apps) => serviceCall("set_service_apps", { id: svc.id, apps });
   const appsBox = chips($(".svc-apps", root), appChips, "application", saveApps);
@@ -242,7 +273,10 @@ export function renderService() {
   tagInput.onkeydown = (e) => {
     if (e.key !== "Enter" || !tagInput.value.trim()) return;
     e.preventDefault();
-    const add = tagInput.value.split(",").map((t) => t.trim()).filter(Boolean);
+    const add = tagInput.value
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
     tagInput.blur();
     saveTags([...svc.tags, ...add]);
   };
@@ -406,9 +440,7 @@ export function fillService() {
   const port = $("#svc-port");
   port.value = k.suggested_port;
   // Say why it isn't the usual port, as the next free one was picked.
-  $("#svc-port-note").textContent = k.suggested_port === k.default_port
-    ? ""
-    : `Suggested: the usual port ${k.default_port} is in use`;
+  $("#svc-port-note").textContent = k.suggested_port === k.default_port ? "" : `Suggested: the usual port ${k.default_port} is in use`;
   noteService();
   $("#svc-error").hidden = true;
 }
@@ -512,9 +544,7 @@ export async function renderContents(svc, root, action?) {
   if (cached && !action) drawContents(svc, root, cached);
   else if (!cached) box.replaceChildren(el("p", "procs-note", "Looking inside…"));
   try {
-    const c = action
-      ? await invoke("service_data", action)
-      : await invoke("service_contents", { id: svc.id });
+    const c = action ? await invoke("service_data", action) : await invoke("service_contents", { id: svc.id });
     contents.set(svc.id, c);
     if (root.dataset.service === svc.id) drawContents(svc, root, c);
   } catch (e) {
@@ -556,10 +586,16 @@ export function drawContents(svc, root, c) {
     for (const [name, size] of c.databases.filter(([n]) => !SYSTEM_DBS.has(n))) {
       const buttons: any[] = [];
       if (svc.clients[0]) buttons.push(act("Open", () => openClient(svc, svc.clients[0], name)));
-      buttons.push(act("Drop…", async () => {
-        if (await confirm(`Drop ${name}?`, `Every table in ${name} is deleted. This can’t be undone.`, "Drop"))
-          renderContents(svc, root, { id: svc.id, action: "drop", name });
-      }, "danger hover-only"));
+      buttons.push(
+        act(
+          "Drop…",
+          async () => {
+            if (await confirm(`Drop ${name}?`, `Every table in ${name} is deleted. This can’t be undone.`, "Drop"))
+              renderContents(svc, root, { id: svc.id, action: "drop", name });
+          },
+          "danger hover-only",
+        ),
+      );
       line(name, bytes(size), ...buttons);
     }
     // The server's own databases: one quiet line instead of a row each.
@@ -589,18 +625,31 @@ export function drawContents(svc, root, c) {
     for (const [db, keys] of c.keys) line(db, `${keys} ${keys === 1 ? "key" : "keys"}`);
     const mem = line("Memory", c.memory ?? "–");
     if (c.keys.length) {
-      mem.lastChild.append(act("Flush All…", async () => {
-        if (await confirm(`Flush ${svc.id}?`, "Every key in every database is deleted.", "Flush"))
-          renderContents(svc, root, { id: svc.id, action: "empty" });
-      }, "danger"));
+      mem.lastChild.append(
+        act(
+          "Flush All…",
+          async () => {
+            if (await confirm(`Flush ${svc.id}?`, "Every key in every database is deleted.", "Flush"))
+              renderContents(svc, root, { id: svc.id, action: "empty" });
+          },
+          "danger",
+        ),
+      );
     }
   } else {
     const n = c.messages ?? 0;
     const buttons = [act("Open inbox", () => invoke("open_url", { url: svc.web }))];
-    if (n) buttons.push(act("Delete All…", async () => {
-      if (await confirm(`Delete ${n} messages?`, `Every message caught by ${svc.id} is deleted.`, "Delete"))
-        renderContents(svc, root, { id: svc.id, action: "empty" });
-    }, "danger"));
+    if (n)
+      buttons.push(
+        act(
+          "Delete All…",
+          async () => {
+            if (await confirm(`Delete ${n} messages?`, `Every message caught by ${svc.id} is deleted.`, "Delete"))
+              renderContents(svc, root, { id: svc.id, action: "empty" });
+          },
+          "danger",
+        ),
+      );
     line(n === 1 ? "1 message" : `${n} messages`, null, ...buttons);
   }
   box.replaceChildren(list);

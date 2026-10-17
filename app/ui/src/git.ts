@@ -1,4 +1,4 @@
-import { $, drawMeta, el, invoke, mode, open, renderSite, row, selected, showError, showTab, snap, tab } from "./app";
+import { $, drawMeta, el, invoke, mode, open, renderSite, selected, showError, showTab, snap, tab } from "./app";
 import { late } from "./late";
 
 // Git: a button for the git app and a Git group in the Overview.
@@ -21,7 +21,14 @@ export async function loadGit(name) {
 export function commitAgo(secs) {
   const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
   const d = secs - Date.now() / 1000;
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [["year", 31536000], ["month", 2592000], ["week", 604800], ["day", 86400], ["hour", 3600], ["minute", 60]];
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["year", 31536000],
+    ["month", 2592000],
+    ["week", 604800],
+    ["day", 86400],
+    ["hour", 3600],
+    ["minute", 60],
+  ];
   for (const [unit, n] of units) {
     if (Math.abs(d) >= n) return rtf.format(Math.round(d / n), unit);
   }

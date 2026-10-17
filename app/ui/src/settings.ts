@@ -66,9 +66,15 @@ export function renderRuntimes() {
       x.title = `Uninstall ${rt.name} ${v}`;
       x.setAttribute("aria-label", String(x.title));
       x.onclick = async () => {
-        const ok = await window.__TAURI__.dialog.ask(`Applications using it switch to another installed version, or stop starting until one is installed.`, {
-          title: `Uninstall ${rt.name} ${v}?`, kind: "warning", okLabel: "Uninstall", cancelLabel: "Cancel",
-        });
+        const ok = await window.__TAURI__.dialog.ask(
+          `Applications using it switch to another installed version, or stop starting until one is installed.`,
+          {
+            title: `Uninstall ${rt.name} ${v}?`,
+            kind: "warning",
+            okLabel: "Uninstall",
+            cancelLabel: "Cancel",
+          },
+        );
         if (!ok) return;
         try {
           await invoke("runtime_uninstall", { id: rt.id, version: v });
@@ -154,8 +160,13 @@ export async function loadAnvilStorage() {
   box.replaceChildren();
   // One group per kind of thing, in this order; sizes add up per group.
   const groups = [
-    ["PHP", "PHP"], ["Languages", "Languages"], ["Services", "Service programs"], ["Data", "Service data"],
-    ["Anvil", "Web server"], ["Cache", "Caches"], ["Logs", "Logs"],
+    ["PHP", "PHP"],
+    ["Languages", "Languages"],
+    ["Services", "Service programs"],
+    ["Data", "Service data"],
+    ["Anvil", "Web server"],
+    ["Cache", "Caches"],
+    ["Logs", "Logs"],
   ];
   // Anything in a category not listed above still shows, last.
   const known = new Set(groups.map(([cat]) => cat));
@@ -201,15 +212,17 @@ export function drawAnvilItem(list, i, withNote) {
   size.style.color = sizeColor(i.bytes);
   actions.append(size);
   if (i.safety === "safe") {
-    actions.append(button("Delete", async () => {
-      if (!(await confirmDelete(`Delete ${i.label}?`, `${i.note}. This frees about ${bytes(i.bytes)}.`))) return;
-      try {
-        await invoke("clean_anvil", { path: i.path });
-      } catch (e) {
-        showError(String(e));
-      }
-      loadAnvilStorage();
-    }));
+    actions.append(
+      button("Delete", async () => {
+        if (!(await confirmDelete(`Delete ${i.label}?`, `${i.note}. This frees about ${bytes(i.bytes)}.`))) return;
+        try {
+          await invoke("clean_anvil", { path: i.path });
+        } catch (e) {
+          showError(String(e));
+        }
+        loadAnvilStorage();
+      }),
+    );
   }
   row.append(info, actions);
   list.append(row);
@@ -253,7 +266,7 @@ export async function scanApps() {
   try {
     await invoke("storage_apps");
     // Apps that are gone since the last measurement drop out.
-    for (const name of [...sizes.keys()]) if (!fresh.has(name)) sizes.delete(name);
+    for (const name of sizes.keys()) if (!fresh.has(name)) sizes.delete(name);
     measuredAt = Date.now() / 1000;
   } catch (e) {
     showError(String(e));
@@ -345,10 +358,13 @@ export function render() {
       row.className = "row";
       const label = document.createElement("span");
       label.textContent = name;
-      row.append(label, button("Show", async () => {
-        await invoke("unhide_site", { site: name }).catch((e) => showError(String(e)));
-        call("settings");
-      }));
+      row.append(
+        label,
+        button("Show", async () => {
+          await invoke("unhide_site", { site: name }).catch((e) => showError(String(e)));
+          call("settings");
+        }),
+      );
       return row;
     }),
   );
@@ -371,11 +387,21 @@ export function render() {
   $("#dock").checked = s.dock_icon;
   $("#theme").value = s.theme ?? "";
   options($("#editor"), s.editors, s.editor, "None");
-  options($("#terminal"), s.terminals.filter((t) => t !== "Terminal"), s.terminal, "Terminal");
+  options(
+    $("#terminal"),
+    s.terminals.filter((t) => t !== "Terminal"),
+    s.terminal,
+    "Terminal",
+  );
   const git = $("#git-client");
   options(git, s.git_clients, s.git_client, s.git_clients.length ? `Automatic (${s.git_clients[0]})` : "None installed");
   // A picked app is stored by path; show its name.
-  for (const o of git.options) if (o.value.includes("/")) o.text = o.value.split("/").pop().replace(/\.app$/, "");
+  for (const o of git.options)
+    if (o.value.includes("/"))
+      o.text = o.value
+        .split("/")
+        .pop()
+        .replace(/\.app$/, "");
   git.add(new Option("Other app…", "other"));
 
   // The address a new application gets.
@@ -387,9 +413,10 @@ export function render() {
   tld.replaceChildren(new Option(".test", "test"), new Option(".localhost (no password needed)", "localhost"));
   if (!["test", "localhost"].includes(s.tld)) tld.add(new Option(`.${s.tld}`, s.tld));
   tld.value = s.tld;
-  $("#tld-note").textContent = s.tld === "localhost"
-    ? "Reaches this Mac by itself, no setup."
-    : "Reaches Anvil through a resolver file, set up once with your password.";
+  $("#tld-note").textContent =
+    s.tld === "localhost"
+      ? "Reaches this Mac by itself, no setup."
+      : "Reaches Anvil through a resolver file, set up once with your password.";
   tld.onchange = () => call("set_tld", { tld: tld.value });
   $("#ports").textContent = `HTTP on ${s.http_port}${s.tld === "localhost" ? "" : `, DNS on ${s.dns_port}`}. Change them in config.toml.`;
   $("#config-dir").textContent = tilde(s.config_dir);
@@ -414,17 +441,22 @@ export function render() {
         button("Make default", () => call("set_default_php", { version: v.version })),
         button("Uninstall", async () => {
           const ok = await window.__TAURI__.dialog.ask("Applications pinned to it fall back to the default PHP version.", {
-            title: `Uninstall PHP ${v.version}?`, kind: "warning", okLabel: "Uninstall", cancelLabel: "Cancel",
+            title: `Uninstall PHP ${v.version}?`,
+            kind: "warning",
+            okLabel: "Uninstall",
+            cancelLabel: "Cancel",
           });
           if (ok) call("php_uninstall", { version: v.version });
         }),
       );
     } else {
-      actions.append(button("Install", async (b) => {
-        b.disabled = true;
-        b.textContent = "Installing…";
-        await call("php_install", { version: v.version });
-      }));
+      actions.append(
+        button("Install", async (b) => {
+          b.disabled = true;
+          b.textContent = "Installing…";
+          await call("php_install", { version: v.version });
+        }),
+      );
     }
     row.append(label, actions);
     versions.append(row);
@@ -455,7 +487,11 @@ $("#terminal").onchange = (e) => call("set_terminal", { terminal: e.target.value
 $("#git-client").onchange = async (e) => {
   let app = e.target.value || null;
   if (app === "other") {
-    app = await window.__TAURI__.dialog.open({ title: "Choose the app that opens your repositories", defaultPath: "/Applications", filters: [{ name: "Apps", extensions: ["app"] }] });
+    app = await window.__TAURI__.dialog.open({
+      title: "Choose the app that opens your repositories",
+      defaultPath: "/Applications",
+      filters: [{ name: "Apps", extensions: ["app"] }],
+    });
     if (!app) return render();
   }
   call("set_git_client", { gitClient: app });
@@ -478,7 +514,8 @@ for (const input of document.querySelectorAll<HTMLInputElement>("[data-ini]")) {
 // Storage: Anvil's own files or the applications', one at a time.
 export function showStorage(which) {
   localStorage.setItem("storageTab", which);
-  for (const b of document.querySelectorAll<HTMLElement>("[data-storage]")) b.setAttribute("aria-selected", String(b.dataset.storage === which));
+  for (const b of document.querySelectorAll<HTMLElement>("[data-storage]"))
+    b.setAttribute("aria-selected", String(b.dataset.storage === which));
   for (const p of document.querySelectorAll<HTMLElement>("[data-storage-panel]")) p.hidden = p.dataset.storagePanel !== which;
 }
 for (const b of document.querySelectorAll<HTMLElement>("[data-storage]")) b.onclick = () => showStorage(b.dataset.storage);

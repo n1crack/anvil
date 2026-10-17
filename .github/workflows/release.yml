@@ -52,6 +52,13 @@ jobs:
       - name: Install the Tauri CLI
         run: cargo install tauri-cli --version '^2' --locked
 
+      # `cargo tauri build` builds the UI first (beforeBuildCommand: pnpm build in app/ui).
+      - name: Install the UI's dependencies
+        working-directory: app/ui
+        run: |
+          npm install --global pnpm@12.14.0
+          pnpm install --frozen-lockfile
+
       # One universal .dmg runs natively on Apple Silicon and Intel, so there is
       # no wrong download to pick. Signing and notarization only happen when the
       # secrets exist: the Tauri bundler treats a variable that is set but empty

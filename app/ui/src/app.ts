@@ -93,7 +93,8 @@ export async function loadSetup(busy?: string) {
   if (machine) {
     const b = el("button", "setup-go", busy === "all" ? "Setting up…" : "Set up Anvil");
     if (busy === "all") b.prepend(el("span", "spin-dot"));
-    b.title = "Local .test domains, ports 80 and 443, the HTTPS certificate and php, composer, laravel and node in your terminal. Asks for your password once.";
+    b.title =
+      "Local .test domains, ports 80 and 443, the HTTPS certificate and php, composer, laravel and node in your terminal. Asks for your password once.";
     b.disabled = !!busy;
     b.onclick = async () => {
       loadSetup("all");
@@ -166,7 +167,14 @@ export function mark(s) {
     img.onload = () => m.replaceChildren(img);
   };
   if (icons.has(s.name)) show(icons.get(s.name));
-  else invoke("icon", { site: s.name }).then((src) => { icons.set(s.name, src); show(src); }, () => icons.set(s.name, null));
+  else
+    invoke("icon", { site: s.name }).then(
+      (src) => {
+        icons.set(s.name, src);
+        show(src);
+      },
+      () => icons.set(s.name, null),
+    );
   return m;
 }
 
@@ -349,8 +357,10 @@ export function showCard(s, row) {
     if (serves(s)) lines.push(el("span", "hc-addr", url(s).replace("https://", "")));
     const o = cardProcs.get(s.name)?.data;
     const up = o
-      ? [...(o.rows ?? []).filter((r) => r.kind !== "site" && r.running).map((r) => r.name),
-         ...(o.containers ?? []).filter((c) => c.state === "running").map((c) => c.service)]
+      ? [
+          ...(o.rows ?? []).filter((r) => r.kind !== "site" && r.running).map((r) => r.name),
+          ...(o.containers ?? []).filter((c) => c.state === "running").map((c) => c.service),
+        ]
       : [];
     const state = snap.app_states[s.name];
     if (up.length) lines.push(el("span", "hc-run", `${up.length} running: ${up.join(", ")}`));
@@ -367,7 +377,12 @@ export function showCard(s, row) {
     const entry = { at: Date.now(), data: c?.data };
     cardProcs.set(s.name, entry);
     invoke("processes", { site: s.name })
-      .then((o) => { entry.data = o; }, () => {})
+      .then(
+        (o) => {
+          entry.data = o;
+        },
+        () => {},
+      )
       .then(() => card.isConnected && draw());
   }
   draw();
@@ -434,9 +449,7 @@ export function renderList() {
   const linked: any[] = [];
   for (const s of snap.sites.filter((s) => s.linked)) (byPath.get(s.path) ?? linked).push(s);
 
-  const order = sortBy === "modified"
-    ? (a, b) => b.modified - a.modified
-    : (a, b) => a.name.localeCompare(b.name);
+  const order = sortBy === "modified" ? (a, b) => b.modified - a.modified : (a, b) => a.name.localeCompare(b.name);
 
   const q = filter.toLowerCase();
   const f = filterOf("apps");
@@ -451,7 +464,7 @@ export function renderList() {
   const section = (title, sites, withChildren, path = true, kind = true, key = `apps:${title}`) => {
     const rows: any[] = [];
     for (const s of [...sites].sort(order)) {
-      const kids = withChildren ? byPath.get(s.path) ?? [] : [];
+      const kids = withChildren ? (byPath.get(s.path) ?? []) : [];
       const parentHit = hit(s);
       const shownKids = kids.filter((k) => parentHit || hit(k));
       if (!parentHit && !shownKids.length) continue;
@@ -473,21 +486,40 @@ export function renderList() {
 
   // User groups first (Favorites leads), then one section per parked folder, then linked folders.
   const grouped = new Set(Object.values(snap.groups).flat());
-  const groupNames = Object.keys(snap.groups).sort((a, b) =>
-    a === "Favorites" ? -1 : b === "Favorites" ? 1 : a.localeCompare(b));
+  const groupNames = Object.keys(snap.groups).sort((a, b) => (a === "Favorites" ? -1 : b === "Favorites" ? 1 : a.localeCompare(b)));
   for (const g of groupNames) {
-    section(g, parked.filter((s) => snap.groups[g].includes(s.name)), true, true, true, `apps:group:${g}`);
+    section(
+      g,
+      parked.filter((s) => snap.groups[g].includes(s.name)),
+      true,
+      true,
+      true,
+      `apps:group:${g}`,
+    );
   }
   const rest = [...parked, ...linked].filter((s) => !grouped.has(s.name));
   if (groupBy === "type") {
     const kinds = [...new Set(rest.map((s) => s.kind))].sort((a, b) => kindLabel(a).localeCompare(kindLabel(b)));
-    for (const k of kinds) section(kindLabel(k), rest.filter((s) => s.kind === k), true, true, false, `apps:type:${k}`);
+    for (const k of kinds)
+      section(
+        kindLabel(k),
+        rest.filter((s) => s.kind === k),
+        true,
+        true,
+        false,
+        `apps:type:${k}`,
+      );
   } else if (groupBy === "none") {
     section("Applications", rest, true, true, true, "apps:all");
   } else {
     const dirs = [...new Set(parked.map((s) => s.parked_in))].sort();
     for (const dir of dirs) {
-      section(tilde(dir), parked.filter((s) => s.parked_in === dir && !grouped.has(s.name)), true, false);
+      section(
+        tilde(dir),
+        parked.filter((s) => s.parked_in === dir && !grouped.has(s.name)),
+        true,
+        false,
+      );
     }
     section("Linked", linked, false);
   }
@@ -496,9 +528,7 @@ export function renderList() {
     const p = document.createElement("p");
     p.className = "empty";
     const what = f.kind ? `${kindLabel(f.kind)} applications` : "applications";
-    p.textContent = filter
-      ? `No ${what} match “${filter}”.`
-      : `No ${f.running ? "running " : ""}${what}.`;
+    p.textContent = filter ? `No ${what} match “${filter}”.` : `No ${f.running ? "running " : ""}${what}.`;
     list.append(p);
   }
 }
@@ -528,25 +558,31 @@ export async function siteMenu(s) {
 
   const items: any[] = [];
   if (serves(s)) {
-    items.push(
-      await M.CheckMenuItem.new({ text: "HTTPS", checked: s.secure, action: () => setSecure(s) }),
-      await sep(),
-    );
+    items.push(await M.CheckMenuItem.new({ text: "HTTPS", checked: s.secure, action: () => setSecure(s) }), await sep());
   }
   if (!s.linked) {
     items.push(await M.MenuItem.new({ text: "Add Alias…", action: () => addAlias(s) }));
-    const groupItems = await Promise.all(groups.map((g) =>
-      M.CheckMenuItem.new({ text: g, checked: g === groupOf, action: () => call("set_group", { site: s.name, group: g === groupOf ? null : g }) })));
+    const groupItems = await Promise.all(
+      groups.map((g) =>
+        M.CheckMenuItem.new({
+          text: g,
+          checked: g === groupOf,
+          action: () => call("set_group", { site: s.name, group: g === groupOf ? null : g }),
+        }),
+      ),
+    );
     groupItems.push(await sep(), await M.MenuItem.new({ text: "New Group…", action: () => newGroup(s) }));
     items.push(await M.Submenu.new({ text: "Add to Group", items: groupItems }), await sep());
   }
-  items.push(await M.MenuItem.new({
-    text: s.linked ? "Remove Link" : "Hide from Anvil",
-    action: async () => {
-      await call("remove_site", { site: s.name });
-      if (!s.linked) toast(`Hid ${s.name}.${snap.tld}`, () => call("unhide_site", { site: s.name }));
-    },
-  }));
+  items.push(
+    await M.MenuItem.new({
+      text: s.linked ? "Remove Link" : "Hide from Anvil",
+      action: async () => {
+        await call("remove_site", { site: s.name });
+        if (!s.linked) toast(`Hid ${s.name}.${snap.tld}`, () => call("unhide_site", { site: s.name }));
+      },
+    }),
+  );
   (await M.Menu.new({ items })).popup();
 }
 
@@ -593,8 +629,11 @@ export function ask(label: string, placeholder?: string, preview?: (v: string) =
 }
 
 export async function addAlias(s) {
-  const alias = await ask(`New domain for ${s.name}.${snap.tld}`, `e.g. admin.${s.name}`, (v) =>
-    `Opens ${v.replace(new RegExp(`\\.${snap.tld}$`), "")}.${snap.tld}`);
+  const alias = await ask(
+    `New domain for ${s.name}.${snap.tld}`,
+    `e.g. admin.${s.name}`,
+    (v) => `Opens ${v.replace(new RegExp(`\\.${snap.tld}$`), "")}.${snap.tld}`,
+  );
   if (alias) await call("add_alias", { site: s.name, alias });
 }
 
@@ -605,7 +644,18 @@ export async function newGroup(s) {
 
 export let tab = localStorage.getItem("tab") ?? "overview";
 export const kindLabel = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
-export const RUNTIME = { next: "Node.js", nuxt: "Node.js", vite: "Node.js", node: "Node.js", rust: "Rust", go: "Go", dotnet: ".NET", django: "Python", fastapi: "Python", flask: "Python" };
+export const RUNTIME = {
+  next: "Node.js",
+  nuxt: "Node.js",
+  vite: "Node.js",
+  node: "Node.js",
+  rust: "Rust",
+  go: "Go",
+  dotnet: ".NET",
+  django: "Python",
+  fastapi: "Python",
+  flask: "Python",
+};
 
 export function showTab(root, name) {
   tab = name;
@@ -629,7 +679,11 @@ export function ago(d) {
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
   if (s < 7 * 86400) return `${Math.round(s / 86400)} d ago`;
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  });
 }
 
 export const touchedCache = new Map<string, { at: number; secs: number | null }>(); // site name -> { at: ms when asked, secs: newest edit }
@@ -659,7 +713,10 @@ export function drawMeta() {
     const addr = el("span", "addr");
     const link = el("a", "site-url", url(s).replace("https://", ""));
     link.href = "#";
-    link.onclick = (e) => { e.preventDefault(); if (snap.running) open("browser"); };
+    link.onclick = (e) => {
+      e.preventDefault();
+      if (snap.running) open("browser");
+    };
     // A stopped server can't answer: the address looks and acts off.
     link.classList.toggle("off", !snap.running);
     link.title = snap.running ? "Open in browser (⌘O)" : "Start Anvil to open this address";
@@ -742,7 +799,11 @@ export const appIcons = new Map<string, Promise<string | null>>(); // app name -
 
 /** Finder, the terminal and the editor as their own colored icons; the outline stays when there is none. */
 export function drawOpenWith(root) {
-  const label = (a) => a.split("/").pop().replace(/\.app$/, "");
+  const label = (a) =>
+    a
+      .split("/")
+      .pop()
+      .replace(/\.app$/, "");
   const apps = { finder: "Finder", terminal: label(snap.terminal ?? "Terminal"), editor: snap.editor && label(snap.editor) };
   for (const b of root.querySelectorAll(".open-with [data-open]")) {
     const name = apps[b.dataset.open];
@@ -756,7 +817,11 @@ export function drawOpenWith(root) {
 
 /** `box`'s content becomes the app's own icon once known; the outline stays otherwise. */
 export function appIconInto(box, name) {
-  if (!appIcons.has(name)) appIcons.set(name, invoke("app_icon", { name }).catch(() => null));
+  if (!appIcons.has(name))
+    appIcons.set(
+      name,
+      invoke("app_icon", { name }).catch(() => null),
+    );
   appIcons.get(name)!.then((src) => {
     if (src) box.replaceChildren(Object.assign(new Image(), { src, alt: "" }));
   });
@@ -801,7 +866,7 @@ export function renderSite() {
         ? "PHP, none installed"
         : null;
   const kind = s.kind === "static" ? "Static files" : kindLabel(s.kind);
-  const runs = !engine || kind === engine.split(" ")[0] ? engine ?? kind : `${kind} on ${engine}`;
+  const runs = !engine || kind === engine.split(" ")[0] ? (engine ?? kind) : `${kind} on ${engine}`;
   $('[data-field="runtime"]', root).textContent = s.kind === s.kind_detected ? runs : `${runs} (type set by you)`;
   if (PHP_KINDS.has(s.kind) && !s.php) {
     const install = el("button", "inline-action", "Install PHP 8.4");
@@ -828,8 +893,7 @@ export function renderSite() {
   kindSel.add(new Option(`Detected (${kindLabel(s.kind_detected)})`, ""));
   for (const [id, name] of snap.kinds) kindSel.add(new Option(name, id));
   kindSel.value = s.kind === s.kind_detected ? "" : s.kind;
-  kindSel.onchange = () =>
-    call("set_app", kindSel.value ? { site: s.name, kind: kindSel.value } : { site: s.name, reset: ["kind"] });
+  kindSel.onchange = () => call("set_app", kindSel.value ? { site: s.name, kind: kindSel.value } : { site: s.name, reset: ["kind"] });
 
   const php = $("#php", root);
   php.add(new Option(`Default (${snap.php_default ?? "none"})`, ""));
@@ -884,7 +948,11 @@ export function djangoHint(root) {
   const box = el("div", "django-hint");
   box.append(
     el("h3", "res-sub", "Django settings"),
-    el("p", "muted", "Add to the end of settings.py so Django accepts the address and trusts HTTPS from Anvil; without it Django answers 400 Bad Request, and forms fail their CSRF check."),
+    el(
+      "p",
+      "muted",
+      "Add to the end of settings.py so Django accepts the address and trusts HTTPS from Anvil; without it Django answers 400 Bad Request, and forms fail their CSRF check.",
+    ),
   );
   const env = el("div", "env");
   const copyBtn = el("button", null, "Copy");
@@ -901,7 +969,11 @@ export function nextHint(s, root) {
   use.onclick = () => call("allow_next_origin", { site: s.name });
   box.append(
     el("h3", "res-sub", "Address"),
-    el("p", "muted", `Next.js only becomes interactive at .${snap.tld} once next.config allows it, so this app opens at ${s.host}. Anvil can add allowedDevOrigins to next.config for you.`),
+    el(
+      "p",
+      "muted",
+      `Next.js only becomes interactive at .${snap.tld} once next.config allows it, so this app opens at ${s.host}. Anvil can add allowedDevOrigins to next.config for you.`,
+    ),
     use,
   );
   $('[data-panel="overview"] .group', root).after(box);
@@ -1069,7 +1141,10 @@ export function renderResources(name) {
 /** Confirm with a native dialog, then delete the items one by one. */
 export async function cleanItems(name, items) {
   const total = items.reduce((a, i) => a + i.bytes, 0);
-  const what = items.length === 1 ? `${items[0].label} (${items[0].path.startsWith("/") ? tilde(items[0].path) : items[0].path})` : `${items.length} items`;
+  const what =
+    items.length === 1
+      ? `${items[0].label} (${items[0].path.startsWith("/") ? tilde(items[0].path) : items[0].path})`
+      : `${items.length} items`;
   const how = items.length === 1 ? items[0].note : items.map((i) => `• ${i.label}: ${i.note}`).join("\n");
   const ok = await window.__TAURI__.dialog.ask(`${how}\n\nThis frees about ${bytes(total)} and can't be undone.`, {
     title: `Delete ${what}?`,
@@ -1115,7 +1190,18 @@ export function renderRunState(s, root) {
 
 export function renderRunSettings(s, root) {
   // Language version: automatic (project file or newest) or pinned.
-  const rtId = { next: "node", nuxt: "node", vite: "node", node: "node", rust: "rust", go: "go", dotnet: "dotnet", django: "python", fastapi: "python", flask: "python" }[s.kind];
+  const rtId = {
+    next: "node",
+    nuxt: "node",
+    vite: "node",
+    node: "node",
+    rust: "rust",
+    go: "go",
+    dotnet: "dotnet",
+    django: "python",
+    fastapi: "python",
+    flask: "python",
+  }[s.kind];
   const versions = snap.runtimes?.[rtId] ?? [];
   const rt = $("#app-runtime", root);
   $("#app-runtime-label", root).textContent = `${RUNTIME[s.kind]} version`;
@@ -1132,7 +1218,7 @@ export function renderRunSettings(s, root) {
 
   const cmd = $("#app-command", root);
   cmd.value = s.command_custom ? s.command : "";
-  cmd.placeholder = s.command_custom ? "" : s.command ?? "";
+  cmd.placeholder = s.command_custom ? "" : (s.command ?? "");
   cmd.onchange = () =>
     call("set_app", cmd.value.trim() ? { site: s.name, command: cmd.value.trim() } : { site: s.name, reset: ["command"] });
 
@@ -1175,7 +1261,16 @@ export function select(name) {
 export async function open(target) {
   try {
     await invoke("open", { site: selected, target });
-    toast({ browser: "Opened in your browser", finder: "Shown in Finder", root: "Shown in Finder", terminal: "Opened in Terminal", editor: `Opened in ${snap.editor}`, git: `Opened in ${snap.git_client}` }[target]);
+    toast(
+      {
+        browser: "Opened in your browser",
+        finder: "Shown in Finder",
+        root: "Shown in Finder",
+        terminal: "Opened in Terminal",
+        editor: `Opened in ${snap.editor}`,
+        git: `Opened in ${snap.git_client}`,
+      }[target],
+    );
   } catch (e) {
     showError(String(e));
   }
@@ -1367,12 +1462,26 @@ $("#filter").onclick = async () => {
   const kinds = [...counts.keys()].sort((a, b) => label(a).localeCompare(label(b)));
   // Applications: how the list is grouped and sorted comes first, then what it shows.
   const pick = (key, current, options) =>
-    Promise.all(options.map(([value, text]) =>
-      M.CheckMenuItem.new({ text, checked: current === value, action: () => setView(key, value) })));
+    Promise.all(
+      options.map(([value, text]) => M.CheckMenuItem.new({ text, checked: current === value, action: () => setView(key, value) })),
+    );
   const view = apps
     ? [
-        M.Submenu.new({ text: "Group By", items: await pick("groupBy", groupBy, [["folder", "Folder"], ["type", "Type"], ["none", "None"]]) }),
-        M.Submenu.new({ text: "Sort By", items: await pick("sortBy", sortBy, [["name", "Name"], ["modified", "Date Modified"]]) }),
+        M.Submenu.new({
+          text: "Group By",
+          items: await pick("groupBy", groupBy, [
+            ["folder", "Folder"],
+            ["type", "Type"],
+            ["none", "None"],
+          ]),
+        }),
+        M.Submenu.new({
+          text: "Sort By",
+          items: await pick("sortBy", sortBy, [
+            ["name", "Name"],
+            ["modified", "Date Modified"],
+          ]),
+        }),
         sep(),
       ]
     : [];
@@ -1382,7 +1491,8 @@ $("#filter").onclick = async () => {
       M.CheckMenuItem.new({ text: "All Types", checked: !f.kind, action: () => set({ kind: null }) }),
       sep(),
       ...kinds.map((k) =>
-        M.CheckMenuItem.new({ text: `${label(k)} (${counts.get(k)})`, checked: f.kind === k, action: () => set({ kind: k }) })),
+        M.CheckMenuItem.new({ text: `${label(k)} (${counts.get(k)})`, checked: f.kind === k, action: () => set({ kind: k }) }),
+      ),
       sep(),
       M.CheckMenuItem.new({ text: "Running Only", checked: f.running, action: () => set({ running: !f.running }) }),
     ]),
@@ -1399,7 +1509,9 @@ export function renderFilter() {
   const what = mode === "apps" ? "applications" : "services";
   btn.title = on
     ? `Filtered: ${[f.kind && "one type", f.running && "running only"].filter(Boolean).join(", ")}`
-    : mode === "apps" ? "Group, sort and filter applications" : `Filter ${what}`;
+    : mode === "apps"
+      ? "Group, sort and filter applications"
+      : `Filter ${what}`;
   btn.setAttribute("aria-label", String(btn.title));
 }
 
@@ -1499,7 +1611,17 @@ document.addEventListener("keydown", (e) => {
   const typing = (e.target as HTMLElement).closest("input, textarea, select");
   const name = TAB_KEYS[e.key]
     ? `tab:${TAB_KEYS[e.key]}`
-    : { o: "open:browser", e: "open:editor", t: "open:terminal", g: "open:git", l: "logs", n: "new", r: "reload", f: "find", ",": "settings" }[e.key];
+    : {
+        o: "open:browser",
+        e: "open:editor",
+        t: "open:terminal",
+        g: "open:git",
+        l: "logs",
+        n: "new",
+        r: "reload",
+        f: "find",
+        ",": "settings",
+      }[e.key];
   if (!name || (typing && !["find", "reload", "settings", "new"].includes(name))) return;
   if (runAction(name)) e.preventDefault();
 });

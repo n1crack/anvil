@@ -1,4 +1,4 @@
-import { $, el, invoke, renderMain, row, selected, showError, snap } from "./app";
+import { $, el, invoke, renderMain, selected, showError, snap } from "./app";
 
 /* Packages tab: an app's dependencies from its manifests and lock files.
  * Shares $, el, invoke, selected and showError with app.js. */
@@ -39,7 +39,6 @@ export async function checkUpdates(name) {
   if (selected === name) drawPackages(name);
 }
 
-
 export function drawPackages(name) {
   const body = $("#site .pkg-body");
   if (!body) return;
@@ -57,7 +56,11 @@ export function drawPackages(name) {
   // What the app is built on, as one quiet line: Laravel 13.12 · Vite 8.0 · PHP ^8.3.
   // With one manager, it is named here (e.g. pnpm 11.20.0) since rows don't say.
   const one = p.ecosystems.length === 1 ? p.ecosystems[0] : null;
-  const facts = [...p.highlights, ...p.ecosystems.flatMap((e) => e.facts), ...(one?.manager ? [[one.manager.split(" ")[0], one.manager.split(" ")[1]]] : [])];
+  const facts = [
+    ...p.highlights,
+    ...p.ecosystems.flatMap((e) => e.facts),
+    ...(one?.manager ? [[one.manager.split(" ")[0], one.manager.split(" ")[1]]] : []),
+  ];
   if (facts.length) {
     const line = el("p", "pkg-summary");
     facts.forEach(([label, v], i) => {
@@ -119,15 +122,18 @@ export function drawLists(body, name, ecosystems, updates) {
   const many = ecosystems.length > 1;
   const newer = new Map(updates.map((u) => [`${u.ecosystem}/${u.name}`, u]));
   // One list reads by name, whichever manager a package comes from.
-  const pkgs = ecosystems
-    .flatMap((e) => e.packages.map((x) => ({ ...x, eco: e })))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const pkgs = ecosystems.flatMap((e) => e.packages.map((x) => ({ ...x, eco: e }))).sort((a, b) => a.name.localeCompare(b.name));
   const hit = (x) => !needle || x.name.toLowerCase().includes(needle);
   const parts = [
     ["deps", "Dependencies", pkgs.filter((x) => !x.dev && hit(x))],
     ["dev", "Development", pkgs.filter((x) => x.dev && hit(x))],
-    ["scripts", "Scripts", ecosystems.flatMap((e) => e.scripts.map(([n, cmd]) => ({ name: n, cmd, eco: e })))
-      .filter((x) => !needle || `${x.name} ${x.cmd}`.toLowerCase().includes(needle))],
+    [
+      "scripts",
+      "Scripts",
+      ecosystems
+        .flatMap((e) => e.scripts.map(([n, cmd]) => ({ name: n, cmd, eco: e })))
+        .filter((x) => !needle || `${x.name} ${x.cmd}`.toLowerCase().includes(needle)),
+    ],
   ];
   if (updates.length) parts.push(["updates", "Updates", pkgs.filter((x) => newer.has(`${x.eco.id}/${x.name}`) && hit(x))]);
   const shown = parts.filter(([id, , rows]) => rows.length || id === "deps");
