@@ -82,11 +82,17 @@ pub fn detect(dir: &Path) -> &'static str {
         read(&dir.join("requirements.txt"))
     )
     .to_lowercase();
-    if py.contains("fastapi") {
-        return "fastapi";
-    }
-    if py.contains("flask") {
-        return "flask";
+    // Next.js with a Flask API folder is a Node app; a Python app has its entry here.
+    let entry = ["main.py", "app.py", "wsgi.py", "app/main.py"]
+        .iter()
+        .any(|f| has(f));
+    if entry || !has("package.json") {
+        if py.contains("fastapi") {
+            return "fastapi";
+        }
+        if py.contains("flask") {
+            return "flask";
+        }
     }
     if has("package.json") {
         let pkg = read(&dir.join("package.json"));
@@ -166,7 +172,8 @@ pub fn default_command(kind: &str, dir: &Path) -> Option<String> {
 /// own environment; requirements.txt goes into uv's cache, not the project; a
 /// project declaring neither gets just its framework.
 fn uv_run(dir: &Path, framework: &str, cmd: &str) -> String {
-    if dir.join("pyproject.toml").exists() {
+    // A pyproject.toml with only tool settings (ruff, poetry) isn't a uv project.
+    if read(&dir.join("pyproject.toml")).contains("[project]") {
         format!("uv run {cmd}")
     } else if dir.join("requirements.txt").exists() {
         format!("uv run --with-requirements requirements.txt {cmd}")
@@ -320,7 +327,7 @@ impl Apps {
         let child = Command::new("/bin/sh")
             .args(["-c", &command, &tag])
             .current_dir(&site.path)
-            .envs(runtimes::env(runtime, &version))
+            .envs(app_env(site, runtime, &version))
             .env("PORT", port.to_string())
             // Best effort: most dev servers honour one of these and stay off the LAN.
             .env("HOST", "127.0.0.1")
@@ -369,6 +376,21 @@ impl Drop for Apps {
     }
 }
 
+/// The runtime's environment for one app. Python leaves the version to the
+/// project (`.python-version`, `requires-python`) unless it is pinned in Anvil,
+/// and keeps uv's environment out of the project, so an existing `.venv` stays.
+fn app_env(site: &Site, runtime: &str, version: &str) -> Vec<(String, String)> {
+    let mut env = runtimes::env(runtime, version);
+    if runtime == "python" {
+        if !site.runtime_pinned {
+            env.retain(|(k, _)| k != "UV_PYTHON");
+        }
+        let venvs = home().join("cache").join("uv-venvs").join(&site.name);
+        env.push(("UV_PROJECT_ENVIRONMENT".into(), venvs.display().to_string()));
+    }
+    env
+}
+
 /// Validate a custom start command before it is saved.
 pub fn check_command(command: &str) -> Result<()> {
     if command.trim().is_empty() || command.contains('\0') {
@@ -399,7 +421,7 @@ mod tests {
 
     #[test]
     fn detects_kinds() {
-        let cases: [(&[(&str, &str)], &str); 14] = [
+        let cases: [(&[(&str, &str)], &str); 16] = [
             (
                 &[("artisan", ""), ("package.json", "{\"vite\":1}")],
                 "laravel",
@@ -439,6 +461,22 @@ mod tests {
             (&[("requirements.txt", "FastAPI==0.115\n")], "fastapi"),
             (&[("pyproject.toml", "dependencies = [\"flask\"]")], "flask"),
             (&[("manage.py", "print(1)")], "static"),
+            // Next.js with an API that uses Flask stays Next.js; with an entry file it's Flask.
+            (
+                &[
+                    ("package.json", "{\"next\":1}"),
+                    ("requirements.txt", "flask"),
+                ],
+                "next",
+            ),
+            (
+                &[
+                    ("package.json", "{}"),
+                    ("requirements.txt", "flask"),
+                    ("app.py", ""),
+                ],
+                "flask",
+            ),
         ];
         for (files, want) in cases {
             let dir = project(files);
@@ -455,6 +493,17 @@ mod tests {
         assert!(
             cmd.contains("uvicorn app.main:app --host 127.0.0.1 --port $PORT"),
             "{cmd}"
+        );
+        fs::remove_dir_all(dir).unwrap();
+        // A tool-only pyproject.toml isn't a uv project: requirements.txt still counts.
+        let dir = project(&[
+            ("pyproject.toml", "[tool.ruff]\n"),
+            ("requirements.txt", "flask"),
+        ]);
+        assert!(
+            default_command("flask", &dir)
+                .unwrap()
+                .contains("--with-requirements")
         );
         fs::remove_dir_all(dir).unwrap();
         let cmd = default_command("django", Path::new("/nonexistent")).unwrap();

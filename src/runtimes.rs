@@ -160,7 +160,9 @@ fn uv() -> PathBuf {
 
 /// uv itself, downloaded once and checked against its pinned checksum.
 fn ensure_uv(mac: bool, arm: bool) -> Result<()> {
-    if uv().exists() {
+    // A newer pinned uv replaces an older one.
+    let marker = root("uv").join("VERSION");
+    if uv().exists() && fs::read_to_string(&marker).is_ok_and(|v| v.trim() == UV_VERSION) {
         return Ok(());
     }
     let target = match (mac, arm) {
@@ -182,7 +184,8 @@ fn ensure_uv(mac: bool, arm: bool) -> Result<()> {
             d,
             true,
             Some(sum),
-        )
+        )?;
+        Ok(fs::write(d.join("VERSION"), UV_VERSION)?)
     })
 }
 
@@ -241,6 +244,13 @@ pub fn install(id: &str, version: &str) -> Result<()> {
         // uv downloads Python (python-build-standalone) and checks it against
         // the checksums built into uv.
         "python" => {
+            // 3.13 style only: anything else would reach uv as a flag or another interpreter.
+            let mut parts = version.split('.');
+            let ok = matches!((parts.next(), parts.next(), parts.next()), (Some(a), Some(b), None)
+                if !a.is_empty() && !b.is_empty() && a.chars().chain(b.chars()).all(|c| c.is_ascii_digit()));
+            if !ok {
+                bail!("Python versions look like 3.13");
+            }
             ensure_uv(mac, arm)?;
             run(Command::new(uv())
                 .args(["python", "install", version])
