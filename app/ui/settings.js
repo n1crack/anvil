@@ -260,6 +260,7 @@ function render() {
   $("#theme").value = s.theme ?? "";
   options($("#editor"), s.editors, s.editor, "None");
   options($("#terminal"), s.terminals.filter((t) => t !== "Terminal"), s.terminal, "Terminal");
+  options($("#git-client"), s.git_clients, s.git_client, s.git_clients.length ? `Automatic (${s.git_clients[0]})` : "None installed");
 
   $("#tld").textContent = `.${s.tld}`;
   $("#http").textContent = s.http_port;
@@ -319,6 +320,7 @@ $("#dock").onchange = (e) => call("set_dock_icon", { on: e.target.checked });
 $("#theme").onchange = (e) => call("set_theme", { theme: e.target.value || null });
 $("#editor").onchange = (e) => call("set_editor", { editor: e.target.value || null });
 $("#terminal").onchange = (e) => call("set_terminal", { terminal: e.target.value || null });
+$("#git-client").onchange = (e) => call("set_git_client", { gitClient: e.target.value || null });
 $("#open-config-about").onclick = () => invoke("open_config_dir").catch((e) => showError(String(e)));
 window.__TAURI__.app?.getVersion().then((v) => ($("#version").textContent = `Version ${v}`));
 $("#open-config").onclick = () => invoke("open_config_dir").catch((e) => showError(String(e)));

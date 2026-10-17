@@ -32,6 +32,8 @@ struct Snapshot {
     php_default: Option<String>,
     php_installed: Vec<String>,
     editor: Option<String>,
+    /// Git app used by "Open in git client", if any is installed.
+    git_client: Option<String>,
     groups: std::collections::BTreeMap<String, Vec<String>>,
     /// php.ini defaults for every site.
     ini: std::collections::BTreeMap<String, String>,
@@ -88,6 +90,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
         editor: cfg.editor.clone(),
+        git_client: git_client(&cfg),
         groups: cfg.groups.clone(),
         ini: cfg.ini.clone(),
         running: running(app),
@@ -277,6 +280,21 @@ async fn resources(handle: AppHandle, site: String) -> Res<anvil::resources::Res
             processes,
             services,
         })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Branch, changes and last commit; `None` when the app is not a git repository.
+#[tauri::command]
+async fn git_info(site: String) -> Res<Option<anvil::git::GitInfo>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = anvil::load().map_err(err)?;
+        let s = anvil::sites(&cfg)
+            .into_iter()
+            .find(|s| s.name == site)
+            .ok_or_else(|| format!("No app named {site}"))?;
+        Ok(anvil::git::info(&s.path))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -810,6 +828,8 @@ struct Settings {
     ini: std::collections::BTreeMap<String, String>,
     terminal: Option<String>,
     terminals: Vec<String>,
+    git_client: Option<String>,
+    git_clients: Vec<String>,
     theme: Option<String>,
     dock_icon: bool,
     login: bool,
@@ -839,6 +859,22 @@ const EDITORS: [&str; 10] = [
     "Windsurf",
     "Fleet",
 ];
+
+const GIT_CLIENTS: [&str; 6] = [
+    "GitHub Desktop",
+    "Fork",
+    "Tower",
+    "Sourcetree",
+    "GitKraken",
+    "Sublime Merge",
+];
+
+/// The chosen git app, or the first one installed.
+fn git_client(cfg: &Config) -> Option<String> {
+    cfg.git_client
+        .clone()
+        .or_else(|| installed_apps(&GIT_CLIENTS).into_iter().next())
+}
 
 /// Which of `apps` are installed in the usual macOS app folders.
 fn installed_apps(apps: &[&str]) -> Vec<String> {
@@ -900,6 +936,8 @@ fn settings(handle: AppHandle) -> Res<Settings> {
             .collect(),
         editors: installed_apps(&EDITORS),
         terminals: installed_apps(&TERMINALS),
+        git_clients: installed_apps(&GIT_CLIENTS),
+        git_client: cfg.git_client.clone(),
         login: handle.autolaunch().is_enabled().unwrap_or(false),
         config_dir: anvil::home(),
         terminal: cfg.terminal,
@@ -977,6 +1015,18 @@ fn set_terminal(handle: AppHandle, terminal: Option<String>) -> Res<Settings> {
         &handle,
         |cfg| {
             cfg.terminal = terminal;
+            Ok(())
+        },
+        false,
+    )
+}
+
+#[tauri::command]
+fn set_git_client(handle: AppHandle, git_client: Option<String>) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.git_client = git_client;
             Ok(())
         },
         false,
@@ -1107,6 +1157,10 @@ fn open(site: String, target: String) -> Res<()> {
         "editor" => {
             let editor = cfg.editor.ok_or("No editor set in ~/.anvil/config.toml")?;
             cmd.args(["-a", &editor]).arg(&s.path)
+        }
+        "git" => {
+            let client = git_client(&cfg).ok_or("No git app installed")?;
+            cmd.args(["-a", &client]).arg(&s.path)
         }
         other => return Err(format!("Unknown target {other}")),
     };
@@ -1341,6 +1395,8 @@ fn main() {
             php_install,
             php_uninstall,
             set_terminal,
+            set_git_client,
+            git_info,
             set_theme,
             set_dock_icon,
             set_login,

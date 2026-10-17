@@ -74,6 +74,8 @@ enum Cmd {
         #[arg(long)]
         safe: bool,
     },
+    /// Branch, changes, last commit and remote of an app (default: current folder)
+    Git { site: Option<String> },
     /// Download the web server and print one-time system setup commands
     Setup,
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
@@ -568,6 +570,49 @@ fn main() -> Result<()> {
                     u.source,
                     u.detail.map_or(String::new(), |d| format!(" ({d})"))
                 );
+            }
+        }
+        Cmd::Git { site } => {
+            let dir = match site {
+                Some(site) => {
+                    sites(&cfg)
+                        .into_iter()
+                        .find(|s| s.name == site_name(&site))
+                        .with_context(|| format!("No app named {site}"))?
+                        .path
+                }
+                None => dir_or_cwd(None)?,
+            };
+            let g = git::info(&dir).context("Not a git repository")?;
+            let mut branch = g.branch;
+            if let Some(u) = &g.upstream {
+                branch += &format!(" (tracks {u})");
+            }
+            if g.ahead > 0 {
+                branch += &format!(" ↑{}", g.ahead);
+            }
+            if g.behind > 0 {
+                branch += &format!(" ↓{}", g.behind);
+            }
+            println!("Branch   {branch}");
+            match g.changed {
+                0 => println!("Changes  clean"),
+                1 => println!("Changes  1 changed file"),
+                n => println!("Changes  {n} changed files"),
+            }
+            if let Some(c) = g.commit {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let ago = match now.saturating_sub(c.time) {
+                    s if s < 3600 => format!("{} minutes ago", s / 60),
+                    s if s < 86400 => format!("{} hours ago", s / 3600),
+                    s => format!("{} days ago", s / 86400),
+                };
+                println!("Commit   {} {} ({}, {ago})", c.hash, c.subject, c.author);
+            }
+            if let Some(r) = g.remote {
+                println!("Remote   {r}");
             }
         }
         Cmd::Ini { site, key, value } => set_site_ini(&mut cfg, &site, &key, value.as_deref())?,
