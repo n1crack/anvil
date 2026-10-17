@@ -30,17 +30,19 @@ async function loadProcs(name, cmd = "processes", args = {}) {
   return ok;
 }
 
-/** Docker can take minutes: the row says what it is doing until it is done. */
-async function containerRun(name, service, action) {
-  const key = `${name}/${service}`;
-  procBusy.set(key, { start: "starting…", stop: "stopping…", restart: "restarting…" }[action]);
+/** Docker can take minutes: the rows say what they are doing until it is done.
+ * Without a service, the whole project (Start all / Stop all) in compose's order. */
+async function containerRun(name, services, action, service) {
+  const keys = services.map((s) => `${name}/${s}`);
+  const word = { start: "starting…", stop: "stopping…", restart: "restarting…" }[action];
+  for (const k of keys) procBusy.set(k, word);
   if (selected === name) drawProcs(name);
   try {
-    procCache.set(name, await invoke("container_run", { site: name, service, action }));
+    procCache.set(name, await invoke(service ? "container_run" : "containers_run", { site: name, service, action }));
   } catch (e) {
     showError(String(e));
   }
-  procBusy.delete(key);
+  for (const k of keys) procBusy.delete(k);
   if (selected === name) drawProcs(name);
 }
 
@@ -110,7 +112,8 @@ function drawProcs(name) {
     head.append(el("h3", "res-sub", "Processes"));
     const all = (action) => {
       loadProcs(name, "process_run", { name: null, action });
-      for (const c of containers) if (up(c) !== (action === "start")) containerRun(name, c.service, action);
+      const change = containers.filter((c) => up(c) !== (action === "start")).map((c) => c.service);
+      if (change.length) containerRun(name, change, action);
     };
     const buttons = el("span", "proc-actions");
     if (anyDown) buttons.append(procBtn("Start all", "Start the app and all its processes", () => all("start")));
@@ -154,7 +157,7 @@ function drawProcs(name) {
           title: "Click to show its log",
           busy: procBusy.get(key),
           open: () => toggleContainerLog(name, c.service),
-          run: (action) => containerRun(name, c.service, action),
+          run: (action) => containerRun(name, [c.service], action, c.service),
         }));
         if (procLogs.has(key)) list.append(el("pre", "proc-log", procLogs.get(key)));
       }

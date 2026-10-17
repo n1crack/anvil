@@ -702,6 +702,18 @@ fn container_run(app: State<App>, site: String, service: String, action: String)
     Ok(overview(&app, &cfg, &s))
 }
 
+/// Start All / Stop All for the containers: one `docker compose up -d|stop` for the
+/// whole project, so compose keeps the dependency order. No lock is held meanwhile.
+#[tauri::command(async)]
+fn containers_run(app: State<App>, site: String, action: String) -> Res<Overview> {
+    let (cfg, s) = find_site_cfg(&site)?;
+    if anvil::compose::file(&s.path).is_none() {
+        return Err(format!("{site} has no compose file"));
+    }
+    anvil::compose::project_action(&s.path, &action).map_err(err)?;
+    Ok(overview(&app, &cfg, &s))
+}
+
 #[tauri::command(async)]
 fn container_log(site: String, service: String) -> Res<String> {
     let s = find_site(&site)?;
@@ -2290,6 +2302,7 @@ fn main() {
             process_run,
             command_run,
             container_run,
+            containers_run,
             once_stop,
             container_log,
             service_log,

@@ -1,6 +1,6 @@
 //! Docker Compose projects: the services of a folder's compose file and their
-//! containers. Anvil only ever runs `up -d`, `stop` and `restart` on one service;
-//! it never kills a container, so quitting Anvil leaves them running.
+//! containers. Anvil only ever runs `up -d`, `stop` and `restart` on one service
+//! or `up -d` and `stop` on the whole project; it never kills a container, so quitting Anvil leaves them running.
 
 use anyhow::{Result, bail};
 use serde::Serialize;
@@ -180,6 +180,21 @@ pub fn action(dir: &Path, service: &str, action: &str) -> Result<()> {
     action_with(&docker_bin(), dir, service, action)
 }
 
+/// Start or stop the whole project with one command, so compose keeps the
+/// dependency order (a database stops after the server that saves to it).
+fn project_action_with(docker: &Path, dir: &Path, action: &str) -> Result<()> {
+    let args: &[&str] = match action {
+        "start" => &["up", "-d"],
+        "stop" => &["stop"],
+        _ => bail!("Unknown action: {action}"),
+    };
+    compose(docker, dir, args, Duration::from_secs(600)).map(drop)
+}
+
+pub fn project_action(dir: &Path, action: &str) -> Result<()> {
+    project_action_with(&docker_bin(), dir, action)
+}
+
 pub fn logs(dir: &Path, service: &str) -> Result<String> {
     compose(
         &docker_bin(),
@@ -296,6 +311,23 @@ esac"#,
             fs::read_to_string(log).unwrap(),
             "compose up -d -- web\ncompose stop -- web\ncompose restart -- web\n"
         );
+    }
+
+    #[test]
+    fn whole_project_actions_leave_the_order_to_compose() {
+        let d = tmp("project-dir");
+        let bin = tmp("project-bin");
+        let log = d.join("args");
+        let docker = fake_docker(&bin, &format!("echo \"$@\" >> {}", log.display()));
+        project_action_with(&docker, &d, "start").unwrap();
+        project_action_with(&docker, &d, "stop").unwrap();
+        assert_eq!(
+            fs::read_to_string(log).unwrap(),
+            "compose up -d\ncompose stop\n"
+        );
+        for a in ["restart", "down", "kill"] {
+            assert!(project_action_with(&docker, &d, a).is_err());
+        }
     }
 
     #[test]
