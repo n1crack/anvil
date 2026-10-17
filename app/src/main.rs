@@ -1407,12 +1407,57 @@ fn setup_status() -> Res<anvil::Setup> {
     Ok(anvil::setup_status(&anvil::load().map_err(err)?))
 }
 
+/// Every system step still missing, behind one password prompt: resolver file,
+/// ports daemon, the certificate authority trusted system-wide (Caddy is started
+/// first when it hasn't made one yet), then the terminal shims.
+fn setup_all(app: &App, cfg: &Config) -> Res<()> {
+    let root = anvil::root_cert();
+    if !root.exists() {
+        if app.server.lock().unwrap().is_none() {
+            start(app, cfg);
+        }
+        for _ in 0..50 {
+            if root.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+    // After Caddy: `trusted` counts a missing authority as trusted.
+    let status = anvil::setup_status(cfg);
+    let ports = if status.ports {
+        None
+    } else {
+        Some(anvil::stage_ports_daemon(cfg).map_err(err)?)
+    };
+    let cert = (root.exists() && !status.trusted).then_some(root.as_path());
+    let script = anvil::setup_script(cfg, !status.resolver, ports.as_deref(), cert);
+    let res = script.map_err(err).and_then(|script| {
+        if script.is_empty() {
+            return Ok(());
+        }
+        let script = script.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            "do shell script \"{script}\" with prompt \"Anvil sets up .{} addresses and HTTPS on this Mac.\" with administrator privileges",
+            cfg.tld
+        );
+        anvil::run(Command::new("osascript").args(["-e", &script])).map_err(err)
+    });
+    if let Some(p) = ports {
+        let _ = std::fs::remove_file(p);
+    }
+    res?;
+    anvil::shims::setup().map_err(err)?;
+    Ok(())
+}
+
 /// Do one setup step. The resolver file needs an administrator: macOS asks for
-/// the password in its own dialog.
+/// the password in its own dialog. "all" does every step still missing.
 #[tauri::command(async)]
-fn setup_fix(handle: AppHandle, step: String) -> Res<anvil::Setup> {
+fn setup_fix(handle: AppHandle, app: State<App>, step: String) -> Res<anvil::Setup> {
     let mut cfg = anvil::load().map_err(err)?;
     match step.as_str() {
+        "all" => setup_all(&app, &cfg)?,
         "resolver" => {
             let ok =
                 |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');

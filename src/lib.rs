@@ -981,7 +981,7 @@ pub fn needs_restart(cfg: &Config) -> bool {
 
 pub fn trust() -> Result<()> {
     // Caddy creates this CA on its first start.
-    let root = home().join("data/caddy/pki/authorities/local/root.crt");
+    let root = root_cert();
     if !root.exists() {
         bail!("No certificate authority yet — start Anvil once, then trust it");
     }
@@ -1004,6 +1004,8 @@ pub struct Setup {
     pub php: bool,
     /// Ports 80 and 443 reach Caddy, so addresses need no `:8443`.
     pub ports: bool,
+    /// The terminal shims are written and on PATH in the user's shell rc file.
+    pub shims: bool,
 }
 
 /// `.localhost` names already reach this Mac (macOS and browsers resolve them
@@ -1135,7 +1137,7 @@ pub fn site_url(cfg: &Config, site: &Site) -> String {
 
 pub fn setup_status(cfg: &Config) -> Setup {
     let (file, want) = resolver_file(cfg);
-    let root = home().join("data/caddy/pki/authorities/local/root.crt");
+    let root = root_cert();
     Setup {
         resolver: !needs_resolver(cfg)
             || fs::read_to_string(file)
@@ -1149,7 +1151,59 @@ pub fn setup_status(cfg: &Config) -> Setup {
                 .is_ok_and(|o| o.status.success()),
         php: !installed_php().is_empty(),
         ports: ports_forwarded(cfg),
+        shims: shims::ready(),
     }
+}
+
+pub const SYSTEM_KEYCHAIN: &str = "/Library/Keychains/System.keychain";
+
+/// The certificate authority Caddy makes on its first start.
+pub fn root_cert() -> PathBuf {
+    home().join("data/caddy/pki/authorities/local/root.crt")
+}
+
+/// One root shell script for the system steps asked for: the resolver file, the
+/// ports daemon (copied from `ports_plist`) and trusting `cert` system-wide.
+pub fn setup_script(
+    cfg: &Config,
+    resolver: bool,
+    ports_plist: Option<&Path>,
+    cert: Option<&Path>,
+) -> Result<String> {
+    let q = |p: &Path| shims::sh_quote(&p.to_string_lossy());
+    let mut steps = Vec::new();
+    if resolver && needs_resolver(cfg) {
+        if cfg.tld.is_empty()
+            || !cfg
+                .tld
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            bail!("{} isn't a valid domain suffix", cfg.tld);
+        }
+        let (file, _) = resolver_file(cfg);
+        steps.push(format!(
+            "mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport {}\\n' > {}",
+            cfg.dns_port,
+            q(&file)
+        ));
+    }
+    if let Some(tmp) = ports_plist {
+        let (file, _) = ports_daemon(cfg);
+        let f = q(&file);
+        // bootout first: a changed port reloads the daemon.
+        steps.push(format!(
+            "{{ launchctl bootout system/{PORTS_LABEL} 2>/dev/null; true; }} && cp {} {f} && chown root:wheel {f} && chmod 644 {f} && launchctl bootstrap system {f}",
+            q(tmp)
+        ));
+    }
+    if let Some(cert) = cert {
+        steps.push(format!(
+            "security add-trusted-cert -d -r trustRoot -k {SYSTEM_KEYCHAIN} {}",
+            q(cert)
+        ));
+    }
+    Ok(steps.join(" && "))
 }
 
 static DNS: Once = Once::new();
@@ -1527,6 +1581,39 @@ mod tests {
         assert_eq!(old.https_default, None);
         let new: Config = toml::from_str(&toml::to_string(&Config::default()).unwrap()).unwrap();
         assert_eq!(new.https_default, Some(false));
+    }
+
+    #[test]
+    fn one_root_script_for_every_setup_step() {
+        let cfg = Config::default();
+        let s = setup_script(
+            &cfg,
+            true,
+            Some(Path::new("/tmp/it's/ports.plist")),
+            Some(Path::new("/h/root.crt")),
+        )
+        .unwrap();
+        assert_eq!(
+            s,
+            "mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport 5354\\n' > '/etc/resolver/test' \
+             && { launchctl bootout system/dev.anvil.ports 2>/dev/null; true; } && cp '/tmp/it'\\''s/ports.plist' \
+             '/Library/LaunchDaemons/dev.anvil.ports.plist' && chown root:wheel '/Library/LaunchDaemons/dev.anvil.ports.plist' \
+             && chmod 644 '/Library/LaunchDaemons/dev.anvil.ports.plist' && launchctl bootstrap system \
+             '/Library/LaunchDaemons/dev.anvil.ports.plist' \
+             && security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain '/h/root.crt'"
+        );
+        // Only what is asked for; .localhost needs no resolver file.
+        let local = Config {
+            tld: "localhost".into(),
+            ..Config::default()
+        };
+        assert_eq!(setup_script(&local, true, None, None).unwrap(), "");
+        let bad = Config {
+            tld: "test;rm".into(),
+            ..Config::default()
+        };
+        assert!(setup_script(&bad, true, None, None).is_err());
+        assert!(setup_script(&bad, false, None, None).is_ok());
     }
 
     #[test]

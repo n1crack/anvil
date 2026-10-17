@@ -97,7 +97,8 @@ enum Cmd {
         #[arg(long)]
         updates: bool,
     },
-    /// Download the web server and print one-time system setup commands
+    /// Download the web server, put the terminal shims on PATH and print the
+    /// one-time system setup command
     Setup,
     /// The program `php`, `composer`, `laravel`, `node`, `npm` or `npx` runs in this folder
     Which { tool: String },
@@ -308,22 +309,46 @@ fn print_resolver_step(cfg: &Config) {
     );
 }
 
-/// The one-time root step that lets addresses drop `:8443`.
-fn print_ports_step(cfg: &Config) -> Result<()> {
-    if ports_forwarded(cfg) {
-        return Ok(());
+/// Put the shims on PATH, then print one sudo command for every system step still
+/// missing: resolver file, ports daemon and the certificate authority.
+fn print_setup(cfg: &Config) -> Result<()> {
+    let status = setup_status(cfg);
+    if !status.shims {
+        println!(
+            "Adding {} to PATH in {} so php, composer, laravel, node, npm and npx follow each site's versions.",
+            home().join("shims").display(),
+            shims::shell_rc_files(&PathBuf::from(std::env::var_os("HOME").unwrap_or_default()))
+                .iter()
+                .map(|f| f.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" and ")
+        );
     }
-    let tmp = stage_ports_daemon(cfg)?;
-    let (file, _) = ports_daemon(cfg);
-    println!(
-        "Run once so addresses work without a port number (ports 80 and 443 are forwarded to Anvil):\n\n  {}\n",
-        cyan(format!(
-            "sudo launchctl bootout system/{PORTS_LABEL} 2>/dev/null; sudo cp {} {} && sudo launchctl bootstrap system {}",
-            tmp.display(),
-            file.display(),
-            file.display()
-        ))
-    );
+    shims::setup()?;
+    if !status.shims {
+        println!("{}\n", commands("Open a new terminal window to use them."));
+    }
+    let root = root_cert();
+    let ports = (!status.ports)
+        .then(|| stage_ports_daemon(cfg))
+        .transpose()?;
+    let cert = (root.exists() && !status.trusted).then_some(root.as_path());
+    let script = setup_script(cfg, !status.resolver, ports.as_deref(), cert)?;
+    if !script.is_empty() {
+        println!(
+            "{}\n\n  {}\n",
+            commands("Run once so addresses, ports 80 and 443 and HTTPS work on this Mac:"),
+            cyan(format!("sudo sh -c {}", shims::sh_quote(&script)))
+        );
+    }
+    if !root.exists() {
+        println!(
+            "{}",
+            commands(
+                "Then `anvil start` once and `anvil setup` again to trust Anvil's HTTPS certificates."
+            )
+        );
+    }
     Ok(())
 }
 
@@ -879,9 +904,7 @@ fn run() -> Result<()> {
         Cmd::Setup => {
             ensure_caddy()?;
             save(&cfg)?;
-            print_resolver_step(&cfg);
-            print_ports_step(&cfg)?;
-            println!("{}", commands("Then `anvil trust` for HTTPS."));
+            print_setup(&cfg)?;
         }
         Cmd::Which { tool } => {
             let (program, pre, _) =
