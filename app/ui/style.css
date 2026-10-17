@@ -356,15 +356,13 @@ button, select, input { font: inherit; color: inherit; }
   gap: 8px;
 }
 
-/* HTTPS lock: quiet when on, only on hover when off. */
-.item .lock {
+/* HTTPS: a small lock after the name. */
+.item .name .lock {
   display: inline-flex;
+  margin-left: 5px;
   color: var(--muted);
-  opacity: 0;
+  vertical-align: -1px;
 }
-.item .lock.on { opacity: 1; }
-.item:hover .lock:not(.on) { opacity: 0.5; }
-.item .lock:hover { color: var(--text); opacity: 1; }
 
 .item .ver {
   font-size: 11px;

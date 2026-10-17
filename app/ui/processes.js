@@ -176,10 +176,10 @@ function procRow({ name, state, detail, error, title, busy, open, run, auto, web
   }
   const actions = el("span", "proc-actions");
   if (auto) actions.append(Object.assign(el("span", "proc-tag", "auto"), { title: "Starts with Anvil" }));
-  if (web) {
+  // Only something running has a page to open.
+  if (web && state === "running") {
     const b = procBtn("🌐", `Open ${name} in the browser`, () => invoke("open_url", { url: web }).catch((e) => showError(String(e))));
-    b.title = state === "running" ? web : "Not running";
-    b.disabled = state !== "running";
+    b.title = web;
     actions.append(b);
   }
   if (run && !busy && !edit) {
@@ -361,11 +361,9 @@ function drawProcs(name) {
       head.append(more);
     }
     box.append(head);
-    // Recently run first, then package.json's order (the sort is stable).
-    const when = (c) => (c.running ? Infinity : c.exit?.at ?? 0);
-    const sorted = [...commands].sort((a, b) => (when(a) === when(b) ? 0 : when(b) > when(a) ? 1 : -1));
+    // package.json's order, so rows don't move when one runs.
     const list = el("div", "group procs-list");
-    for (const c of all ? sorted : sorted.slice(0, CMD_MAX)) list.append(cmdRow(name, c));
+    for (const c of all ? commands : commands.slice(0, CMD_MAX)) list.append(cmdRow(name, c));
     box.append(list);
   }
   focus?.focus();
