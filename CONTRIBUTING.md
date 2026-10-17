@@ -45,9 +45,10 @@ for f in app/ui/*.js; do node --check "$f"; done
 ```
 
 - Add a test for logic you change in `src/` where it is practical.
-- Update the docs in `docs/` and the `[Unreleased]` section of
-  [CHANGELOG.md](CHANGELOG.md) for anything a user would notice. Write the
-  changelog for users, not commit by commit.
+- Update the docs in `docs/` for anything a user would notice.
+- Leave [CHANGELOG.md](CHANGELOG.md) alone: it is written once per release
+  from the merged pull requests, so describe the change for users in the pull
+  request instead.
 - Keep CLI help text and [docs/cli.md](docs/cli.md) in sync.
 
 ## Commit messages
@@ -67,7 +68,9 @@ one place, `[workspace.package] version` in the root `Cargo.toml`; both crates
 inherit it and the app bundle reads it from there (`app/tauri.conf.json` has
 no `version` on purpose).
 
-1. Make sure `[Unreleased]` in `CHANGELOG.md` describes the release.
+1. Write `[Unreleased]` in `CHANGELOG.md` from the pull requests merged since
+   the last tag (`gh pr list --state merged --search "merged:>YYYY-MM-DD"`),
+   for users, not pull request by pull request.
 2. Run `scripts/bump-version.sh <version>` (macOS `sed`). It sets the workspace
    version, refreshes `Cargo.lock`, and turns `[Unreleased]` into
    `[<version>] - <today>` with compare links.
