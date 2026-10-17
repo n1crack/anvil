@@ -965,7 +965,11 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-dismiss { flex: none; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; line-height: 1; }
 .dev-dismiss:hover { color: var(--text); }
 .dev-none { margin: 0; padding: 8px 12px; color: var(--muted); font-size: 12px; }
-.dev-pane { position: relative; margin: 0; }
+.dev-pane { position: relative; margin: 0; container-type: inline-size; }
+.dev-out:focus-visible { outline-offset: -2px; }
+/* The keys, one muted line under the output; gone when the pane is too narrow for it. */
+.dev-keys { flex: none; margin: 0; padding: 3px 14px 4px; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #8d959f; font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; }
+@container (max-width: 460px) { .dev-keys { display: none; } }
 .dev-head .console-title { flex: none; }
 .dev-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .dev-pane.is-empty .dev-head-start { display: none; }

@@ -278,6 +278,79 @@ describe("dev", () => {
     expect($(".dev-conf").hidden).toBe(true);
   });
 
+  test("keys act with the focus in the list or output, never in a field nor with ⌘", async () => {
+    const key = (at: HTMLElement, k: string, o = {}) => at.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ...o }));
+    const runs = (from: number) => calls("process_run").slice(from).map(([, a]) => [a.name, a.action]);
+    const list = $(".dev-list");
+    const out = $(".dev-out");
+    expect($(".dev-keys").textContent).toBe("↑↓ select · s start · x stop · r restart · q stop all · c clear");
+    expect(out.tabIndex).toBe(0);
+    $('.tabs [data-tab="overview"]').click();
+    devTab().click();
+    await wait(80);
+    expect(document.activeElement).toBe(list);
+
+    item("app").click();
+    await wait(80);
+    key(list, "j");
+    await wait(80);
+    expect(chosen()).toBe("proc:docs-dev");
+    key(out, "k");
+    await wait(80);
+    expect(chosen()).toBe("app");
+    key(list, "ArrowDown");
+    await wait(80);
+    expect(chosen()).toBe("proc:docs-dev");
+
+    // A modifier, a field (in the pane or elsewhere): not the pane's keys.
+    let before = calls("process_run").length;
+    key(list, "j", { metaKey: true });
+    key(list, "x", { ctrlKey: true });
+    const field = document.createElement("input");
+    $(".dev-head").append(field);
+    key(field, "x");
+    key(field, "j");
+    field.remove();
+    key($("#search") ?? document.body, "x");
+    await wait(80);
+    expect(chosen()).toBe("proc:docs-dev");
+    expect(runs(before)).toEqual([]);
+
+    // docs:dev runs: x stops, s does nothing, r restarts; c clears its output.
+    key(out, "s");
+    key(out, "x");
+    key(list, "r");
+    await wait(80);
+    expect(runs(before)).toEqual([
+      ["docs-dev", "stop"],
+      ["docs-dev", "restart"],
+    ]);
+    key(list, "c");
+    await wait();
+    expect(calls("log_clear").at(-1)![1]).toEqual({ site: "vuefinder", source: "proc:docs-dev" });
+
+    // docs:site is stopped: s starts it.
+    key(list, "j");
+    await wait(80);
+    before = calls("process_run").length;
+    key(list, "x");
+    key(list, "s");
+    await wait(80);
+    expect(runs(before)).toEqual([["docs-site", "start"]]);
+
+    // All: r restarts what runs, q is the header's Stop.
+    item("all").click();
+    await wait(80);
+    before = calls("process_run").length;
+    key(list, "r");
+    key(list, "q");
+    await wait(80);
+    expect(runs(before)).toEqual([
+      ["docs-dev", "restart"],
+      [null, "stop"],
+    ]);
+  });
+
   test("a crashed process has a red dot; a folder has no Dev tab", async () => {
     await select("shop");
     expect(item("proc:logs").querySelector(".dot.bad")).not.toBeNull();

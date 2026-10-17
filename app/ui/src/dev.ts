@@ -44,7 +44,10 @@ const pane = el("section", "console dev-pane");
 const head = el("header", "console-head dev-head");
 const term = termOut("console-out dev-out");
 const empty = el("div", "dev-empty");
-pane.append(head, term.out, empty);
+term.out.tabIndex = 0;
+// The keys (see main.onkeydown), said once; hidden when the pane is too narrow for it.
+const keysHint = el("p", "dev-keys", "↑↓ select · s start · x stop · r restart · q stop all · c clear");
+pane.append(head, term.out, empty, keysHint);
 main.append(list, pane);
 const conf = el("div", "dev-conf");
 box.append(bar, main, conf);
@@ -87,12 +90,45 @@ function pick(name: string, key: string) {
   devTick();
 }
 
-list.onkeydown = (e) => {
-  if ((e.key !== "ArrowDown" && e.key !== "ArrowUp") || !view) return;
+/** The header's Start or Stop (every dev process of the app), when it is offered. */
+function headerAll(action: "start" | "stop") {
+  const b = $(`#site [data-all="${action}"]`);
+  if (b && !b.hidden) b.click();
+}
+
+/* Keys, like mprocs, while the focus is in the list or the output; never while typing
+ * nor with a modifier (those are the menu's). What changes on screen is the feedback. */
+main.onkeydown = (e) => {
+  const v = view;
+  if (!v || e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
+  const name = v.site;
+  const procs = procItems(name);
+  const items = [...procs, ...runItems(name)];
+  const one = items.find((x) => x.key === v.key);
+  const k = e.key;
+  if (k === "ArrowDown" || k === "ArrowUp" || k === "j" || k === "k") {
+    const keys = ["all", ...items.map((x) => x.key)];
+    const i = keys.indexOf(v.key) + (k === "ArrowDown" || k === "j" ? 1 : -1);
+    if (i >= 0 && i < keys.length) pick(name, keys[i]);
+  } else if (k === "s") {
+    if (!one) headerAll("start");
+    else if (one.row && !one.running) runProc(name, one, "start");
+  } else if (k === "x") {
+    if (!one) headerAll("stop");
+    else if (one.row && one.running) runProc(name, one, "stop");
+  } else if (k === "r") {
+    for (const x of one ? [one] : procs.filter((p) => p.running)) if (x.row && (x.running || x.crashed)) runProc(name, x, "restart");
+  } else if (k === "q") headerAll("stop");
+  else if (k === "c") {
+    if (one) clearOutput(name, one);
+    else {
+      // All: the screen only; each process's own output stays.
+      term.out.replaceChildren();
+      v.live = null;
+      syncEmpty();
+    }
+  } else return;
   e.preventDefault();
-  const keys = ["all", ...procItems(view.site).map((x) => x.key), ...runItems(view.site).map((x) => x.key)];
-  const i = keys.indexOf(view.key) + (e.key === "ArrowDown" ? 1 : -1);
-  if (i >= 0 && i < keys.length) pick(view.site, keys[i]);
 };
 
 /** Start, stop or restart a process; a restart starts its output over. */
@@ -550,6 +586,7 @@ late.devTab = () => {
   if (!selected) return;
   drawDev(selected);
   devTick();
+  if (!main.hidden && box.isConnected) list.focus({ preventScroll: true });
 };
 late.openDev = openDev;
 
