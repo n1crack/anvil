@@ -150,13 +150,16 @@ async function loadAnvilStorage() {
     info.append(name, note);
     const actions = document.createElement("span");
     actions.className = "actions-inline";
-    const tag = document.createElement("span");
-    tag.className = `safety ${i.safety}`;
-    tag.textContent = SAFETY_LABEL[i.safety];
+    if (i.safety !== "keep") {
+      const tag = document.createElement("span");
+      tag.className = `safety ${i.safety}`;
+      tag.textContent = SAFETY_LABEL[i.safety];
+      actions.append(tag);
+    }
     const size = document.createElement("span");
     size.className = "size";
     size.textContent = bytes(i.bytes);
-    actions.append(tag, size);
+    actions.append(size);
     if (i.safety === "safe") {
       actions.append(button("Delete", async () => {
         if (!(await confirmDelete(`Delete ${i.label}?`, `${i.note}. This frees about ${bytes(i.bytes)}.`))) return;

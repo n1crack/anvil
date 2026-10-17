@@ -637,9 +637,13 @@ function renderResources(name) {
     dt.append(el("span", null, i.label));
     if (i.path) dt.append(el("small", "path", i.path.startsWith("/") ? tilde(i.path) : i.path));
     const dd = el("dd", "res-cells");
-    const tag = el("span", `safety ${i.safety}`, SAFETY[i.safety][0]);
-    tag.title = i.note;
-    dd.append(tag, el("span", "size", bytes(i.bytes)));
+    // Only items you can act on carry a tag; "keep" would be on every row.
+    if (i.safety !== "keep") {
+      const tag = el("span", `safety ${i.safety}`, SAFETY[i.safety][0]);
+      tag.title = i.note;
+      dd.append(tag);
+    }
+    dd.append(el("span", "size", bytes(i.bytes)));
     if (i.safety !== "keep") {
       const del = el("button", "del", "Delete");
       del.setAttribute("aria-label", `Delete ${i.label}`);
