@@ -155,6 +155,8 @@ function mark(s) {
 }
 
 let sortBy = localStorage.getItem("sortBy") ?? "name";
+// How the list is split after your own groups: by parked folder, by type, or not at all.
+let groupBy = localStorage.getItem("groupBy") ?? "folder";
 // Sidebar sections folded from their heading, by "mode:title".
 const folded = new Set(JSON.parse(localStorage.getItem("sections") ?? "[]"));
 
@@ -197,7 +199,7 @@ function toggle(name, open = collapsed.has(name)) {
   parent.nextElementSibling?.classList.toggle("closed", !open);
 }
 
-function row(s, { child = false, kids = 0, path = true } = {}) {
+function row(s, { child = false, kids = 0, path = true, kind: showKind = true } = {}) {
   const b = document.createElement("button");
   b.className = child ? "item child" : "item";
   b.dataset.name = s.name;
@@ -222,7 +224,8 @@ function row(s, { child = false, kids = 0, path = true } = {}) {
   end.className = "end";
   if (child) end.append(el("span", "alias", "alias"));
   // A plain PHP app shows only its pinned version, not "PHP" twice.
-  if (!child && s.kind !== "static" && !(s.kind === "php" && s.php_pinned)) {
+  // Under a type heading the type would only repeat it.
+  if (showKind && !child && s.kind !== "static" && !(s.kind === "php" && s.php_pinned)) {
     const kind = document.createElement("span");
     kind.className = `kind kind-${s.kind}`;
     kind.textContent = snap.kinds.find(([id]) => id === s.kind)?.[1] ?? s.kind;
@@ -337,14 +340,14 @@ function renderList() {
     (!q || `${s.name}.${snap.tld} ${s.path}`.toLowerCase().includes(q));
   let count = 0;
 
-  const section = (title, sites, withChildren, path = true) => {
+  const section = (title, sites, withChildren, path = true, kind = true) => {
     const rows = [];
     for (const s of [...sites].sort(order)) {
       const kids = withChildren ? byPath.get(s.path) ?? [] : [];
       const parentHit = hit(s);
       const shownKids = kids.filter((k) => parentHit || hit(k));
       if (!parentHit && !shownKids.length) continue;
-      rows.push(row(s, { kids: kids.length, path }));
+      rows.push(row(s, { kids: kids.length, path, kind }));
       if (shownKids.length) {
         // Always rendered so folding can slide; while searching, matches stay open.
         const wrap = document.createElement("div");
@@ -367,11 +370,19 @@ function renderList() {
   for (const g of groupNames) {
     section(g, parked.filter((s) => snap.groups[g].includes(s.name)), true);
   }
-  const dirs = [...new Set(parked.map((s) => s.parked_in))].sort();
-  for (const dir of dirs) {
-    section(tilde(dir), parked.filter((s) => s.parked_in === dir && !grouped.has(s.name)), true, false);
+  const rest = [...parked, ...linked].filter((s) => !grouped.has(s.name));
+  if (groupBy === "type") {
+    const kinds = [...new Set(rest.map((s) => s.kind))].sort((a, b) => kindLabel(a).localeCompare(kindLabel(b)));
+    for (const k of kinds) section(kindLabel(k), rest.filter((s) => s.kind === k), true, true, false);
+  } else if (groupBy === "none") {
+    section("Applications", rest, true);
+  } else {
+    const dirs = [...new Set(parked.map((s) => s.parked_in))].sort();
+    for (const dir of dirs) {
+      section(tilde(dir), parked.filter((s) => s.parked_in === dir && !grouped.has(s.name)), true, false);
+    }
+    section("Linked", linked, false);
   }
-  section("Linked", linked, false);
 
   if (!count) {
     const p = document.createElement("p");
@@ -393,15 +404,7 @@ async function siteMenu(s) {
   const groupOf = Object.keys(snap.groups).find((g) => snap.groups[g].includes(s.name));
   const groups = [...new Set(["Favorites", ...Object.keys(snap.groups)])];
 
-  const sort = await M.Submenu.new({
-    text: "Sort By",
-    items: await Promise.all([
-      M.CheckMenuItem.new({ text: "Name", checked: sortBy === "name", action: () => setSort("name") }),
-      M.CheckMenuItem.new({ text: "Date Modified", checked: sortBy === "modified", action: () => setSort("modified") }),
-    ]),
-  });
-
-  const items = [sort, await sep()];
+  const items = [];
   if (!s.linked) {
     items.push(await M.MenuItem.new({ text: "Add Alias…", action: () => addAlias(s) }));
     const groupItems = await Promise.all(groups.map((g) =>
@@ -419,9 +422,10 @@ async function siteMenu(s) {
   (await M.Menu.new({ items })).popup();
 }
 
-function setSort(by) {
-  sortBy = by;
-  localStorage.setItem("sortBy", by);
+function setView(key, value) {
+  if (key === "sortBy") sortBy = value;
+  else groupBy = value;
+  localStorage.setItem(key, value);
   renderList();
 }
 
@@ -1093,8 +1097,20 @@ $("#filter").onclick = async () => {
   };
   const sep = () => M.PredefinedMenuItem.new({ item: "Separator" });
   const kinds = [...counts.keys()].sort((a, b) => label(a).localeCompare(label(b)));
+  // Applications: how the list is grouped and sorted comes first, then what it shows.
+  const pick = (key, current, options) =>
+    Promise.all(options.map(([value, text]) =>
+      M.CheckMenuItem.new({ text, checked: current === value, action: () => setView(key, value) })));
+  const view = apps
+    ? [
+        M.Submenu.new({ text: "Group By", items: await pick("groupBy", groupBy, [["folder", "Folder"], ["type", "Type"], ["none", "None"]]) }),
+        M.Submenu.new({ text: "Sort By", items: await pick("sortBy", sortBy, [["name", "Name"], ["modified", "Date Modified"]]) }),
+        sep(),
+      ]
+    : [];
   const menu = await M.Menu.new({
     items: await Promise.all([
+      ...view,
       M.CheckMenuItem.new({ text: "All Types", checked: !f.kind, action: () => set({ kind: null }) }),
       sep(),
       ...kinds.map((k) =>
@@ -1113,7 +1129,9 @@ function renderFilter() {
   const btn = $("#filter");
   btn.classList.toggle("active", on);
   const what = mode === "apps" ? "applications" : "services";
-  btn.title = on ? `Filtered: ${[f.kind && "one type", f.running && "running only"].filter(Boolean).join(", ")}` : `Filter ${what}`;
+  btn.title = on
+    ? `Filtered: ${[f.kind && "one type", f.running && "running only"].filter(Boolean).join(", ")}`
+    : mode === "apps" ? "Group, sort and filter applications" : `Filter ${what}`;
   btn.setAttribute("aria-label", btn.title);
 }
 
