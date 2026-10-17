@@ -149,6 +149,11 @@ pub fn version(cfg: &Config, id: &str) -> String {
         .unwrap_or_else(|| kind_of(cfg, id).map_or("", default_version).to_string())
 }
 
+/// The program folder a service runs from.
+pub fn program_dir(cfg: &Config, id: &str) -> Result<PathBuf> {
+    Ok(dir(kind_of(cfg, id)?, &version(cfg, id)))
+}
+
 /// Programs live in `services/<kind>/<version>/`.
 fn dir(kind: &str, version: &str) -> PathBuf {
     let root = home().join("services").join(kind);

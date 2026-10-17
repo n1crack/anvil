@@ -225,8 +225,20 @@ function renderService() {
   tagsBox.append(tagInput);
 
   $(".svc-data", root).textContent = `~/.anvil/data/${svc.id}`;
-  $(".svc-env", root).textContent = svc.env;
-  $(".svc-copy", root).onclick = () => copy(svc.env, `Copied ${svc.id}’s settings`);
+  const env = envFor(svc);
+  $(".svc-env", root).textContent = env;
+  $(".svc-copy", root).onclick = () => copy(env, `Copied ${svc.id}’s settings`);
+
+  // Database apps installed on this Mac open the service directly.
+  for (const client of svc.clients) {
+    const b = el("button");
+    b.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.75" rx="5.25" ry="2"/><path d="M2.75 3.75v8.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-8.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/></svg>`;
+    b.append(client);
+    b.title = `Open ${svc.id} in ${client}`;
+    b.onclick = () => openClient(svc, client, chosenDb[svc.id]);
+    $(".quick", root).append(b);
+  }
+  renderContents(svc, root);
   $(".svc-remove", root).onclick = () => removeService(svc);
 }
 
@@ -377,3 +389,132 @@ $("#svc-form").onsubmit = async (e) => {
 
 renderModes();
 window.loadServices();
+
+/* ---------- What's inside: databases, keys, messages ---------- */
+
+const contents = new Map(); // service id -> last contents
+const chosenDb = {}; // service id -> database used in the .env lines
+
+function openClient(svc, client, database) {
+  invoke("open_in_client", { id: svc.id, client, database: database ?? null }).catch((e) => showError(String(e)));
+}
+
+/** The .env lines, pointed at the chosen database. */
+function envFor(svc) {
+  const db = chosenDb[svc.id];
+  if (!db) return svc.env;
+  return svc.env
+    .split("\n")
+    .map((l) => (l.startsWith("DATABASE_URL=") ? l.replace(/\/[^/]*$/, `/${db}`) : l))
+    .concat(`DB_DATABASE=${db}`)
+    .join("\n");
+}
+
+const CONTENTS_TITLE = { mysql: "Databases", postgres: "Databases", redis: "Keys", mailpit: "Messages" };
+const SYSTEM_DBS = new Set(["information_schema", "mysql", "performance_schema", "sys", "postgres", "template1"]);
+
+async function renderContents(svc, root, action) {
+  $(".svc-contents-title", root).textContent = CONTENTS_TITLE[svc.kind];
+  const box = $(".svc-contents", root);
+  if (!svc.running) {
+    box.replaceChildren(el("p", "muted", `Start ${svc.id} to see what’s inside.`));
+    contents.delete(svc.id);
+    return;
+  }
+  const cached = contents.get(svc.id);
+  if (cached && !action) drawContents(svc, root, cached);
+  else if (!cached) box.replaceChildren(el("p", "muted", "Looking inside…"));
+  try {
+    const c = action
+      ? await invoke("service_data", action)
+      : await invoke("service_contents", { id: svc.id });
+    contents.set(svc.id, c);
+    if (root.dataset.service === svc.id) drawContents(svc, root, c);
+  } catch (e) {
+    if (action) showError(String(e));
+    else box.replaceChildren(el("p", "muted", String(e)));
+  }
+}
+
+function drawContents(svc, root, c) {
+  const box = $(".svc-contents", root);
+  const list = el("dl", "group res-list");
+  const line = (name, value, ...buttons) => {
+    const row = el("div", "row");
+    const dt = el("dt");
+    dt.append(el("span", null, name));
+    const dd = el("dd", "res-cells");
+    if (value != null) dd.append(el("span", "size", value));
+    dd.append(...buttons);
+    row.append(dt, dd);
+    list.append(row);
+    return dt;
+  };
+  const act = (label, fn, cls) => {
+    const b = el("button", cls ?? "link", label);
+    b.onclick = fn;
+    return b;
+  };
+  const confirm = (title, message, ok) =>
+    window.__TAURI__.dialog.ask(message, { title, kind: "warning", okLabel: ok, cancelLabel: "Cancel" });
+
+  if (svc.kind === "mysql" || svc.kind === "postgres") {
+    const system = c.databases.filter(([n]) => SYSTEM_DBS.has(n));
+    for (const [name, size] of c.databases.filter(([n]) => !SYSTEM_DBS.has(n))) {
+      const used = chosenDb[svc.id] === name;
+      const buttons = [];
+      {
+        buttons.push(act(used ? "In .env" : "Use in .env", () => {
+          chosenDb[svc.id] = used ? undefined : name;
+          renderService();
+        }));
+        if (svc.clients[0]) buttons.push(act("Open", () => openClient(svc, svc.clients[0], name)));
+        buttons.push(act("Drop…", async () => {
+          if (await confirm(`Drop ${name}?`, `Every table in ${name} is deleted. This can’t be undone.`, "Drop"))
+            renderContents(svc, root, { id: svc.id, action: "drop", name });
+        }));
+      }
+      line(name, bytes(size), ...buttons);
+    }
+    // The server's own databases: one quiet line instead of a row each.
+    if (system.length) {
+      const dt = line("Server databases", bytes(system.reduce((a, [, b]) => a + b, 0)));
+      dt.classList.add("muted");
+      dt.append(el("small", "path", system.map(([n]) => n).join(", ")));
+    }
+    // New database: name field plus Create.
+    const row = el("div", "row");
+    const input = el("input");
+    input.placeholder = "New database name";
+    input.spellcheck = false;
+    input.setAttribute("aria-label", "New database name");
+    const create = () => {
+      const name = input.value.trim();
+      if (name) renderContents(svc, root, { id: svc.id, action: "create", name });
+    };
+    input.onkeydown = (e) => e.key === "Enter" && create();
+    row.append(input, act("Create", create, "plain"));
+    list.append(row);
+  } else if (svc.kind === "redis") {
+    if (!c.keys.length) line("No keys yet", null);
+    for (const [db, keys] of c.keys) line(db, `${keys} ${keys === 1 ? "key" : "keys"}`);
+    line("Memory", c.memory ?? "–");
+    if (c.keys.length) {
+      const row = el("div", "row");
+      row.append(act("Flush All…", async () => {
+        if (await confirm(`Flush ${svc.id}?`, "Every key in every database is deleted.", "Flush"))
+          renderContents(svc, root, { id: svc.id, action: "empty" });
+      }, "plain"));
+      list.append(row);
+    }
+  } else {
+    const n = c.messages ?? 0;
+    const buttons = [act("Open inbox", () => invoke("open_url", { url: svc.web }))];
+    if (n) buttons.push(act("Delete All…", async () => {
+      if (await confirm(`Delete ${n} messages?`, `Every message caught by ${svc.id} is deleted.`, "Delete"))
+        renderContents(svc, root, { id: svc.id, action: "empty" });
+    }));
+    line(n === 1 ? "1 message" : `${n} messages`, null, ...buttons);
+  }
+  box.replaceChildren(list);
+}

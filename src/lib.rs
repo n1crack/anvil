@@ -3,6 +3,7 @@
 
 pub mod apps;
 pub mod create;
+pub mod databases;
 pub mod dns;
 pub mod resources;
 pub mod runtimes;
