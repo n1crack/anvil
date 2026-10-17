@@ -371,10 +371,10 @@ function render() {
   if (!["test", "localhost"].includes(s.tld)) tld.add(new Option(`.${s.tld}`, s.tld));
   tld.value = s.tld;
   $("#tld-note").textContent = s.tld === "localhost"
-    ? "Reaches this Mac by itself."
-    : "Needs a one-time step that asks for your password.";
+    ? "Reaches this Mac by itself, no setup."
+    : "Reaches Anvil through a resolver file, set up once with your password.";
   tld.onchange = () => call("set_tld", { tld: tld.value });
-  $("#ports").textContent = `HTTP on ${s.http_port}, DNS on ${s.dns_port}. Change them in config.toml.`;
+  $("#ports").textContent = `HTTP on ${s.http_port}${s.tld === "localhost" ? "" : `, DNS on ${s.dns_port}`}. Change them in config.toml.`;
   $("#config-dir").textContent = tilde(s.config_dir);
 
   // PHP versions
