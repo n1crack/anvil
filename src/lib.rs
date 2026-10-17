@@ -11,6 +11,7 @@ pub mod packages;
 pub mod resources;
 pub mod runtimes;
 pub mod services;
+pub mod uninstall;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
