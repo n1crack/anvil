@@ -87,11 +87,7 @@ function renderServiceList() {
   const list = $("#list");
   list.replaceChildren();
   if (!services.length) {
-    const p = el("p", "empty", "No services yet. Add MySQL, PostgreSQL, Redis or Mailpit; each one gets its own port and data.");
-    const add = el("button", "below", "Add Service…");
-    add.onclick = openAddService;
-    p.append(el("br"), add);
-    list.append(p);
+    list.append(el("p", "empty", "No services yet."));
     return;
   }
   const note = filterNote("services", (k) => services.find((x) => x.kind === k)?.name ?? k);
@@ -157,7 +153,16 @@ function renderService() {
   if (!services.some((x) => x.id === svcSelected)) svcSelected = services[0]?.id;
   const svc = services.find((x) => x.id === svcSelected);
   if (!svc) {
-    root.innerHTML = `<div class="placeholder">Add a service to get started</div>`;
+    const box = el("div", "welcome");
+    const add = el("button", "primary", "Add Service…");
+    add.onclick = openAddService;
+    box.append(
+      el("h1", null, "No services yet"),
+      el("p", "muted", "Add MySQL, PostgreSQL, Redis or Mailpit. Each one gets its own name, port and data, and you can add as many as you need."),
+      add,
+    );
+    root.replaceChildren(box);
+    delete root.dataset.service;
     return;
   }
   // Keep focus and typing in a field across refreshes of the same service.

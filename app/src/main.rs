@@ -606,6 +606,42 @@ fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot
     snapshot(&app)
 }
 
+/// What still needs doing before `.test` addresses work: resolver, certificate, PHP.
+#[tauri::command(async)]
+fn setup_status() -> Res<anvil::Setup> {
+    Ok(anvil::setup_status(&anvil::load().map_err(err)?))
+}
+
+/// Do one setup step. The resolver file needs an administrator: macOS asks for
+/// the password in its own dialog.
+#[tauri::command(async)]
+fn setup_fix(handle: AppHandle, step: String) -> Res<anvil::Setup> {
+    let mut cfg = anvil::load().map_err(err)?;
+    match step.as_str() {
+        "resolver" => {
+            let ok =
+                |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+            if !ok(&cfg.tld) {
+                return Err(format!("{} isn't a valid domain suffix", cfg.tld));
+            }
+            let (file, _) = anvil::resolver_file(&cfg);
+            // Backslashes survive AppleScript once, so printf sees \n.
+            let script = format!(
+                "do shell script \"mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\\\nport {}\\\\n' > {}\" with prompt \"Anvil sets up .{} addresses on this Mac.\" with administrator privileges",
+                cfg.dns_port,
+                file.display(),
+                cfg.tld
+            );
+            anvil::run(Command::new("osascript").args(["-e", &script])).map_err(err)?;
+        }
+        "trust" => anvil::trust().map_err(err)?,
+        "php" => anvil::php_install(&mut cfg, "8.4").map_err(err)?,
+        other => return Err(format!("Unknown setup step {other}")),
+    }
+    changed(&handle);
+    setup_status()
+}
+
 #[tauri::command(async)]
 fn unhide_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
     let mut cfg = anvil::load().map_err(err)?;
@@ -1522,6 +1558,8 @@ fn main() {
             park_folder,
             remove_site,
             unhide_site,
+            setup_status,
+            setup_fix,
             set_group,
             set_site_ini,
             set_runtime,

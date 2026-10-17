@@ -48,7 +48,45 @@ function toast(msg, undo) {
 window.refresh = () => {
   call("state");
   window.loadServices?.();
+  loadSetup();
 };
+
+/* ---------- Setup: what still stands between this Mac and working addresses ---------- */
+
+// [step, field in setup_status, label, what it does]
+const SETUP_STEPS = [
+  ["resolver", "resolver", "Local domains", "Lets local addresses reach Anvil (asks for your password)"],
+  ["trust", "trusted", "HTTPS certificate", "Lets browsers trust Anvil’s local certificates"],
+  ["php", "php", "PHP", "Installs PHP 8.4 for PHP applications"],
+];
+
+async function loadSetup(fixing) {
+  let st;
+  try {
+    st = await invoke("setup_status");
+  } catch {
+    return;
+  }
+  const bar = $("#setup");
+  const missing = SETUP_STEPS.filter(([, field]) => !st[field]);
+  bar.hidden = !missing.length;
+  bar.replaceChildren(el("span", null, "Finish setting up"));
+  for (const [id, , label, why] of missing) {
+    const b = el("button", null, fixing === id ? `${label}…` : label);
+    b.title = why;
+    b.disabled = !!fixing;
+    b.onclick = async () => {
+      loadSetup(id);
+      try {
+        await invoke("setup_fix", { step: id });
+      } catch (e) {
+        showError(String(e));
+      }
+      loadSetup();
+    };
+    bar.append(b);
+  }
+}
 
 function render() {
   showError(snap.error);
@@ -187,6 +225,29 @@ function filterNote(m, label) {
   return note;
 }
 
+/** First run: one clear next step instead of an empty pane. */
+function welcome(root) {
+  const box = el("div", "welcome");
+  const icon = el("img");
+  icon.src = "icon.png";
+  icon.alt = "";
+  const add = el("button", "primary", "Add Projects Folder…");
+  add.onclick = async () => {
+    const path = await window.__TAURI__.dialog.open({ directory: true, title: "Every project inside this folder becomes an application" });
+    if (path) await call("park_folder", { path });
+  };
+  const create = el("button", "link", "or create a new application");
+  create.onclick = openNewApp;
+  box.append(
+    icon,
+    el("h1", null, "Welcome to Anvil"),
+    el("p", "muted", `Add the folder where your projects live. Each project in it gets its own .${snap.tld} address.`),
+    add,
+    create,
+  );
+  root.replaceChildren(box);
+}
+
 function renderList() {
   const list = $("#list");
   list.replaceChildren();
@@ -194,18 +255,7 @@ function renderList() {
   if (note && snap.sites.length) list.append(note);
 
   if (!snap.sites.length) {
-    const p = el("div", "empty", "No applications yet. Create one, or add the folder where your projects live and each of them becomes an application.");
-    const actions = el("div", "empty-actions");
-    const create = el("button", null, "New Application…");
-    create.onclick = openNewApp;
-    const park = el("button", null, "Add Folder of Applications…");
-    park.onclick = async () => {
-      const path = await window.__TAURI__.dialog.open({ directory: true, title: "Every project inside this folder becomes an application" });
-      if (path) await call("park_folder", { path });
-    };
-    actions.append(create, park);
-    p.append(actions);
-    list.append(p);
+    list.append(el("p", "empty", "No applications yet."));
     return;
   }
 
@@ -370,6 +420,7 @@ function showTab(root, name) {
 function renderSite() {
   const root = $("#site");
   const s = snap.sites.find((x) => x.name === selected);
+  if (!snap.sites.length) return welcome(root);
   if (!s) {
     root.innerHTML = `<div class="placeholder">Select an application</div>`;
     return;
