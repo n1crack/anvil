@@ -1736,3 +1736,83 @@ mod tests {
         assert!(out.contains("file_server"));
     }
 }
+
+/// The PATH a terminal would have. An app opened from Finder gets launchd's short
+/// PATH (/usr/bin:/bin:…), so pnpm, Homebrew, nvm and the like aren't found by
+/// the processes Anvil starts. This asks the user's login shell once.
+pub fn login_path() -> Option<String> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let mut child = Command::new(shell)
+        .args(["-lic", "printf '\\n__ANVIL_PATH__%s\\n' \"$PATH\""])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    // A shell that waits on something (a prompt, a slow plugin) must not hold Anvil up.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(20))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut out = String::new();
+    std::io::Read::read_to_string(&mut child.stdout?, &mut out).ok()?;
+    parse_login_path(&out)
+}
+
+/// The PATH printed after the marker; shells may print banners around it.
+fn parse_login_path(out: &str) -> Option<String> {
+    out.lines()
+        .rev()
+        .find_map(|l| l.strip_prefix("__ANVIL_PATH__"))
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(String::from)
+}
+
+/// `current` with the login shell's entries added after it, each directory once.
+pub fn merge_path(current: &str, login: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    current
+        .split(':')
+        .chain(login.split(':'))
+        .filter(|d| !d.is_empty() && seen.insert(*d))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_path_after_banners() {
+        let out = "Welcome!\n\n__ANVIL_PATH__/opt/homebrew/bin:/usr/bin\n";
+        assert_eq!(
+            parse_login_path(out).as_deref(),
+            Some("/opt/homebrew/bin:/usr/bin")
+        );
+        assert_eq!(parse_login_path("no marker"), None);
+        assert_eq!(parse_login_path("__ANVIL_PATH__\n"), None);
+    }
+
+    #[test]
+    fn merges_without_duplicates_keeping_order() {
+        assert_eq!(
+            merge_path(
+                "/usr/bin:/bin",
+                "/opt/homebrew/bin:/usr/bin:/Users/x/Library/pnpm"
+            ),
+            "/usr/bin:/bin:/opt/homebrew/bin:/Users/x/Library/pnpm"
+        );
+    }
+}

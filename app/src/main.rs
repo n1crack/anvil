@@ -2624,6 +2624,13 @@ fn on_menu(handle: &AppHandle, id: &str) {
 }
 
 fn main() {
+    // Opened from Finder, Anvil gets launchd's short PATH; what it starts (pnpm,
+    // Homebrew tools, nvm's node…) needs the one a terminal has.
+    if let Some(login) = anvil::login_path() {
+        let path = anvil::merge_path(&std::env::var("PATH").unwrap_or_default(), &login);
+        // SAFETY: no other thread exists yet.
+        unsafe { std::env::set_var("PATH", path) };
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
