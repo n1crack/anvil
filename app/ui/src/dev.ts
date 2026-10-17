@@ -1,5 +1,5 @@
 import type { CommandChip, ProcessRow } from "./types";
-import { $, M, PHP_KINDS, PROCESS_KINDS, call, el, invoke, mode, popAt, selected, showError, showTab, snap, tab } from "./app";
+import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, mode, popAt, selected, showError, showTab, snap, tab } from "./app";
 import { type Tail, readTail, tail, termOut } from "./console";
 import { late } from "./late";
 import { confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
@@ -157,6 +157,15 @@ async function clearOutput(name: string, x: Item) {
   if (view?.site === name) forget(view, x.key);
 }
 
+async function editAddress(name: string, r: ProcessRow) {
+  const host = new URL(r.address!).hostname;
+  const rest = host.slice(host.indexOf("."));
+  const first = await ask(`Address of ${r.name}`, host.slice(0, host.indexOf(".")), (v) => `${v.trim() || "…"}${rest}`);
+  if (typeof first !== "string") return;
+  const v = first.trim();
+  await loadProcs(name, "set_process", { id: r.id, ...(v ? { host: v } : { resetHost: true }) });
+}
+
 /** Right-click on an entry: what can be done to it. */
 async function itemMenu(name: string, x: Item, at: HTMLElement) {
   const item = (text, action) => M.MenuItem.new({ text, action });
@@ -177,6 +186,8 @@ async function itemMenu(name: string, x: Item, at: HTMLElement) {
     else items.push(item("Start", () => runProc(name, x, "start")));
     const web = r.web ?? r.address;
     if (web) items.push(item("Open in Browser", () => invoke("open_url", { url: web }).catch((e) => showError(String(e)))));
+    // An extra dev server's own address, <first part>.<app>.<tld>: the first part is editable.
+    if (r.address && !r.main) items.push(item("Edit Address…", () => editAddress(name, r)));
     items.push(
       M.PredefinedMenuItem.new({ item: "Separator" }),
       item("Clear", () => clearOutput(name, x)),
@@ -530,7 +541,7 @@ function drawConf(name: string, force = false) {
   for (const [h, tip] of [
     ["Name", ""],
     ["Command", "Runs in the app’s folder"],
-    ["Dev start", "Started by the header’s Start"],
+    ["Dev start", "Started by Start in this toolbar"],
     ["With Anvil", "Started when Anvil starts"],
     ["", ""],
   ]) {

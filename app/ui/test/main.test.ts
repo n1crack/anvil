@@ -212,11 +212,11 @@ describe("dev", () => {
     ).toEqual([{ site: "vuefinder", name: "docs-dev", action: "restart" }]);
   });
 
-  test("a right-click offers Stop, Restart, Open in Browser and Clear; Clear empties it", async () => {
+  test("a right-click offers Stop, Restart, Open in Browser, Edit Address and Clear; Clear empties it", async () => {
     item("proc:docs-dev").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     await wait();
     const menu = w.mockMenu as any[];
-    expect(menu.map((i) => i.text ?? i.item)).toEqual(["Stop", "Restart", "Open in Browser", "Separator", "Clear"]);
+    expect(menu.map((i) => i.text ?? i.item)).toEqual(["Stop", "Restart", "Open in Browser", "Edit Address…", "Separator", "Clear"]);
     menu.find((i) => i.text === "Clear").action();
     await wait();
     expect(calls("log_clear").at(-1)![1]).toEqual({ site: "vuefinder", source: "proc:docs-dev" });
