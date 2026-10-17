@@ -13,7 +13,7 @@ Free and open source. Built for developers.
 
 ---
 
-Anvil turns the folders on your Mac into running applications at local domains like `myapp.test`, with HTTPS, isolated language runtimes, databases and per-application settings. No containers, no virtual machines and no changes to your system packages. Everything Anvil installs lives in `~/.anvil`, and so do the caches of the tools it runs; the only system changes are the ones you approve (a resolver file for the local domain, a trusted HTTPS certificate, an optional login item), and `anvil uninstall` removes them. The few exceptions, like Go's local telemetry counters, are listed in [Applications](docs/applications.md#languages).
+Anvil turns the folders on your Mac into running applications at local domains like `myapp.test`, with HTTPS, isolated language runtimes, databases and per-application settings. No containers, no virtual machines and no changes to your system packages. Everything Anvil installs lives in `~/.anvil`, and so do the caches of the tools it runs; the only system changes are the ones you approve (a resolver file for the local domain, a trusted HTTPS certificate, an optional login item), and `anvil uninstall` removes them. The few exceptions, like Go's local telemetry counters, are listed in [Applications](https://anvil.tr/docs/applications#languages).
 
 > **Status: early development.** The core works on macOS today. Expect breaking changes until 1.0.
 
@@ -62,8 +62,8 @@ git clone <repository-url> anvil && cd anvil
 cargo install --path .
 ```
 
-To build the native app as well, see [Getting started](docs/getting-started.md#the-macos-app-optional).
-What Anvil needs on your Mac (macOS version, tools, disk, network, ports) is in [System requirements](docs/requirements.md).
+To build the native app as well, see [Getting started](https://anvil.tr/docs/getting-started#the-macos-app-optional).
+What Anvil needs on your Mac (macOS version, tools, disk, network, ports) is in [System requirements](https://anvil.tr/docs/requirements).
 
 ## Quick start
 
@@ -77,7 +77,7 @@ anvil start                # the first start creates the local certificate autho
 anvil trust                # in another terminal: trust it for HTTPS
 ```
 
-Open `https://<folder>.test:8443` in your browser. [Getting started](docs/getting-started.md) explains each step.
+Open `https://<folder>.test:8443` in your browser. [Getting started](https://anvil.tr/docs/getting-started) explains each step.
 
 ## Commands at a glance
 
@@ -90,18 +90,18 @@ Open `https://<folder>.test:8443` in your browser. [Getting started](docs/gettin
 | Inspect | `anvil usage`, `clean`, `logs`, `git`, `packages` |
 | Run | `anvil setup`, `start`, `trust` |
 
-Every command is in the [CLI reference](docs/cli.md); `anvil --help` lists them too.
+Every command is in the [CLI reference](https://anvil.tr/docs/cli); `anvil --help` lists them too.
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md): install, first run, HTTPS, DNS, uninstall
-- [Applications](docs/applications.md): detection, PHP, languages, templates, storage
-- [Services](docs/services.md): MySQL, PostgreSQL, Redis and Mailpit
-- [The macOS app](docs/app.md) and its keyboard shortcuts
-- [CLI reference](docs/cli.md)
-- [Configuration](docs/configuration.md): `config.toml` and the `~/.anvil` folder
-- [Architecture](docs/architecture.md): how the pieces fit together
-- [Code signing](docs/signing.md): how releases get signed on macOS, Linux and Windows
+- [Getting started](https://anvil.tr/docs/getting-started): install, first run, HTTPS, DNS, uninstall
+- [Applications](https://anvil.tr/docs/applications): detection, PHP, languages, templates, storage
+- [Services](https://anvil.tr/docs/services): MySQL, PostgreSQL, Redis and Mailpit
+- [The macOS app](https://anvil.tr/docs/app) and its keyboard shortcuts
+- [CLI reference](https://anvil.tr/docs/cli)
+- [Configuration](https://anvil.tr/docs/configuration): `config.toml` and the `~/.anvil` folder
+- [Architecture](https://anvil.tr/docs/architecture): how the pieces fit together
+- [Code signing](SIGNING.md): how releases get signed on macOS, Linux and Windows
 - [Changelog](CHANGELOG.md)
 
 ## Contributing
