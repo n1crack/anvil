@@ -408,6 +408,146 @@ describe("dev", () => {
   });
 });
 
+describe("containers", () => {
+  const tabBtn = () => $('.tabs [data-tab="containers"]');
+  const item = (key: string) => $(`.containers .dev-item[data-key="${key}"]`);
+  const lines = () => $$('[data-panel="containers"] .dev-line').map((l) => l.textContent);
+  const keyDown = (key: string) => $(".containers .dev-list").dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  let saved: any;
+
+  test("the Overview has one Containers line with a dot each, which opens the tab", async () => {
+    saved = structuredClone(w.mockOv.stack);
+    await select("stack");
+    const line = $(".procs .dev-summary");
+    expect(line.querySelector(".dev-summary-title")!.textContent).toBe("Containers");
+    expect(line.querySelector(".dev-summary-state")!.textContent).toBe("3 of 4 running");
+    expect([...line.querySelectorAll(".dot")].map((d) => d.className)).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
+    expect($$(".procs .proc, .procs .proc-log")).toHaveLength(0);
+    expect($('.tabs [data-tab="dev"]').hidden).toBe(true);
+    expect(tabBtn().hidden).toBe(false);
+    line.click();
+    await wait(80);
+    expect(tabBtn().getAttribute("aria-selected")).toBe("true");
+  });
+
+  test("the list: All, then each service with its state, port and health", async () => {
+    expect($$(".containers .dev-item").map((i) => i.dataset.key)).toEqual(["all", "web", "db", "cache", "worker"]);
+    const dot = (k: string) => item(k).firstElementChild!.className;
+    expect([dot("web"), dot("db"), dot("cache"), dot("worker")]).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
+    expect(item("db").querySelector(".dev-exit")!.textContent).toBe(":5432 · healthy");
+    expect(item("worker").querySelector(".dev-exit")!.textContent).toBe("exited (1)");
+    // Start, as in Dev: something is down. No Run nor Configure.
+    expect($$(".containers .dev-bar button").map((b) => b.className)).toEqual(["dev-all dev-start"]);
+  });
+
+  test("All merges the logs by time, each line tagged with its service in its color", async () => {
+    await wait(50);
+    const l = lines();
+    expect(l[0]).toBe("db     │ PostgreSQL init process complete; ready for start up.");
+    expect(l[1]).toBe("web    │ /docker-entrypoint.sh: Configuration complete; ready for start up");
+    expect(l.at(-1)).toBe('web    │ 172.18.0.1 - - [17/Oct/2026:10:00:12 +0000] "GET /favicon.ico HTTP/1.1" 404 153');
+    const tag = $$('[data-panel="containers"] .dev-tag').find((t) => t.textContent!.startsWith("db "))!;
+    expect(tag.className).toBe("dev-tag pc1");
+    // Then only what came since the last line read.
+    const n = calls("container_log").length;
+    await wait(1100);
+    const since = calls("container_log")
+      .slice(n)
+      .find(([, a]) => a.service === "web")![1];
+    expect(since.since).toBe(w.mockContainerLogs.web.at(-1).split(" ")[0]);
+    expect(lines()).toHaveLength(l.length);
+  });
+
+  test("one container: its log, colored; keys start, stop, restart and clear", async () => {
+    item("worker").click();
+    await wait(50);
+    expect(lines()).toEqual(["Starting queue worker", "Error: connect ECONNREFUSED 172.18.0.3:6379", "exited with code 1"]);
+    expect($('[data-panel="containers"] .dev-out span.ansi1').textContent).toBe("Error:");
+    expect($('[data-panel="containers"] .dev-head .dev-cmd').textContent).toBe("exited (1)");
+    const n = calls("container_run").length;
+    keyDown("x"); // already stopped: nothing
+    keyDown("s");
+    await wait(50);
+    keyDown("r");
+    keyDown("x"); // still restarting: nothing
+    await wait(50);
+    keyDown("x");
+    await wait(50);
+    expect(
+      calls("container_run")
+        .slice(n)
+        .map(([, a]) => [a.service, a.action]),
+    ).toEqual([
+      ["worker", "start"],
+      ["worker", "restart"],
+      ["worker", "stop"],
+    ]);
+    keyDown("c");
+    expect(lines()).toEqual([]);
+    keyDown("ArrowUp");
+    await wait(50);
+    expect($(".containers .dev-item[aria-selected=true]").dataset.key).toBe("cache");
+  });
+
+  test("a right-click offers Stop, Restart and Open in Browser on its port", async () => {
+    item("web").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait();
+    const menu = w.mockMenu as any[];
+    expect(menu.map((i) => i.text ?? i.item)).toEqual(["Stop", "Restart", "Separator", "Open in Browser"]);
+    menu.at(-1).action();
+    await wait();
+    expect(calls("open_url").at(-1)![1]).toEqual({ url: "http://localhost:8080" });
+  });
+
+  test("Start and Stop in the toolbar run compose for the project, never down; q stops all", async () => {
+    const n = calls("containers_run").length;
+    w.mockDelay = { containers_run: 60 };
+    $(".containers .dev-bar .dev-all").click();
+    await wait(10);
+    expect($(".containers .dev-bar .dev-all").textContent).toBe("Starting…");
+    expect($(".containers .dev-bar .spin-dot")).not.toBeNull();
+    await wait(120);
+    w.mockDelay = {};
+    expect($(".containers .dev-bar .dev-all").textContent).toBe("Stop");
+    keyDown("q");
+    await wait(50);
+    expect(
+      calls("containers_run")
+        .slice(n)
+        .map(([, a]) => a.action),
+    ).toEqual(["start", "stop"]);
+    expect(JSON.stringify(w.mockCalls)).not.toMatch(/"down"|"rm"/);
+  });
+
+  test("⌘3 and the header's state open Containers when the app has no Dev", async () => {
+    $('.tabs [data-tab="overview"]').click();
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "3", metaKey: true, bubbles: true }));
+    await wait();
+    expect(tabBtn().getAttribute("aria-selected")).toBe("true");
+    $('.tabs [data-tab="overview"]').click();
+    ($("#site .run-box .state") as HTMLElement).click();
+    await wait();
+    expect(tabBtn().getAttribute("aria-selected")).toBe("true");
+    w.mockOv.stack = saved;
+    $('.tabs [data-tab="overview"]').click();
+    await select("shop");
+    expect(tabBtn().hidden).toBe(true);
+  });
+
+  test("stamped: docker's times sort as text; only lines after `since`", async () => {
+    const { stamped } = await import("../src/containers");
+    const raw = "2026-10-17T10:00:01.5Z a\n2026-10-17T10:00:01.123456789Z b\ncontinued\n2026-10-17T10:00:02Z c\n";
+    expect(stamped(raw, null).map((l) => [l.at, l.text])).toEqual([
+      ["2026-10-17T10:00:01.500000000", "a"],
+      ["2026-10-17T10:00:01.123456789", "b"],
+      ["2026-10-17T10:00:01.123456789", "continued"],
+      ["2026-10-17T10:00:02.000000000", "c"],
+    ]);
+    expect(stamped(raw, "2026-10-17T10:00:01.5Z").map((l) => l.text)).toEqual(["c"]);
+    expect(stamped("", "2026-10-17T10:00:01.5Z")).toEqual([]);
+  });
+});
+
 describe("audit fixes", () => {
   test("a folder shows no lock nor 'Runs on', even with an old HTTPS flag", async () => {
     await select("notes");
@@ -448,8 +588,74 @@ describe("audit fixes", () => {
     expect(copy.textContent).toBe("Copied");
     expect($("#toast").hidden).toBe(true);
     await wait(1600);
-    expect(copy.textContent).toBe("Copy");
+    // The copy icon again.
+    expect(copy.textContent!.trim()).toBe("");
+    expect(copy.querySelector("svg")).not.toBeNull();
     $('.modes [data-mode="apps"]').click();
+  });
+});
+
+describe("service page", () => {
+  const show = async (id: string) => {
+    $('.modes [data-mode="services"]').click();
+    await wait(40);
+    $(`#list [data-name="${id}"]`).click();
+    await wait(80);
+  };
+  const log = () => $('[data-svc-open="log"]');
+
+  test("no Log section; the log icon opens Processes on that service, or says Not running", async () => {
+    await show("cache");
+    expect($$("#site .res-sub").map((h) => h.textContent)).not.toContain("Log");
+    expect($("#site .svc-log")).toBeNull();
+    expect(log().title).toBe("Show the log in Processes");
+    log().click();
+    await wait();
+    expect(calls("show_processes").at(-1)![1]).toEqual({ select: "service:cache" });
+    const n = calls("show_processes").length;
+    await show("postgres");
+    expect(log().title).toBe("Not running");
+    expect(log().getAttribute("aria-disabled")).toBe("true");
+    log().click();
+    await wait();
+    expect(calls("show_processes")).toHaveLength(n);
+  });
+
+  test("Redis: keys and memory on one line that opens to the keys", async () => {
+    await show("cache");
+    const sum = $(".svc-summary");
+    expect(sum.textContent).toBe("12 keys · 911 KB memory");
+    expect($$(".svc-contents .proc").length).toBe(1);
+    sum.click();
+    await wait();
+    expect($(".svc-summary").getAttribute("aria-expanded")).toBe("true");
+    expect($$(".svc-sub .proc-name").map((n) => n.textContent)).toEqual(["db0"]);
+    expect($(".svc-sub .danger").textContent).toBe("Flush All…");
+    expect($(".svc-contents-head").hidden).toBe(true);
+  });
+
+  test("MySQL: Databases kept; one client is an icon in the header, several a row", async () => {
+    await show("mysql");
+    expect($(".svc-contents-head").hidden).toBe(false);
+    expect($$(".svc-contents .proc-name").map((n) => n.textContent)).toContain("shop");
+    const client = $('[data-svc-open="client"]');
+    expect([client.hidden, client.title]).toEqual([false, "Open in TablePlus"]);
+    expect($(".svc-clients").hidden).toBe(true);
+    client.click();
+    await wait();
+    expect(calls("open_in_client").at(-1)![1]).toEqual({ id: "mysql", client: "TablePlus", database: null });
+    const svc = w.mockServices.find((s) => s.id === "mysql");
+    svc.clients = ["TablePlus", "Sequel Ace"];
+    w.loadServices();
+    await show("cache");
+    await show("mysql");
+    expect($('[data-svc-open="client"]').hidden).toBe(true);
+    expect($$(".svc-clients button").map((b) => b.textContent)).toEqual(["TablePlus", "Sequel Ace"]);
+    svc.clients = ["TablePlus"];
+    w.loadServices();
+    expect($(".svc-remove").textContent).toBe("Remove Service…");
+    $('.modes [data-mode="apps"]').click();
+    await wait(40);
   });
 });
 
@@ -510,6 +716,45 @@ describe("logs", () => {
     expect(trace.classList.contains("folded")).toBe(false);
     (trace.querySelector("button.log-file") as HTMLElement).click();
     expect(calls("open_in_editor").at(-1)![1]).toEqual({ site: "shop", path: "app/Http/Controllers/CheckoutController.php", line: 42 });
+  });
+
+  test("a JSX tree in a message is highlighted, as text only, with React's diff lines marked", async () => {
+    const { messageView } = await import("../src/logs");
+    const msg = [
+      "Hydration failed. This can happen if:",
+      "- A server/client branch",
+      "  <Table>",
+      '    <div className="wrap" style={{...}}>',
+      '+     <td className="cell">',
+      '-     <td className="old">',
+      '>      <span title="%s" data-x="<img src=x onerror=alert(1)>">{"Total"}</span>',
+      "Expected %s.",
+    ].join("\n");
+    const pre = messageView(msg);
+    expect(pre.textContent).toBe(msg.replace(/\n/g, ""));
+    expect(pre.querySelector("img")).toBeNull();
+    expect(pre.innerHTML).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    const lines = [...pre.children] as HTMLElement[];
+    expect(lines.map((l) => l.className)).toEqual([
+      "hl-line",
+      "hl-line", // a bullet of the prose, not a diff line
+      "hl-line",
+      "hl-line",
+      "hl-line hl-add",
+      "hl-line hl-del",
+      "hl-line hl-here",
+      "hl-line",
+    ]);
+    const of = (cls: string) => [...pre.querySelectorAll(`.${cls}`)].map((s) => s.textContent);
+    expect(of("hl-tag")).toEqual(["Table", "div", "td", "td", "span", "span"]);
+    expect(of("hl-attr")).toEqual(["className", "style", "className", "className", "title", "data-x"]);
+    expect(of("hl-str")).toEqual(['"wrap"', '"cell"', '"old"', '"%s"', '"<img src=x onerror=alert(1)>"']);
+    expect(of("hl-mute")).toEqual(["{{...}}", "%s", '{"Total"}', "%s"]);
+    expect(lines[6].querySelector(".hl-mark")!.textContent).toBe(">");
+    // Plain prose: only placeholders.
+    const plain = messageView('Expected "a" to be 3 < 4, got %d times');
+    expect(plain.querySelectorAll("span span").length).toBe(1);
+    expect(plain.querySelector(".hl-mute")!.textContent).toBe("%d");
   });
 
   test("times summary and exception parsing", async () => {

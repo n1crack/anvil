@@ -215,10 +215,21 @@ export function renderService() {
   data.title = `Show ~/.anvil/data/${svc.id} in Finder`;
   data.setAttribute("aria-label", String(data.title));
   inbox.onclick = () => invoke("open_url", { url: svc.web }).catch((e) => showError(String(e)));
-  for (const what of ["data", "log"]) {
-    $(`[data-svc-open="${what}"]`, root).onclick = () => invoke("open_service", { id: svc.id, what }).catch((e) => showError(String(e)));
+  data.onclick = () => invoke("open_service", { id: svc.id, what: "data" }).catch((e) => showError(String(e)));
+  // The log is in the Processes window, on its Services tab, while the service runs.
+  const log = $('[data-svc-open="log"]', root);
+  log.title = svc.running ? "Show the log in Processes" : "Not running";
+  log.setAttribute("aria-label", svc.running ? `Show the log of ${svc.id} in Processes` : "Log: not running");
+  log.setAttribute("aria-disabled", String(!svc.running));
+  log.onclick = () => svc.running && invoke("show_processes", { select: `service:${svc.id}` }).catch((e) => showError(String(e)));
+  // One database app: an icon beside the folder; several: a row of them under the contents.
+  const one = $('[data-svc-open="client"]', root);
+  one.hidden = svc.clients.length !== 1;
+  if (svc.clients.length === 1) {
+    one.title = `Open in ${svc.clients[0]}`;
+    one.setAttribute("aria-label", `Open ${svc.id} in ${svc.clients[0]}`);
+    one.onclick = () => openClient(svc, svc.clients[0], chosenDb[svc.id]);
   }
-  loadServiceLog(svc.id);
 
   const portInput = (sel, value, web) => {
     const input = $(sel, root);
@@ -286,22 +297,20 @@ export function renderService() {
   $(".svc-env", root).textContent = env;
   $(".svc-copy", root).onclick = (e) => copy(env, e.currentTarget);
 
-  // Database apps installed on this Mac open the service directly: a row each.
   const clients = $(".svc-clients", root);
-  clients.hidden = $(".svc-clients-head", root).hidden = !svc.clients.length;
-  for (const client of svc.clients) {
-    const icon = el("span", "svc-icon");
-    icon.innerHTML = DB_ICON;
-    const open = el("button", null, "Open");
-    open.setAttribute("aria-label", String(`Open ${svc.id} in ${client}`));
-    open.onclick = () => openClient(svc, client, chosenDb[svc.id]);
-    clients.append(svcLine(icon, client, null, open));
+  clients.hidden = svc.clients.length < 2;
+  if (svc.clients.length > 1) {
+    clients.append(el("span", "muted", "Open with"));
+    for (const client of svc.clients) {
+      const open = el("button", null, client);
+      open.setAttribute("aria-label", String(`Open ${svc.id} in ${client}`));
+      open.onclick = () => openClient(svc, client, chosenDb[svc.id]);
+      clients.append(open);
+    }
   }
   renderContents(svc, root);
   $(".svc-remove", root).onclick = () => removeService(svc);
 }
-
-export const DB_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.75" rx="5.25" ry="2"/><path d="M2.75 3.75v8.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-8.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/></svg>`;
 
 /** The line under the name, as an app's: kind · version · port · data size (once
  * an app's Resources measured it) · what is notable about its state. */
@@ -315,11 +324,9 @@ export function drawServiceMeta(svc, root) {
   $(".meta", root).replaceChildren(...spans.flatMap((p, i) => (i ? [el("span", "sep", "·"), p] : [p])));
 }
 
-/** A row of a service's lists, in the Processes look: an optional icon, the
- * name, a muted detail, then buttons. */
-export function svcLine(lead, name, detail, ...buttons) {
-  const row = el("div", lead ? "proc svc-row with-icon" : "proc svc-row");
-  if (lead) row.append(lead);
+/** A row of a service's lists, in the Processes look: the name, a muted detail, then buttons. */
+export function svcLine(name, detail, ...buttons) {
+  const row = el("div", "proc svc-row");
   row.append(el("span", "proc-name", name));
   const last = el("span", "proc-last", detail ?? "");
   last.title = detail ?? "";
@@ -342,10 +349,11 @@ export async function copy(text, btn) {
     document.execCommand("copy");
     t.remove();
   }
-  const label = btn.dataset.label ?? btn.textContent;
+  // An icon button too: "Copied" in its place, then the icon again.
+  const label = btn.dataset.label ?? btn.innerHTML;
   btn.dataset.label = label;
   btn.textContent = "Copied";
-  setTimeout(() => (btn.textContent = label), 1500);
+  setTimeout(() => (btn.innerHTML = label), 1500);
 }
 
 /** Remove a service; a second question decides whether its data goes too. */
@@ -365,28 +373,6 @@ export async function removeService(svc) {
   keptNote = wipe ? "" : `Kept ${svc.id}’s ${what} for when you add ${svc.id} again.`;
   await serviceCall("remove_service", { id: svc.id, deleteData: wipe });
 }
-
-/** The service's newest log lines under its page; the Log button opens the whole file. */
-export async function loadServiceLog(id) {
-  let lines: any[] = [];
-  try {
-    lines = await invoke("service_log", { id });
-  } catch {}
-  const box = $("#site .svc-log");
-  if (!box || svcSelected !== id) return;
-  const line = (t) => {
-    const row = el("div", "proc svc-line");
-    row.append(Object.assign(el("span", "proc-last", t), { title: t }));
-    return row;
-  };
-  box.replaceChildren(...(lines.length ? lines.map(line) : [line("Nothing logged yet.")]));
-}
-
-// A running service keeps adding to its log; refresh the lines while it is shown.
-setInterval(() => {
-  if (document.hidden || mode !== "services" || !svcSelected) return;
-  if (services.find((x) => x.id === svcSelected)?.running) loadServiceLog(svcSelected);
-}, 3000);
 
 /* ---------- Add Service sheet: kind, name, port, app and tags, like creating a container ---------- */
 
@@ -532,11 +518,21 @@ export function envFor(svc) {
     .join("\n");
 }
 
-export const CONTENTS_TITLE = { mysql: "Databases", postgres: "Databases", redis: "Keys", mailpit: "Messages" };
 export const SYSTEM_DBS = new Set(["information_schema", "mysql", "performance_schema", "sys", "postgres", "template1"]);
+export const keysOpen = new Set<string>(); // Redis services whose keys are shown
+
+/** Redis's used_memory_human ("911.12K", "1.20M", "856B") as "911 KB", "1.2 MB". */
+export function memText(m: string | null) {
+  const x = /^([\d.]+)([KMGT]?)B?$/i.exec(m ?? "");
+  if (!x) return m ?? "–";
+  const n = Number(x[1]);
+  const unit = `${x[2].toUpperCase()}B`;
+  return `${n < 10 && x[2] ? String(Math.round(n * 10) / 10) : Math.round(n)} ${unit}`;
+}
 
 export async function renderContents(svc, root, action?) {
-  $(".svc-contents-title", root).textContent = CONTENTS_TITLE[svc.kind];
+  // Only a database list needs its heading; keys and messages say what they are.
+  $(".svc-contents-head", root).hidden = !svc.running || !["mysql", "postgres"].includes(svc.kind);
   const box = $(".svc-contents", root);
   if (!svc.running) {
     box.replaceChildren(el("p", "procs-note", `Start ${svc.id} to see what’s inside.`));
@@ -560,7 +556,7 @@ export function drawContents(svc, root, c) {
   const box = $(".svc-contents", root);
   const list = el("div", "group procs-list svc-list");
   const line = (name, value, ...buttons) => {
-    const row = svcLine(null, name, value, ...buttons);
+    const row = svcLine(name, value, ...buttons);
     list.append(row);
     return row;
   };
@@ -587,9 +583,8 @@ export function drawContents(svc, root, c) {
     };
     const system = c.databases.filter(([n]) => SYSTEM_DBS.has(n));
     for (const [name, size] of c.databases.filter(([n]) => !SYSTEM_DBS.has(n))) {
-      const buttons: any[] = [];
-      if (svc.clients[0]) buttons.push(act("Open", () => openClient(svc, svc.clients[0], name)));
-      buttons.push(
+      // Drop… (shown on hover) first, so Open lines up with Create at the right edge.
+      const buttons: any[] = [
         act(
           "Drop…",
           async () => {
@@ -598,7 +593,8 @@ export function drawContents(svc, root, c) {
           },
           "danger hover-only",
         ),
-      );
+      ];
+      if (svc.clients[0]) buttons.push(act("Open", () => openClient(svc, svc.clients[0], name)));
       line(name, bytes(size), ...buttons);
     }
     // The server's own databases: one quiet line instead of a row each.
@@ -624,11 +620,26 @@ export function drawContents(svc, root, c) {
     row.append(input, actions);
     list.append(row);
   } else if (svc.kind === "redis") {
-    if (!c.keys.length) line("No keys yet", null);
-    for (const [db, keys] of c.keys) line(db, `${keys} ${keys === 1 ? "key" : "keys"}`);
-    const mem = line("Memory", c.memory ?? "–");
+    // One line, "12 keys · 911 KB memory"; with keys, a click shows them per database.
+    const total = c.keys.reduce((a, [, n]) => a + n, 0);
+    const open = keysOpen.has(svc.id) && c.keys.length > 0;
+    const sum = el(c.keys.length ? "button" : "div", "proc svc-row svc-summary");
     if (c.keys.length) {
-      mem.lastChild.append(
+      sum.setAttribute("aria-expanded", String(open));
+      sum.innerHTML = `<svg class="chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg>`;
+      sum.title = open ? "Hide the keys" : "Show the keys";
+      sum.onclick = () => {
+        keysOpen[open ? "delete" : "add"](svc.id);
+        drawContents(svc, root, c);
+      };
+    }
+    sum.append(el("span", "proc-name", `${total} ${total === 1 ? "key" : "keys"} · ${memText(c.memory)} memory`));
+    list.append(sum);
+    if (open) {
+      const rows = c.keys.map(([db, keys]) => line(db, `${keys} ${keys === 1 ? "key" : "keys"}`));
+      for (const r of rows) r.classList.add("svc-sub");
+      // Flush All… on the last database's row.
+      rows.at(-1).lastChild.append(
         act(
           "Flush All…",
           async () => {
@@ -640,8 +651,9 @@ export function drawContents(svc, root, c) {
       );
     }
   } else {
+    // The inbox opens from the header's envelope.
     const n = c.messages ?? 0;
-    const buttons = [act("Open inbox", () => invoke("open_url", { url: svc.web }))];
+    const buttons: HTMLElement[] = [];
     if (n)
       buttons.push(
         act(

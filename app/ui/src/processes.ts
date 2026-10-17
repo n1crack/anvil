@@ -1,15 +1,15 @@
-import type { Overview } from "./types";
+import type { Container, Overview } from "./types";
 import { $, el, invoke, mode, popAt, renderSite, selected, showError, showTab, snap, tab } from "./app";
 import { late } from "./late";
 
 /* An app's processes as the Overview and the header see them: the backend's overview
  * (rows, one-off scripts, Docker Compose containers), the header's Dev start/stop, one
- * "Dev · 3 of 4 running" line that opens the Dev tab (dev.ts), and the containers. */
+ * "Dev · 3 of 4 running" line that opens the Dev tab (dev.ts), and the same line for the
+ * containers, which opens the Containers tab (containers.ts). */
 
 export const procCache = new Map<string, Overview>(); // site name -> overview from the backend
 export const procLoading = new Set<string>(); // site names with a request on its way
 export const procBusy = new Map<string, string>(); // "site/service" -> "starting…" while Docker works
-export const procLogs = new Map<string, string>(); // "site/service" -> container log text, while shown
 
 /** Called by renderSite: draw what is known, then ask again. */
 window.renderProcesses = (s) => {
@@ -50,19 +50,6 @@ export async function containerRun(name, services, action, service?: string) {
   if (selected === name) drawProcs(name);
 }
 
-export async function toggleContainerLog(name, service) {
-  const key = `${name}/${service}`;
-  if (procLogs.delete(key)) return drawProcs(name);
-  procLogs.set(key, "Loading…");
-  drawProcs(name);
-  try {
-    procLogs.set(key, (await invoke("container_log", { site: name, service })) || "No output yet");
-  } catch (e) {
-    procLogs.set(key, String(e));
-  }
-  if (selected === name && procLogs.has(key)) drawProcs(name);
-}
-
 export function procBtn(label, aria, onclick) {
   const b = el("button", null, label);
   b.setAttribute("aria-label", String(aria));
@@ -91,26 +78,14 @@ export function confirmPop(anchor, text, label, onYes) {
   };
 }
 
-/** A container: dot, name, detail, then Restart and ■ (or ▶). A click shows its log. */
-function containerRow({ name, state, detail, busy, open, run }: Record<string, any>) {
-  const row = el("div", `proc ${state}`);
-  const dot = el("span", `dot ${state === "running" ? "on" : ""}`);
-  dot.title = state === "running" ? "Running" : "Stopped";
-  const label = el("button", "proc-name", name);
-  label.title = "Click to show its log";
-  row.onclick = open;
-  const last = el("span", "proc-last", busy ?? detail);
-  last.title = last.textContent;
-  row.append(dot, label, last);
-  const actions = el("span", "proc-actions");
-  if (!busy) {
-    if (state !== "stopped") actions.append(procBtn("Restart", `Restart ${name}`, () => run("restart")));
-    if (state !== "stopped") actions.append(procBtn("■", `Stop ${name}`, () => run("stop")));
-    if (state === "stopped") actions.append(procBtn("▶", `Start ${name}`, () => run("start")));
-  }
-  row.append(actions);
-  return row;
+/** A container as its dot shows it: running (green); starting (amber) while its health
+ * check hasn't passed or Docker restarts it; crashed (red) when it exited non-zero. */
+export function containerState(c: Container): "running" | "starting" | "crashed" | "stopped" {
+  if (c.state === "running") return c.health === "starting" || c.health === "unhealthy" ? "starting" : "running";
+  if (c.state === "restarting") return "starting";
+  return c.state === "exited" && c.exit_code ? "crashed" : "stopped";
 }
+export const DOT = { running: "on", starting: "amber", crashed: "bad", stopped: "" };
 
 /** The app's own server when it is a process, then every other process: what Dev runs. */
 export const devRows = (o?: Overview | null) => (o?.rows ?? []).filter((r) => r.kind !== "site");
@@ -137,9 +112,10 @@ export function drawRunBox(name, rows, containers) {
   const crashed = own.filter((r) => r.crashed && !r.running).length;
   box.hidden = !rows.length && !containers.length;
   const text = $(".state-text", box);
-  // A click on the state opens the Dev tab, when there is one.
+  // A click on the state opens the Dev tab, or the Containers tab when there is no Dev.
   $(".state", box).onclick = () => {
-    if (!$('#site .tabs [data-tab="dev"]').hidden) showTab($("#site"), "dev");
+    const t = ["dev", "containers"].find((t) => !$(`#site .tabs [data-tab="${t}"]`).hidden);
+    if (t) showTab($("#site"), t);
   };
   if (devAll.site !== name) devAll.busy = "";
   devAll.site = name;
@@ -193,19 +169,19 @@ export function drawRunBox(name, rows, containers) {
   };
 }
 
-/** "Dev · 3 of 4 running" with a dot per process; a click opens the Dev tab. */
-function devLine(rows) {
+/** "Dev · 3 of 4 running" with a dot per entry (or what went wrong); a click opens `tab`. */
+export function summaryLine(title: string, dots: [string, string][], running: number, tab: string, keys: string, error?: string | null) {
   const b = el("button", "dev-summary");
-  const running = rows.filter((r) => r.running).length;
-  const dots = el("span", "dev-summary-dots");
-  for (const r of rows) {
-    const d = el("span", `dot ${r.running ? "on" : r.crashed ? "bad" : ""}`);
-    d.title = r.name;
-    dots.append(d);
+  const box = el("span", "dev-summary-dots");
+  for (const [name, cls] of dots) {
+    const d = el("span", `dot ${cls}`);
+    d.title = name;
+    box.append(d);
   }
-  b.append(el("span", "dev-summary-title", "Dev"), el("span", "dev-summary-state", `${running} of ${rows.length} running`), dots);
-  b.title = "Show the Dev tab (⌘3)";
-  b.onclick = () => showTab($("#site"), "dev");
+  const state = el("span", `dev-summary-state${error ? " error-text" : ""}`, error ?? `${running} of ${dots.length} running`);
+  b.append(el("span", "dev-summary-title", title), state, box);
+  b.title = keys ? `Show the ${title} tab (${keys})` : `Show the ${title} tab`;
+  b.onclick = () => showTab($("#site"), tab);
   return b;
 }
 
@@ -219,37 +195,23 @@ export function drawProcs(name) {
   const compose = !!(o?.containers || o?.docker_error);
   drawRunBox(name, rows, containers);
   late.drawDev?.(name);
+  late.drawContainers?.(name);
   box.hidden = !(dev.length || compose);
   box.replaceChildren();
   if (box.hidden) return;
-  if (dev.length) box.append(devLine(dev));
-  if (!compose) return;
-  box.append(el("h3", "res-sub", "Containers"));
-  if (o!.docker_error) {
-    const note = el("div", "procs-containers");
-    note.append(el("p", "procs-note", o!.docker_error));
-    return box.append(note);
+  const devTab = !$('#site .tabs [data-tab="dev"]')?.hidden;
+  if (dev.length) {
+    const dots: [string, string][] = dev.map((r) => [r.name, r.running ? "on" : r.crashed ? "bad" : ""]);
+    box.append(summaryLine("Dev", dots, dev.filter((r) => r.running).length, "dev", "⌘3"));
   }
-  const list = el("div", "group procs-list procs-containers");
-  const up = (c) => c.state === "running";
-  for (const c of containers) {
-    const key = `${name}/${c.service}`;
-    list.append(
-      containerRow({
-        name: c.service,
-        state: up(c) ? "running" : "stopped",
-        detail: [...c.ports.map((p) => `:${p}`), c.health ?? c.state].join(" · "),
-        busy: procBusy.get(key),
-        open: () => toggleContainerLog(name, c.service),
-        run: (action) => containerRun(name, [c.service], action, c.service),
-      }),
-    );
-    if (procLogs.has(key)) list.append(el("pre", "proc-log", procLogs.get(key)));
+  if (compose) {
+    const dots: [string, string][] = containers.map((c) => [c.service, DOT[containerState(c)]]);
+    const up = containers.filter((c) => c.state === "running").length;
+    box.append(summaryLine("Containers", dots, up, "containers", devTab ? "" : "⌘3", o!.docker_error));
   }
-  box.append(list);
 }
 
-// While the Overview is shown, keep the Dev line and the containers fresh.
+// While the Overview is shown, keep the Dev and Containers lines fresh.
 setInterval(() => {
   if (document.hidden || mode !== "apps" || !selected || tab !== "overview") return;
   const o = procCache.get(selected);

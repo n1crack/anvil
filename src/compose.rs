@@ -15,6 +15,8 @@ pub struct Container {
     pub state: String,
     pub health: Option<String>,
     pub ports: Vec<u16>,
+    /// How an exited container ended; None while it runs or when it never ran.
+    pub exit_code: Option<i64>,
 }
 
 pub fn file(dir: &Path) -> Option<PathBuf> {
@@ -100,7 +102,7 @@ fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<St
     )
 }
 
-type Row = (String, String, Option<String>, Vec<u16>);
+type Row = (String, String, Option<String>, Vec<u16>, Option<i64>);
 
 /// Read `docker compose ps --format json`: one object per line (v2+) or a JSON array (older).
 pub(crate) fn parse_ps(json_lines: &str) -> Vec<Row> {
@@ -133,6 +135,9 @@ pub(crate) fn parse_ps(json_lines: &str) -> Vec<Row> {
                 text("State").unwrap_or_default(),
                 text("Health").filter(|h| !h.is_empty()),
                 ports,
+                v["ExitCode"]
+                    .as_i64()
+                    .filter(|_| text("State").as_deref() == Some("exited")),
             ))
         })
         .collect()
@@ -149,17 +154,19 @@ fn containers_with(docker: &Path, dir: &Path) -> Result<Vec<Container>> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|name| match ps.iter().find(|r| r.0 == name) {
-            Some((_, state, health, ports)) => Container {
+            Some((_, state, health, ports, exit_code)) => Container {
                 service: name.into(),
                 state: state.clone(),
                 health: health.clone(),
                 ports: ports.clone(),
+                exit_code: *exit_code,
             },
             None => Container {
                 service: name.into(),
                 state: "stopped".into(),
                 health: None,
                 ports: vec![],
+                exit_code: None,
             },
         })
         .collect())
@@ -205,6 +212,7 @@ pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
                 state: l.state,
                 health,
                 ports,
+                exit_code: None,
             };
             (PathBuf::from(l.dir), c)
         })
@@ -258,6 +266,35 @@ pub fn project_action(dir: &Path, action: &str) -> Result<()> {
     project_action_with(&docker_bin(), dir, action)
 }
 
+/// A service's log lines, each after docker's RFC 3339 timestamp: the newest 500, or
+/// those since `since` (a timestamp from an earlier answer). The caller drops the lines
+/// it already has, as `--since` keeps the one at that very time.
+fn logs_since_with(
+    docker: &Path,
+    dir: &Path,
+    service: &str,
+    since: Option<&str>,
+) -> Result<String> {
+    let mut args = vec!["logs", "--no-color", "--no-log-prefix", "--timestamps"];
+    match since {
+        Some(t)
+            if !t.is_empty()
+                && t.chars()
+                    .all(|c| c.is_ascii_digit() || "-:.TZ+".contains(c)) =>
+        {
+            args.extend(["--since", t])
+        }
+        Some(t) => bail!("Not a timestamp: {t}"),
+        None => args.extend(["--tail", "500"]),
+    }
+    args.extend(["--", service]);
+    compose(docker, dir, &args, Duration::from_secs(10))
+}
+
+pub fn logs_since(dir: &Path, service: &str, since: Option<&str>) -> Result<String> {
+    logs_since_with(&docker_bin(), dir, service, since)
+}
+
 pub fn logs(dir: &Path, service: &str) -> Result<String> {
     compose(
         &docker_bin(),
@@ -292,7 +329,7 @@ mod tests {
         let lines = concat!(
             r#"{"Service":"sphere","State":"running","Health":"healthy","Publishers":[{"PublishedPort":2593},{"PublishedPort":2593}]}"#,
             "\n",
-            r#"{"Service":"db","State":"exited","Health":"","Publishers":[]}"#,
+            r#"{"Service":"db","State":"exited","Health":"","Publishers":[],"ExitCode":137}"#,
             "\n"
         );
         let want = vec![
@@ -301,8 +338,9 @@ mod tests {
                 "running".into(),
                 Some("healthy".into()),
                 vec![2593],
+                None,
             ),
-            ("db".into(), "exited".into(), None, vec![]),
+            ("db".into(), "exited".into(), None, vec![], Some(137)),
         ];
         assert_eq!(parse_ps(lines), want);
         let array = format!("[{}]", lines.trim().replace('\n', ","));
@@ -461,6 +499,22 @@ esac"#,
         for a in ["restart", "down", "kill"] {
             assert!(project_action_with(&docker, &d, a).is_err());
         }
+    }
+
+    #[test]
+    fn reads_logs_with_timestamps_and_refuses_other_since_values() {
+        let d = tmp("logs-dir");
+        let bin = tmp("logs-bin");
+        let log = d.join("args");
+        let docker = fake_docker(&bin, &format!("echo \"$@\" >> {}", log.display()));
+        logs_since_with(&docker, &d, "db", None).unwrap();
+        logs_since_with(&docker, &d, "db", Some("2026-10-17T10:00:01.5Z")).unwrap();
+        assert!(logs_since_with(&docker, &d, "db", Some("--follow")).is_err());
+        assert_eq!(
+            fs::read_to_string(log).unwrap(),
+            "compose logs --no-color --no-log-prefix --timestamps --tail 500 -- db\n\
+             compose logs --no-color --no-log-prefix --timestamps --since 2026-10-17T10:00:01.5Z -- db\n"
+        );
     }
 
     #[test]

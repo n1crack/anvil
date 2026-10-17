@@ -30,6 +30,7 @@ window.mockSnap = {
     mockSite("api.shop", "laravel", { linked: true, path: "/Users/x/Sites/shop", parked_in: null, secure: false }),
     mockSite("notes", "folder"),
     mockSite("vuefinder", "vite", { command: "npm run dev", port: 5173 }),
+    mockSite("stack", "compose", { secure: false, runtime_version: null }),
   ],
   tld: "test",
   https_port: 443,
@@ -48,6 +49,7 @@ window.mockSnap = {
     ["laravel", "Laravel"],
     ["vite", "Vite"],
     ["folder", "Folder"],
+    ["compose", "Docker Compose"],
   ],
   paths: ["/Users/x/Sites"],
   runtimes: { node: ["22.1.0"] },
@@ -76,8 +78,22 @@ const mockRow = (o) => ({
   crashed: null,
   ...o,
 });
+const mockContainer = (service, state, o = {}) => ({ service, state, health: null, ports: [], exit_code: null, ...o });
 window.mockOv = {
   notes: { rows: [], commands: [], containers: null, docker_error: null, hidden: [] },
+  // A Docker Compose project: up, healthy, still starting and one that exited with an error.
+  stack: {
+    rows: [],
+    commands: [],
+    containers: [
+      mockContainer("web", "running", { ports: [8080] }),
+      mockContainer("db", "running", { health: "healthy", ports: [5432] }),
+      mockContainer("cache", "running", { health: "starting", ports: [6379] }),
+      mockContainer("worker", "exited", { exit_code: 1 }),
+    ],
+    docker_error: null,
+    hidden: [],
+  },
   shop: {
     rows: [
       mockRow({ name: "shop.test", source: "anvil", server: true, kind: "site", main: true, web: "https://shop.test", running: true }),
@@ -325,6 +341,26 @@ window.mockServices = [
     }),
     trace: vendorTrace,
   };
+  // A browser.log entry: React's hydration error with its tree, as the browser reports it.
+  const hydration = [
+    "Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:",
+    "",
+    "- A server/client branch `if (typeof window !== 'undefined')`.",
+    "- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.",
+    "",
+    "https://react.dev/link/hydration-mismatch",
+    "",
+    "  <App>",
+    '    <Layout title="Orders">',
+    "      <Table>",
+    '        <div className="table-wrap" style={{...}}>',
+    "          <table>",
+    "            ...",
+    "              <tr>",
+    '+               <td className="cell">',
+    '-               <td className="cell cell-active">',
+    '>                <span title="%s" data-x="<img src=x onerror=alert(1)>">{"Total"}</span>',
+  ].join("\n");
   const entries = [
     ...Array.from({ length: 24 }, (_, i) => E(1 + i * 8, "ERROR", err, binding)),
     E(200, "INFO", "Horizon started"),
@@ -366,6 +402,7 @@ window.mockServices = [
     E(270, "DEBUG", "Config cached"),
     E(275, "INFO", "Application booted", { context: null }),
     E(280, "DEBUG", "Vite manifest read (3 entries)"),
+    E(290, "ERROR", hydration),
   ];
   const page = { entries, start_offset: 0, end_offset: 2097152, truncated: false };
   const sources = [
@@ -506,6 +543,24 @@ window.mockActivity = {
     actRow("service:cache", "Redis", "running", { pid: 822, port: 6379, cpu: 0.2, memory: 9437184, detail: "7.4.1" }),
   ],
 };
+// `docker compose logs --timestamps`: each line after its time, in UTC.
+const T = (s, text) => `2026-10-17T10:00:${String(s).padStart(2, "0")}.${String(s * 7919).padStart(9, "0")}Z ${text}`;
+window.mockContainerLogs = {
+  web: [
+    T(1, "/docker-entrypoint.sh: Configuration complete; ready for start up"),
+    T(4, "\x1b[32mlistening\x1b[39m on http://localhost:8080"),
+    T(9, '172.18.0.1 - - [17/Oct/2026:10:00:09 +0000] "GET / HTTP/1.1" 200 615'),
+    T(12, '172.18.0.1 - - [17/Oct/2026:10:00:12 +0000] "GET /favicon.ico HTTP/1.1" 404 153'),
+  ],
+  db: [
+    T(0, "PostgreSQL init process complete; ready for start up."),
+    T(2, "LOG:  starting PostgreSQL 17.2 on aarch64-unknown-linux-musl"),
+    T(3, 'LOG:  listening on IPv4 address "0.0.0.0", port 5432'),
+    T(5, "LOG:  database system is ready to accept connections"),
+  ],
+  cache: [T(6, "* Ready to accept connections tcp"), T(10, "* Background saving started by pid 21")],
+  worker: [T(7, "Starting queue worker"), T(8, "\x1b[31mError:\x1b[39m connect ECONNREFUSED 172.18.0.3:6379"), T(8, "exited with code 1")],
+};
 const mockHandle = (cmd, a) => {
   const ov = a?.site && mockOv[a.site];
   switch (cmd) {
@@ -521,8 +576,16 @@ const mockHandle = (cmd, a) => {
     }
     case "processes":
     case "process_run":
-    case "containers_run":
       return ov;
+    case "containers_run":
+    case "container_run": {
+      for (const c of ov.containers ?? [])
+        if (!a.service || c.service === a.service)
+          Object.assign(c, a.action === "stop" ? { state: "exited", health: null, exit_code: 0 } : { state: "running", exit_code: null });
+      return ov;
+    }
+    case "container_log":
+      return a.since ? "" : (window.mockContainerLogs[a.service] ?? []).join("\n") + "\n";
     case "command_run": {
       const c = ov.commands.find((x) => x.id === a.id);
       Object.assign(c, { running: true, exit: null });
@@ -593,11 +656,6 @@ const mockHandle = (cmd, a) => {
     case "services":
     case "service_run":
       return mockServices;
-    case "service_log":
-      return [
-        "2026-10-17T10:00:01 [Note] mysqld: ready for connections.",
-        "2026-10-17T10:00:01 [Note] Version: '8.4.2'  socket: '/tmp/mysql.sock'  port: 3306",
-      ];
     case "service_contents":
       return {
         databases: [
@@ -607,7 +665,7 @@ const mockHandle = (cmd, a) => {
           ["sys", 40960],
         ],
         keys: [["db0", 12]],
-        memory: "1.2 MB",
+        memory: "911.12K",
         messages: 3,
       };
     case "once_stop":

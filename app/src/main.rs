@@ -929,10 +929,12 @@ fn containers_run(app: State<App>, site: String, action: String) -> Res<Overview
     Ok(overview(&app, &cfg, &s))
 }
 
+/// The Containers tab's log of one service: timestamped lines, the newest 500 or those
+/// since `since`.
 #[tauri::command(async)]
-fn container_log(site: String, service: String) -> Res<String> {
+fn container_log(site: String, service: String, since: Option<String>) -> Res<String> {
     let s = find_site(&site)?;
-    anvil::compose::logs(&s.path, &service).map_err(err)
+    anvil::compose::logs_since(&s.path, &service, since.as_deref()).map_err(err)
 }
 
 /// Start the processes marked Start with Anvil. Only apps that still exist and rows
@@ -1899,50 +1901,22 @@ fn set_service_apps(
     services(app)
 }
 
-/// `what` is "log" (opens in Console) or "data" (shows the folder in Finder).
+/// `what` is "data": the service's data folder in Finder.
 #[tauri::command(async)]
 fn open_service(id: String, what: String) -> Res<()> {
     let cfg = anvil::load().map_err(err)?;
     if !cfg.services.contains_key(&id) {
         return Err(format!("There's no service called {id}"));
     }
-    let (path, app) = if what == "log" {
-        (anvil::services::log_file(&id), "Console")
-    } else {
-        (anvil::services::data(&id), "Finder")
-    };
+    // The log is in the Processes window (show_processes with the service's key).
+    if what != "data" {
+        return Err(format!("Can't open {what}"));
+    }
+    let path = anvil::services::data(&id);
     if !path.exists() {
         return Err(format!("Nothing there yet — start {id} first"));
     }
-    anvil::run(Command::new("open").arg("-a").arg(app).arg(path)).map_err(err)
-}
-
-/// The newest lines of a service's log as written (colour codes removed), oldest
-/// first; none when it hasn't written one. Reads only the file's last 16 KB.
-#[tauri::command(async)]
-fn service_log(id: String) -> Res<Vec<String>> {
-    use std::io::{Read, Seek, SeekFrom};
-    let cfg = anvil::load().map_err(err)?;
-    if !cfg.services.contains_key(&id) {
-        return Err(format!("No service named {id}"));
-    }
-    let Ok(mut f) = std::fs::File::open(anvil::services::log_file(&id)) else {
-        return Ok(vec![]);
-    };
-    let len = f.metadata().map_err(|e| e.to_string())?.len();
-    let start = len.saturating_sub(16 * 1024);
-    f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-    let text = String::from_utf8_lossy(&buf);
-    // From the middle of the file, the first line is likely cut: skip it.
-    let lines: Vec<String> = text
-        .lines()
-        .skip(usize::from(start > 0))
-        .map(anvil::logs::strip_ansi)
-        .filter(|l| !l.trim().is_empty())
-        .collect();
-    Ok(lines[lines.len().saturating_sub(8)..].to_vec())
+    anvil::run(Command::new("open").arg("-a").arg("Finder").arg(path)).map_err(err)
 }
 
 /// Databases, keys or messages in a running service.
@@ -2479,18 +2453,30 @@ fn show_settings(handle: AppHandle) {
     open_settings(&handle);
 }
 
-/// The task-manager window: everything Anvil runs, with usage and logs.
-fn open_processes(handle: &AppHandle) {
+/// The task-manager window: everything Anvil runs, with usage and logs. With `select`
+/// (a row key such as "service:cache"), that row is shown on its tab with its log.
+fn open_processes(handle: &AppHandle, select: Option<&str>) {
     if let Some(w) = handle.get_webview_window("processes") {
+        if let Some(key) = select {
+            let _ = handle.emit_to("processes", "activity-select", key);
+        }
         let _ = w.show();
         let _ = w.set_focus();
         return;
     }
+    // A row key is plain (see `parse_log_key`), so it goes into the script as it is.
+    let pick = select
+        .filter(|k| {
+            k.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_.:/@#".contains(c))
+        })
+        .map_or("null".into(), |k| format!("\"{k}\""));
     let built = WebviewWindowBuilder::new(
         handle,
         "processes",
         WebviewUrl::App("processes.html".into()),
     )
+    .initialization_script(format!("window.activitySelect = {pick};"))
     .title("Processes")
     .inner_size(820.0, 560.0)
     .min_inner_size(640.0, 420.0)
@@ -2504,8 +2490,8 @@ fn open_processes(handle: &AppHandle) {
 }
 
 #[tauri::command(async)]
-fn show_processes(handle: AppHandle) {
-    open_processes(&handle);
+fn show_processes(handle: AppHandle, select: Option<String>) {
+    open_processes(&handle, select.as_deref());
 }
 
 #[tauri::command(async)]
@@ -2876,7 +2862,6 @@ fn main() {
             containers_run,
             once_stop,
             container_log,
-            service_log,
             set_dock_icon,
             set_trim_app_logs,
             set_login,
