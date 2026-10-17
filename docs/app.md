@@ -5,10 +5,11 @@ it starts Anvil, the enabled services and the applications set to start with
 Anvil. Build it from source as described in
 [getting-started.md](getting-started.md#the-macos-app-optional).
 
-- **Applications list** with search, a filter by type (only the types you have,
-  with counts) and running only, sorting by name or date modified, your own
-  groups (Favorites first), a section per parked folder, linked folders, and
-  extra linked domains under their application. Add applications with the +
+- **Applications list** with search and one view menu (the funnel button):
+  group by folder, type or nothing, sort by name or date modified, show one
+  type (only the types you have, with counts) or running only. Your own groups
+  (Favorites first) always come first, and extra linked domains sit under their
+  application. Each section folds from its heading. Add applications with the +
   button: New Application, Add Folder of Applications (park) or Add Application
   Folder (link).
 - **Application panel** with Start, Stop and Restart for apps with their own
