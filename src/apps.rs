@@ -524,23 +524,16 @@ impl Apps {
             .collect()
     }
 
-    /// `npm run <script>` once, as a process of the app (key `<site>#<id>`); its end
-    /// is not a crash.
-    pub fn run_once(&mut self, site: &Site, script: &str) -> Result<()> {
-        let key = crate::processes::once_key(&site.name, script);
+    /// A one-off script, as a process of the app (key `<site>#<id>`); its end is not a
+    /// crash. Its log holds the last run.
+    pub fn run_once(&mut self, site: &Site, script: &crate::processes::Script) -> Result<()> {
+        let key = crate::processes::once_key(&site.name, &script.id);
         if self.running(&key) {
             return Ok(());
         }
-        let command = format!("npm run '{}'", script.replace('\'', r"'\''"));
-        self.spawn(
-            &key,
-            &site.path,
-            &command,
-            crate::processes::env(site),
-            false,
-        )?;
+        self.spawn(&key, &site.path, &script.run, crate::processes::env(site))?;
         self.processes.insert(key.clone());
-        self.once.insert(key, script.to_string());
+        self.once.insert(key, script.name.clone());
         Ok(())
     }
 
@@ -577,7 +570,7 @@ impl Apps {
                 format!(".{tld}"),
             ),
         ]);
-        self.spawn(&site.name, &site.path, &command, env, true)
+        self.spawn(&site.name, &site.path, &command, env)
     }
 
     /// One of an app's other processes (queue, Vite…), see `processes`; `tld` as in `start`.
@@ -591,27 +584,19 @@ impl Apps {
         if self.running(&key) {
             return Ok(());
         }
-        self.spawn(
-            &key,
-            &site.path,
-            &p.command,
-            process_env(site, p, tld),
-            true,
-        )?;
+        self.spawn(&key, &site.path, &p.command, process_env(site, p, tld))?;
         self.processes.insert(key);
         Ok(())
     }
 
     /// Run `command` in `dir` as its own process group, output to `log_file(key)`, with
-    /// colors as in a terminal. `fresh` empties the log first, as a new terminal starts
-    /// empty; a command run once keeps adding to its log.
+    /// colors as in a terminal. The log starts empty, as a new terminal does.
     fn spawn(
         &mut self,
         key: &str,
         dir: &Path,
         command: &str,
         env: Vec<(String, String)>,
-        fresh: bool,
     ) -> Result<()> {
         // Its old shell, if a crashed Anvil left one, ends first: nothing writes the log meanwhile.
         kill_orphans(&pid_in(&self.home, key), true);
@@ -620,9 +605,7 @@ impl Apps {
             .create(true)
             .append(true)
             .open(log_in(&self.home, key))?;
-        if fresh {
-            log.set_len(0)?;
-        }
+        log.set_len(0)?;
         let command = crate::processes::with_ansi(command);
         // The trailing argument is $0: it tags the shell with Anvil's home so a
         // crashed Anvil's leftovers can be recognised and cleaned up.
@@ -1069,7 +1052,14 @@ mod tests {
         let mut apps = Apps::in_home(dir.join("home"));
         let site = site_at(&dir);
         // No package.json: npm fails (or is missing), which still must not count as a crash.
-        apps.run_once(&site, "build:all").unwrap();
+        let script = crate::processes::Script {
+            name: "build:all".into(),
+            id: "build-all".into(),
+            text: String::new(),
+            source: "package.json",
+            run: "npm run build:all".into(),
+        };
+        apps.run_once(&site, &script).unwrap();
         assert!(apps.processes.contains("shop#build-all"));
         // The Processes window shows the script, not its id.
         assert_eq!(apps.once_name("shop#build-all"), Some("build:all"));

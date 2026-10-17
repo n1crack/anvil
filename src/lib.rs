@@ -83,6 +83,8 @@ pub struct Config {
     /// The field's own `default` (None) wins over `Config::default()` (Some(false)).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub https_default: Option<bool>,
+    /// Weekly, trim apps' big `storage/logs/*.log` and delete old daily logs (`logs::trim_app_logs`).
+    pub trim_app_logs: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -136,6 +138,12 @@ pub struct ProcessConfig {
     /// `docs.vuefinder.test`), replacing the automatic one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    /// Left out when the app's processes start together (Dev start); started by hand only.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub manual: bool,
+    /// Added in Anvil, not detected: `command` is what it runs and the id is its name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub added: bool,
 }
 
 impl Default for Config {
@@ -161,6 +169,7 @@ impl Default for Config {
             services: BTreeMap::new(),
             git_client: None,
             https_default: Some(false),
+            trim_app_logs: true,
         }
     }
 }

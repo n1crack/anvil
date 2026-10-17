@@ -74,7 +74,7 @@ fn process_log(site: &str, p: &crate::processes::Process) -> (String, PathBuf) {
     )
 }
 
-/// Source id and log file of a package.json command run once, by its id.
+/// Source id and log file of a one-off script run once, by its name or id.
 fn once_log(site: &str, script: &str) -> (String, PathBuf) {
     (
         format!("once:{}", crate::processes::process_id(script)),
@@ -113,9 +113,9 @@ pub fn sources(site: &Site) -> Vec<LogSource> {
         out.extend(source(&id, &p.name, &path));
     }
     // Commands run once, once they have written something.
-    for script in crate::processes::package_scripts(&site.path).1 {
-        let (id, path) = once_log(&site.name, &script);
-        out.extend(source(&id, &script, &path));
+    for script in crate::processes::one_off_scripts(site) {
+        let (id, path) = once_log(&site.name, &script.id);
+        out.extend(source(&id, &script.name, &path));
     }
     if let Some(v) = site.php.as_ref().filter(|_| apps::is_php(&site.kind)) {
         let path = home().join("log").join(format!("php-{v}-fpm.log"));
@@ -575,10 +575,231 @@ pub fn editor_command(editor: &str, file: &Path, line: u32) -> (String, Vec<Stri
     }
 }
 
+/* ---------- Retention: logs don't grow without end ---------- */
+
+const MB: u64 = 1024 * 1024;
+const DAY: u64 = 86400;
+
+/// A plain file over `over` bytes keeps its last `keep`, from the start of a line. In
+/// place, so a process appending to it keeps writing at its end. A symlink is left alone.
+pub fn trim(path: &Path, over: u64, keep: u64) -> Result<bool> {
+    use std::io::Write;
+    let meta = fs::symlink_metadata(path)?;
+    if !meta.is_file() || meta.len() <= over {
+        return Ok(false);
+    }
+    let mut f = fs::OpenOptions::new().read(true).write(true).open(path)?;
+    f.seek(SeekFrom::Start(meta.len() - keep))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    let line = buf
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(buf.len(), |i| i + 1);
+    f.set_len(0)?;
+    f.seek(SeekFrom::Start(0))?;
+    f.write_all(&buf[line..])?;
+    Ok(true)
+}
+
+/// Anvil's own logs (apps' and processes' output, services, Caddy, PHP-FPM): over 5 MB
+/// keeps the last 1 MB.
+pub fn trim_anvil_logs(home: &Path) {
+    let Ok(dir) = fs::read_dir(home.join("log")) else {
+        return;
+    };
+    for e in dir.flatten() {
+        if e.file_name().to_string_lossy().ends_with(".log") {
+            let _ = trim(&e.path(), 5 * MB, MB);
+        }
+    }
+}
+
+/// `laravel-2026-10-17.log`, Laravel's daily channel.
+fn daily(name: &str) -> bool {
+    name.strip_prefix("laravel-")
+        .and_then(|n| n.strip_suffix(".log"))
+        .is_some_and(|d| {
+            d.len() == 10
+                && d.bytes().enumerate().all(|(i, b)| {
+                    if i == 4 || i == 7 {
+                        b == b'-'
+                    } else {
+                        b.is_ascii_digit()
+                    }
+                })
+        })
+}
+
+/// An app's `storage/logs/*.log`: over 10 MB keeps the last 1 MB, and daily logs last
+/// written more than 14 days before `now` are deleted. Only files right in that folder;
+/// a symlink, there or on the way, is never followed.
+pub fn trim_app_logs(site: &Path, now: std::time::SystemTime) {
+    let plain_dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+    let dir = site.join("storage/logs");
+    if !plain_dir(&site.join("storage")) || !plain_dir(&dir) {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        // The entry's own type: a symlink is not a file here.
+        if !name.ends_with(".log") || !e.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        let age = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .map_or(0, |d| d.as_secs());
+        if daily(&name) && age > 14 * DAY {
+            let _ = fs::remove_file(e.path());
+        } else {
+            let _ = trim(&e.path(), 10 * MB, MB);
+        }
+    }
+}
+
+/// When apps' logs were last trimmed (Unix seconds), in Anvil's state.
+fn trimmed_file(home: &Path) -> PathBuf {
+    home.join("run").join("logs-trimmed")
+}
+
+/// What runs at Anvil's start and hourly: Anvil's logs every time, apps' logs (`sites`,
+/// their folders) once a week when `apps` is on. The last apps' run is recorded.
+pub fn retention(home: &Path, apps: bool, sites: &[PathBuf], now: std::time::SystemTime) {
+    trim_anvil_logs(home);
+    let secs = now.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let last: u64 = fs::read_to_string(trimmed_file(home))
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(0);
+    if !apps || secs.saturating_sub(last) < 7 * DAY {
+        return;
+    }
+    for s in sites {
+        trim_app_logs(s, now);
+    }
+    if crate::state_dirs_in(home).is_ok() {
+        let _ = fs::write(trimmed_file(home), secs.to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn trim_keeps_the_last_lines() {
+        let dir = std::env::temp_dir().join(format!("anvil-trim-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.log");
+        // 30 lines of 10 bytes; over 100 keeps the last 45, cut to the line: 4 lines.
+        let text: String = (0..30).map(|i| format!("line {i:04}\n")).collect();
+        fs::write(&f, &text).unwrap();
+        assert!(!trim(&f, 1000, 45).unwrap());
+        assert!(trim(&f, 100, 45).unwrap());
+        assert_eq!(
+            fs::read_to_string(&f).unwrap(),
+            "line 0026\nline 0027\nline 0028\nline 0029\n"
+        );
+        // A symlink to a big file is left alone, and so is its target.
+        let big = dir.join("big.txt");
+        fs::write(&big, &text).unwrap();
+        let link = dir.join("link.log");
+        std::os::unix::fs::symlink(&big, &link).unwrap();
+        assert!(!trim(&link, 100, 45).unwrap());
+        assert_eq!(fs::read_to_string(&big).unwrap(), text);
+        // Anvil's log folder: only *.log files.
+        let home = dir.join("home");
+        fs::create_dir_all(home.join("log")).unwrap();
+        let big_log = vec![b'x'; (6 * MB) as usize];
+        fs::write(home.join("log/caddy.log"), &big_log).unwrap();
+        fs::write(home.join("log/notes.txt"), &big_log).unwrap();
+        trim_anvil_logs(&home);
+        // No line break in the last 1 MB: nothing of it is kept.
+        assert_eq!(fs::metadata(home.join("log/caddy.log")).unwrap().len(), 0);
+        assert_eq!(
+            fs::metadata(home.join("log/notes.txt")).unwrap().len(),
+            6 * MB
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn app_logs_trim_only_their_own_folder_weekly() {
+        let root = std::env::temp_dir().join(format!("anvil-applogs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let site = root.join("shop");
+        let logs = site.join("storage/logs");
+        fs::create_dir_all(&logs).unwrap();
+        let now = std::time::SystemTime::now();
+        let ago = |days: u64| now - std::time::Duration::from_secs(days * DAY);
+        let write = |name: &str, bytes: usize, days: u64| {
+            let p = logs.join(name);
+            let mut line = vec![b'x'; 99];
+            line.push(b'\n');
+            fs::write(&p, line.repeat(bytes / 100)).unwrap();
+            File::options()
+                .write(true)
+                .open(&p)
+                .unwrap()
+                .set_modified(ago(days))
+                .unwrap();
+        };
+        write("laravel.log", (11 * MB) as usize, 0);
+        write("worker.log", (2 * MB) as usize, 0);
+        write("laravel-2026-01-01.log", 100, 20);
+        write("laravel-2026-10-10.log", 100, 7);
+        write("laravel-old.log", 100, 30);
+        // Outside the folder or behind a symlink: never touched.
+        let outside = root.join("outside.log");
+        fs::write(&outside, vec![b'y'; (11 * MB) as usize]).unwrap();
+        std::os::unix::fs::symlink(&outside, logs.join("evil.log")).unwrap();
+        fs::create_dir_all(logs.join("sub")).unwrap();
+        fs::write(logs.join("sub/deep.log"), vec![b'z'; (11 * MB) as usize]).unwrap();
+
+        let home = root.join("home");
+        retention(&home, true, std::slice::from_ref(&site), now);
+        let len = |p: PathBuf| fs::metadata(p).map(|m| m.len()).ok();
+        let kept = len(logs.join("laravel.log")).unwrap();
+        assert!(kept <= MB && kept > MB - 100, "{kept}");
+        assert_eq!(len(logs.join("worker.log")), Some(2 * MB / 100 * 100));
+        assert_eq!(len(logs.join("laravel-2026-01-01.log")), None);
+        assert_eq!(len(logs.join("laravel-2026-10-10.log")), Some(100));
+        assert_eq!(len(logs.join("laravel-old.log")), Some(100));
+        assert_eq!(len(outside.clone()), Some(11 * MB));
+        assert_eq!(len(logs.join("sub/deep.log")), Some(11 * MB));
+        let last = fs::read_to_string(trimmed_file(&home)).unwrap();
+        assert_eq!(
+            last,
+            now.duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                .to_string()
+        );
+
+        // Within the week nothing more happens; off, never.
+        write("laravel.log", (11 * MB) as usize, 0);
+        retention(&home, true, std::slice::from_ref(&site), now);
+        assert_eq!(len(logs.join("laravel.log")), Some(11 * MB / 100 * 100));
+        fs::remove_file(trimmed_file(&home)).unwrap();
+        retention(&home, false, std::slice::from_ref(&site), now);
+        assert_eq!(len(logs.join("laravel.log")), Some(11 * MB / 100 * 100));
+
+        // A storage/logs that is a symlink is not followed.
+        let other = root.join("other");
+        fs::create_dir_all(other.join("storage")).unwrap();
+        std::os::unix::fs::symlink(&logs, other.join("storage/logs")).unwrap();
+        trim_app_logs(&other, now);
+        assert_eq!(len(logs.join("laravel.log")), Some(11 * MB / 100 * 100));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn editor_commands_take_the_line() {

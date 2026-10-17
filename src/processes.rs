@@ -27,6 +27,10 @@ pub struct Process {
     pub pinned: bool,
     /// Kept on top: listed first after the app's own row.
     pub top: bool,
+    /// Left out of Dev start (the header's Start): started by hand only.
+    pub manual: bool,
+    /// Added in Anvil rather than detected.
+    pub added: bool,
 }
 
 /// An edit of one process's settings; `None` leaves a field as it is.
@@ -40,6 +44,7 @@ pub struct ProcessChange {
     pub top: Option<bool>,
     /// The address's subdomain label; `Some(None)` goes back to the automatic one.
     pub host: Option<Option<String>>,
+    pub manual: Option<bool>,
 }
 
 /// Merge `change` into the site's settings for process `id`; an entry back at its
@@ -64,6 +69,7 @@ pub fn apply_process_change(
     p.hidden = change.hidden.unwrap_or(p.hidden);
     p.pinned = change.pinned.unwrap_or(p.pinned);
     p.top = change.top.unwrap_or(p.top);
+    p.manual = change.manual.unwrap_or(p.manual);
     if let Some(host) = change.host {
         p.host = match host {
             Some(h) => {
@@ -81,12 +87,85 @@ pub fn apply_process_change(
             None => None,
         };
     }
-    if p == crate::ProcessConfig::default() {
+    // Removing a process the user added forgets it; a detected one stays hidden.
+    if p == crate::ProcessConfig::default() || (p.added && p.hidden) {
         site.processes.remove(id);
     } else {
         site.processes.insert(id.into(), p);
     }
     Ok(())
+}
+
+/// A process of the user's own: `name` is its id, and must not be one the app has.
+fn add_entry(
+    site: &mut crate::SiteConfig,
+    taken: &[String],
+    name: &str,
+    command: &str,
+) -> anyhow::Result<()> {
+    let name = name.trim();
+    anyhow::ensure!(
+        valid_name(name),
+        "“{name}” can't be a name: use up to 40 letters, digits, dashes and underscores"
+    );
+    anyhow::ensure!(
+        !taken.iter().any(|t| t == name) && !site.processes.contains_key(name),
+        "{name} is already a process of this app"
+    );
+    anyhow::ensure!(!command.trim().is_empty(), "the command can't be empty");
+    site.processes.insert(
+        name.into(),
+        crate::ProcessConfig {
+            command: Some(command.trim().into()),
+            added: true,
+            ..Default::default()
+        },
+    );
+    Ok(())
+}
+
+/// Add a process of the user's own to `site` and save.
+pub fn add_process(
+    cfg: &mut crate::Config,
+    site: &Site,
+    name: &str,
+    command: &str,
+) -> anyhow::Result<()> {
+    let taken: Vec<String> = detect_with(site, Some(cfg))
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    add_entry(
+        cfg.sites.entry(site.name.clone()).or_default(),
+        &taken,
+        name,
+        command,
+    )?;
+    crate::save(cfg)
+}
+
+/// Back to what is detected: added processes go, hidden ones return, and commands,
+/// Dev start, Start with Anvil and pins are the defaults again. Addresses and Keep on
+/// Top stay: the Configure table doesn't show them.
+fn reset_entries(site: &mut crate::SiteConfig) {
+    site.processes.retain(|_, p| !p.added);
+    for p in site.processes.values_mut() {
+        *p = crate::ProcessConfig {
+            host: p.host.take(),
+            top: p.top,
+            ..Default::default()
+        };
+    }
+    site.processes
+        .retain(|_, p| *p != crate::ProcessConfig::default());
+}
+
+/// `reset_entries` for `site`, saved.
+pub fn reset_processes(cfg: &mut crate::Config, site: &Site) -> anyhow::Result<()> {
+    if let Some(s) = cfg.sites.get_mut(&site.name) {
+        reset_entries(s);
+    }
+    crate::save(cfg)
 }
 
 /// Change one process's settings of `site` and save.
@@ -213,15 +292,32 @@ fn apply_settings(
         .filter(|p| !procs.iter().any(|d| d.id == p.id))
         .collect();
     procs.extend(extra);
+    // The user's own, after the detected ones; a detected id wins over an added one.
+    let added: Vec<Process> = set
+        .iter()
+        .filter(|(id, c)| c.added && valid_name(id) && !procs.iter().any(|p| &p.id == *id))
+        .filter_map(|(id, c)| {
+            Some(Process {
+                id: id.clone(),
+                name: id.clone(),
+                command: c.command.clone()?,
+                source: "Anvil",
+                added: true,
+                ..Default::default()
+            })
+        })
+        .collect();
+    procs.extend(added);
     procs.retain(|p| !set.get(&p.id).is_some_and(|c| c.hidden));
     for p in &mut procs {
         if let Some(c) = set.get(&p.id) {
             p.autostart = c.autostart;
             p.pinned = c.pinned;
             p.top = c.top;
+            p.manual = c.manual;
             if let Some(command) = &c.command {
                 p.command = command.clone();
-                p.edited = true;
+                p.edited = !c.added;
             }
         }
     }
@@ -692,6 +788,87 @@ pub fn package_scripts(dir: &Path) -> (Vec<Process>, Vec<String>) {
         }
     }
     (servers, commands)
+}
+
+/// A script of the app's run once, not a dev process: a package.json command or a
+/// composer.json script.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct Script {
+    /// The script's name as written (`build:all`).
+    pub name: String,
+    /// Key and log name part: `process_id` of the name, `composer-` first for Composer's.
+    pub id: String,
+    /// The script as written in its file.
+    pub text: String,
+    /// `package.json` or `composer.json`.
+    pub source: &'static str,
+    /// What runs it.
+    #[serde(skip)]
+    pub run: String,
+}
+
+fn quoted(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// The app's one-off scripts: package.json's commands (see `package_scripts`), then a PHP
+/// app's composer.json scripts other than `dev` and Composer's event hooks.
+pub fn one_off_scripts(site: &Site) -> Vec<Script> {
+    let texts = script_texts(&site.path);
+    let mut out: Vec<Script> = package_scripts(&site.path)
+        .1
+        .into_iter()
+        .map(|name| Script {
+            id: process_id(&name),
+            text: texts.get(&name).cloned().unwrap_or_default(),
+            run: format!("npm run {}", quoted(&name)),
+            source: "package.json",
+            name,
+        })
+        .collect();
+    if !apps::is_php(&site.kind) {
+        return out;
+    }
+    let composer: serde_json::Value = fs::read_to_string(site.path.join("composer.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let Some(scripts) = composer["scripts"].as_object() else {
+        return out;
+    };
+    let php = home()
+        .join("php")
+        .join(site.php.as_deref().unwrap_or_default())
+        .join("php");
+    let phar = home().join("bin/composer.phar");
+    for (name, v) in scripts {
+        // Composer's events are all `pre-…` and `post-…`; `dev` is what Dev runs.
+        if name == "dev" || name.starts_with("pre-") || name.starts_with("post-") {
+            continue;
+        }
+        let text = match v {
+            serde_json::Value::String(t) => t.clone(),
+            serde_json::Value::Array(a) => a
+                .iter()
+                .filter_map(|x| x.as_str())
+                .collect::<Vec<_>>()
+                .join(" && "),
+            _ => continue,
+        };
+        out.push(Script {
+            id: format!("composer-{}", process_id(name)),
+            run: format!(
+                "{} {} run-script {}",
+                quoted(&php.display().to_string()),
+                quoted(&phar.display().to_string()),
+                quoted(name)
+            ),
+            text,
+            source: "composer.json",
+            name: name.clone(),
+        });
+    }
+    out
 }
 
 /// Names become file names and ids: letters, digits, `-` and `_`.
@@ -1678,5 +1855,135 @@ echo '{DEV_JSON}'
                 .iter()
                 .any(|(k, _)| k == "PORT")
         );
+    }
+
+    #[test]
+    fn configure_adds_leaves_out_removes_and_resets() {
+        let (dir, php) = fake_php("conf", &format!("echo '{DEV_JSON}'"));
+        let cache = dir.parent().unwrap().join("cache");
+        let l = site(&dir, "laravel");
+        let mut cfg = crate::Config::default();
+        let ids = |cfg: &crate::Config| -> Vec<String> {
+            detect_in(&l, &php, &cache, Some(cfg))
+                .into_iter()
+                .map(|p| p.id)
+                .collect()
+        };
+        let taken = ids(&cfg);
+        let s = cfg.sites.entry("shop".into()).or_default();
+        // A new name, not a detected one nor a bad file name, with a command.
+        add_entry(s, &taken, "reverb", "php artisan reverb:start").unwrap();
+        assert!(add_entry(s, &taken, "queue", "x").is_err());
+        assert!(add_entry(s, &taken, "reverb", "x").is_err());
+        assert!(add_entry(s, &taken, "../x", "x").is_err());
+        assert!(add_entry(s, &taken, "ok", "  ").is_err());
+        let p = detect_in(&l, &php, &cache, Some(&cfg));
+        let added = p.iter().find(|p| p.id == "reverb").unwrap();
+        assert_eq!(
+            (
+                added.command.as_str(),
+                added.added,
+                added.edited,
+                added.source
+            ),
+            ("php artisan reverb:start", true, false, "Anvil")
+        );
+        assert_eq!(ids(&cfg), ["queue", "logs", "vite", "reverb"]);
+
+        // Dev start off for logs: still listed, marked manual.
+        let manual = ProcessChange {
+            manual: Some(true),
+            ..Default::default()
+        };
+        settings(&mut cfg, "shop", "logs", manual);
+        let p = detect_in(&l, &php, &cache, Some(&cfg));
+        assert!(p.iter().find(|p| p.id == "logs").unwrap().manual);
+        assert!(!p.iter().find(|p| p.id == "queue").unwrap().manual);
+
+        // Removing: an added process is forgotten, a detected one hidden.
+        let hide = || ProcessChange {
+            hidden: Some(true),
+            ..Default::default()
+        };
+        settings(&mut cfg, "shop", "reverb", hide());
+        settings(&mut cfg, "shop", "vite", hide());
+        assert!(!cfg.sites["shop"].processes.contains_key("reverb"));
+        assert_eq!(ids(&cfg), ["queue", "logs"]);
+
+        // Reset: back to the detected list; an address label and Keep on Top stay.
+        settings(
+            &mut cfg,
+            "shop",
+            "queue",
+            ProcessChange {
+                command: Some(Some("php artisan queue:work".into())),
+                autostart: Some(true),
+                top: Some(true),
+                host: Some(Some("jobs".into())),
+                ..Default::default()
+            },
+        );
+        let s = cfg.sites.get_mut("shop").unwrap();
+        add_entry(s, &taken, "extra", "sleep 1").unwrap();
+        reset_entries(s);
+        assert_eq!(ids(&cfg), ["queue", "logs", "vite"]);
+        let left = &cfg.sites["shop"].processes;
+        assert_eq!(left.keys().collect::<Vec<_>>(), ["queue"]);
+        assert_eq!(
+            left["queue"],
+            crate::ProcessConfig {
+                top: true,
+                host: Some("jobs".into()),
+                ..Default::default()
+            }
+        );
+        let p = detect_in(&l, &php, &cache, Some(&cfg));
+        assert!(p.iter().all(|p| !p.manual && !p.autostart && !p.edited));
+        fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn one_off_scripts_are_package_commands_then_composer_scripts() {
+        let dir = std::env::temp_dir().join(format!("anvil-oneoff-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            r#"{"scripts":{"dev":"vite","build":"vite build","prebuild":"x","test:unit":"vitest"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("composer.json"),
+            r#"{"scripts":{"dev":["npx concurrently a b"],"post-autoload-dump":["@php artisan package:discover"],"pre-install-cmd":"x","test":["@php artisan config:clear","@php artisan test"],"it's":"echo hi"}}"#,
+        )
+        .unwrap();
+        let got = one_off_scripts(&site(&dir, "laravel"));
+        let short: Vec<(&str, &str, &str, &str)> = got
+            .iter()
+            .map(|s| (s.name.as_str(), s.id.as_str(), s.text.as_str(), s.source))
+            .collect();
+        assert_eq!(
+            short,
+            [
+                ("build", "build", "vite build", "package.json"),
+                ("test:unit", "test-unit", "vitest", "package.json"),
+                (
+                    "test",
+                    "composer-test",
+                    "@php artisan config:clear && @php artisan test",
+                    "composer.json"
+                ),
+                ("it's", "composer-it-s", "echo hi", "composer.json"),
+            ]
+        );
+        assert_eq!(got[1].run, "npm run 'test:unit'");
+        assert!(
+            got[3].run.ends_with(r"run-script 'it'\''s'"),
+            "{}",
+            got[3].run
+        );
+        // Composer's scripts are a PHP app's only.
+        assert_eq!(one_off_scripts(&site(&dir, "vite")).len(), 2);
+        fs::remove_dir_all(dir).unwrap();
     }
 }
