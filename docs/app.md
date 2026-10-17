@@ -48,12 +48,14 @@ icon. The app applies changes right away.
 
 ## Keyboard shortcuts
 
+Every shortcut is also in the menu bar (File, View, Application).
+
 | Applications window | |
 |---|---|
 | Search applications | ⌘F |
 | Move through the list | ↑ ↓ |
 | Show or hide linked domains | ← → |
-| Application tabs, in order | ⌘1 ⌘2 ⌘3 … |
+| Overview, Git, Logs, Packages, Resources, Settings tabs | ⌘1 … ⌘6 |
 | Open in browser | ⌘O |
 | Open in editor | ⌘E |
 | Open Terminal in the project | ⌘T |

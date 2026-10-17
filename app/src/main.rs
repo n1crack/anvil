@@ -1374,6 +1374,90 @@ fn show(handle: &AppHandle) {
     update_dock(handle);
 }
 
+/// The app's menu bar: every shortcut is listed where macOS users look for it.
+/// Picks are sent to the main window as a `menu` event; the page acts on them
+/// the same way as on its own key handling.
+fn app_menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
+    use tauri::menu::{MenuItemBuilder, SubmenuBuilder};
+    let item = |id: &str, text: &str, key: Option<&str>| {
+        let b = MenuItemBuilder::with_id(format!("m:{id}"), text);
+        match key {
+            Some(k) => b.accelerator(k).build(handle),
+            None => b.build(handle),
+        }
+    };
+    let anvil = SubmenuBuilder::new(handle, "Anvil")
+        .about(None)
+        .separator()
+        .item(&item("settings", "Settings…", Some("CmdOrCtrl+,"))?)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+    let file = SubmenuBuilder::new(handle, "File")
+        .item(&item("new", "New…", Some("CmdOrCtrl+N"))?)
+        .item(&item("park", "Add Folder of Applications…", None)?)
+        .separator()
+        .close_window()
+        .build()?;
+    // Without these, copy and paste stop working in text fields.
+    let edit = SubmenuBuilder::new(handle, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let view = SubmenuBuilder::new(handle, "View")
+        .item(&item("mode:apps", "Applications", None)?)
+        .item(&item("mode:services", "Services", None)?)
+        .separator()
+        .item(&item("tab:overview", "Overview", Some("CmdOrCtrl+1"))?)
+        .item(&item("tab:git", "Git", Some("CmdOrCtrl+2"))?)
+        .item(&item("tab:logs", "Logs", Some("CmdOrCtrl+3"))?)
+        .item(&item("tab:packages", "Packages", Some("CmdOrCtrl+4"))?)
+        .item(&item("tab:resources", "Resources", Some("CmdOrCtrl+5"))?)
+        .item(&item("tab:settings", "Settings", Some("CmdOrCtrl+6"))?)
+        .separator()
+        .item(&item("find", "Find", Some("CmdOrCtrl+F"))?)
+        .item(&item("reload", "Reload", Some("CmdOrCtrl+R"))?)
+        .build()?;
+    let application = SubmenuBuilder::new(handle, "Application")
+        .item(&item("open:browser", "Open in Browser", Some("CmdOrCtrl+O"))?)
+        .item(&item("open:editor", "Open in Editor", Some("CmdOrCtrl+E"))?)
+        .item(&item("open:terminal", "Open Terminal", Some("CmdOrCtrl+T"))?)
+        .item(&item("open:git", "Open in Git App", Some("CmdOrCtrl+G"))?)
+        .item(&item("logs", "Show Logs", Some("CmdOrCtrl+L"))?)
+        .build()?;
+    let window = SubmenuBuilder::new(handle, "Window")
+        .minimize()
+        .maximize()
+        .separator()
+        .bring_all_to_front()
+        .build()?;
+    Menu::with_items(handle, &[&anvil, &file, &edit, &view, &application, &window])
+}
+
+fn on_app_menu(handle: &AppHandle, id: &str) {
+    let Some(action) = id.strip_prefix("m:") else {
+        return;
+    };
+    if action == "settings" {
+        return open_settings(handle);
+    }
+    show(handle);
+    if let Some(w) = handle.get_webview_window("main") {
+        let _ = w.emit("menu", action);
+    }
+}
+
 fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let app = handle.state::<App>();
     let on = running(&app);
@@ -1662,6 +1746,8 @@ fn main() {
                 .build(app)?;
             Ok(())
         })
+        .menu(app_menu)
+        .on_menu_event(|handle, e| on_app_menu(handle, e.id.as_ref()))
         .on_window_event(|w, e| {
             // Closing the main window keeps Anvil running in the menu bar.
             match e {
