@@ -72,7 +72,7 @@ anvil php install 8.4      # an isolated PHP; the first one becomes the default
 anvil setup                # downloads the web server, prints the one-time DNS command
 sudo mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\nport 5354\n' | sudo tee /etc/resolver/test
 # or skip the line above: `anvil tld localhost` uses <folder>.localhost, no password needed
-anvil park ~/Sites         # every folder in ~/Sites becomes <folder>.test
+anvil park ~/Sites         # every folder in ~/Sites becomes <folder>.test (or .localhost)
 anvil start                # the first start creates the local certificate authority
 anvil trust                # in another terminal: trust it for HTTPS
 ```

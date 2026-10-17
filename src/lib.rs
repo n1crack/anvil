@@ -929,6 +929,8 @@ pub fn setup_status(cfg: &Config) -> Setup {
 }
 
 static DNS: Once = Once::new();
+/// The suffix the DNS server answers for; every start sets it.
+static DNS_TLD: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 
 fn pid_file() -> PathBuf {
     home().join("run").join("pids")
@@ -1050,15 +1052,16 @@ impl Server {
             .collect();
         fs::write(pid_file(), pids.join("\n"))?;
 
-        // ponytail: DNS settings are read once per process; changing tld/dns_port needs a restart of the process.
-        let (port, tld) = (cfg.dns_port, cfg.tld.clone());
+        // ponytail: the DNS port is bound once per process; changing dns_port needs a restart of the process.
+        *DNS_TLD.write().unwrap_or_else(|e| e.into_inner()) = cfg.tld.clone();
         // .localhost needs no DNS; switching to another suffix later starts it then.
         if !needs_resolver(cfg) {
             return Ok(server);
         }
+        let port = cfg.dns_port;
         DNS.call_once(|| {
             std::thread::spawn(move || {
-                if let Err(e) = dns::serve(port, tld) {
+                if let Err(e) = dns::serve(port, &DNS_TLD) {
                     eprintln!("DNS server stopped: {e}");
                 }
             });
