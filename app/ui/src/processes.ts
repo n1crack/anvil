@@ -1,5 +1,6 @@
 import type { Overview } from "./types";
 import { ansi, clean } from "./term";
+import { type Tail, readTail, tail, termOut } from "./console";
 import { $, M, call, el, invoke, mode, popAt, renderSite, selected, showError, snap, tab } from "./app";
 
 /* Processes: an app's own server (or the site Anvil serves), queue worker, log tailer,
@@ -456,26 +457,20 @@ export function drawProcs(name) {
 
 export const conBox = el("section", "console");
 conBox.setAttribute("aria-label", "Output");
-conBox.innerHTML = `<header class="console-head"><span class="console-title"></span><span class="proc-actions"></span><button class="icon-btn console-close" aria-label="Close output">×</button></header><pre class="console-out"></pre>`;
-export const conOut = $(".console-out", conBox);
-export let con: any = null; // { site, source, label, raw, from, busy }
-export let conAtEnd = true; // follow new output only while the reader is at the bottom
-export let conTop = 0;
-conOut.onscroll = () => {
-  if (!conOut.clientHeight) return; // detached by a redraw, not scrolled
-  conTop = conOut.scrollTop;
-  conAtEnd = conTop + conOut.clientHeight >= conOut.scrollHeight - 4;
-};
+conBox.innerHTML = `<header class="console-head"><span class="console-title"></span><span class="proc-actions"></span><button class="icon-btn console-close" aria-label="Close output">×</button></header>`;
+export const conTerm = termOut("console-out");
+conBox.append(conTerm.out);
+export let con: Tail | null = null; // and its label
 $(".console-close", conBox).onclick = () => {
   con = null;
   conBox.hidden = true;
 };
 
 export function openConsole(site, source, label) {
-  if (con?.site !== site || con.source !== source) {
-    con = { site, source, label, raw: "", from: 0, busy: false };
-    conOut.replaceChildren();
-    conAtEnd = true;
+  if (con?.site !== site || con?.source !== source) {
+    con = tail(site, source, { label });
+    conTerm.out.replaceChildren();
+    conTerm.atEnd = true;
   }
   drawConsole(site);
   conTail();
@@ -487,10 +482,10 @@ export function drawConsole(name) {
   if (!box) return;
   if (box.nextElementSibling !== conBox) {
     box.after(conBox);
-    conOut.scrollTop = conAtEnd ? conOut.scrollHeight : conTop;
+    conTerm.restore();
   }
   conBox.hidden = con?.site !== name;
-  if (conBox.hidden) return;
+  if (!con || conBox.hidden) return;
   const o = procCache.get(name);
   const [kind, id] = con.source === "app" ? ["app", ""] : con.source.split(":");
   const chip = kind === "once" ? o?.commands.find((c) => c.id === id) : null;
@@ -518,25 +513,9 @@ export function drawConsole(name) {
  * with \r, or a color begun earlier, comes out right. */
 export async function conTail() {
   const c = con;
-  if (!c || c.busy) return;
-  c.busy = true;
-  let page;
-  try {
-    page = await invoke("log_text", { site: c.site, source: c.source, from: c.from });
-  } catch {
-    return; // no output yet
-  } finally {
-    c.busy = false;
-  }
-  if (c !== con) return;
-  if (page.end_offset < c.from) c.raw = ""; // cleared: start over
-  c.from = page.end_offset;
-  if (!page.text) return;
-  c.raw += page.text;
-  // ponytail: keeps the newest ~512 KB and redraws all of it; a ring of lines if that gets slow.
-  if (c.raw.length > 524288) c.raw = c.raw.slice(c.raw.indexOf("\n", c.raw.length - 262144) + 1);
-  conOut.replaceChildren(ansi(clean(c.raw, true)));
-  if (conAtEnd) conOut.scrollTop = conOut.scrollHeight;
+  if (!c || !(await readTail(c)) || c !== con) return;
+  conTerm.out.replaceChildren(ansi(clean(c.raw, true)));
+  conTerm.follow();
 }
 
 // While the Overview is shown, keep states and the console fresh.
