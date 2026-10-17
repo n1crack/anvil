@@ -23,7 +23,8 @@
 
   --radius-s: 6px;
   --radius-m: 10px;
-  --sidebar: 420px;
+  /* Narrower windows give the detail pane the room; 760px is the window minimum. */
+  --sidebar: clamp(280px, 36vw, 420px);
   --titlebar: 52px;
 
   font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
@@ -431,18 +432,23 @@ button, select, input { font: inherit; color: inherit; }
 /* Header: name and address on the left, run state on the right. */
 .site-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px 16px;
   margin-bottom: 16px;
 }
 
+/* The name keeps its line; Start/Stop move under it when the pane is narrow. */
 .site-title {
   display: flex;
+  flex: 1 1 260px;
   align-items: center;
   gap: 14px;
   min-width: 0;
 }
+
+.site-title > div { min-width: 0; }
 
 .mark.big {
   display: grid;
