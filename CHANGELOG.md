@@ -8,6 +8,11 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- `anvil clean` exits with an error when it refuses or fails to delete an
+  item, instead of reporting success.
+
 ## [0.1.0] - 2026-10-17
 
 The first public release of Anvil, a macOS development environment.

@@ -344,7 +344,7 @@ fn main() -> Result<()> {
             if targets.is_empty() {
                 bail!("Nothing to clean: pass paths from `anvil usage {site}`, or --safe");
             }
-            let mut freed = 0;
+            let (mut freed, mut failed) = (0, 0);
             for t in targets {
                 // Accept full paths inside the project as well as the relative ones `usage` prints.
                 let t = PathBuf::from(&t)
@@ -352,10 +352,16 @@ fn main() -> Result<()> {
                     .map_or(t.clone(), |r| r.display().to_string());
                 match resources::clean(&s, &t, running) {
                     Ok(b) => freed += b,
-                    Err(e) => println!("  {t}: {e:#}"),
+                    Err(e) => {
+                        println!("  {t}: {e:#}");
+                        failed += 1;
+                    }
                 }
             }
             println!("Freed {:.1} MB", freed as f64 / 1_048_576.0);
+            if failed > 0 {
+                bail!("{failed} item(s) not cleaned");
+            }
         }
         Cmd::Php { cmd: PhpCmd::List } => {
             for v in installed_php() {
