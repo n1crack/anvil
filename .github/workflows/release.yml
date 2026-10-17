@@ -23,7 +23,7 @@ jobs:
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Check the tag matches the Cargo version
         run: |
@@ -47,13 +47,17 @@ jobs:
           rustup toolchain install stable --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin
           rustup default stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      # Signing and notarization only happen when the secrets exist. The Tauri
-      # bundler treats a variable that is set but empty as "sign with this", so
-      # each one is exported only when it has a value; without them the build
-      # is unsigned and still succeeds.
-      - name: Enable signing and notarization if configured
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version '^2' --locked
+
+      # One universal .dmg runs natively on Apple Silicon and Intel, so there is
+      # no wrong download to pick. Signing and notarization only happen when the
+      # secrets exist: the Tauri bundler treats a variable that is set but empty
+      # as "sign with this", so empty ones are unset. The secrets live only in
+      # this step's environment; later steps never see them.
+      - name: Build the app
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -63,23 +67,15 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
-            value=$(printenv "$name" || true)
-            if [ -n "$value" ]; then
-              { echo "$name<<__ANVIL_EOF__"; echo "$value"; echo "__ANVIL_EOF__"; } >> "$GITHUB_ENV"
-              echo "$name is set"
-            else
+            if [ -z "$(printenv "$name" || true)" ]; then
+              unset "$name"
               echo "$name is not set"
+            else
+              echo "$name is set"
             fi
           done
-
-      # One universal .dmg runs natively on Apple Silicon and Intel, so there is
-      # no wrong download to pick. Without tagName/releaseId the action only
-      # builds; the release is created below together with the CLI.
-      - name: Build the app
-        uses: tauri-apps/tauri-action@v0
-        with:
-          projectPath: app
-          args: --target universal-apple-darwin --bundles app,dmg
+          cd app
+          cargo tauri build --target universal-apple-darwin --bundles app,dmg
 
       - name: Build the CLI
         run: |
