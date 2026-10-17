@@ -1830,8 +1830,11 @@ kbd {
   text-align: left;
 }
 
-.log-head:hover,
+button.log-head:hover,
 .log-head[aria-expanded="true"] { background: var(--steel-hover); }
+/* A row with nothing more to show: its whole message, wrapped, selectable. */
+.log.flat .log-head { user-select: text; -webkit-user-select: text; cursor: text; }
+.log.flat .log-msg { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .log-time {
   flex: none;
@@ -1928,11 +1931,42 @@ kbd {
   background: var(--steel-hover);
 }
 
-.log-trace { padding: 0; list-style: none; }
-.log-trace li { padding-left: 2em; text-indent: -2em; color: var(--muted); }
-.log-trace.folded .vendor { display: none; }
-.log-trace .own { color: var(--text); }
+/* A frame a line: number, file:line, the function muted; cut at the edge, whole in the tooltip. */
+.log-trace { padding: 0; list-style: none; white-space: nowrap; }
+.log-trace li { overflow: hidden; color: var(--muted); text-overflow: ellipsis; }
+.log-trace.folded .fold { display: none; }
+.log-no { display: inline-block; min-width: 3.5ch; margin-right: 1ch; opacity: 0.7; font-variant-numeric: tabular-nums; }
+.log-fn { margin-left: 1.5ch; opacity: 0.75; }
+.log-trace .log-file { color: var(--text); }
+.log-trace .vendor .log-file { color: color-mix(in srgb, var(--text) 70%, var(--muted)); }
 .log-trace .own .log-file { font-weight: 600; }
+
+/* "show all times": a quiet text link; the times, when shown, in narrow columns. */
+.log-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+}
+.log-link:hover { color: var(--text); }
+.log-times {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  columns: 10em;
+  column-gap: 16px;
+  color: var(--muted);
+  font: 11px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Laravel's exception context as one line: the class, then where it was thrown. */
+.log-exc { display: flex; align-items: baseline; gap: 10px; min-width: 0; margin: 2px 0 6px; font: 11.5px/1.55 ui-monospace, "SF Mono", Menlo, monospace; }
+.log-exc-cls { font-weight: 600; }
+.log-exc .log-file { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 
 /* An app frame opens in the editor at its line. */
 button.log-file {
@@ -1971,15 +2005,26 @@ button.log-file:hover { text-decoration-color: currentColor; }
 /* Nothing listed: no rule above the message, it would double the tabs' line. */
 .logs-list:has(> .empty, > .logs-large) { border-top: 0; }
 
-/* App output: its own scroll box that opens at the newest line, like a terminal. */
-.logs-list.chrono {
-  max-height: max(240px, calc(100vh - 370px));
-  overflow-y: auto;
-  border-bottom: 1px solid var(--line);
+/* Output of a process or a command: a terminal, on the console's surface. */
+.logs-term {
+  min-height: 240px;
+  margin: 0;
+  padding: 8px 14px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: #121518;
+  color: #d7dce1;
+  font: 11px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
-
-.logs-list.chrono .log:last-child { border-bottom: 0; }
-.logs-more:has(+ .logs-list.chrono) { margin: 0 auto 10px; }
+.logs-term[hidden] { display: none; }
+.logs-term:empty::before { content: attr(data-empty); color: #8d959f; }
+.logs-term mark { border-radius: 2px; background: rgba(227, 179, 65, 0.35); color: inherit; }
+[data-panel="logs"] .logs > .logs-term { flex: 1; min-height: 0; }
 
 /* No timestamps anywhere: no empty time column, and app output, where every line
  * would say info, hides the everyday level; the column keeps lines aligned. */

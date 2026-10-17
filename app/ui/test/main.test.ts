@@ -233,29 +233,82 @@ describe("audit fixes", () => {
 });
 
 describe("logs", () => {
-  test("repeats fold into one row with ×N; open, it lists each time and folds vendor frames", async () => {
+  test("a ×24 exception opens to one summary line, its class and file, and three frames", async () => {
     await select("shop");
     $('.tabs [data-tab="logs"]').click();
     await wait(80);
     const first = $$(".logs-list .log")[0];
-    expect(first.querySelector(".log-count")?.textContent).toBe("×4");
-    expect(first.querySelector(".log-level")?.textContent).toBe("error");
-    expect(first.querySelector(".log-dot")).not.toBeNull();
+    expect(first.querySelector(".log-count")?.textContent).toBe("×24");
     (first.querySelector(".log-head") as HTMLElement).click();
-    expect(first.querySelector(".log-meta")?.textContent).toMatch(/^4 times: /);
+    expect(first.querySelector(".log-meta > span")?.textContent).toMatch(
+      /^24 times · first \d+ \w{3} \d\d:\d\d · last (\d+ \w{3} )?\d\d:\d\d · local show all times$/,
+    );
+    expect(first.querySelector(".log-times")).toBeNull();
+    (first.querySelector(".log-link") as HTMLElement).click();
+    expect(first.querySelectorAll(".log-times li")).toHaveLength(24);
+    expect(first.querySelectorAll(".log-copy")).toHaveLength(1);
+    const exc = first.querySelector(".log-exc")!;
+    expect(exc.querySelector(".log-exc-cls")?.textContent).toBe("BindingResolutionException");
+    expect((exc.querySelector(".log-exc-cls") as HTMLElement).title).toBe("Illuminate\\Contracts\\Container\\BindingResolutionException");
+    expect(exc.querySelector(".log-file")?.textContent).toBe("Illuminate/Container/Container.php:1127");
+    // No raw JSON, no repeated message: the row shows it whole.
+    expect(first.querySelector(".log-json")).toBeNull();
+    expect(first.querySelector("pre.log-text")).toBeNull();
     const trace = first.querySelector(".log-trace")!;
+    expect(trace.querySelectorAll("li:not(.fold)")).toHaveLength(3);
+    const frame = trace.querySelector("li")!;
+    expect(frame.querySelector(".log-no")?.textContent).toBe("#0");
+    expect(frame.querySelector(".log-file")?.textContent).toBe("Illuminate/Container/Container.php:1127");
+    expect(frame.querySelector(".log-fn")?.textContent).toBe("Illuminate\\Container\\Container->build()");
+    expect(first.querySelector(".log-vendor")?.textContent).toBe("+57 more");
+  });
+
+  test("a row with nothing more to show doesn't open", async () => {
+    const warn = $$(".logs-list .log")[1];
+    expect(warn.classList.contains("flat")).toBe(true);
+    expect(warn.querySelector("button.log-head")).toBeNull();
+    (warn.querySelector(".log-head") as HTMLElement).click();
+    expect(warn.querySelector(".log-detail")).toBeNull();
+  });
+
+  test("with app frames, vendor frames fold and app frames open in the editor", async () => {
+    const row = $$(".logs-list .log")[2];
+    expect(row.querySelector(".log-count")?.textContent).toBe("×4");
+    expect(row.querySelector(".log-level")?.textContent).toBe("error");
+    (row.querySelector(".log-head") as HTMLElement).click();
+    const trace = row.querySelector(".log-trace")!;
     expect(trace.classList.contains("folded")).toBe(true);
     expect([...trace.querySelectorAll(".own .log-file")].map((f) => f.textContent)).toEqual([
       "app/Http/Controllers/CheckoutController.php:42",
       "app/Http/Middleware/EnsureCartNotEmpty.php:23",
       "app/Providers/RouteServiceProvider.php:51",
     ]);
-    const more = first.querySelector(".log-vendor") as HTMLElement;
+    const more = row.querySelector(".log-vendor") as HTMLElement;
     expect(more.textContent).toBe("+56 vendor frames");
     more.click();
     expect(trace.classList.contains("folded")).toBe(false);
     (trace.querySelector("button.log-file") as HTMLElement).click();
     expect(calls("open_in_editor").at(-1)![1]).toEqual({ site: "shop", path: "app/Http/Controllers/CheckoutController.php", line: 42 });
+  });
+
+  test("times summary and exception parsing", async () => {
+    const { timesSummary, parseException } = await import("../src/logs");
+    expect(timesSummary(["2026-10-05 16:24:11", "2026-10-05 15:00:00", "2026-10-05 13:23:39"])).toBe(
+      "3 times · first 5 Oct 13:23 · last 16:24",
+    );
+    expect(timesSummary(["2026-10-06 09:01:00", "2026-10-05 13:23:39"])).toBe("2 times · first 5 Oct 13:23 · last 6 Oct 09:01");
+    expect(timesSummary(["2026-10-05 16:24:11"])).toBe("5 Oct 16:24:11");
+    expect(
+      parseException(
+        "[object] (Illuminate\\Contracts\\Container\\BindingResolutionException(code: 0): Target class [request] does not exist. at /x/vendor/a/B.php:1127)",
+      ),
+    ).toEqual({
+      cls: "Illuminate\\Contracts\\Container\\BindingResolutionException",
+      message: "Target class [request] does not exist.",
+      file: "/x/vendor/a/B.php",
+      line: 1127,
+    });
+    expect(parseException("just text")).toBeNull();
   });
 
   test("only adjacent repeats group", async () => {
@@ -269,6 +322,35 @@ describe("logs", () => {
     ($$(".logs-bar .seg button").find((b) => b.textContent === "Errors") as HTMLElement).click();
     await wait(80);
     expect(calls("log_search").at(-1)![1]).toMatchObject({ site: "shop", level: "error" });
+  });
+
+  test("a plain source is terminal text: colored lines, no rows; search and Errors filter lines", async () => {
+    ($$(".logs-bar .seg button").find((b) => b.textContent === "All") as HTMLElement).click();
+    ($('.logs-files .seg [data-id="once:build"]') as HTMLElement).click();
+    await wait(80);
+    expect(calls("log_text").at(-1)![1]).toMatchObject({ site: "shop", source: "once:build" });
+    const term = $(".logs-term");
+    expect(term.hidden).toBe(false);
+    expect(($(".logs-list") as HTMLElement).hidden).toBe(true);
+    expect(term.textContent).toContain("✓ built in 3.41s");
+    expect(term.querySelector(".ansi2")).not.toBeNull();
+    expect(term.querySelector(".log-copy, .log-head")).toBeNull();
+    const search = $(".logs-search") as HTMLInputElement;
+    search.value = "err!";
+    search.dispatchEvent(new Event("input"));
+    await wait(350);
+    expect(term.textContent!.split("\n")).toHaveLength(3);
+    expect([...term.querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["ERR!", "ERR!", "ERR!"]);
+    search.value = "";
+    search.dispatchEvent(new Event("input"));
+    await wait(350);
+    ($$(".logs-bar .seg button").find((b) => b.textContent === "Errors") as HTMLElement).click();
+    await wait(30);
+    expect(term.textContent!.split("\n")).toHaveLength(5);
+    expect(calls("log_search").at(-1)![1]).not.toMatchObject({ source: "once:build" });
+    ($$(".logs-bar .seg button").find((b) => b.textContent === "All") as HTMLElement).click();
+    ($('.logs-files .seg [data-id="laravel.log"]') as HTMLElement).click();
+    await wait(80);
   });
 });
 

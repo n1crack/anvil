@@ -130,6 +130,33 @@ window.mockOv = {
   },
 };
 const mockLog = "\x1b[1m\x1b[32m✓\x1b[0m built in \x1b[33m1.2s\x1b[39m\n12%\r50%\r100%\n\x1b[2Kplain \x1b[91mbright red\x1b[0m\n";
+// `vite build` as a once-run writes it: colors, no timestamps nor levels.
+const mockBuild = [
+  "",
+  "> shop@ build",
+  "> vite build",
+  "",
+  "\x1b[36mvite v6.2.0 \x1b[32mbuilding for production...\x1b[39m",
+  "transforming...",
+  "\x1b[32m✓\x1b[39m 412 modules transformed.",
+  "\x1b[33m(!) Some chunks are larger than 500 kB after minification.\x1b[39m",
+  "rendering chunks...",
+  "computing gzip size...",
+  "\x1b[2mpublic/build/\x1b[22m\x1b[32mmanifest.json            \x1b[39m\x1b[1m\x1b[2m  0.62 kB\x1b[22m\x1b[1m\x1b[22m",
+  "\x1b[2mpublic/build/\x1b[22m\x1b[35massets/app-BqW2c9xP.css  \x1b[39m\x1b[1m\x1b[2m 48.20 kB\x1b[22m\x1b[1m\x1b[22m\x1b[2m │ gzip:  8.91 kB\x1b[22m",
+  "\x1b[2mpublic/build/\x1b[22m\x1b[36massets/app-D1x9fK2a.js   \x1b[39m\x1b[1m\x1b[33m612.44 kB\x1b[39m\x1b[22m\x1b[2m │ gzip: 196.03 kB\x1b[22m",
+  "\x1b[32m✓ built in 3.41s\x1b[39m",
+  "",
+  "> shop@ build:ssr",
+  "> vite build --ssr",
+  "",
+  "\x1b[31merror\x1b[39m during build:",
+  '\x1b[31m[vite]: Rollup failed to resolve import "@/Components/Chart" from "resources/js/Pages/Dashboard.vue".\x1b[39m',
+  "npm \x1b[31mERR!\x1b[39m code 1",
+  "npm \x1b[31mERR!\x1b[39m path /Users/x/Sites/shop",
+  "npm \x1b[31mERR!\x1b[39m command failed",
+  "",
+].join("\n");
 {
   const c = mockOv.vuefinder.commands;
   const t = Math.floor(Date.now() / 1000);
@@ -252,12 +279,31 @@ window.mockServices = [
   }
   const E = (min, level, message, extra = {}) => ({ time: ts(min), env: "local", level, message, context: null, trace: [], ...extra });
   const err = "Target class [request] does not exist.";
+  // The same exception 24 times over three hours, as Laravel writes it: the context only
+  // repeats it, and no frame of the trace is the app's.
+  const ill = "/Users/x/Sites/shop/vendor/laravel/framework/src/Illuminate/";
+  const steps = [
+    ["Container/Container.php(1127)", "Illuminate\\Container\\Container->build()"],
+    ["Container/Container.php(950)", "Illuminate\\Container\\Container->resolve()"],
+    ["Foundation/Application.php(1078)", "Illuminate\\Foundation\\Application->resolve()"],
+    ["Pipeline/Pipeline.php(183)", "Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()"],
+    ["Routing/Router.php(799)", "Illuminate\\Routing\\Router->runRouteWithinStack()"],
+  ];
+  const vendorTrace = Array.from({ length: 60 }, (_, i) => `#${i} ${ill}${steps[i % 5][0]}: ${steps[i % 5][1]}`);
+  const binding = {
+    context: JSON.stringify({
+      exception: `[object] (Illuminate\\Contracts\\Container\\BindingResolutionException(code: 0): ${err} at ${ill}Container/Container.php:1127)`,
+    }),
+    trace: vendorTrace,
+  };
   const entries = [
-    E(1, "ERROR", err, { trace }),
-    E(2, "ERROR", err, { trace }),
-    E(2, "ERROR", err, { trace }),
-    E(4, "ERROR", err, { trace }),
-    E(6, "INFO", "Order placed", {
+    ...Array.from({ length: 24 }, (_, i) => E(1 + i * 8, "ERROR", err, binding)),
+    E(200, "INFO", "Horizon started"),
+    E(201, "ERROR", err, { trace }),
+    E(202, "ERROR", err, { trace }),
+    E(202, "ERROR", err, { trace }),
+    E(204, "ERROR", err, { trace }),
+    E(206, "INFO", "Order placed", {
       context: JSON.stringify({
         order_id: 10482,
         user_id: 37,
@@ -269,28 +315,28 @@ window.mockServices = [
         ],
       }),
     }),
-    E(8, "WARNING", "Cache store [redis] unavailable, falling back to [file]"),
-    E(9, "DEBUG", "select * from `users` where `id` = ? limit 1 [37] (1.24ms)"),
-    E(9, "DEBUG", "select * from `orders` where `user_id` = ? [37] (0.88ms)"),
-    E(11, "ERROR", "SQLSTATE[HY000] [2002] Connection refused (Connection: mysql, SQL: select * from `sessions` where `id` = ?)", {
+    E(208, "WARNING", "Cache store [redis] unavailable, falling back to [file]"),
+    E(209, "DEBUG", "select * from `users` where `id` = ? limit 1 [37] (1.24ms)"),
+    E(209, "DEBUG", "select * from `orders` where `user_id` = ? [37] (0.88ms)"),
+    E(211, "ERROR", "SQLSTATE[HY000] [2002] Connection refused (Connection: mysql, SQL: select * from `sessions` where `id` = ?)", {
       trace: trace.slice(0, 12),
     }),
-    E(14, "INFO", "Queue worker started", { context: JSON.stringify({ queue: "default", tries: 1 }) }),
-    E(15, "DEBUG", "Mail sent to anna@example.com (subject: Your receipt)"),
-    E(19, "WARNING", "Deprecated: Creation of dynamic property App\\Models\\Cart::$coupon is deprecated"),
-    E(22, "DEBUG", "Stripe webhook payload received [charge.succeeded]"),
-    E(25, "INFO", "User logged in", { context: JSON.stringify({ user_id: 37, ip: "127.0.0.1" }) }),
-    E(31, "DEBUG", "select count(*) as aggregate from `products` where `active` = ? [1] (2.01ms)"),
-    E(33, "ERROR", err, { trace }),
-    E(36, "ERROR", err, { trace }),
-    E(41, "NOTICE", "Route [shop.cart] is slow: 842ms"),
-    E(47, "DEBUG", "View cache cleared"),
-    E(52, "INFO", "Scheduled task finished", { context: JSON.stringify({ command: "inspire", ms: 31 }) }),
-    E(58, "DEBUG", "Session regenerated"),
-    E(64, "WARNING", 'Undefined array key "discount" in app/Services/PriceCalculator.php:88'),
-    E(70, "DEBUG", "Config cached"),
-    E(75, "INFO", "Application booted", { context: null }),
-    E(80, "DEBUG", "Vite manifest read (3 entries)"),
+    E(214, "INFO", "Queue worker started", { context: JSON.stringify({ queue: "default", tries: 1 }) }),
+    E(215, "DEBUG", "Mail sent to anna@example.com (subject: Your receipt)"),
+    E(219, "WARNING", "Deprecated: Creation of dynamic property App\\Models\\Cart::$coupon is deprecated"),
+    E(222, "DEBUG", "Stripe webhook payload received [charge.succeeded]"),
+    E(225, "INFO", "User logged in", { context: JSON.stringify({ user_id: 37, ip: "127.0.0.1" }) }),
+    E(231, "DEBUG", "select count(*) as aggregate from `products` where `active` = ? [1] (2.01ms)"),
+    E(233, "ERROR", err, { trace }),
+    E(236, "ERROR", err, { trace }),
+    E(241, "NOTICE", "Route [shop.cart] is slow: 842ms"),
+    E(247, "DEBUG", "View cache cleared"),
+    E(252, "INFO", "Scheduled task finished", { context: JSON.stringify({ command: "inspire", ms: 31 }) }),
+    E(258, "DEBUG", "Session regenerated"),
+    E(264, "WARNING", 'Undefined array key "discount" in app/Services/PriceCalculator.php:88'),
+    E(270, "DEBUG", "Config cached"),
+    E(275, "INFO", "Application booted", { context: null }),
+    E(280, "DEBUG", "Vite manifest read (3 entries)"),
   ];
   const page = { entries, start_offset: 0, end_offset: 2097152, truncated: false };
   const sources = [
@@ -477,7 +523,7 @@ const mockHandle = (cmd, a) => {
       return structuredClone(ov);
     }
     case "log_text": {
-      const text = window.mockLogs?.[a.source] ?? mockLog;
+      const text = window.mockLogs?.[a.source] ?? (a.source === "once:build" ? mockBuild : mockLog);
       return { text: a.from ? "" : text, end_offset: text.length };
     }
     case "log_sources":
