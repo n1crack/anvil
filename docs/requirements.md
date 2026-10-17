@@ -68,6 +68,8 @@ Everything goes into `~/.anvil`. Sizes measured on one Apple silicon Mac:
 | Go 1.27 | 270 MB |
 | Rust (minimal toolchain) | 460 MB |
 | .NET SDK | 650 MB |
+| uv | 27 MB |
+| One Python version | 71 MB |
 
 Only what you install is downloaded. Downloads are unpacked in
 `~/.anvil/build` and removed afterwards, so leave room for the archive as well.
@@ -88,6 +90,9 @@ Downloads come from these hosts, useful if a firewall or proxy needs them:
 | `go.dev`, `dl.google.com` | Go |
 | `static.rust-lang.org` | Rust (rustup) |
 | `builds.dotnet.microsoft.com` | .NET SDK and its release list |
+| `github.com` (astral-sh/uv) | uv |
+| `releases.astral.sh` | The Python builds uv installs |
+| `pypi.org`, `files.pythonhosted.org` | Python packages for your apps, through uv |
 
 `anvil packages --updates` also asks `repo.packagist.org`,
 `registry.npmjs.org`, `crates.io`, `proxy.golang.org` and `api.nuget.org` for
