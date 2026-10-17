@@ -129,6 +129,9 @@ pub struct ProcessConfig {
     /// A package.json command script shown as a row.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pinned: bool,
+    /// Kept on top: listed first after the app's own row.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub top: bool,
     /// The subdomain label of an extra dev server's address (`docs` in
     /// `docs.vuefinder.test`), replacing the automatic one.
     #[serde(default, skip_serializing_if = "Option::is_none")]

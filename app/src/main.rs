@@ -328,7 +328,9 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
             process: p,
         }
     });
-    let rows: Vec<ProcessRow> = main.into_iter().chain(rows).collect();
+    let mut rows: Vec<ProcessRow> = main.into_iter().chain(rows).collect();
+    // The app's own row first, then those kept on top, each group in detection order.
+    rows.sort_by_key(|r| (!r.main, !r.process.top));
     rows.into_iter()
         .map(|mut r| {
             // The site row is the web server's; it has no process, log or errors of its own.
@@ -630,6 +632,13 @@ fn activity(app: State<App>) -> Res<Activity> {
                 rows.push(r);
             }
         }
+        // The app's own row first, then the processes kept on top.
+        let kept = |key: &str| {
+            key.strip_prefix(&format!("{}@", site.name))
+                .and_then(|id| cfg.sites.get(&site.name)?.processes.get(id))
+                .is_some_and(|p| p.top)
+        };
+        rows.sort_by_key(|r| (r.key != site.name, !kept(&r.key)));
         if !rows.is_empty() {
             groups.push(AppGroup {
                 site: site.name.clone(),
@@ -947,7 +956,7 @@ fn set_app(
 }
 
 /// Change one row's settings: its command (`reset` goes back to the detected one),
-/// Start with Anvil, hidden, pinned or its address's label (`reset_host`: automatic). The app's own row (`id` "") maps onto `set_app`
+/// Start with Anvil, hidden, pinned, kept on top or its address's label (`reset_host`: automatic). The app's own row (`id` "") maps onto `set_app`
 /// and can't be hidden. A running row whose command changed restarts.
 #[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
@@ -961,6 +970,7 @@ fn set_process(
     autostart: Option<bool>,
     hidden: Option<bool>,
     pinned: Option<bool>,
+    top: Option<bool>,
     host: Option<String>,
     reset_host: Option<bool>,
 ) -> Res<Overview> {
@@ -978,6 +988,9 @@ fn set_process(
         if hidden == Some(true) {
             return Err("The app's own row can't be hidden".into());
         }
+        if top.is_some() {
+            return Err("The app's own row is always first".into());
+        }
         if !anvil::apps::runs_process(&s.kind) {
             return Err(format!("Anvil serves {site}; it has no command of its own"));
         }
@@ -992,6 +1005,7 @@ fn set_process(
             autostart,
             hidden,
             pinned,
+            top,
             host: if reset_host == Some(true) {
                 Some(None)
             } else {

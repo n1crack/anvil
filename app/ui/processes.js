@@ -80,6 +80,9 @@ function popup(menu, btn) {
   menu.popup(dpi ? new dpi.LogicalPosition(r.left, r.bottom + 4) : undefined);
 }
 
+/** A pin outline in currentColor, for "Add to processes" and rows kept on top. */
+const PIN = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4M6.75 2.5v4L4.5 9.25h7L9.25 6.5v-4M8 9.25v4.25" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 const setProc = (name, id, change) => loadProcs(name, "set_process", { id, ...change });
 
 /** An address's subdomain label and the fixed rest: ["docs", ".vuefinder.test"]. */
@@ -104,6 +107,8 @@ async function procMenu(name, r, btn) {
   if (r.host_edited) items.push(M.MenuItem.new({ text: "Reset address", action: () => setProc(name, r.id, { resetHost: true }) }));
   if (!r.main) {
     items.push(
+      // The app's own row is always first already.
+      M.CheckMenuItem.new({ text: "Keep on Top", checked: !!r.top, action: () => setProc(name, r.id, { top: !r.top }) }),
       M.PredefinedMenuItem.new({ item: "Separator" }),
       r.pinned
         ? M.MenuItem.new({ text: "Unpin", action: () => setProc(name, r.id, { pinned: false }) })
@@ -159,8 +164,8 @@ function editField(name, r) {
   return form;
 }
 
-/** One line: dot, name, detail, then the auto tag, 🌐, Restart and ■ (or ▶) and ⋯. */
-function procRow({ name, state, detail, error, title, busy, open, run, auto, web, menu, edit }) {
+/** One line: dot, name, detail, then the on-top pin, the auto tag, 🌐, Restart and ■ (or ▶) and ⋯. */
+function procRow({ name, state, detail, error, title, busy, open, run, top, auto, web, menu, edit }) {
   const row = el("div", `proc ${state}`);
   const dot = el("span", `dot ${state === "running" ? "on" : state === "crashed" ? "bad" : ""}`);
   dot.title = { running: "Running", crashed: "Crashed", stopped: "Stopped" }[state];
@@ -175,6 +180,7 @@ function procRow({ name, state, detail, error, title, busy, open, run, auto, web
     row.append(last);
   }
   const actions = el("span", "proc-actions");
+  if (top) actions.append(Object.assign(el("span", "proc-top"), { title: "Kept on top", innerHTML: PIN }));
   if (auto) actions.append(Object.assign(el("span", "proc-tag", "auto"), { title: "Starts with Anvil" }));
   // Only something running has a page to open.
   if (web && state === "running") {
@@ -204,8 +210,6 @@ function agoShort(at) {
   return `${Math.floor(s / 86400)}d`;
 }
 
-/** One package.json command: name, script, then 📌 and ▶ on hover and how the last run went.
- * A click runs it (or, while running, shows it) in the console. */
 /** A small confirm bubble under `anchor`: Enter or Run confirms, Esc or a click elsewhere cancels. */
 function confirmPop(anchor, text, label, onYes) {
   const pop = el("div", "pop-confirm");
@@ -217,6 +221,8 @@ function confirmPop(anchor, text, label, onYes) {
   no.onclick = (e) => { e.stopPropagation(); close(); };
 }
 
+/** One package.json command: name, script, then the pin (on hover) and ▶, then how the
+ * last run went, if it ran. A click shows its output once there is some. */
 function cmdRow(name, c) {
   const row = el("div", "proc cmd");
   const label = `npm run ${c.name}`;
@@ -230,15 +236,19 @@ function cmdRow(name, c) {
   const script = el("span", "proc-last", c.command);
   row.append(el("span", "proc-name", c.name), script);
   const actions = el("span", "proc-actions");
-  const pin = procBtn("📌", `Add ${c.name} to processes`, () => setProc(name, c.id, { pinned: true }));
+  const pin = procBtn("", `Add ${c.name} to processes`, () => setProc(name, c.id, { pinned: true }));
+  pin.innerHTML = PIN;
   pin.title = "Add to processes";
-  pin.classList.add("cmd-hover");
+  pin.className = "cmd-hover cmd-pin";
   actions.append(pin);
   if (!c.running) {
     const play = procBtn("▶", `Run ${c.name}`, () => confirmPop(play, `Run ${label}?`, "Run", run));
     play.title = "Run";
     actions.append(play);
   }
+  row.append(actions);
+  // Only a command that ran gets a result column; otherwise ▶ sits flush right.
+  if (!c.running && !c.exit) return row;
   const result = el("span", "cmd-result");
   if (c.running) {
     result.append(el("span", "dot warm"));
@@ -248,7 +258,7 @@ function cmdRow(name, c) {
     result.append(el("span", ok ? "cmd-ok" : "cmd-bad", ok ? "✓" : "✗"), ` ${agoShort(c.exit.at)}`);
     result.title = `${ok ? "Succeeded" : "Failed"} ${new Date(c.exit.at * 1000).toLocaleString()}`;
   }
-  row.append(actions, result);
+  row.append(result);
   return row;
 }
 
@@ -354,6 +364,7 @@ function drawProcs(name) {
         title: site ? (r.running ? "Served by Anvil" : "Start Anvil to serve it") : `${r.command}\nFrom ${r.source}. Click to show its output.`,
         open: site ? null : () => openConsole(name, r.main ? "app" : `proc:${r.id}`, r.command || r.name),
         run: site ? null : r.main ? (action) => call("app_run", { site: name, action }) : (action) => loadProcs(name, "process_run", { name: r.id, action }),
+        top: r.top && !r.main,
         auto: r.autostart,
         web: r.web,
         menu: site ? null : (btn) => procMenu(name, r, btn),

@@ -25,6 +25,8 @@ pub struct Process {
     pub edited: bool,
     /// A package.json command script the user pinned as a row.
     pub pinned: bool,
+    /// Kept on top: listed first after the app's own row.
+    pub top: bool,
 }
 
 /// An edit of one process's settings; `None` leaves a field as it is.
@@ -35,6 +37,7 @@ pub struct ProcessChange {
     pub autostart: Option<bool>,
     pub hidden: Option<bool>,
     pub pinned: Option<bool>,
+    pub top: Option<bool>,
     /// The address's subdomain label; `Some(None)` goes back to the automatic one.
     pub host: Option<Option<String>>,
 }
@@ -60,6 +63,7 @@ pub fn apply_process_change(
     p.autostart = change.autostart.unwrap_or(p.autostart);
     p.hidden = change.hidden.unwrap_or(p.hidden);
     p.pinned = change.pinned.unwrap_or(p.pinned);
+    p.top = change.top.unwrap_or(p.top);
     if let Some(host) = change.host {
         p.host = match host {
             Some(h) => {
@@ -214,6 +218,7 @@ fn apply_settings(
         if let Some(c) = set.get(&p.id) {
             p.autostart = c.autostart;
             p.pinned = c.pinned;
+            p.top = c.top;
             if let Some(command) = &c.command {
                 p.command = command.clone();
                 p.edited = true;
@@ -1570,6 +1575,21 @@ echo '{DEV_JSON}'
             ..Default::default()
         };
         assert!(apply_process_change(&mut sc, "", c).is_err());
+        assert!(sc.processes.is_empty());
+    }
+
+    #[test]
+    fn keep_on_top_is_stored_and_cleared() {
+        let mut sc = crate::SiteConfig::default();
+        let top = |on| ProcessChange {
+            top: Some(on),
+            ..Default::default()
+        };
+        apply_process_change(&mut sc, "queue", top(true)).unwrap();
+        assert!(sc.processes["queue"].top);
+        let saved = toml::to_string(&sc).unwrap();
+        assert!(saved.contains("top = true"), "{saved}");
+        apply_process_change(&mut sc, "queue", top(false)).unwrap();
         assert!(sc.processes.is_empty());
     }
 

@@ -910,13 +910,19 @@ button, select, input { font: inherit; color: inherit; }
 
 .proc-last.error-text { color: var(--danger); }
 
-/* Commands: tighter rows; 📌 and ▶ only while hovered, then how the last run went. */
-.proc.cmd { grid-template-columns: auto 1fr auto auto; min-height: 30px; padding: 3px 14px; }
+/* Commands: tighter rows; the pin only while hovered, ▶ flush right, then how the last
+ * run went in a 4th column that only a command that ran has. */
+.proc.cmd { grid-template-columns: auto 1fr auto; min-height: 30px; padding: 3px 14px; }
 .cmd-hover { visibility: hidden; }
 .cmd:hover .cmd-hover,
 .cmd-hover:focus-visible { visibility: visible; }
 .cmd .proc-actions button { height: 22px; padding: 0 6px; }
-.cmd-result { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 32px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cmd .proc-actions .cmd-pin { display: grid; place-items: center; min-width: 22px; padding: 0; border: 0; background: none; color: var(--muted); }
+.cmd .proc-actions .cmd-pin:hover { color: var(--text); }
+.cmd-pin svg,
+.proc-top svg { width: 14px; height: 14px; }
+.proc-top { display: grid; place-items: center; color: var(--muted); opacity: 0.8; }
+.cmd-result { grid-column: 4; display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 32px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .cmd-ok { color: var(--ok-text); }
 .cmd-bad { color: var(--danger); }
 .proc-suffix { color: var(--muted); font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
