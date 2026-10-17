@@ -100,6 +100,9 @@ function render() {
 
   const power = $("#power");
   power.dataset.on = snap.running;
+  // Serving, it opens a menu; stopped, a click just starts.
+  if (snap.running) power.setAttribute("aria-haspopup", "menu");
+  else power.removeAttribute("aria-haspopup");
   $("#power-label").textContent = snap.running ? "Serving" : "Stopped";
 
   if (!snap.sites.some((s) => s.name === selected)) selected = snap.sites[0]?.name;
@@ -458,7 +461,7 @@ function showTab(root, name) {
   tab = name;
   localStorage.setItem("tab", name);
   // One stop in the Tab order; the arrow keys move between tabs.
-  for (const b of root.querySelectorAll("[role=tab]")) {
+  for (const b of root.querySelectorAll(".tabs [role=tab]")) {
     b.setAttribute("aria-selected", b.dataset.tab === name);
     b.tabIndex = b.dataset.tab === name ? 0 : -1;
   }
@@ -503,10 +506,10 @@ function renderSite() {
   for (const el of root.querySelectorAll(".php-only")) el.hidden = process;
   for (const el of root.querySelectorAll(".process-only")) el.hidden = !process;
 
-  for (const b of root.querySelectorAll("[role=tab]")) b.onclick = () => showTab(root, b.dataset.tab);
+  for (const b of root.querySelectorAll(".tabs [role=tab]")) b.onclick = () => showTab(root, b.dataset.tab);
   $(".tabs", root).onkeydown = (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    const tabs = [...root.querySelectorAll("[role=tab]")];
+    const tabs = [...root.querySelectorAll(".tabs [role=tab]:not([hidden])")];
     const i = tabs.findIndex((t) => t.dataset.tab === tab);
     const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
     showTab(root, next.dataset.tab);
