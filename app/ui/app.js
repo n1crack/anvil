@@ -337,7 +337,8 @@ function renderList() {
   const hit = (s) =>
     (!f.kind || s.kind === f.kind) &&
     (!f.running || snap.app_states[s.name]) &&
-    (!q || `${s.name}.${snap.tld} ${s.path}`.toLowerCase().includes(q));
+    // Name, folder or type: "django" finds every Django app.
+    (!q || `${s.name}.${snap.tld} ${s.path} ${kindLabel(s.kind)}`.toLowerCase().includes(q));
   let count = 0;
 
   const section = (title, sites, withChildren, path = true, kind = true) => {
