@@ -137,6 +137,34 @@ function mark(s) {
 }
 
 let sortBy = localStorage.getItem("sortBy") ?? "name";
+// Sidebar sections folded from their heading, by "mode:title".
+const folded = new Set(JSON.parse(localStorage.getItem("sections") ?? "[]"));
+
+/** A sidebar section: a heading with a count that folds the rows under it.
+ * While searching every section stays open. */
+function listSection(key, title, rows, count) {
+  const open = !!filter || !folded.has(key);
+  const head = el("button", "section-head");
+  head.setAttribute("aria-expanded", open);
+  head.append(el("span", "chevron", "›"), el("span", null, title), el("span", "section-count", count));
+  const box = el("div", "rows");
+  box.append(...rows);
+  const inner = el("div");
+  inner.append(box);
+  const fold = el("div", open ? "fold" : "fold closed");
+  fold.append(inner);
+  head.onclick = () => {
+    const opening = head.getAttribute("aria-expanded") !== "true";
+    if (opening) folded.delete(key);
+    else folded.add(key);
+    localStorage.setItem("sections", JSON.stringify([...folded]));
+    head.setAttribute("aria-expanded", opening);
+    fold.classList.toggle("closed", !opening);
+  };
+  const h = el("h2");
+  h.append(head);
+  return [h, fold];
+}
 const collapsed = new Set(JSON.parse(localStorage.getItem("collapsed") ?? "[]"));
 
 // Fold a site's linked domains in place (no re-render), so the slide can animate.
@@ -311,12 +339,7 @@ function renderList() {
     }
     if (!rows.length) return;
     count += rows.length;
-    const h = document.createElement("h2");
-    h.textContent = title;
-    const box = document.createElement("div");
-    box.className = "rows";
-    box.append(...rows);
-    list.append(h, box);
+    list.append(...listSection(`apps:${title}`, title, rows, rows.filter((r) => r.classList.contains("item")).length));
   };
 
   // User groups first (Favorites leads), then one section per parked folder, then linked folders.
@@ -1056,7 +1079,7 @@ $("#list").onkeydown = (e) => {
   }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
-  const items = [...document.querySelectorAll(".item")].filter((b) => !b.closest(".kids.closed"));
+  const items = [...document.querySelectorAll(".item")].filter((b) => !b.closest(".closed"));
   const i = items.findIndex((b) => b.dataset.name === selected);
   const next = items[i + (e.key === "ArrowDown" ? 1 : -1)];
   if (next) select(next.dataset.name);
