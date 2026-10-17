@@ -1516,11 +1516,12 @@ kbd {
   background: var(--steel-raised);
 }
 
+/* The main action: a little stronger than the others, never colored. */
 .sheet-actions .primary,
 .pop-confirm .primary {
-  border-color: transparent;
-  background: linear-gradient(180deg, var(--heat), var(--heat-deep));
-  color: #2a1204;
+  border-color: color-mix(in srgb, var(--text) 28%, transparent);
+  background: color-mix(in srgb, var(--text) 13%, transparent);
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -2058,10 +2059,10 @@ kbd {
 .welcome .primary {
   height: 32px;
   padding: 0 18px;
-  border: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 28%, transparent);
   border-radius: var(--radius-s);
-  background: linear-gradient(180deg, var(--heat), var(--heat-deep));
-  color: #2a1204;
+  background: color-mix(in srgb, var(--text) 13%, transparent);
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -2081,9 +2082,9 @@ kbd {
 .setup[hidden] { display: none; }
 .setup button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; font-size: 12px; }
 .setup .setup-go {
-  border-color: transparent;
-  background: linear-gradient(180deg, var(--heat), var(--heat-deep));
-  color: #2a1204;
+  border-color: color-mix(in srgb, var(--text) 28%, transparent);
+  background: color-mix(in srgb, var(--text) 13%, transparent);
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -2346,3 +2347,8 @@ body.activity {
 .pop-confirm { display: flex; align-items: center; gap: 8px; }
 .pop-confirm span { margin-right: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 .pop-confirm button { height: 24px; padding: 0 10px; }
+
+.sheet-actions .primary:hover,
+.pop-confirm .primary:hover,
+.setup .setup-go:hover,
+.welcome .primary:hover { background: color-mix(in srgb, var(--text) 20%, transparent); }
