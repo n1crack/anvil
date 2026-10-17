@@ -842,14 +842,14 @@ const TEMPLATES = [
   ["laravel", "Laravel", "PHP"],
   ["statamic", "Statamic", "PHP"],
   ["symfony", "Symfony", "PHP"],
-  ["php", "PHP", "Plain PHP"],
+  ["php", "PHP", "Plain"],
   ["static", "Static", "HTML"],
   ["next", "Next.js", "Node.js"],
   ["nuxt", "Nuxt", "Node.js"],
-  ["vite", "Vite", "React"],
+  ["vite", "Vite", "Frontend"],
   ["node", "Node.js", "Server"],
   ["rust", "Rust", "Cargo"],
-  ["go", "Go", "net/http"],
+  ["go", "Go", "Server"],
   ["dotnet", ".NET", "ASP.NET"],
 ];
 let newKind = localStorage.getItem("newKind") ?? "laravel";
@@ -884,7 +884,7 @@ function openNewApp() {
   };
   const name = $("#new-name");
   name.value = "";
-  const preview = () => ($("#new-url").textContent = name.value ? `${name.value}.${snap.tld}` : "");
+  const preview = () => ($("#new-url").textContent = `Its address: ${name.value || "name"}.${snap.tld}`);
   name.oninput = () => {
     name.value = name.value.toLowerCase().replace(/[^a-z0-9.-]/g, "-");
     preview();
