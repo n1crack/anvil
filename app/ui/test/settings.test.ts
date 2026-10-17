@@ -41,6 +41,10 @@ describe("sidebar", () => {
     expect(text(".nav button")).toEqual(["General", "PHP", "Node.js", "Go", "Rust", ".NET", "Python", "Storage", "Shortcuts", "About"]);
     expect($$(".nav button").every((b) => b.querySelector("svg"))).toBe(true);
     expect($("[data-page='languages']")).toBeNull();
+    // Each language its own glyph, drawn in currentColor by the stylesheet (no fill of its own).
+    const glyphs = ["php", "node", "go", "rust", "dotnet", "python"].map((id) => $(`[data-page="${id}"] svg.glyph path`));
+    expect(new Set(glyphs.map((p) => p.getAttribute("d"))).size).toBe(6);
+    expect(glyphs.every((p) => !p.getAttribute("fill"))).toBe(true);
     for (const id of ["php", "node", "go", "rust", "dotnet", "python"]) expect($(`section#${id}`)).not.toBeNull();
   });
 });
