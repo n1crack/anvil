@@ -123,6 +123,16 @@ function bytes(n) {
   return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
 }
 
+/** Size text runs from the normal text colour to red on a log scale:
+ * 10 MB and below plain, 20 GB and above full red. Only the number changes. */
+function sizeColor(n) {
+  const lo = Math.log10(10 * 1024 ** 2);
+  const hi = Math.log10(20 * 1024 ** 3);
+  const t = Math.min(1, Math.max(0, (Math.log10(Math.max(n, 1)) - lo) / (hi - lo)));
+  // A gentler start, so red is for the really big ones.
+  return `color-mix(in oklab, var(--danger) ${Math.round(t ** 1.4 * 100)}%, var(--text))`;
+}
+
 const SAFETY_LABEL = { safe: "Safe to delete", rebuild: "Rebuildable", keep: "Keep" };
 
 async function confirmDelete(title, message) {
@@ -186,6 +196,7 @@ function drawAnvilItem(list, i, withNote) {
   const size = document.createElement("span");
   size.className = "size";
   size.textContent = bytes(i.bytes);
+  size.style.color = sizeColor(i.bytes);
   actions.append(size);
   if (i.safety === "safe") {
     actions.append(button("Delete", async () => {
@@ -298,6 +309,7 @@ function drawSizes() {
     const size = document.createElement("span");
     size.className = "size";
     size.textContent = bytes(a.total);
+    size.style.color = sizeColor(a.total);
     row.append(info, size);
     list.append(row);
   }
