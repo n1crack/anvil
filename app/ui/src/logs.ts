@@ -1,7 +1,7 @@
 import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, seg, selected, showError, showTab, snap, tab, tilde } from "./app";
 import { readTail, tail, termOut } from "./console";
 import { copy } from "./services";
-import { ansi, clean } from "./term";
+import { ansi, clean, linkify } from "./term";
 
 /* Logs tab: an app's log files, newest first. app.js calls logsTab() from showTab. */
 
@@ -300,7 +300,7 @@ export function drawText(v) {
     });
   const out = v.term.out;
   out.dataset.empty = filtered(v) ? "Nothing matches." : "No output yet.";
-  out.replaceChildren(v.tail.raw ? ansi(lines.join("\n")) : "");
+  out.replaceChildren(v.tail.raw ? linkify(ansi(lines.join("\n"))) : "");
   if (q) mark(out, q);
   const n = lines.length;
   $(".logs-status", v.node).textContent = filtered(v) ? `${n} matching ${n === 1 ? "line" : "lines"} in ${v.source.label}` : "";

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { ansi, clean, colorize } from "../src/term";
 
@@ -67,5 +69,91 @@ describe("colorize", () => {
     expect([...div.querySelectorAll(".ansi1")].map((s) => s.textContent)).toEqual(["ERROR one", "two"]);
     // Not a whole word, and no leading time: left alone.
     expect(div.querySelector(".ansi4, .term-time")).toBeNull();
+  });
+});
+
+describe("progress and badges", () => {
+  const render = (text: string) => {
+    const div = document.createElement("div");
+    div.append(colorize(clean(text, true)));
+    return div;
+  };
+
+  test("backspaces between color resets overwrite, as docker logs of a counter show them", () => {
+    // The real bytes of elpida-sphere's counter: ESC[0m pairs around every \b.
+    const r = "\x1b[0m\x1b[0m";
+    let raw = `${r}0%`;
+    for (let n = 1; n <= 100; n++) raw += `${r}\b`.repeat(String(n - 1).length + 1) + `${r}${n}%`;
+    raw += "\n";
+    expect(clean(raw)).toBe("100%\n");
+    const div = render(raw);
+    expect(div.textContent).toBe("100%\n");
+    expect(div.textContent).not.toContain("[0");
+    // The same with \r.
+    expect(render("0%\r\x1b[0m1%\r\x1b[32m100%\x1b[0m\n").textContent).toBe("100%\n");
+  });
+
+  test("badges keep their contrast: black on green, white on blue, black on cyan and yellow", () => {
+    const css = document.createElement("style");
+    css.textContent = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
+    document.head.append(css);
+    const badge = (text: string) => {
+      const div = render(text);
+      document.body.append(div);
+      const span = div.querySelector("span")!;
+      return [span.textContent, getComputedStyle(span).color, getComputedStyle(span).backgroundColor];
+    };
+    // Pint's PASS: bright black on green, bold.
+    const [pass, fg] = badge("  \x1b[90;42;1m  PASS  \x1b[39;49;22m 1 file");
+    expect(pass).toBe("  PASS  ");
+    expect(["#000", "#000000", "rgb(0, 0, 0)"]).toContain(fg);
+    for (const t of ["\x1b[30;42m PASS \x1b[39;49m", "\x1b[30;46m INFO \x1b[0m", "\x1b[30;43m WARN \x1b[0m"])
+      expect(["#000", "#000000", "rgb(0, 0, 0)"]).toContain(badge(t)[1]);
+    expect(["#fff", "#ffffff", "rgb(255, 255, 255)"]).toContain(badge("\x1b[37;44m INFO \x1b[0m")[1]);
+    css.remove();
+  });
+
+  test("inverse swaps the colors, and the default ones too", () => {
+    const span = render("\x1b[7m sel \x1b[27m").querySelector("span")!;
+    expect(span.className).toBe("ansi0 ansi-bg7");
+    expect(render("\x1b[32;7mok\x1b[0m").querySelector("span")!.className).toBe("ansi0 ansi-bg2");
+  });
+});
+
+describe("links", () => {
+  const render = (text: string) => {
+    const div = document.createElement("div");
+    div.append(colorize(clean(text, true)));
+    document.body.append(div);
+    return div;
+  };
+  const links = (div: HTMLElement) => [...div.querySelectorAll<HTMLElement>(".term-link")];
+
+  test("URLs are found, also when a color splits one; text stays the same", () => {
+    const div = render(
+      "  ➜  Local:   \x1b[36mhttp://localhost:\x1b[1m5174\x1b[22m/\x1b[39m\nsee https://laravel.com/docs, then http://shop.test.",
+    );
+    expect(links(div).map((a) => a.dataset.url)).toEqual(["http://localhost:5174/", "https://laravel.com/docs", "http://shop.test"]);
+    expect(links(div)[0].textContent).toBe("http://localhost:5174/");
+    expect(links(div)[0].querySelector(".ansi-b")?.textContent).toBe("5174");
+    expect(links(div)[0].title).toBe("⌘-click to open");
+    expect(div.textContent).toBe("  ➜  Local:   http://localhost:5174/\nsee https://laravel.com/docs, then http://shop.test.");
+  });
+
+  test("⌘-click opens through open_url; a plain click opens nothing", async () => {
+    const calls: [string, any][] = [];
+    (window as any).__TAURI__ = { core: { invoke: async (cmd: string, args: any) => void calls.push([cmd, args]) } };
+    const a = links(render("at http://localhost:5173/ now"))[0];
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(calls).toEqual([]);
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+    expect(calls).toEqual([["open_url", { url: "http://localhost:5173/" }]]);
+  });
+
+  test("⌘ held marks the page so a hovered link underlines", () => {
+    dispatchEvent(new KeyboardEvent("keydown", { key: "Meta", metaKey: true }));
+    expect(document.documentElement.classList.contains("link-mod")).toBe(true);
+    dispatchEvent(new KeyboardEvent("keyup", { key: "Meta" }));
+    expect(document.documentElement.classList.contains("link-mod")).toBe(false);
   });
 });

@@ -62,6 +62,24 @@ describe("https", () => {
   });
 });
 
+describe("sidebar", () => {
+  test("an app's dot: green while anything of it runs, amber while starting, red after a crash", async () => {
+    w.mockSnap.app_states = { shop: "running", vuefinder: "starting", notes: "crashed" };
+    await wait(550); // refresh reads the state again only half a second after the last read
+    w.refresh();
+    await wait(80);
+    const badge = (name: string) => $(`#list [data-name="${name}"] .run-badge`);
+    expect(badge("shop").className).toBe("run-badge on");
+    expect(badge("vuefinder").className).toBe("run-badge warm");
+    expect([badge("notes").className, badge("notes").title]).toEqual(["run-badge bad", "A process crashed"]);
+    w.mockSnap.app_states = {};
+    await wait(550);
+    w.refresh();
+    await wait(80);
+    expect(badge("shop")).toBeNull();
+  });
+});
+
 describe("overview", () => {
   test("one Dev line with a dot per process, and no process or command lists", async () => {
     await select("vuefinder");
@@ -79,17 +97,40 @@ describe("overview", () => {
     $('.tabs [data-tab="overview"]').click();
   });
 
-  test("the header's Start is Dev start: processes left out of it don't keep it shown", async () => {
+  test("the header says what runs and opens Dev; Dev's Start leaves out what Dev start does", async () => {
     await select("vuefinder");
+    expect($("#site [data-all]")).toBeNull();
+    // Something in Dev start is stopped: Start (green), right of Configure.
+    expect($$(".dev-bar button").map((b) => b.className)).toEqual(["dev-run", "dev-configure", "dev-all dev-stop"]);
     const ov = w.mockOv.vuefinder;
     const before = structuredClone(ov.rows);
+    for (const r of ov.rows) r.running = false;
+    await select("shop");
+    await select("vuefinder");
+    expect($(".dev-bar .dev-all").textContent).toBe("Start");
+    expect($(".dev-bar .dev-all").className).toBe("dev-all dev-start");
     for (const r of ov.rows) r.running = r.id !== "docs-site";
     ov.rows.find((r) => r.id === "docs-site").manual = true;
     await select("shop");
     await select("vuefinder");
-    expect($('#site [data-all="start"]').hidden).toBe(true);
+    expect($(".dev-bar .dev-all").textContent).toBe("Stop");
     expect($("#site .state-text").textContent).toBe("2 running");
+    ($("#site .state-link") as HTMLElement).click();
+    await wait(80);
+    expect($('.tabs [data-tab="dev"]').getAttribute("aria-selected")).toBe("true");
+    // Stop: "Stopping…" with a spinner while it works, then Dev stop for everything.
+    const n = calls("process_run").length;
+    w.mockDelay = { process_run: 60 };
+    ($(".dev-bar .dev-all") as HTMLElement).click();
+    await wait(10);
+    expect($(".dev-bar .dev-all").textContent).toBe("Stopping…");
+    expect($(".dev-bar .dev-all .spin-dot")).not.toBeNull();
+    await wait(120);
+    w.mockDelay = {};
+    expect(calls("process_run").slice(n)[0][1]).toEqual({ site: "vuefinder", name: null, action: "stop" });
+    expect($(".dev-bar .dev-all").textContent).toBe("Stop");
     ov.rows = before;
+    $('.tabs [data-tab="overview"]').click();
     await select("shop");
   });
 });
@@ -125,10 +166,13 @@ describe("dev", () => {
       "dev-name pc2",
     ]);
     expect($(".dev-list .dev-divider")).not.toBeNull();
-    expect(item("once:test").querySelector(".dot.on")).not.toBeNull();
-    expect(item("once:preview").querySelector(".dev-exit")!.textContent).toBe("✓");
-    const bad = item("once:format").querySelector(".dev-exit")!;
-    expect([bad.textContent, bad.className]).toEqual(["1", "dev-exit bad"]);
+    // A run's status sits in the dot column: a spinner, then ✓ or ✕ (the code in its tooltip).
+    expect(item("once:test").querySelector(".dev-status .spin-dot")).not.toBeNull();
+    expect(item("once:preview").firstElementChild!.className).toBe("dev-status ok");
+    expect(item("once:preview").firstElementChild!.textContent).toBe("✓");
+    const bad = item("once:format").firstElementChild as HTMLElement;
+    expect([bad.textContent, bad.className, bad.title]).toEqual(["✕", "dev-status bad", "Exited with code 1"]);
+    expect(item("app").firstElementChild!.className).toContain("dot");
   });
 
   test("All merges the processes' lines, each tagged with its name in its color", async () => {
@@ -276,6 +320,82 @@ describe("dev", () => {
     await wait();
     expect($(".dev-main").hidden).toBe(false);
     expect($(".dev-conf").hidden).toBe(true);
+  });
+
+  test("keys act with the focus in the list or output, never in a field nor with ⌘", async () => {
+    const key = (at: HTMLElement, k: string, o = {}) => at.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ...o }));
+    const runs = (from: number) =>
+      calls("process_run")
+        .slice(from)
+        .map(([, a]) => [a.name, a.action]);
+    const list = $(".dev-list");
+    const out = $(".dev-out");
+    expect($(".dev-keys").textContent).toBe("↑↓ select · s start · x stop · r restart · q stop all · c clear");
+    expect(out.tabIndex).toBe(0);
+    $('.tabs [data-tab="overview"]').click();
+    devTab().click();
+    await wait(80);
+    expect(document.activeElement).toBe(list);
+
+    item("app").click();
+    await wait(80);
+    key(list, "j");
+    await wait(80);
+    expect(chosen()).toBe("proc:docs-dev");
+    key(out, "k");
+    await wait(80);
+    expect(chosen()).toBe("app");
+    key(list, "ArrowDown");
+    await wait(80);
+    expect(chosen()).toBe("proc:docs-dev");
+
+    // A modifier, a field (in the pane or elsewhere): not the pane's keys.
+    let before = calls("process_run").length;
+    key(list, "j", { metaKey: true });
+    key(list, "x", { ctrlKey: true });
+    const field = document.createElement("input");
+    $(".dev-head").append(field);
+    key(field, "x");
+    key(field, "j");
+    field.remove();
+    key($("#search") ?? document.body, "x");
+    await wait(80);
+    expect(chosen()).toBe("proc:docs-dev");
+    expect(runs(before)).toEqual([]);
+
+    // docs:dev runs: x stops, s does nothing, r restarts; c clears its output.
+    key(out, "s");
+    key(out, "x");
+    key(list, "r");
+    await wait(80);
+    expect(runs(before)).toEqual([
+      ["docs-dev", "stop"],
+      ["docs-dev", "restart"],
+    ]);
+    key(list, "c");
+    await wait();
+    expect(calls("log_clear").at(-1)![1]).toEqual({ site: "vuefinder", source: "proc:docs-dev" });
+
+    // docs:site is stopped: s starts it.
+    key(list, "j");
+    await wait(80);
+    before = calls("process_run").length;
+    key(list, "x");
+    key(list, "s");
+    await wait(80);
+    expect(runs(before)).toEqual([["docs-site", "start"]]);
+
+    // All: r restarts what runs, q is the header's Stop.
+    item("all").click();
+    await wait(80);
+    before = calls("process_run").length;
+    key(list, "r");
+    key(list, "q");
+    await wait(80);
+    expect(runs(before)).toEqual([
+      ["docs-dev", "restart"],
+      [null, "stop"],
+    ]);
   });
 
   test("a crashed process has a red dot; a folder has no Dev tab", async () => {

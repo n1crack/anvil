@@ -35,6 +35,7 @@
   --group-text: color-mix(in srgb, var(--heat-text) 70%, var(--text));
   --sidebar-bg: transparent; /* the native vibrancy shows through */
   --card: var(--steel-hover); /* the sidebar's grouped rows */
+  --switch-on: color-mix(in srgb, var(--text) 52%, transparent); /* light enough for the white knob */
 
   /* A process's name color in Watch (blue, purple, pink, orange, green, cyan), as
    * Laravel's concurrently gives them; darker in light so they hold on white. */
@@ -76,6 +77,7 @@
     --group-text: #a8410f;
     --sidebar-bg: rgba(246, 246, 248, 0.72);
     --card: rgba(255, 255, 255, 0.78);
+    --switch-on: var(--text);
 
     --pc0: #1d4ed8; --pc1: #6d28d9; --pc2: #be123c; --pc3: #c2410c; --pc4: #15803d; --pc5: #0e7490;
   }
@@ -735,6 +737,10 @@ button, select, input { font: inherit; color: inherit; }
   background: var(--steel-raised);
 }
 
+/* The app header's state opens Dev: link-like, a subtle hover only. */
+.run-box .state-link { margin: 0; padding: 0 8px; border: 0; border-radius: var(--radius-s); background: none; }
+.run-box .state-link:hover { background: var(--steel-hover); color: var(--text); }
+
 /* Tabs: text with an underline on the selected one. */
 .tabs {
   position: relative;
@@ -920,6 +926,8 @@ button.proc-name:hover { text-decoration: underline; }
   -webkit-user-select: text;
 }
 .console-out:empty::before { content: "No output yet"; color: #8d959f; }
+/* A URL in output: nothing special until ⌘ is held, then it reads as a link. */
+.link-mod .term-link:hover { text-decoration: underline; cursor: pointer; }
 .ansi-b { font-weight: 700; }
 .ansi0 { color: #6e7681; } .ansi1 { color: #ff7b72; } .ansi2 { color: #7ee787; } .ansi3 { color: #e3b341; }
 .ansi4 { color: #79c0ff; } .ansi5 { color: #d2a8ff; } .ansi6 { color: #76e3ea; } .ansi7 { color: #d7dce1; }
@@ -928,10 +936,13 @@ button.proc-name:hover { text-decoration: underline; }
 /* Backgrounds deeper than the text colors, so white on blue (Laravel's INFO) reads;
  * black on any of them is the surface's near-black, not ansi0's grey. */
 .ansi-bg0 { background: #30363d; } .ansi-bg1 { background: #da3633; } .ansi-bg2 { background: #2ea043; } .ansi-bg3 { background: #d29922; }
-.ansi-bg4 { background: #1f6feb; } .ansi-bg5 { background: #8957e5; } .ansi-bg6 { background: #39c5cf; } .ansi-bg7 { background: #d7dce1; color: #121518; }
+.ansi-bg4 { background: #1f5fcf; } .ansi-bg5 { background: #8957e5; } .ansi-bg6 { background: #39c5cf; } .ansi-bg7 { background: #d7dce1; color: #121518; }
 .ansi-bg8 { background: #484f58; } .ansi-bg9 { background: #f85149; } .ansi-bg10 { background: #3fb950; } .ansi-bg11 { background: #e3b341; }
 .ansi-bg12 { background: #388bfd; } .ansi-bg13 { background: #a371f7; } .ansi-bg14 { background: #56d4dd; } .ansi-bg15 { background: #ffffff; color: #121518; }
-[class*="ansi-bg"].ansi0 { color: #121518; }
+/* Badges: black and bright black (Pint's PASS is 90;42) are real black on a colored ground,
+ * white is white; on the two grey grounds they stay as they are. */
+[class*="ansi-bg"]:is(.ansi0, .ansi8):not(.ansi-bg0, .ansi-bg8) { color: #000; }
+[class*="ansi-bg"]:is(.ansi7, .ansi15):not(.ansi-bg7, .ansi-bg15) { color: #fff; }
 .ansi-dim { opacity: 0.6; } .ansi-i { font-style: italic; } .ansi-u { text-decoration: underline; }
 .term-time { color: #8b949e; }
 /* Process names: on the terminal surface always the dark theme's, in lists the theme's. */
@@ -946,6 +957,16 @@ button.proc-name:hover { text-decoration: underline; }
 .dev { display: flex; flex-direction: column; gap: 10px; }
 .dev-bar { display: flex; justify-content: flex-end; gap: 6px; }
 .dev-bar [aria-pressed="true"] { background: var(--selected); }
+/* Run ▾ · Configure · Start/Stop: one height, a 14px outline icon, color on icon and label only. */
+.dev-bar button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; }
+.dev-bar svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.dev-bar .spin-dot { flex: none; width: 10px; height: 10px; margin: 2px; }
+.dev-chevron { margin-left: -2px; color: var(--muted); font-size: 10px; }
+.dev-start { color: var(--ok-text); }
+.dev-start svg { fill: currentColor; }
+.dev-stop { color: var(--danger); }
+.dev-stop:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+.dev-all:disabled { color: var(--muted); opacity: 1; }
 .dev-main { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 12px; align-items: start; }
 .dev-main[hidden], .dev-conf[hidden] { display: none; }
 .dev-list { max-width: none; overflow: hidden; outline: none; }
@@ -953,15 +974,25 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-list > .dev-divider { height: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); }
 .dev-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; font-size: 12px; }
 .dev-item[aria-selected="true"] { background: var(--selected); }
-.dev-item .dot { flex: none; }
-.dev-item .dot-none { visibility: hidden; }
+/* The status column, one width for a process's dot and a run's spinner, ✓ or ✕. */
+.dev-item .dot { flex: none; margin: 0 2px; }
+.dev-status { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 12px; height: 12px; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1; }
+.dev-status .spin-dot { width: 8px; height: 8px; }
+.dev-status.ok { color: var(--ok-text); }
+.dev-status.bad { color: var(--danger); }
 .dev-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dev-exit { flex: none; color: var(--muted); font: 11px ui-monospace, "SF Mono", Menlo, monospace; }
 .dev-exit.bad { color: var(--danger); }
 .dev-dismiss { flex: none; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; line-height: 1; }
 .dev-dismiss:hover { color: var(--text); }
+.dev-item:not(:hover) .dev-dismiss:not(:focus-visible) { visibility: hidden; }
+.dev-head .dev-exit { flex: none; margin-right: 4px; } .dev-head .dev-exit.bad { color: #ff7b72; }
 .dev-none { margin: 0; padding: 8px 12px; color: var(--muted); font-size: 12px; }
-.dev-pane { position: relative; margin: 0; }
+.dev-pane { position: relative; margin: 0; container-type: inline-size; }
+.dev-out:focus-visible { outline-offset: -2px; }
+/* The keys, one muted line under the output; gone when the pane is too narrow for it. */
+.dev-keys { flex: none; margin: 0; padding: 3px 14px 4px; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #8d959f; font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; }
+@container (max-width: 460px) { .dev-keys { display: none; } }
 .dev-head .console-title { flex: none; }
 .dev-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .dev-pane.is-empty .dev-head-start { display: none; }
@@ -1066,7 +1097,7 @@ input[type="checkbox"][role="switch"] {
   height: 20px;
   margin: 0;
   border-radius: 10px;
-  background: var(--steel-raised);
+  background: var(--selected);
   box-shadow: inset 0 0 0 1px var(--line);
   transition: background 0.2s ease;
 }
@@ -1084,7 +1115,8 @@ input[type="checkbox"][role="switch"]::after {
   transition: transform 0.2s ease;
 }
 
-input[type="checkbox"][role="switch"]:checked { background: var(--heat); }
+/* On is neutral, never the brand orange: a strong grey in dark, the text color in light. */
+input[type="checkbox"][role="switch"]:checked { background: var(--switch-on); box-shadow: none; }
 
 input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14px); }
 

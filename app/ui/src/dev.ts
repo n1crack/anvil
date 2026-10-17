@@ -2,7 +2,7 @@ import type { CommandChip, ProcessRow } from "./types";
 import { $, M, PHP_KINDS, PROCESS_KINDS, call, el, invoke, mode, popAt, selected, showError, showTab, snap, tab } from "./app";
 import { type Tail, readTail, tail, termOut } from "./console";
 import { late } from "./late";
-import { confirmPop, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
+import { confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
 /* Dev tab: the app's dev processes on the left, the chosen one's output live on the right,
@@ -32,6 +32,7 @@ const runItems = (name: string): Item[] =>
     .filter((c) => c.running || c.exit)
     .map((c) => ({ key: `once:${c.id}`, name: c.name, color: "", running: c.running, crashed: !c.running && c.exit?.code !== 0, run: c }));
 const scriptLabel = (c: CommandChip) => (c.source === "composer.json" ? `composer ${c.name}` : `npm run ${c.name}`);
+const exitText = (c: CommandChip) => (c.exit?.code == null ? "Ended by a signal" : `Exited with code ${c.exit.code}`);
 
 const box = el("div", "dev");
 const bar = el("div", "dev-bar");
@@ -44,7 +45,10 @@ const pane = el("section", "console dev-pane");
 const head = el("header", "console-head dev-head");
 const term = termOut("console-out dev-out");
 const empty = el("div", "dev-empty");
-pane.append(head, term.out, empty);
+term.out.tabIndex = 0;
+// The keys (see main.onkeydown), said once; hidden when the pane is too narrow for it.
+const keysHint = el("p", "dev-keys", "↑↓ select · s start · x stop · r restart · q stop all · c clear");
+pane.append(head, term.out, empty, keysHint);
 main.append(list, pane);
 const conf = el("div", "dev-conf");
 box.append(bar, main, conf);
@@ -87,12 +91,44 @@ function pick(name: string, key: string) {
   devTick();
 }
 
-list.onkeydown = (e) => {
-  if ((e.key !== "ArrowDown" && e.key !== "ArrowUp") || !view) return;
+/** Dev start or stop (the toolbar's Start/Stop), when it is offered. */
+function headerAll(action: "start" | "stop") {
+  if (devAll.site === view?.site && devAll[action] && !devAll.busy) devAll.run(action);
+}
+
+/* Keys, like mprocs, while the focus is in the list or the output; never while typing
+ * nor with a modifier (those are the menu's). What changes on screen is the feedback. */
+main.onkeydown = (e) => {
+  const v = view;
+  if (!v || e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
+  const name = v.site;
+  const procs = procItems(name);
+  const items = [...procs, ...runItems(name)];
+  const one = items.find((x) => x.key === v.key);
+  const k = e.key;
+  if (k === "ArrowDown" || k === "ArrowUp" || k === "j" || k === "k") {
+    const keys = ["all", ...items.map((x) => x.key)];
+    const i = keys.indexOf(v.key) + (k === "ArrowDown" || k === "j" ? 1 : -1);
+    if (i >= 0 && i < keys.length) pick(name, keys[i]);
+  } else if (k === "s") {
+    if (!one) headerAll("start");
+    else if (one.row && !one.running) runProc(name, one, "start");
+  } else if (k === "x") {
+    if (!one) headerAll("stop");
+    else if (one.row && one.running) runProc(name, one, "stop");
+  } else if (k === "r") {
+    for (const x of one ? [one] : procs.filter((p) => p.running)) if (x.row && (x.running || x.crashed)) runProc(name, x, "restart");
+  } else if (k === "q") headerAll("stop");
+  else if (k === "c") {
+    if (one) clearOutput(name, one);
+    else {
+      // All: the screen only; each process's own output stays.
+      term.out.replaceChildren();
+      v.live = null;
+      syncEmpty();
+    }
+  } else return;
   e.preventDefault();
-  const keys = ["all", ...procItems(view.site).map((x) => x.key), ...runItems(view.site).map((x) => x.key)];
-  const i = keys.indexOf(view.key) + (e.key === "ArrowDown" ? 1 : -1);
-  if (i >= 0 && i < keys.length) pick(view.site, keys[i]);
 };
 
 /** Start, stop or restart a process; a restart starts its output over. */
@@ -154,18 +190,23 @@ function entry(name: string, x: Item) {
   it.setAttribute("role", "option");
   it.setAttribute("aria-selected", String(x.key === view?.key));
   it.dataset.key = x.key;
-  const done = x.run && !x.running;
-  const dot = el("span", `dot ${x.running ? "on" : x.crashed && !x.run ? "bad" : ""}`);
-  if (done) dot.classList.add("dot-none");
-  it.append(dot, el("span", `dev-name ${x.color}`.trim(), x.name));
+  // The status column: a process's dot; a run's spinner, then ✓ or ✕.
+  let status: HTMLElement;
+  if (!x.run) status = el("span", `dot ${x.running ? "on" : x.crashed ? "bad" : ""}`);
+  else if (x.running) {
+    status = el("span", "dev-status");
+    status.append(el("span", "spin-dot"));
+    status.title = "Running";
+  } else {
+    const ok = x.run.exit?.code === 0;
+    status = el("span", `dev-status ${ok ? "ok" : "bad"}`, ok ? "✓" : "✕");
+    status.title = ok ? "Succeeded" : exitText(x.run);
+  }
+  const label =
+    x.run?.source === "composer.json" && runItems(name).some((y) => y.key !== x.key && y.name === x.name) ? `composer ${x.name}` : x.name;
+  it.append(status, el("span", `dev-name ${x.color}`.trim(), label));
   if (x.run) {
     const c = x.run;
-    if (done) {
-      const ok = c.exit!.code === 0;
-      const mark = el("span", ok ? "dev-exit" : "dev-exit bad", ok ? "✓" : String(c.exit!.code ?? "signal"));
-      mark.title = ok ? "Succeeded" : c.exit!.code == null ? "Ended by a signal" : `Exited with code ${c.exit!.code}`;
-      it.append(mark);
-    }
     const x2 = procBtn("×", c.running ? `Stop and dismiss ${c.name}` : `Dismiss ${c.name}`, () => dismiss(name, c));
     x2.className = "dev-dismiss";
     x2.title = c.running ? "Stop and dismiss" : "Dismiss";
@@ -214,17 +255,53 @@ function runMenu(name: string, btn: HTMLElement) {
   const close = popAt(btn, pop, pop.querySelector("button"));
 }
 
+// Outline icons, 14px, drawn in the label's color.
+const ICONS = {
+  run: '<path d="M2.5 4.5 6 8l-3.5 3.5M7.5 12h6"/>',
+  configure: '<path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/>',
+  start: '<path d="M4.5 3v10l8.5-5z"/>',
+  stop: '<rect x="4" y="4" width="8" height="8" rx="1"/>',
+};
+function icon(name: keyof typeof ICONS) {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 16 16");
+  s.setAttribute("aria-hidden", "true");
+  s.innerHTML = ICONS[name];
+  return s;
+}
+const barBtn = (cls: string, ico: Element, label: string) => {
+  const b = el("button", cls);
+  b.append(ico, el("span", null, label));
+  return b;
+};
+
+/** Dev start/stop: Start (green) while something in Dev start is stopped, else Stop (red)
+ * while anything runs; a spinner and "Starting…"/"Stopping…" while it works. */
+function devButton(name: string) {
+  if (devAll.site !== name) return null;
+  const busy = devAll.busy;
+  const action = busy || (devAll.stop ? "stop" : devAll.start ? "start" : "");
+  if (!action) return null;
+  const label = busy ? (busy === "start" ? "Starting…" : "Stopping…") : action === "start" ? "Start" : "Stop";
+  const b = barBtn(`dev-all dev-${action}`, busy ? el("span", "spin-dot") : icon(action), label);
+  b.title = action === "start" ? "Start the app and every process in Dev start" : "Stop the app and all its processes";
+  b.disabled = !!busy;
+  b.onclick = () => devAll.run(action);
+  return b;
+}
+
 function drawBar(name: string) {
   bar.replaceChildren();
   const cmds = procCache.get(name)?.commands ?? [];
   if (cmds.length && configuring !== name) {
-    const run = el("button", "dev-run", "Run ▾");
+    const run = barBtn("dev-run", icon("run"), "Run");
+    run.append(el("span", "dev-chevron", "▾"));
     run.title = "Run one of the app’s scripts";
     run.setAttribute("aria-haspopup", "menu");
     run.onclick = () => runMenu(name, run);
     bar.append(run);
   }
-  const cfg = el("button", "dev-configure", "Configure");
+  const cfg = barBtn("dev-configure", icon("configure"), "Configure");
   cfg.setAttribute("aria-pressed", String(configuring === name));
   cfg.title = "Choose the processes Dev runs and their commands";
   cfg.onclick = () => {
@@ -235,6 +312,8 @@ function drawBar(name: string) {
     devTick();
   };
   bar.append(cfg);
+  const all = configuring === name ? null : devButton(name);
+  if (all) bar.append(all);
 }
 
 /** Called whenever the app's processes are drawn, and when the tab is shown. */
@@ -293,6 +372,7 @@ export function drawDev(name: string) {
   } else if (one.run) {
     const c = one.run;
     head.append(el("span", "console-title", c.name), el("span", "dev-cmd", scriptLabel(c)));
+    if (c.exit && !c.running && c.exit.code !== 0) head.append(el("span", "dev-exit bad", exitText(c)));
     if (c.running) actions.append(procBtn("■ Stop", `Stop ${scriptLabel(c)}`, () => dismiss(name, c)));
     else {
       const again = procBtn("↻ Run again", `Run ${scriptLabel(c)} again`, () =>
@@ -321,11 +401,10 @@ export function drawDev(name: string) {
   else if (one?.run) empty.append(el("span", null, "No output"));
   else {
     empty.append(el("span", null, "Not running"));
-    if (one || procs.length) {
-      const go = one
-        ? procBtn("▶", `Start ${one.name}`, () => runProc(name, one, "start"))
-        : procBtn("▶", "Start all processes", () => loadProcs(name, "process_run", { name: null, action: "start" }));
-      go.title = one ? `Start ${one.name}` : "Start Dev";
+    // All has the toolbar's Start; one process gets its own ▶.
+    if (one) {
+      const go = procBtn("▶", `Start ${one.name}`, () => runProc(name, one, "start"));
+      go.title = `Start ${one.name}`;
       empty.append(go);
     }
   }
@@ -550,6 +629,7 @@ late.devTab = () => {
   if (!selected) return;
   drawDev(selected);
   devTick();
+  if (!main.hidden && box.isConnected) list.focus({ preventScroll: true });
 };
 late.openDev = openDev;
 

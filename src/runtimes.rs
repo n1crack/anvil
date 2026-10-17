@@ -389,7 +389,12 @@ pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
         "node" => {
             e.push(("npm_config_cache".into(), d(cache.join("npm"))));
             // Native modules: node-gyp keeps Node headers in ~/Library/Caches/node-gyp otherwise.
-            e.push(("npm_config_devdir".into(), d(cache.join("node-gyp"))));
+            // npm 11 warns about npm_config_devdir ("Unknown env config"); node-gyp also
+            // reads its options from npm_package_config_node_gyp_*, which npm leaves alone.
+            e.push((
+                "npm_package_config_node_gyp_devdir".into(),
+                d(cache.join("node-gyp")),
+            ));
             // giget (Nuxt's templates) and yarn use ~/.cache, pnpm ~/.local/state,
             // unless the user points them elsewhere; their choice stands.
             for (var, dir) in [("XDG_CACHE_HOME", "xdg"), ("XDG_STATE_HOME", "xdg-state")] {
@@ -526,8 +531,16 @@ mod tests {
             }
         }
         let node: Vec<String> = env("node", "22").into_iter().map(|(k, _)| k).collect();
-        for k in ["npm_config_cache", "npm_config_devdir", "COREPACK_HOME"] {
+        for k in [
+            "npm_config_cache",
+            "npm_package_config_node_gyp_devdir",
+            "COREPACK_HOME",
+        ] {
             assert!(node.iter().any(|n| n == k), "node env lacks {k}");
+        }
+        // npm warns about any npm_config_ key that isn't its own config.
+        for k in node.iter().filter(|k| k.starts_with("npm_config_")) {
+            assert_eq!(k, "npm_config_cache", "npm warns about {k}");
         }
     }
 
