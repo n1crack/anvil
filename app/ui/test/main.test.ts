@@ -214,6 +214,8 @@ describe("audit fixes", () => {
     $("#new-form").dispatchEvent(new Event("submit", { cancelable: true }));
     await wait(80);
     expect(calls("create_app")).toHaveLength(1);
+    $("#new-done").click();
+    await wait();
     expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
     expect($("#toast").hidden).toBe(true);
   });
@@ -293,5 +295,178 @@ describe("packages", () => {
     $(".pkg-check").click();
     await wait(80);
     expect(calls("package_updates")).toHaveLength(2);
+  });
+});
+
+describe("new application", () => {
+  const openSheet = async () => {
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "n", metaKey: true, bubbles: true }));
+    await wait(60);
+  };
+  const kinds = () => $$("#new-kinds .kind-item");
+  const chosenKind = () => $('#new-kinds [aria-selected="true"]')?.dataset.kind;
+  const pick = async (kind: string) => {
+    kinds()
+      .find((k) => k.dataset.kind === kind)!
+      .click();
+    await wait();
+  };
+  const key = async (k: string) => {
+    $("#new-kinds").dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+    await wait(40);
+  };
+  const fill = (name: string) => {
+    const input = $("#new-name") as HTMLInputElement;
+    input.value = name;
+    input.dispatchEvent(new Event("input"));
+  };
+  const submit = () => $("#new-form").dispatchEvent(new Event("submit", { cancelable: true }));
+  const steps = () => $$("#new-steps .new-step").map((s) => `${s.textContent}:${s.className.split(" ")[1]}`);
+
+  test("templates are grouped by language, each with a monochrome glyph; a click only chooses", async () => {
+    localStorage.setItem("newKind", "laravel");
+    await openSheet();
+    expect($("#new-app").hasAttribute("open")).toBe(true);
+    expect($$("#new-kinds .kind-head").map((h) => h.textContent)).toEqual(["PHP", "JavaScript", "Python", "Other"]);
+    expect(kinds()).toHaveLength(15);
+    for (const k of kinds()) {
+      expect(k.querySelector(".kind-icon svg")).not.toBeNull();
+      expect(k.querySelector(".kind-icon")!.innerHTML).toContain("currentColor");
+      expect(k.querySelector(".kind-about")!.textContent).not.toBe("");
+    }
+    expect(chosenKind()).toBe("laravel");
+    const created = calls("create_app").length;
+    await pick("vite");
+    expect(chosenKind()).toBe("vite");
+    expect(calls("create_app")).toHaveLength(created);
+    $("#new-cancel").click();
+  });
+
+  test("arrows move the choice, Enter creates", async () => {
+    await openSheet();
+    await pick("laravel");
+    await key("ArrowDown");
+    expect(chosenKind()).toBe("statamic");
+    await key("ArrowRight");
+    expect(chosenKind()).toBe("symfony");
+    await key("ArrowUp");
+    await key("ArrowLeft");
+    expect(chosenKind()).toBe("laravel");
+    fill("my-app");
+    await key("Enter");
+    await wait(80);
+    expect(calls("create_app").at(-1)![1]).toMatchObject({ kind: "laravel", name: "my-app", parent: "/Users/x/Sites" });
+    $("#new-done").click();
+  });
+
+  test("the address follows the typed name and the configured TLD", async () => {
+    await openSheet();
+    expect($("#new-url").textContent).toBe("Its address: my-app.test");
+    fill("Shop Front");
+    expect(($("#new-name") as HTMLInputElement).value).toBe("shop-front");
+    expect($("#new-url").textContent).toBe("Its address: shop-front.test");
+    $("#new-cancel").click();
+  });
+
+  test("Options show the chosen template's choices, summed up when closed, remembered per template", async () => {
+    await openSheet();
+    await pick("laravel");
+    expect(($("#new-options") as HTMLDetailsElement).open).toBe(false);
+    expect($("#new-opts-sum").textContent).toBe("No starter kit · SQLite · npm · PHP 8.4 · Git");
+    const keys = () => $$("#new-opts [data-key]").map((x) => x.dataset.key);
+    expect(keys()).toEqual(["kit", "db", "js", "php", "git"]);
+    const kit = $('#new-opts select[data-key="kit"]') as HTMLSelectElement;
+    kit.value = "livewire";
+    kit.dispatchEvent(new Event("change"));
+    expect($("#new-opts-sum").textContent).toBe("Livewire · SQLite · npm · PHP 8.4 · Git");
+
+    await pick("next");
+    expect(keys()).toEqual(["js", "node", "ts", "tailwind", "git"]);
+    const tw = $('#new-opts input[data-key="tailwind"]') as HTMLInputElement;
+    tw.checked = false;
+    tw.dispatchEvent(new Event("change"));
+    expect($("#new-opts-sum").textContent).toBe("TypeScript · npm · Node 24 · Git");
+
+    await pick("flask");
+    expect(keys()).toEqual(["git"]);
+
+    await pick("laravel");
+    expect($("#new-opts-sum").textContent).toContain("Livewire");
+    fill("kit-app");
+    submit();
+    await wait(80);
+    expect(calls("create_app").at(-1)![1].options).toEqual({ kit: "livewire", db: "sqlite", js: "npm", php: "8.4", git: "on" });
+    $("#new-done").click();
+    localStorage.removeItem("newOpts:laravel");
+  });
+
+  test("Create turns the sheet into the creation: steps tick, the log is colored, then ready, and Open selects the app", async () => {
+    await openSheet();
+    await pick("laravel");
+    fill("notes");
+    w.mockCreateLog =
+      "==> Download\n\u001b[32m  - Installing laravel/laravel\u001b[39m\n==> PHP dependencies\nProgress 10%\rProgress 90%\n";
+    w.mockDelay = { create_app: 900 };
+    submit();
+    await wait(450);
+    expect($("#new-form").hidden).toBe(true);
+    expect($("#new-progress").hidden).toBe(false);
+    expect($("#new-progress-title").textContent).toBe("Creating notes…");
+    expect($("#new-state .spin-dot")).not.toBeNull();
+    expect(steps()).toEqual(["Download:done", "PHP dependencies:now", "JS dependencies:todo", "Set up:todo"]);
+    expect($("#new-progress .new-out .ansi2")?.textContent).toContain("Installing laravel/laravel");
+    expect($("#new-progress .new-out").textContent).not.toContain("Progress 10%");
+    expect(($("#new-done") as HTMLButtonElement).disabled).toBe(true);
+
+    w.mockCreateLog += "==> JS dependencies\n==> Set up\nDone\n";
+    await wait(650);
+    w.mockDelay = {};
+    expect($("#new-progress-title").textContent).toBe("notes is ready");
+    expect($("#new-state").classList.contains("ok")).toBe(true);
+    expect(steps().every((s) => s.endsWith(":done"))).toBe(true);
+    expect($("#new-done").textContent).toBe("Open");
+    expect($("#new-reveal").hidden).toBe(true);
+    await select("shop");
+    $("#new-done").click();
+    await wait();
+    expect($("#new-app").hasAttribute("open")).toBe(false);
+    expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
+  });
+
+  test("a failure shows ✕, highlights the error in the log, and offers Close and Show in Finder", async () => {
+    await openSheet();
+    fill("broken");
+    w.mockCreateLog =
+      "==> Download\n==> PHP dependencies\nYour requirements could not be resolved.\n\nPHP dependencies failed (exit status: 1)\n";
+    w.mockCreateFail = "PHP dependencies failed (exit status: 1)";
+    submit();
+    await wait(120);
+    w.mockCreateFail = null;
+    expect($("#new-progress-title").textContent).toBe("Couldn't create broken");
+    expect($("#new-state").classList.contains("bad")).toBe(true);
+    expect($(".new-step.bad")?.textContent).toBe("PHP dependencies");
+    const errors = $$(".new-out .term-error").map((l) => l.textContent!.trim());
+    expect(errors).toContain("PHP dependencies failed (exit status: 1)");
+    expect(errors).toContain("Your requirements could not be resolved.");
+    expect($("#new-done").textContent).toBe("Close");
+    expect($("#new-reveal").hidden).toBe(false);
+    $("#new-reveal").click();
+    await wait();
+    expect(calls("create_reveal").at(-1)![1]).toEqual({ name: "broken" });
+    $("#new-done").click();
+    expect($("#new-app").hasAttribute("open")).toBe(false);
+  });
+
+  test("a refusal before anything ran stays in the form", async () => {
+    await openSheet();
+    fill("shop");
+    w.mockCreateLog = "";
+    w.mockCreateFail = "/Users/x/Sites/shop already exists";
+    submit();
+    await wait(80);
+    w.mockCreateFail = null;
+    expect($("#new-form").hidden).toBe(false);
+    expect($("#new-error").textContent).toBe("/Users/x/Sites/shop already exists");
+    $("#new-cancel").click();
   });
 });

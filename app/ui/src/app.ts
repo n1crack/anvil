@@ -424,7 +424,7 @@ export function welcome(root) {
     if (path) await call("park_folder", { path });
   };
   const create = el("button", "link", "or create a new application");
-  create.onclick = openNewApp;
+  create.onclick = () => late.openNewApp();
   box.append(
     icon,
     el("h1", null, "Welcome to Anvil"),
@@ -1320,74 +1320,7 @@ $("#open-processes").onclick = () => invoke("show_processes");
 
 /* ---------- New application ---------- */
 
-export const TEMPLATES = [
-  ["laravel", "Laravel", "PHP"],
-  ["statamic", "Statamic", "PHP"],
-  ["symfony", "Symfony", "PHP"],
-  ["php", "PHP", "Plain"],
-  ["static", "Static", "HTML"],
-  ["next", "Next.js", "Node.js"],
-  ["nuxt", "Nuxt", "Node.js"],
-  ["vite", "Vite", "Frontend"],
-  ["node", "Node.js", "Server"],
-  ["rust", "Rust", "Cargo"],
-  ["go", "Go", "Server"],
-  ["dotnet", ".NET", "ASP.NET"],
-  ["django", "Django", "Python"],
-  ["fastapi", "FastAPI", "Python"],
-  ["flask", "Flask", "Python"],
-];
-export let newKind = localStorage.getItem("newKind") ?? "laravel";
-
-export function openNewApp() {
-  const dlg = $("#new-app");
-  const grid = $("#new-kinds");
-  grid.replaceChildren();
-  for (const [id, name, sub] of TEMPLATES) {
-    const label = el("label", "kind-card");
-    const radio = el("input");
-    radio.type = "radio";
-    radio.name = "kind";
-    radio.value = id;
-    radio.checked = id === newKind;
-    radio.onchange = () => {
-      newKind = id;
-      localStorage.setItem("newKind", id);
-    };
-    label.append(radio, el("strong", null, name), el("small", null, sub));
-    grid.append(label);
-  }
-  const parent = $("#new-parent");
-  parent.replaceChildren();
-  for (const p of snap.paths) parent.add(new Option(tilde(p), p));
-  parent.add(new Option("Choose a folder…", ""));
-  parent.onchange = async () => {
-    if (parent.value) return;
-    const path = await window.__TAURI__.dialog.open({ directory: true, title: "Create the application in" });
-    if (path) parent.add(new Option(tilde(path), path), 0);
-    parent.selectedIndex = 0;
-  };
-  const name = $("#new-name");
-  name.value = "";
-  const preview = () => ($("#new-url").textContent = `Its address: ${name.value || "name"}.${snap.tld}`);
-  name.oninput = () => {
-    name.value = name.value.toLowerCase().replace(/[^a-z0-9.-]/g, "-");
-    preview();
-  };
-  preview();
-  $("#new-error").hidden = true;
-  $("#new-log").hidden = true;
-  $("#new-existing").hidden = false;
-  setBusy(false);
-  dlg.showModal();
-  name.focus();
-}
-
-export function setBusy(busy) {
-  $("#new-create").disabled = busy;
-  $("#new-create").textContent = busy ? "Creating…" : "Create";
-  for (const i of $("#new-form").querySelectorAll("input, select")) i.disabled = busy;
-}
+// The sheet itself is newapp.ts.
 
 /** Serve one existing project folder. Resolves to whether one was added. */
 export async function addAppFolder() {
@@ -1404,38 +1337,12 @@ export async function addAppFolder() {
   }
 }
 
-$("#new-existing").onclick = async () => {
-  if (await addAppFolder()) $("#new-app").close();
-};
-$("#new-cancel").onclick = () => $("#new-app").close();
-$("#new-log").onclick = () => invoke("open_create_log", { name: $("#new-name").value });
-$("#new-form").onsubmit = async (e) => {
-  e.preventDefault();
-  const name = $("#new-name").value.trim();
-  const parent = $("#new-parent").value;
-  if (!name || !parent) return;
-  setBusy(true);
-  $("#new-log").hidden = false;
-  $("#new-existing").hidden = true;
-  $("#new-error").hidden = true;
-  try {
-    const site = await invoke("create_app", { kind: newKind, name, parent });
-    $("#new-app").close();
-    await call("state");
-    select(site);
-  } catch (err) {
-    $("#new-error").textContent = String(err);
-    $("#new-error").hidden = false;
-    setBusy(false);
-  }
-};
-
 $("#add").onclick = async () => {
   if (mode === "services") return late.openAddService();
   const pick = (title) => window.__TAURI__.dialog.open({ directory: true, title });
   const menu = await M.Menu.new({
     items: await Promise.all([
-      M.MenuItem.new({ text: "New Application…", accelerator: "CmdOrCtrl+N", action: openNewApp }),
+      M.MenuItem.new({ text: "New Application…", accelerator: "CmdOrCtrl+N", action: () => late.openNewApp() }),
       M.PredefinedMenuItem.new({ item: "Separator" }),
       M.MenuItem.new({
         text: "Add Folder of Applications…",
@@ -1592,7 +1499,7 @@ export function runAction(name) {
     else done = false;
   } else if (name === "new") {
     if (mode === "services") late.openAddService();
-    else openNewApp();
+    else late.openNewApp();
   } else if (name === "park") {
     window.__TAURI__.dialog
       .open({ directory: true, title: "Every project inside this folder becomes an application" })
