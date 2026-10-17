@@ -4,6 +4,8 @@
 let services = [];
 let svcSelected = localStorage.getItem("service");
 const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
+// Tiles are one width: long app names get a short label, the full name is in the tooltip.
+const CLIENT_LABEL = { "Another Redis Desktop Manager": "Redis Desktop", "Beekeeper Studio": "Beekeeper" };
 
 async function serviceCall(cmd, args) {
   try {
@@ -256,7 +258,7 @@ function renderService() {
   for (const client of svc.clients) {
     const b = el("button");
     b.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.75" rx="5.25" ry="2"/><path d="M2.75 3.75v8.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-8.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/></svg>`;
-    b.append(client);
+    b.append(el("span", "tile-label", CLIENT_LABEL[client] ?? client));
     b.title = `Open ${svc.id} in ${client}`;
     b.onclick = () => openClient(svc, client, chosenDb[svc.id]);
     $(".quick", root).append(b);
