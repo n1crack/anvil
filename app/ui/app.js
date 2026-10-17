@@ -415,6 +415,8 @@ function showTab(root, name) {
   for (const p of root.querySelectorAll("[role=tabpanel]")) p.hidden = p.dataset.panel !== name;
   $(".res-reload", root).hidden = name !== "resources";
   window.logsTab?.(root, name === "logs");
+  // Measuring (du, lsof, docker) only happens when someone looks at it.
+  if (name === "resources" && selected) loadResources(selected);
 }
 
 function renderSite() {
@@ -462,16 +464,17 @@ function renderSite() {
   };
   showTab(root, tab);
 
-  // Overview
-  $('[data-field="kind"]', root).textContent =
-    s.kind === s.kind_detected ? kindLabel(s.kind) : `${kindLabel(s.kind)} (set by you)`;
-  $('[data-field="runtime"]', root).textContent = process
+  // Overview: the type and what runs it in one line, e.g. "Laravel on PHP 8.4".
+  const engine = process
     ? `${RUNTIME[s.kind]}${s.runtime_version && s.kind !== "dotnet" && s.kind !== "rust" ? ` ${s.runtime_version}` : ""}${s.runtime_version ? "" : " (not installed)"}`
     : s.php
       ? `PHP ${s.php}${s.php_pinned ? "" : " (default)"}`
       : PHP_KINDS.has(s.kind)
         ? "PHP, none installed"
-        : "Static files";
+        : null;
+  const kind = s.kind === "static" ? "Static files" : kindLabel(s.kind);
+  const runs = !engine || kind === engine.split(" ")[0] ? engine ?? kind : `${kind} on ${engine}`;
+  $('[data-field="runtime"]', root).textContent = s.kind === s.kind_detected ? runs : `${runs} (type set by you)`;
   if (PHP_KINDS.has(s.kind) && !s.php) {
     const install = el("button", "inline-action", "Install PHP 8.4");
     install.onclick = async () => {
@@ -536,7 +539,6 @@ function renderSite() {
 
   // Resources (also feeds the Overview's disk and services rows)
   $(".res-reload", root).onclick = () => loadResources(s.name, true);
-  loadResources(s.name);
   window.renderGit?.(s);
   window.renderSiteServices?.(s, root);
   window.renderPackages?.(s, root);
@@ -581,25 +583,10 @@ function el(tag, cls, text) {
   return e;
 }
 
-function renderOverviewResources(r) {
-  const disk = $('#site [data-field="disk"]');
-  const svc = $('#site [data-field="services"]');
-  if (!disk || !r || r.error) return;
-  const safe = r.items.filter((i) => i.safety === "safe").reduce((a, i) => a + i.bytes, 0);
-  disk.textContent = safe ? `${bytes(r.total)}, ${bytes(safe)} can be cleaned up` : bytes(r.total);
-  disk.classList.remove("muted");
-  const src = { anvil: "Anvil", docker: "Docker", local: "local", remote: "remote", none: "not running" };
-  svc.textContent = r.services.length
-    ? r.services.map((x) => (x.port || x.host ? `${x.label} (${src[x.source]})` : x.label)).join(", ")
-    : "None found in .env";
-  svc.classList.toggle("muted", !r.services.length);
-}
-
 function renderResources(name) {
   const body = $("#site .res-body");
   if (!body) return;
   const r = resCache.get(name);
-  renderOverviewResources(r);
   body.replaceChildren();
   if (!r) return body.append(el("p", "muted", "Measuring…"));
   if (r.error) return body.append(el("p", "error", r.error));
