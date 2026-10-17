@@ -793,6 +793,7 @@ button, select, input { font: inherit; color: inherit; }
 .cmd-result { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 32px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .cmd-ok { color: var(--ok-text); }
 .cmd-bad { color: var(--danger); }
+.proc-suffix { color: var(--muted); font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
 
 /* The console: a terminal's colors on a dark surface, in light mode too. */
 .console {

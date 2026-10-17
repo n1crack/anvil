@@ -9,7 +9,7 @@ const procCache = new Map(); // site name -> overview from the backend
 const procLoading = new Set(); // site names with a request on its way
 const procBusy = new Map(); // "site/service" -> "starting…" while Docker works
 const procLogs = new Map(); // "site/service" -> container log text, while shown
-let procEdit = null; // { site, id, value, error } while a row's command is edited
+let procEdit = null; // { site, id, field, value, error } while a row's command or address is edited
 
 /** Called by renderSite: draw what is known, then ask again. */
 window.renderProcesses = (s) => {
@@ -82,19 +82,26 @@ function popup(menu, btn) {
 
 const setProc = (name, id, change) => loadProcs(name, "set_process", { id, ...change });
 
-/** ⋯ on a row: edit its command, start it with Anvil, reset or remove it. */
+/** An address's subdomain label and the fixed rest: ["docs", ".vuefinder.test"]. */
+function hostParts(address) {
+  const host = new URL(address).hostname;
+  const dot = host.indexOf(".");
+  return [host.slice(0, dot), host.slice(dot)];
+}
+
+/** ⋯ on a row: edit its command or address, start it with Anvil, reset or remove it. */
 async function procMenu(name, r, btn) {
+  const edit = (field, value) => () => {
+    procEdit = { site: name, id: r.id, field, value, error: null };
+    drawProcs(name);
+  };
   const items = [
-    M.MenuItem.new({
-      text: "Edit command…",
-      action: () => {
-        procEdit = { site: name, id: r.id, value: r.command, error: null };
-        drawProcs(name);
-      },
-    }),
+    M.MenuItem.new({ text: "Edit command…", action: edit("command", r.command) }),
     M.CheckMenuItem.new({ text: "Start with Anvil", checked: r.autostart, action: () => setProc(name, r.id, { autostart: !r.autostart }) }),
   ];
   if (r.edited) items.push(M.MenuItem.new({ text: "Reset command", action: () => setProc(name, r.id, { reset: true }) }));
+  if (r.address) items.push(M.MenuItem.new({ text: "Edit address…", action: edit("host", hostParts(r.address)[0]) }));
+  if (r.host_edited) items.push(M.MenuItem.new({ text: "Reset address", action: () => setProc(name, r.id, { resetHost: true }) }));
   if (!r.main) {
     items.push(
       M.PredefinedMenuItem.new({ item: "Separator" }),
@@ -112,14 +119,16 @@ async function hiddenMenu(name, hidden, btn) {
   popup(await M.Menu.new({ items: await Promise.all(items) }), btn);
 }
 
-/** The row's command as a one-line field: Return saves, Esc cancels. */
+/** The row's command, or its address's label before the fixed rest, as a one-line
+ * field: Return saves, Esc cancels. */
 function editField(name, r) {
+  const host = procEdit.field === "host";
   const form = el("form", "proc-edit");
   form.onclick = (e) => e.stopPropagation();
   const input = el("input");
   input.value = procEdit.value;
   input.spellcheck = false;
-  input.setAttribute("aria-label", `Command for ${r.name}`);
+  input.setAttribute("aria-label", host ? `Address of ${r.name}` : `Command for ${r.name}`);
   input.oninput = () => (procEdit.value = input.value);
   const cancel = () => {
     procEdit = null;
@@ -131,7 +140,7 @@ function editField(name, r) {
   form.onsubmit = async (e) => {
     e.preventDefault();
     try {
-      procCache.set(name, await invoke("set_process", { site: name, id: r.id, command: procEdit.value.trim() }));
+      procCache.set(name, await invoke("set_process", { site: name, id: r.id, [procEdit.field]: procEdit.value.trim() }));
       procEdit = null;
     } catch (err) {
       procEdit.error = String(err);
@@ -143,7 +152,9 @@ function editField(name, r) {
   const no = el("button", null, "Cancel");
   no.type = "button";
   no.onclick = cancel;
-  form.append(input, save, no);
+  form.append(input);
+  if (host) form.append(el("span", "proc-suffix", hostParts(r.address)[1]));
+  form.append(save, no);
   if (procEdit.error) form.append(el("span", "proc-last error-text", procEdit.error));
   return form;
 }

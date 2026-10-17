@@ -35,6 +35,8 @@ pub struct ProcessChange {
     pub autostart: Option<bool>,
     pub hidden: Option<bool>,
     pub pinned: Option<bool>,
+    /// The address's subdomain label; `Some(None)` goes back to the automatic one.
+    pub host: Option<Option<String>>,
 }
 
 /// Merge `change` into the site's settings for process `id`; an entry back at its
@@ -58,6 +60,23 @@ pub fn apply_process_change(
     p.autostart = change.autostart.unwrap_or(p.autostart);
     p.hidden = change.hidden.unwrap_or(p.hidden);
     p.pinned = change.pinned.unwrap_or(p.pinned);
+    if let Some(host) = change.host {
+        p.host = match host {
+            Some(h) => {
+                let h = h.trim().to_lowercase();
+                anyhow::ensure!(
+                    (1..=63).contains(&h.len())
+                        && h.bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+                        && !h.starts_with('-')
+                        && !h.ends_with('-'),
+                    "“{h}” can't be an address: use 1–63 letters, digits and dashes, not starting or ending with a dash"
+                );
+                Some(h)
+            }
+            None => None,
+        };
+    }
     if p == crate::ProcessConfig::default() {
         site.processes.remove(id);
     } else {
@@ -69,20 +88,55 @@ pub fn apply_process_change(
 /// Change one process's settings of `site` and save.
 pub fn set_process(
     cfg: &mut crate::Config,
-    site: &str,
+    site: &Site,
     id: &str,
     change: ProcessChange,
 ) -> anyhow::Result<()> {
-    // A new entry is only added once the change is accepted.
-    match cfg.sites.get_mut(site) {
-        Some(s) => apply_process_change(s, id, change)?,
-        None => {
-            let mut s = crate::SiteConfig::default();
-            apply_process_change(&mut s, id, change)?;
-            cfg.sites.insert(site.into(), s);
+    change_process(cfg, site, id, change)?;
+    crate::save(cfg)
+}
+
+/// `set_process` without saving. An address must be a row's and not another row's.
+fn change_process(
+    cfg: &mut crate::Config,
+    site: &Site,
+    id: &str,
+    change: ProcessChange,
+) -> anyhow::Result<()> {
+    let check_host = change.host.is_some();
+    // A new entry is only added once the change is accepted; a rejected address is undone.
+    let existed = cfg.sites.contains_key(&site.name);
+    let s = cfg.sites.entry(site.name.clone()).or_default();
+    let before = s.processes.get(id).cloned();
+    let result = apply_process_change(s, id, change).and_then(|()| match check_host {
+        true => host_free(cfg, site, id),
+        false => Ok(()),
+    });
+    if result.is_err() {
+        let s = cfg.sites.get_mut(&site.name).expect("added above");
+        match before {
+            Some(b) => s.processes.insert(id.into(), b),
+            None => s.processes.remove(id),
+        };
+        if !existed {
+            cfg.sites.remove(&site.name);
         }
     }
-    crate::save(cfg)
+    result
+}
+
+/// Row `id` has an address and no other row has the same one. Hidden rows count
+/// too: they keep their address for when they come back.
+fn host_free(cfg: &crate::Config, site: &Site, id: &str) -> anyhow::Result<()> {
+    let all = all_rows(cfg, site);
+    let (_, row) = all
+        .iter()
+        .find(|(p, _)| p.id == id)
+        .ok_or_else(|| anyhow::anyhow!("{id} has no address"))?;
+    if let Some((p, _)) = all.iter().find(|(p, r)| p.id != id && r.host == row.host) {
+        anyhow::bail!("{} is already the address of {}", row.host, p.name);
+    }
+    Ok(())
 }
 
 /// Ids of the processes hidden in the app's settings, so they can be brought back.
@@ -420,6 +474,20 @@ pub fn server_rows(cfg: &crate::Config, site: &Site) -> Vec<ServerRow> {
 }
 
 fn rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
+    let hidden = |id: &str| {
+        cfg.sites
+            .get(&site.name)
+            .is_some_and(|s| s.processes.get(id).is_some_and(|p| p.hidden))
+    };
+    // Dropped after ports and prefixes are given out, so the other rows keep theirs.
+    all_rows(cfg, site)
+        .into_iter()
+        .filter(|(p, _)| !hidden(&p.id))
+        .collect()
+}
+
+/// `rows` with the hidden ones.
+fn all_rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
     // `.anvil.toml`'s processes replace everything detected.
     let own = fs::read_to_string(site.path.join(".anvil.toml"))
         .ok()
@@ -435,16 +503,8 @@ fn rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
     }
     let mut prefixes: Vec<String> = vec![];
     // Pinned command scripts that pin their own port are rows like the servers.
-    let pinned = |id: &str| {
-        cfg.sites
-            .get(&site.name)
-            .is_some_and(|s| s.processes.get(id).is_some_and(|p| p.pinned))
-    };
-    let hidden = |id: &str| {
-        cfg.sites
-            .get(&site.name)
-            .is_some_and(|s| s.processes.get(id).is_some_and(|p| p.hidden))
-    };
+    let set = |id: &str| cfg.sites.get(&site.name)?.processes.get(id);
+    let pinned = |id: &str| set(id).is_some_and(|p| p.pinned);
     let mut procs = package_scripts(&site.path).0;
     procs.retain(|p| p.name != "dev");
     procs.extend(
@@ -467,15 +527,15 @@ fn rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
             };
             prefixes.push(prefix.clone());
             p.port = Some(port);
+            // A label set in the app's settings wins; automatic ones stay as they were.
+            let label = set(&p.id).and_then(|c| c.host.clone()).unwrap_or(prefix);
             let row = ServerRow {
                 id: p.id.clone(),
-                host: format!("{prefix}.{}", site.host),
+                host: format!("{label}.{}", site.host),
                 port,
             };
             (p, row)
         })
-        // Dropped after ports and prefixes are given out, so the other rows keep theirs.
-        .filter(|(p, _)| !hidden(&p.id))
         .collect()
 }
 
@@ -1327,14 +1387,71 @@ echo '{DEV_JSON}'
     }
 
     #[test]
+    fn a_row_address_can_be_edited_and_reset() {
+        let scripts =
+            r#"{"dev":"vite","docs:dev":"vitepress dev docs","docs:site":"vitepress dev docs"}"#;
+        let s = vite_site("host", "vuefinder", scripts);
+        let mut cfg = crate::Config {
+            http_port: 18080,
+            ..Default::default()
+        };
+        let before = server_rows(&cfg, &s);
+        let host = |label: Option<&str>| ProcessChange {
+            host: Some(label.map(String::from)),
+            ..Default::default()
+        };
+        change_process(&mut cfg, &s, "docs-dev", host(Some("API-Docs"))).unwrap();
+        assert_eq!(
+            cfg.sites["vuefinder"].processes["docs-dev"].host.as_deref(),
+            Some("api-docs")
+        );
+        let after = server_rows(&cfg, &s);
+        assert_eq!(after[0].host, "api-docs.vuefinder.test");
+        assert_eq!(
+            address(&cfg, &s, "docs-dev").as_deref(),
+            Some("http://api-docs.vuefinder.test:18080")
+        );
+        // The other row keeps its host, and every row its port.
+        assert_eq!(after[1].host, before[1].host);
+        let ports = |r: &[ServerRow]| r.iter().map(|r| r.port).collect::<Vec<_>>();
+        assert_eq!(ports(&after), ports(&before));
+        // Invalid labels and one another row uses are rejected, and change nothing.
+        for bad in [
+            "",
+            "-a",
+            "a-",
+            "a.b",
+            "a_b",
+            "ü",
+            &"a".repeat(64),
+            "docs-site",
+        ] {
+            assert!(
+                change_process(&mut cfg, &s, "docs-dev", host(Some(bad))).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(change_process(&mut cfg, &s, "docs-site", host(Some("api-docs"))).is_err());
+        assert_eq!(server_rows(&cfg, &s)[0].host, "api-docs.vuefinder.test");
+        // A row without an address has no address to edit.
+        assert!(change_process(&mut cfg, &s, "dev", host(Some("x"))).is_err());
+        // Back to automatic: the entry is gone.
+        change_process(&mut cfg, &s, "docs-dev", host(None)).unwrap();
+        assert_eq!(server_rows(&cfg, &s)[0].host, before[0].host);
+        assert!(cfg.sites["vuefinder"].processes.is_empty());
+        fs::remove_dir_all(&s.path).unwrap();
+    }
+
+    #[test]
     fn rejected_settings_leave_no_empty_app_entry() {
         let mut cfg = crate::Config::default();
-        assert!(set_process(&mut cfg, "shop", "", ProcessChange::default()).is_err());
+        let shop = site(Path::new("/nonexistent"), "laravel");
+        assert!(set_process(&mut cfg, &shop, "", ProcessChange::default()).is_err());
         let empty = ProcessChange {
             command: Some(Some("  ".into())),
             ..Default::default()
         };
-        assert!(set_process(&mut cfg, "shop", "queue", empty).is_err());
+        assert!(set_process(&mut cfg, &shop, "queue", empty).is_err());
         assert!(cfg.sites.is_empty());
     }
 

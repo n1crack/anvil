@@ -214,6 +214,8 @@ struct ProcessRow {
     error: Option<String>,
     /// Where an extra dev server answers, e.g. `https://docs.vuefinder.test`.
     address: Option<String>,
+    /// Its address's label was set in the app's settings.
+    host_edited: bool,
     pid: Option<u32>,
     /// How it ended on its own, until started or stopped again.
     crashed: Option<anvil::apps::Exit>,
@@ -282,6 +284,7 @@ fn main_row(cfg: &Config, site: &Site, serving: bool, running: bool) -> Option<P
         last: None,
         error: None,
         address: None,
+        host_edited: false,
         pid: None,
         crashed: None,
     })
@@ -309,6 +312,11 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
             kind: "process",
             main: false,
             address: web.clone(),
+            host_edited: cfg
+                .sites
+                .get(&site.name)
+                .and_then(|c| c.processes.get(&p.id))
+                .is_some_and(|c| c.host.is_some()),
             web,
             last: None,
             error: None,
@@ -936,7 +944,7 @@ fn set_app(
 }
 
 /// Change one row's settings: its command (`reset` goes back to the detected one),
-/// Start with Anvil, hidden or pinned. The app's own row (`id` "") maps onto `set_app`
+/// Start with Anvil, hidden, pinned or its address's label (`reset_host`: automatic). The app's own row (`id` "") maps onto `set_app`
 /// and can't be hidden. A running row whose command changed restarts.
 #[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
@@ -950,6 +958,8 @@ fn set_process(
     autostart: Option<bool>,
     hidden: Option<bool>,
     pinned: Option<bool>,
+    host: Option<String>,
+    reset_host: Option<bool>,
 ) -> Res<Overview> {
     if !id.is_empty() && !plain(&id, false) {
         return Err(format!("Not a process: {id}"));
@@ -979,6 +989,11 @@ fn set_process(
             autostart,
             hidden,
             pinned,
+            host: if reset_host == Some(true) {
+                Some(None)
+            } else {
+                host.map(Some)
+            },
         };
         let routes = |c: &Config| {
             anvil::processes::server_rows(c, &s)
@@ -987,7 +1002,7 @@ fn set_process(
                 .collect::<Vec<_>>()
         };
         let before = routes(&cfg);
-        anvil::processes::set_process(&mut cfg, &s.name, &id, change).map_err(err)?;
+        anvil::processes::set_process(&mut cfg, &s, &id, change).map_err(err)?;
         let reroute = routes(&cfg) != before;
         let key = anvil::processes::key(&s.name, &id);
         let was_running = app.apps.lock().unwrap().running(&key);

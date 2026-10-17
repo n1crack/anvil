@@ -23,7 +23,8 @@ Until 1.0.0, minor versions may contain breaking changes.
 - Laravel 13's `php artisan dev` processes (queue, logs, Vite) are read from the
   application itself; the server is left out, since Anvil serves through PHP-FPM.
 - Extra `package.json` dev servers get their own address,
-  `<script>.<app>.<tld>` (for example `docs.vuefinder.test`).
+  `<script>.<app>.<tld>` (for example `docs.vuefinder.test`); "Edit address…"
+  in the row's ⋯ menu changes the first part.
 - One-off scripts appear as "Commands", a compact list with each script's
   command and how its last run went; recently run ones come first, and "Show
   all" lists more than six. Their output streams into the log.
