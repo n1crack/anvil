@@ -668,6 +668,7 @@ export function showTab(root, name) {
   for (const p of root.querySelectorAll("[role=tabpanel]")) p.hidden = p.dataset.panel !== name;
   $(".res-reload", root).hidden = name !== "resources";
   window.logsTab?.(root, name === "logs");
+  if (name === "watch") late.watchTab?.();
   // Measuring (du, lsof, docker) only happens when someone looks at it.
   if (name === "resources" && selected) loadResources(selected);
 }

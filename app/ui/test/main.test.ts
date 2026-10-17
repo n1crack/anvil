@@ -96,3 +96,81 @@ describe("https", () => {
     w.mockDelay = {};
   });
 });
+
+describe("watch", () => {
+  const row = (name: string) => $$(".procs .proc").find((r) => r.querySelector(".proc-name")?.textContent === name)!;
+  const watchTab = () => $('.tabs [data-tab="watch"]');
+  const chosen = () => $(".watch-item[aria-selected=true]")?.dataset.key;
+
+  test("a command row click still shows its last output in the console", async () => {
+    await select("vuefinder");
+    row("test").click();
+    await wait(80);
+    expect($(".console").hidden).toBe(false);
+    expect($(".console-out span.ansi2")).not.toBeNull();
+    ($(".console-close") as HTMLElement).click();
+  });
+
+  test("a stopped row click doesn't open the console nor read its output", async () => {
+    const before = calls("log_text").length;
+    row("docs:site").click();
+    await wait();
+    expect(calls("log_text")).toHaveLength(before);
+    expect($(".console").hidden).toBe(true);
+    expect(row("docs:site").querySelector('[aria-label^="Watch"]')).toBeNull();
+  });
+
+  test("All is the default and merges the processes' lines, each tagged with its name", async () => {
+    w.mockLogs = { app: "server up\n", "proc:docs-site": "" };
+    expect(watchTab().hidden).toBe(false);
+    watchTab().click();
+    await wait(80);
+    expect($('[data-panel="watch"]').hidden).toBe(false);
+    expect(chosen()).toBe("all");
+    const lines = $$(".watch-line").map((l) => l.textContent);
+    expect(lines).toContain("dev       │ server up");
+    expect(lines.some((l) => l!.startsWith("docs:dev  │ ✓ built in"))).toBe(true);
+    expect($(".watch-line .watch-tag.ansi4")).not.toBeNull();
+  });
+
+  test("Watch on a running row opens the tab on that process, with its colored output", async () => {
+    $('.tabs [data-tab="overview"]').click();
+    const watch = row("docs:dev").querySelector('[aria-label="Watch docs:dev"]') as HTMLElement;
+    const actions = [...row("docs:dev").querySelectorAll(".proc-actions button")].map((b) => b.textContent);
+    expect(actions.indexOf("Watch")).toBe(actions.indexOf("Restart") - 1);
+    watch.click();
+    await wait(80);
+    expect(watchTab().getAttribute("aria-selected")).toBe("true");
+    expect(chosen()).toBe("proc:docs-dev");
+    expect($(".watch-head .console-title").textContent).toBe("docs:dev");
+    expect($(".watch-head .watch-cmd").textContent).toBe("npm run docs:dev");
+    expect($(".watch-out span.ansi2")).not.toBeNull();
+    expect($(".watch-out").textContent).toContain("built in 1.2s");
+  });
+
+  test("Restart in the pane restarts that process", async () => {
+    const before = calls("process_run").length;
+    ($('.watch-head [aria-label="Restart docs:dev"]') as HTMLElement).click();
+    await wait();
+    expect(
+      calls("process_run")
+        .slice(before)
+        .map(([, a]) => a),
+    ).toEqual([{ site: "vuefinder", name: "docs-dev", action: "restart" }]);
+  });
+
+  test("↓ moves the selection; a stopped process without output says so", async () => {
+    $(".watch-list").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    await wait(80);
+    expect(chosen()).toBe("proc:docs-site");
+    expect($(".watch-out").dataset.empty).toBe("Not running");
+    expect($('.watch-head [aria-label="Start docs:site"]')).not.toBeNull();
+  });
+
+  test("an app without processes has no Watch tab", async () => {
+    await select("notes");
+    expect(watchTab().hidden).toBe(true);
+    expect($('.tabs [data-tab="overview"]').getAttribute("aria-selected")).toBe("true");
+    w.mockLogs = null;
+  });
+});

@@ -6,3 +6,4 @@ import "./logs";
 import "./services";
 import "./packages";
 import "./processes";
+import "./watch";

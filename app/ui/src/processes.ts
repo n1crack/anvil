@@ -2,11 +2,13 @@ import type { Overview } from "./types";
 import { ansi, clean } from "./term";
 import { type Tail, readTail, tail, termOut } from "./console";
 import { $, M, call, el, invoke, mode, popAt, renderSite, selected, showError, snap, tab } from "./app";
+import { late } from "./late";
 
 /* Processes: an app's own server (or the site Anvil serves), queue worker, log tailer,
  * extra dev servers, one-off commands and Docker Compose containers, first in the
  * Overview. Each row starts and stops on its own; the header's Start/Stop run them all.
- * A row or command opens its output in a console below. Shares $, el, invoke, call,
+ * A running row's Watch opens its output in the Watch tab (watch.ts); a command's
+ * output opens in a console below. Shares $, el, invoke, call,
  * snap, selected, tab, mode, M, render, toast and showError with app.js; clean and
  * ansi with term.js. */
 
@@ -172,8 +174,8 @@ export function editField(name, r) {
   return form;
 }
 
-/** One line: dot, name, detail, then the on-top pin, the auto tag, the globe, Restart and ■ (or ▶) and ⋯. */
-export function procRow({ name, state, detail, error, title, busy, open, run, top, auto, web, menu, edit }: Record<string, any>) {
+/** One line: dot, name, detail, then the on-top pin, the auto tag, the globe, Watch, Restart and ■ (or ▶) and ⋯. */
+export function procRow({ name, state, detail, error, title, busy, open, run, watch, top, auto, web, menu, edit }: Record<string, any>) {
   const row = el("div", `proc ${state}`);
   const dot = el("span", `dot ${state === "running" ? "on" : state === "crashed" ? "bad" : ""}`);
   dot.title = { running: "Running", crashed: "Crashed", stopped: "Stopped" }[state];
@@ -198,6 +200,7 @@ export function procRow({ name, state, detail, error, title, busy, open, run, to
     b.title = web;
     actions.append(b);
   }
+  if (watch && state === "running" && !busy && !edit) actions.append(procBtn("Watch", `Watch ${name}`, watch));
   if (run && !busy && !edit) {
     if (state !== "stopped") actions.append(procBtn("Restart", `Restart ${name}`, () => run("restart")));
     // On a crashed row ■ dismisses the crash.
@@ -349,6 +352,7 @@ export function drawProcs(name) {
   const hidden = o?.hidden ?? [];
   const compose = !!(o?.containers || o?.docker_error);
   drawRunBox(name, rows, containers);
+  late.drawWatch?.(name);
   box.hidden = !(rows.length || commands.length || compose || hidden.length);
   box.replaceChildren();
   drawConsole(name);
@@ -381,12 +385,8 @@ export function drawProcs(name) {
           state: r.running ? "running" : r.crashed ? "crashed" : "stopped",
           detail: exit ?? where ?? r.command,
           error: r.error,
-          title: site
-            ? r.running
-              ? "Served by Anvil"
-              : "Start Anvil to serve it"
-            : `${r.command}\nFrom ${r.source}. Click to show its output.`,
-          open: site ? null : () => openConsole(name, r.main ? "app" : `proc:${r.id}`, r.command || r.name),
+          title: site ? (r.running ? "Served by Anvil" : "Start Anvil to serve it") : `${r.command}\nFrom ${r.source}.`,
+          watch: site ? null : () => late.openWatch(name, r.main ? "app" : `proc:${r.id}`),
           run: site
             ? null
             : r.main
@@ -453,7 +453,7 @@ export function drawProcs(name) {
   focus?.focus();
 }
 
-/* ---------- Console: one row's or command's output, as a terminal shows it ---------- */
+/* ---------- Console: a command's output, as a terminal shows it ---------- */
 
 export const conBox = el("section", "console");
 conBox.setAttribute("aria-label", "Output");
@@ -486,23 +486,17 @@ export function drawConsole(name) {
   }
   conBox.hidden = con?.site !== name;
   if (!con || conBox.hidden) return;
-  const o = procCache.get(name);
-  const [kind, id] = con.source === "app" ? ["app", ""] : con.source.split(":");
-  const chip = kind === "once" ? o?.commands.find((c) => c.id === id) : null;
-  const row = kind === "once" ? null : o?.rows.find((r) => (kind === "app" ? r.main : !r.main && r.id === id));
+  const id = con.source.slice("once:".length);
+  const chip = procCache.get(name)?.commands.find((c) => c.id === id);
   $(".console-title", conBox).textContent = con.label;
   const actions = $(".proc-actions", conBox);
   actions.replaceChildren();
-  if ((chip ?? row)?.running) {
-    const stop = {
-      app: () => call("app_run", { site: name, action: "stop" }),
-      proc: () => loadProcs(name, "process_run", { name: id, action: "stop" }),
-      once: () =>
-        invoke("once_stop", { site: name, id }).then(
-          () => loadProcs(name),
-          (e) => showError(String(e)),
-        ),
-    }[kind];
+  if (chip?.running) {
+    const stop = () =>
+      invoke("once_stop", { site: name, id }).then(
+        () => loadProcs(name),
+        (e) => showError(String(e)),
+      );
     actions.append(procBtn("■ Stop", `Stop ${con.label}`, stop));
   } else if (chip) {
     actions.append(procBtn("↻ Run again", `Run ${con.label} again`, () => loadProcs(name, "command_run", { script: chip.name })));

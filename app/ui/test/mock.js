@@ -74,6 +74,7 @@ const mockRow = (o) => ({
   ...o,
 });
 window.mockOv = {
+  notes: { rows: [], commands: [], containers: null, docker_error: null, hidden: [] },
   shop: {
     rows: [
       mockRow({ name: "shop.test", source: "anvil", server: true, kind: "site", main: true, web: "https://shop.test", running: true }),
@@ -278,8 +279,10 @@ const mockHandle = (cmd, a) => {
       }
       return structuredClone(ov);
     }
-    case "log_text":
-      return { text: a.from ? "" : mockLog, end_offset: mockLog.length };
+    case "log_text": {
+      const text = window.mockLogs?.[a.source] ?? mockLog;
+      return { text: a.from ? "" : text, end_offset: text.length };
+    }
     case "log_sources":
       return [];
     case "services":

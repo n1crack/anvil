@@ -844,7 +844,7 @@ button, select, input { font: inherit; color: inherit; }
 .proc.crashed { box-shadow: inset 2px 0 0 var(--danger); }
 .dot.bad { background: var(--danger); }
 .proc-name { padding: 0; border: 0; background: none; font-weight: 600; text-align: left; }
-.proc-name:hover { text-decoration: underline; }
+button.proc-name:hover { text-decoration: underline; }
 
 .proc-last {
   overflow: hidden;
@@ -927,6 +927,21 @@ button, select, input { font: inherit; color: inherit; }
 .ansi4 { color: #79c0ff; } .ansi5 { color: #d2a8ff; } .ansi6 { color: #76e3ea; } .ansi7 { color: #d7dce1; }
 .ansi8 { color: #8b949e; } .ansi9 { color: #ffa198; } .ansi10 { color: #aff5b4; } .ansi11 { color: #f8e3a1; }
 .ansi12 { color: #a5d6ff; } .ansi13 { color: #e2c5ff; } .ansi14 { color: #b3f0ff; } .ansi15 { color: #ffffff; }
+
+/* Watch: the app's processes on the left, the chosen one's output on the console's
+ * terminal surface; "All" tags each line with its process's name. */
+.watch { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 12px; align-items: start; }
+.watch-list { max-width: none; overflow: hidden; outline: none; }
+.watch-list:focus-visible { box-shadow: 0 0 0 2px var(--selected); }
+.watch-item { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 12px; font-size: 12px; }
+.watch-item[aria-selected="true"] { background: var(--selected); }
+.watch-item .dot { flex: none; }
+.watch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watch-pane { margin: 0; }
+.watch-head .console-title { flex: none; }
+.watch-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.watch-out { height: max(260px, calc(100vh - 330px)); }
+.watch-out:empty::before { content: attr(data-empty); }
 
 .path {
   overflow-wrap: anywhere;
