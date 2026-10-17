@@ -2272,20 +2272,23 @@ body.activity {
 .act-app:hover th { background: var(--selected); }
 /* A fixed square, so it turns around its own center and the name never moves. */
 .act-app .chevron {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  margin-right: 4px;
-  line-height: 1;
-  vertical-align: -1px;
-  color: var(--muted);
+  width: 14px;
+  height: 14px;
+  margin: 0 6px 0 -2px;
+  color: var(--text);
+  vertical-align: -2px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   transform-origin: 50% 50%;
   transition: transform 0.15s ease;
 }
 .act-app[aria-expanded="true"] .chevron { transform: rotate(90deg); }
-.act-count { margin-left: 8px; color: var(--muted); font-weight: 500; }
+/* What a folded group hides, muted on the header's line; a crash stays red. */
+.act-sum { margin-left: 10px; color: var(--muted); font-weight: 400; }
+.act-sum-crashed { color: var(--danger); }
 .act-row.inner td:first-child { padding-left: 32px; }
 
 

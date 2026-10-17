@@ -61,15 +61,26 @@ export function head(text, cls) {
   return tr;
 }
 
-/** An application's header: click to fold its rows away. */
+/** An application's header: click anywhere on it to fold its rows away. Folded, it
+ * says what it hides on the same line: "2 running · dev, docs:dev". */
 export function appHead(a) {
   const tr = head("", "act-app");
   const open = !folded.has(a.site);
   tr.setAttribute("aria-expanded", String(open));
   (tr.firstChild as HTMLElement).innerHTML =
-    `<span class="chevron" aria-hidden="true">›</span><span class="act-site"></span><span class="act-count"></span>`;
+    `<svg class="chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg><span class="act-site"></span><span class="act-sum"></span>`;
   $(".act-site", tr).textContent = a.site;
-  $(".act-count", tr).textContent = open ? "" : a.rows.length;
+  if (!open) {
+    const sum = $(".act-sum", tr);
+    const counts = ["running", "starting", "crashed"].map((st) => [st, a.rows.filter((r) => r.state === st).length]).filter(([, n]) => n);
+    counts.forEach(([st, n], i) => {
+      const c = document.createElement("span");
+      c.className = `act-sum-${st}`;
+      c.textContent = `${n} ${st}`;
+      sum.append(i ? ", " : "", c);
+    });
+    sum.append(`${counts.length ? " · " : ""}${a.rows.map((r) => r.name).join(", ")}`);
+  }
   tr.onclick = () => {
     folded[open ? "add" : "delete"](a.site);
     localStorage.setItem("act-folded", JSON.stringify([...folded]));
@@ -135,10 +146,10 @@ export function row(r, inner?: boolean) {
   tr.className = `act-row ${r.state}${inner ? " inner" : ""}`;
   tr.setAttribute("aria-selected", String(r.key === selected));
   tr.dataset.key = r.key;
-  tr.onclick = () => select(r.key);
+  // Control-click is a right-click on macOS: the menu only, the selection stays.
+  tr.onclick = (e) => !e.ctrlKey && select(r.key);
   tr.oncontextmenu = (e) => {
     e.preventDefault();
-    select(r.key);
     rowMenu(r).catch((err) => showError(String(err)));
   };
   const name = td(r.name, "act-name");
