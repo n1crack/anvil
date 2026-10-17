@@ -171,13 +171,10 @@
     </section>
   </template>
 
-  <dialog id="new-app" class="sheet" aria-labelledby="new-title">
+  <dialog id="new-app" class="sheet new-sheet" aria-labelledby="new-title">
     <form method="dialog" id="new-form">
       <h2 id="new-title">New application</h2>
-      <fieldset class="kinds">
-        <legend class="visually-hidden">Type</legend>
-        <div id="new-kinds" class="kind-grid"></div>
-      </fieldset>
+      <div id="new-kinds" class="kind-list" role="listbox" tabindex="0" aria-label="Type"></div>
       <label class="field">
         <span>Name</span>
         <input id="new-name" required autocomplete="off" spellcheck="false" placeholder="my-app">
@@ -187,15 +184,28 @@
         <span>Location</span>
         <select id="new-parent"></select>
       </label>
+      <details id="new-options" class="new-options">
+        <summary><span>Options</span><span id="new-opts-sum" class="new-opts-sum"></span></summary>
+        <div id="new-opts" class="new-opts"></div>
+      </details>
       <p id="new-error" class="error" hidden></p>
       <div class="sheet-actions">
         <button type="button" id="new-existing" class="link" title="Serve a project that is already on this Mac; its type is detected">Use Existing Folder…</button>
-        <button type="button" id="new-log" class="link" hidden>Show log</button>
         <span class="spacer"></span>
         <button type="button" id="new-cancel">Cancel</button>
         <button type="submit" id="new-create" class="primary">Create</button>
       </div>
     </form>
+    <section id="new-progress" class="new-progress" hidden aria-live="polite">
+      <header class="new-head"><span id="new-state" class="new-state"></span><h2 id="new-progress-title"></h2></header>
+      <ol id="new-steps" class="new-steps"></ol>
+      <div class="console new-term"></div>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" id="new-reveal" hidden>Show in Finder</button>
+        <button type="button" id="new-done" class="primary">Open</button>
+      </div>
+    </section>
   </dialog>
 
   <template id="service-tpl">

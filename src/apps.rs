@@ -151,11 +151,71 @@ pub fn is_php(kind: &str) -> bool {
     matches!(kind, "laravel" | "statamic" | "symfony" | "php")
 }
 
+/// The package manager a JS project uses, by its lockfile; npm without one.
+pub fn js_manager(dir: &Path) -> &'static str {
+    [
+        ("pnpm-lock.yaml", "pnpm"),
+        ("yarn.lock", "yarn"),
+        ("bun.lockb", "bun"),
+        ("bun.lock", "bun"),
+    ]
+    .into_iter()
+    .find(|(f, _)| dir.join(f).exists())
+    .map_or("npm", |(_, m)| m)
+}
+
+/// The shell command installing a JS project's dependencies with `manager`.
+/// pnpm and yarn come through Corepack when they aren't on the PATH. pnpm 11
+/// fails an install whose dependencies' build scripts it skipped (esbuild); a
+/// dev server runs without them, so that's no reason to stop.
+pub fn js_install(manager: &str) -> String {
+    let via = |m: &str| {
+        format!("$(command -v {m} || echo env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack {m})")
+    };
+    match manager {
+        "pnpm" => format!("{} install --config.strict-dep-builds=false", via("pnpm")),
+        "yarn" => format!("{} install", via("yarn")),
+        "bun" => "bun install".into(),
+        _ => "npm install".into(),
+    }
+}
+
+/// Whether a shell command runs a package script or a package's binary
+/// (`npm run dev`, `pnpm build`, `yarn`, `bun run x`, `npx vite`), so needs node_modules.
+fn runs_package_script(command: &str) -> bool {
+    let words: Vec<&str> = command
+        .split(|c: char| c.is_whitespace() || ";&|()'\"".contains(c))
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.iter().enumerate().any(|(i, w)| {
+        let next = words.get(i + 1).copied().unwrap_or("");
+        match *w {
+            "npx" | "pnpx" | "bunx" => true,
+            "npm" => matches!(next, "run" | "run-script" | "start" | "test" | "exec"),
+            "bun" => matches!(next, "run" | "x" | "dev" | "start"),
+            "pnpm" | "yarn" => !matches!(next, "install" | "i" | "add" | "dlx" | "create"),
+            _ => false,
+        }
+    })
+}
+
+/// `command`, first installing node_modules with the lockfile's manager when it
+/// runs a package script and they are missing, so the install shows in its log.
+/// It stops if the install fails, so its error is the last thing in the log.
+pub fn with_js_install(dir: &Path, command: &str) -> String {
+    if !runs_package_script(command) || !dir.join("package.json").exists() {
+        return command.to_string();
+    }
+    format!(
+        "{{ [ -d node_modules ] || {}; }} && {command}",
+        js_install(js_manager(dir))
+    )
+}
+
 /// The command Anvil runs when the app has no custom one. `$PORT` is set.
+/// `spawn` installs node_modules first (`with_js_install`).
 pub fn default_command(kind: &str, dir: &Path) -> Option<String> {
-    // Stop if the install fails, so its error is the last thing in the log.
-    let npm =
-        |script: &str| format!("{{ [ -d node_modules ] || npm install; }} && npm run {script}");
+    let npm = |script: &str| format!("npm run {script}");
     Some(match kind {
         // Next ignores $HOSTNAME and would listen on every interface.
         "next" => npm("dev -- --hostname 127.0.0.1"),
@@ -611,6 +671,7 @@ impl Apps {
         // The trailing argument is $0: it tags the shell with Anvil's home so a
         // crashed Anvil's leftovers can be recognised and cleaned up.
         let tag = format!("anvil:{}:{key}", self.home.display());
+        let command = with_js_install(dir, command);
         let child = Command::new("/bin/sh")
             .args(["-c", &command, &tag])
             .current_dir(dir)
@@ -858,6 +919,52 @@ mod tests {
                 .unwrap()
                 .ends_with("npm run dev -- --hostname 127.0.0.1")
         );
+    }
+
+    #[test]
+    fn package_scripts_install_node_modules_first() {
+        for cmd in [
+            "npm run dev",
+            "pnpm dev",
+            "yarn",
+            "bun run build",
+            "npx vite",
+            "cd web && npm start",
+            "php artisan serve & npm run dev",
+        ] {
+            assert!(runs_package_script(cmd), "{cmd}");
+        }
+        for cmd in [
+            "php artisan queue:work",
+            "npm install",
+            "pnpm install",
+            "cargo run",
+            "echo npm",
+        ] {
+            assert!(!runs_package_script(cmd), "{cmd}");
+        }
+        let dir = project(&[("package.json", "{}")]);
+        assert_eq!(js_manager(&dir), "npm");
+        assert_eq!(
+            with_js_install(&dir, "npm run dev"),
+            "{ [ -d node_modules ] || npm install; } && npm run dev"
+        );
+        assert_eq!(with_js_install(&dir, "cargo run"), "cargo run");
+        for (lock, manager) in [
+            ("pnpm-lock.yaml", "pnpm"),
+            ("yarn.lock", "yarn"),
+            ("bun.lockb", "bun"),
+            ("bun.lock", "bun"),
+        ] {
+            fs::write(dir.join(lock), "").unwrap();
+            assert_eq!(js_manager(&dir), manager);
+            assert!(with_js_install(&dir, "npx vite").contains(&js_install(manager)));
+            fs::remove_file(dir.join(lock)).unwrap();
+        }
+        // Without a package.json there is nothing to install.
+        fs::remove_file(dir.join("package.json")).unwrap();
+        assert_eq!(with_js_install(&dir, "npm run dev"), "npm run dev");
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

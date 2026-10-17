@@ -561,6 +561,48 @@ window.mockContainerLogs = {
   cache: [T(6, "* Ready to accept connections tcp"), T(10, "* Background saving started by pid 21")],
   worker: [T(7, "Starting queue worker"), T(8, "\x1b[31mError:\x1b[39m connect ECONNREFUSED 172.18.0.3:6379"), T(8, "exited with code 1")],
 };
+// What `create::options` offers per template (the New application sheet's Options).
+const mockOpt = (key, label, choices) => ({ key, label, choices, default: choices[0][0] });
+const mockOnOff = (key, label) =>
+  mockOpt(key, label, [
+    ["on", label],
+    ["off", ""],
+  ]);
+const mockJs = mockOpt("js", "Packages", [
+  ["npm", "npm"],
+  ["pnpm", "pnpm"],
+  ["bun", "bun"],
+]);
+const mockCreateOptions = (kind) =>
+  ({
+    laravel: [
+      mockOpt("kit", "Starter kit", [
+        ["none", "No starter kit"],
+        ["react", "React"],
+        ["vue", "Vue"],
+        ["svelte", "Svelte"],
+        ["livewire", "Livewire"],
+      ]),
+      mockOpt("db", "Database", [
+        ["sqlite", "SQLite"],
+        ["service:mysql", "MySQL"],
+      ]),
+      mockJs,
+      mockOpt("php", "PHP", [
+        ["8.4", "PHP 8.4"],
+        ["8.3", "PHP 8.3"],
+      ]),
+    ],
+    next: [
+      mockOnOff("ts", "TypeScript"),
+      mockOnOff("tailwind", "Tailwind"),
+      mockJs,
+      mockOpt("node", "Node.js", [
+        ["24", "Node 24"],
+        ["22", "Node 22"],
+      ]),
+    ],
+  })[kind]?.concat(mockOnOff("git", "Git")) ?? [mockOnOff("git", "Git")];
 const mockHandle = (cmd, a) => {
   const ov = a?.site && mockOv[a.site];
   switch (cmd) {
@@ -677,7 +719,16 @@ const mockHandle = (cmd, a) => {
     case "link_folder":
       return "notes";
     case "create_app":
+      if (window.mockCreateFail) throw window.mockCreateFail;
       return "notes";
+    case "create_log": {
+      const log = window.mockCreateLog ?? "";
+      return { text: log.slice(a.from), end_offset: log.length };
+    }
+    case "create_options":
+      return mockCreateOptions(a.kind);
+    case "create_reveal":
+      return null;
     case "touched":
       return Math.floor(Date.now() / 1000) - 7200;
     case "git_info":

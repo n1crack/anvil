@@ -1500,18 +1500,20 @@ async fn create_app(
     kind: String,
     name: String,
     parent: std::path::PathBuf,
+    options: Option<anvil::create::Options>,
 ) -> Res<String> {
-    let job = (kind.clone(), name.clone(), parent.clone());
+    let mut cfg = anvil::load().map_err(err)?;
+    let opts = anvil::create::resolve(&kind, &cfg, &options.unwrap_or_default()).map_err(err)?;
+    let job = (kind.clone(), name.clone(), parent.clone(), opts.clone());
     let dir = tauri::async_runtime::spawn_blocking(move || {
-        let cfg = anvil::load()?;
-        anvil::create::create(&job.0, &job.1, &job.2, cfg.php.as_deref())
+        anvil::create::create(&job.0, &job.1, &job.2, &job.3)
     })
     .await
     .map_err(|e| e.to_string())?
     .map_err(err)?;
 
     let app = handle.state::<App>();
-    let mut cfg = anvil::load().map_err(err)?;
+    cfg = anvil::load().map_err(err)?;
     let parked = cfg
         .paths
         .iter()
@@ -1521,6 +1523,19 @@ async fn create_app(
     } else {
         anvil::link(&mut cfg, &name, dir).map_err(err)?
     };
+    // The versions chosen in the sheet, when they aren't the defaults anyway.
+    let defaults = anvil::create::resolve(&kind, &cfg, &Default::default()).map_err(err)?;
+    if let Some(v) = opts.get("php").filter(|v| defaults.get("php") != Some(v)) {
+        anvil::set_site_php(&mut cfg, &site, Some(v.clone())).map_err(err)?;
+    }
+    if let Some(v) = opts.get("node").filter(|v| defaults.get("node") != Some(v)) {
+        anvil::set_site_runtime(&mut cfg, &site, Some(v.clone())).map_err(err)?;
+    }
+    if let Some(id) = opts.get("db").and_then(|d| d.strip_prefix("service:")) {
+        let mut list = cfg.services[id].apps.clone();
+        list.push(site.clone());
+        anvil::services::set_apps(&mut cfg, id, &list).map_err(err)?;
+    }
     sites_changed(&handle, &app, &cfg);
     if anvil::apps::runs_process(&kind) {
         start_app(&app, &cfg, &site);
@@ -1529,11 +1544,30 @@ async fn create_app(
     Ok(site)
 }
 
+/// What the New application sheet offers for a template (`create_app`'s `options`).
 #[tauri::command(async)]
-fn open_create_log(name: String) -> Res<()> {
+fn create_options(kind: String) -> Res<Vec<anvil::create::Opt>> {
+    Ok(anvil::create::options(&kind, &anvil::load().map_err(err)?))
+}
+
+/// The creation log of `name` from `from` on, read while `create_app` runs.
+#[tauri::command(async)]
+fn create_log(name: String, from: u64) -> Res<anvil::logs::Text> {
+    anvil::create::check_name(&name).map_err(err)?;
+    let file = anvil::create::log_file(&name);
+    if !file.exists() {
+        return Ok(Default::default());
+    }
+    anvil::logs::tail_text(&file, from).map_err(err)
+}
+
+/// A failed creation's log, shown in Finder (its half-made folder is gone).
+#[tauri::command(async)]
+fn create_reveal(name: String) -> Res<()> {
+    anvil::create::check_name(&name).map_err(err)?;
     anvil::run(
         Command::new("open")
-            .args(["-a", "Console"])
+            .arg("-R")
             .arg(anvil::create::log_file(&name)),
     )
     .map_err(err)
@@ -2839,7 +2873,9 @@ fn main() {
             add_alias,
             link_folder,
             create_app,
-            open_create_log,
+            create_options,
+            create_log,
+            create_reveal,
             park_folder,
             remove_site,
             unhide_site,
