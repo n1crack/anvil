@@ -36,6 +36,8 @@ pub fn info(dir: &Path) -> Option<GitInfo> {
     let git_dir = git_dir(dir)?;
     let git = |args: &[&str]| {
         Command::new("git")
+            // A repo's own config could otherwise run a program (fsmonitor) on status.
+            .args(["-c", "core.fsmonitor=false"])
             .arg("-C")
             .arg(dir)
             .args(args)

@@ -768,7 +768,9 @@ fn compose_service(dir: &Path, name: &str) -> bool {
 }
 
 /// Services the app's .env points at, matched to Anvil services by port.
-pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) -> Vec<ServiceUse> {
+/// `live` is the running Anvil services and their pids (`Services::pids`), taken
+/// beforehand so no lock is held while this runs lsof, docker and du.
+pub fn services_used(cfg: &Config, site: &Site, live: &BTreeMap<String, u32>) -> Vec<ServiceUse> {
     let env = dotenv(&site.path);
     let get = |k: &str| env.get(k).map(String::as_str);
     let host = |k: &str| get(k).map(String::from);
@@ -858,9 +860,9 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
             });
             let proc = anvil
                 .as_deref()
-                .and_then(|id| svc.pid(id))
+                .and_then(|id| live.get(id).copied())
                 .and_then(|pid| table.iter().find(|p| p.pid == pid));
-            let running = anvil.as_deref().is_some_and(|id| svc.running(id));
+            let running = anvil.as_deref().is_some_and(|id| live.contains_key(id));
             let listener = port.and_then(|p| listening.get(&p));
             let (source, detail) = match (&host, port) {
                 (Some(h), _) if !is_local(Some(h)) => {
@@ -908,16 +910,16 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
         {
             continue;
         }
-        let proc = svc
-            .pid(&id)
-            .and_then(|pid| table.iter().find(|p| p.pid == pid));
+        let proc = live
+            .get(&id)
+            .and_then(|pid| table.iter().find(|p| p.pid == *pid));
         found.push(ServiceUse {
             label: services::name(services::kind_of(cfg, &id).unwrap_or("redis")).into(),
             port: Some(services::port(cfg, &id)),
             host: None,
             source: Source::Anvil,
             detail: Some(id.clone()),
-            running: svc.running(&id),
+            running: live.contains_key(&id),
             memory: proc.map(|p| p.rss),
             cpu: proc.map(|p| p.cpu),
             data_bytes: data_sizes.get(&home().join("data").join(&id)).copied(),

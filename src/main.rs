@@ -583,7 +583,7 @@ fn main() -> Result<()> {
                 );
             }
             let mut svc = services::Services::default();
-            for u in resources::services_used(&cfg, &s, &mut svc) {
+            for u in resources::services_used(&cfg, &s, &svc.pids()) {
                 println!(
                     "  uses {:<12} port {:<6} {:?}{}",
                     u.label,
