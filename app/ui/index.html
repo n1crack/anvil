@@ -91,6 +91,7 @@
     <div class="tabs" role="tablist" aria-label="Application">
       <button role="tab" data-tab="overview">Overview</button>
       <button role="tab" data-tab="logs">Logs</button>
+      <button role="tab" data-tab="packages">Packages</button>
       <button role="tab" data-tab="resources">Resources</button>
       <button role="tab" data-tab="settings">Settings</button>
       <button class="icon-btn res-reload" title="Measure again" aria-label="Measure resources again" hidden>
@@ -154,6 +155,10 @@
           <dd><input id="app-autostart" type="checkbox" role="switch"></dd>
         </div>
       </dl>
+    </section>
+
+    <section role="tabpanel" data-panel="packages" hidden>
+      <div class="pkg-body"></div>
     </section>
 
     <section role="tabpanel" data-panel="resources" hidden>
@@ -280,5 +285,6 @@
   <script src="git.js"></script>
   <script src="logs.js"></script>
   <script src="services.js"></script>
+  <script src="packages.js"></script>
 </body>
 </html>

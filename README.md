@@ -153,10 +153,12 @@ open ../target/release/bundle/macos/Anvil.app
 ```
 
 - **Applications list** with search, a filter by type (only the types you have, with counts) and running only, sorting by name or date modified, your own groups (Favorites first), a section per parked folder, linked folders, and extra linked domains under their application. Add applications with the + button: New Application, Add Folder of Applications (park) or Add Application Folder (link).
-- **Application panel** with Start, Stop and Restart for apps with their own server, quick buttons for browser, Finder, Terminal, editor and log, and three tabs:
-  - **Overview:** type, runtime, folder, web root, disk and services in use.
-  - **Settings:** type, PHP version and php.ini settings, or start command, port and "Start with Anvil".
+- **Application panel** with Start, Stop and Restart for apps with their own server, quick buttons for browser, Finder, Terminal, editor and log, and these tabs:
+  - **Overview:** type, runtime, folder, web root, disk, services in use and Git (branch, changes, last commit, remote).
+  - **Logs:** the app's log files (Laravel, Symfony, app output, PHP-FPM) as readable entries with level filters, search, follow, expandable context and stack traces; fast on files of hundreds of MB.
+  - **Packages:** framework versions, then each package manager's dependencies (Composer, npm, pnpm, yarn, Cargo, Go, .NET) with the version the lock file pins, the scripts, and a check for newer versions on demand.
   - **Resources:** disk breakdown with clean-up, processes and services.
+  - **Settings:** type, PHP version and php.ini settings, or start command, port and "Start with Anvil".
 - **Services** next to Applications in the sidebar: grouped by kind with a running dot and tags. Each service has Start, Stop and Restart, its ports, the applications that use it, tags, data folder and log, the `.env` lines to copy (pointed at a database you pick), what's inside (databases with sizes, create and drop; Redis keys and memory with Flush All; Mailpit messages with Delete All), buttons for database apps you have installed (TablePlus, Sequel Ace, Postico, DBeaver, DataGrip, Beekeeper Studio, RedisInsight), and removal with or without its data. The + button (⌘N) adds one: kind, name, port, application and tags.
 - **Settings window:**
   - **General:** site folders, launch at login, Dock icon, theme, editor and terminal, domain and ports.
@@ -175,7 +177,7 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | Search applications | ⌘F |
 | Move through the list | ↑ ↓ |
 | Show or hide linked domains | ← → |
-| Overview, Settings, Resources | ⌘1 ⌘2 ⌘3 |
+| Application tabs, in order | ⌘1 ⌘2 ⌘3 … |
 | Open in browser | ⌘O |
 | Open in editor | ⌘E |
 | Open Terminal in the project | ⌘T |
@@ -224,6 +226,7 @@ Closing the window keeps Anvil running in the menu bar; quit from the menu bar i
 | `anvil service uninstall <kind> <version>` | Remove a program version no service uses anymore |
 | `anvil service enable <name>` / `disable <name>` | Start the service with Anvil, or not |
 | `anvil service port <name> [port] [--web [port]]` | Set the port; leave it out for the usual one. `--web` sets Mailpit's inbox port (no value resets it) |
+| `anvil packages [site or folder] [--updates]` | Dependencies and locked versions; `--updates` asks the registries for newer ones |
 | `anvil usage [site]` | Disk usage of one application, or of Anvil and all applications |
 | `anvil clean <site> [paths…] [--safe]` | Delete items `anvil usage` lists, or every safe-to-delete item; `anvil clean --safe` does it for every app. Rebuildable items wait until the app is stopped |
 | `anvil setup` | Download the web server and print the one-time DNS command |

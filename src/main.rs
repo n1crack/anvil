@@ -89,6 +89,13 @@ enum Cmd {
         #[arg(long)]
         level: Option<String>,
     },
+    /// Dependencies of an app (or a folder, default: current) from its manifests and lock files
+    Packages {
+        site: Option<String>,
+        /// Also ask the registries for newer versions
+        #[arg(long)]
+        updates: bool,
+    },
     /// Download the web server and print one-time system setup commands
     Setup,
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
@@ -673,6 +680,56 @@ fn main() -> Result<()> {
                 }
                 if let Some(t) = e.trace.first() {
                     println!("    {t} ({} frames)", e.trace.len());
+                }
+            }
+        }
+        Cmd::Packages { site, updates } => {
+            let named = site
+                .as_deref()
+                .and_then(|n| sites(&cfg).into_iter().find(|s| s.name == site_name(n)));
+            let dir = match named {
+                Some(s) => s.path,
+                None => dir_or_cwd(site.map(PathBuf::from))?,
+            };
+            let p = packages::read(&dir);
+            for (name, version) in &p.highlights {
+                println!("{name} {version}");
+            }
+            let behind = if updates {
+                packages::updates(&p)
+            } else {
+                Vec::new()
+            };
+            for e in &p.ecosystems {
+                let dev = e.packages.iter().filter(|p| p.dev).count();
+                println!(
+                    "\n{} ({}): {} direct, {} dev, {} in lock",
+                    e.label,
+                    e.manager
+                        .as_deref()
+                        .or(e.lock.as_deref())
+                        .unwrap_or("no lock file"),
+                    e.packages.len() - dev,
+                    dev,
+                    e.locked.len()
+                );
+                for (k, v) in &e.facts {
+                    println!("  {k} {v}");
+                }
+                for p in &e.packages {
+                    let latest = behind
+                        .iter()
+                        .find(|u| u.ecosystem == e.id && u.name == p.name)
+                        .map_or(String::new(), |u| {
+                            format!("  {} available ({})", u.latest, u.level)
+                        });
+                    println!(
+                        "  {:<44} {:<16} {:<14}{}{latest}",
+                        p.name,
+                        p.constraint,
+                        p.version.as_deref().unwrap_or("-"),
+                        if p.dev { " dev" } else { "" }
+                    );
                 }
             }
         }

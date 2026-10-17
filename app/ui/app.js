@@ -426,6 +426,7 @@ function renderSite() {
   $(".res-reload", root).onclick = () => loadResources(s.name, true);
   loadResources(s.name);
   window.renderGit?.(s);
+  window.renderPackages?.(s, root);
 }
 
 /* ---------- Resources ---------- */

@@ -1,0 +1,35 @@
+{
+    "_readme": ["This file locks the dependencies of your project to a known state"],
+    "content-hash": "0f1e",
+    "packages": [
+        {
+            "name": "inertiajs/inertia-laravel",
+            "version": "v2.0.3",
+            "source": {"type": "git", "url": "https://github.com/inertiajs/inertia-laravel.git", "reference": "b732"},
+            "require": {"laravel/framework": "^10.0|^11.0|^12.0", "php": "^8.1.0"},
+            "type": "library",
+            "time": "2025-06-20T07:38:21+00:00"
+        },
+        {
+            "name": "laravel/framework",
+            "version": "v12.20.0",
+            "source": {"type": "git", "url": "https://github.com/laravel/framework.git", "reference": "1b9a"},
+            "require": {"php": "^8.2"},
+            "type": "library",
+            "time": "2025-07-08T15:02:21+00:00"
+        }
+    ],
+    "packages-dev": [
+        {
+            "name": "pestphp/pest",
+            "version": "v3.8.2",
+            "type": "library",
+            "time": "2025-04-17T10:53:02+00:00"
+        }
+    ],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "platform": {"php": "^8.2"},
+    "platform-dev": {},
+    "plugin-api-version": "2.6.0"
+}
