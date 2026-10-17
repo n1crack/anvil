@@ -34,8 +34,21 @@ Until 1.0.0, minor versions may contain breaking changes.
   period set in the compose file.
 - A Processes window (the button next to Settings) lists everything Anvil runs
   with PID, port, CPU, memory and a live log.
+- A Dev tab (⌘3) shows an app's processes with their live, colored output, one
+  at a time or all merged. "Run ▾" runs a package.json or composer.json script
+  after a confirmation; the run stays in the list with how it ended until
+  dismissed. "Configure" edits the processes as a table: commands, which ones
+  Dev start includes, which start with Anvil, processes of your own, and "Reset
+  to detected".
+- Log retention: Anvil's own logs stay under 5 MB. Settings › Storage › "Trim
+  app logs weekly" (on by default) cuts an app's `storage/logs/*.log` over 10 MB
+  to its last 1 MB and deletes daily logs older than 14 days.
 
 ### Changed
+
+- The Overview shows one "Dev · 3 of 4 running" line instead of the Processes
+  and Commands lists; the header's Start and Stop are Dev start and stop.
+- The Logs tab follows new entries by default.
 
 - An application's Overview lists all its processes, its own server or site
   first, each with Browser, Start/Stop/Restart, an editable command and "Start

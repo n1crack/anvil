@@ -62,6 +62,9 @@ const mockRow = (o) => ({
   autostart: false,
   edited: false,
   pinned: false,
+  top: false,
+  manual: false,
+  added: false,
   kind: "process",
   main: false,
   web: null,
@@ -83,8 +86,16 @@ window.mockOv = {
       mockRow({ id: "vite", name: "vite", command: "npm run dev", source: "artisan dev", server: true, port: 5174, autostart: true }),
     ],
     commands: [
-      { name: "build", id: "build", command: "vite build", running: false, exit: null },
-      { name: "test:unit", id: "test-unit", command: "vitest", running: false, exit: { code: 0, at: 1 } },
+      { name: "build", id: "build", command: "vite build", source: "package.json", running: false, exit: null },
+      { name: "test:unit", id: "test-unit", command: "vitest", source: "package.json", running: false, exit: { code: 0, at: 1 } },
+      {
+        name: "test",
+        id: "composer-test",
+        command: "@php artisan config:clear && @php artisan test",
+        source: "composer.json",
+        running: false,
+        exit: null,
+      },
     ],
     containers: null,
     docker_error: null,
@@ -123,7 +134,7 @@ window.mockOv = {
       ["docs:build", "npm run build && vitepress build docs"],
       ["preview", "vite preview"],
       ["format", "prettier --write src/"],
-    ].map(([name, command]) => ({ name, id: name.replace(":", "-"), command, running: false, exit: null })),
+    ].map(([name, command]) => ({ name, id: name.replace(":", "-"), command, source: "package.json", running: false, exit: null })),
     containers: null,
     docker_error: null,
     hidden: [],
@@ -512,9 +523,22 @@ const mockHandle = (cmd, a) => {
     case "process_run":
     case "containers_run":
       return ov;
-    case "command_run":
-      ov.commands.find((c) => c.name === a.script).running = true;
+    case "command_run": {
+      const c = ov.commands.find((x) => x.id === a.id);
+      Object.assign(c, { running: true, exit: null });
       return ov;
+    }
+    case "process_add": {
+      if (ov.rows.some((x) => x.id === a.name)) throw `${a.name} is already a process of this app`;
+      ov.rows.push(mockRow({ id: a.name, name: a.name, command: a.command, source: "Anvil", added: true }));
+      return ov;
+    }
+    case "processes_reset":
+      ov.rows = ov.rows.filter((x) => !x.added).map((x) => ({ ...x, manual: false, autostart: false, edited: false }));
+      ov.hidden = [];
+      return ov;
+    case "log_clear":
+      return null;
     case "set_process": {
       if (a.command === "") throw "The command can't be empty";
       const r = ov.rows.find((x) => x.id === a.id);
@@ -524,13 +548,14 @@ const mockHandle = (cmd, a) => {
       }
       if (a.command != null) Object.assign(r, { command: a.command, edited: true });
       if (a.autostart != null) r.autostart = a.autostart;
+      if (a.manual != null) r.manual = a.manual;
       if (a.top != null) {
         r.top = a.top;
         ov.rows.sort((x, y) => y.main - x.main || !!y.top - !!x.top);
       }
       if (a.hidden === true) {
         ov.rows = ov.rows.filter((x) => x !== r);
-        ov.hidden.push({ id: r.id, name: r.name });
+        if (!r.added) ov.hidden.push({ id: r.id, name: r.name });
       }
       if (a.hidden === false) {
         const h = ov.hidden.find((x) => x.id === a.id);
@@ -546,7 +571,7 @@ const mockHandle = (cmd, a) => {
     }
     case "log_text": {
       const text = window.mockLogs?.[a.source] ?? mockSiteLogs[a.site]?.[a.source] ?? (a.source === "once:build" ? mockBuild : mockLog);
-      return { text: a.from ? "" : text, end_offset: text.length };
+      return { text: text.slice(a.from > text.length ? 0 : a.from), end_offset: text.length };
     }
     case "log_sources":
       return window.mockLogSources;
@@ -586,7 +611,10 @@ const mockHandle = (cmd, a) => {
         messages: 3,
       };
     case "once_stop":
-      ov.commands.find((c) => c.id === a.id).running = false;
+      Object.assign(
+        ov.commands.find((c) => c.id === a.id),
+        { running: false, exit: null },
+      );
       return null;
     case "link_folder":
       return "notes";
@@ -623,6 +651,7 @@ const mockHandle = (cmd, a) => {
         git_clients: ["Fork"],
         theme: null,
         dock_icon: true,
+        trim_app_logs: true,
         https_default: true,
         login: false,
         config_dir: "/Users/x/Library/Application Support/Anvil",

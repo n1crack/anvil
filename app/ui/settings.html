@@ -122,6 +122,12 @@
 
     <section id="storage" class="page" hidden>
       <h1>Storage</h1>
+      <div class="group">
+        <label class="row">
+          <span>Trim app logs weekly<small>Logs in an app’s storage/logs over 10 MB keep their last 1 MB; daily logs older than 14 days are deleted. Anvil’s own logs always stay under 5 MB.</small></span>
+          <input id="trim-logs" type="checkbox" role="switch">
+        </label>
+      </div>
       <div class="storage-tabs" role="tablist" aria-label="Storage">
         <button role="tab" data-storage="anvil">Anvil <span id="anvil-size"></span></button>
         <button role="tab" data-storage="apps">Applications <span id="apps-size"></span></button>
@@ -146,7 +152,7 @@
         <div class="row"><span>Search applications</span><kbd>⌘F</kbd></div>
         <div class="row"><span>Move through the list</span><kbd>↑ ↓</kbd></div>
         <div class="row"><span>Show or hide linked domains</span><kbd>← →</kbd></div>
-        <div class="row"><span>Overview, Git, Watch, Logs, Packages, Resources, Settings tabs</span><kbd>⌘1 … ⌘7</kbd></div>
+        <div class="row"><span>Overview, Git, Dev, Logs, Packages, Resources, Settings tabs</span><kbd>⌘1 … ⌘7</kbd></div>
         <div class="row"><span>Open in browser</span><kbd>⌘O</kbd></div>
         <div class="row"><span>Open in editor</span><kbd>⌘E</kbd></div>
         <div class="row"><span>Open Terminal in the project</span><kbd>⌘T</kbd></div>

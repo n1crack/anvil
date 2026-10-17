@@ -230,8 +230,10 @@ struct CommandChip {
     name: String,
     /// Its log source is `once:<id>`.
     id: String,
-    /// The script as package.json has it.
+    /// The script as its file has it.
     command: String,
+    /// `package.json` or `composer.json`.
+    source: &'static str,
     running: bool,
     /// How the last run ended, once it has.
     exit: Option<anvil::apps::Exit>,
@@ -385,20 +387,21 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
             HiddenRow { id, name }
         })
         .collect();
-    let texts = anvil::processes::script_texts(&site.path);
+    let one_off = anvil::processes::one_off_scripts(site);
     let commands = {
         let mut apps = app.apps.lock().unwrap();
-        scripts
+        one_off
             .into_iter()
-            .map(|name| {
-                let key = anvil::processes::once_key(&site.name, &name);
+            .map(|s| {
+                let key = anvil::processes::once_key(&site.name, &s.id);
                 let running = apps.running(&key);
                 CommandChip {
-                    id: anvil::processes::process_id(&name),
-                    command: texts.get(&name).cloned().unwrap_or_default(),
+                    id: s.id,
+                    command: s.text,
+                    source: s.source,
                     exit: apps.finished(&key).filter(|_| !running),
                     running,
-                    name,
+                    name: s.name,
                 }
             })
             .collect()
@@ -748,8 +751,8 @@ fn processes(app: State<App>, site: String) -> Res<Overview> {
     Ok(overview(&app, &cfg, &s))
 }
 
-/// Start, stop or restart one process, or all of them and the app's own server
-/// when `name` is None.
+/// Start, stop or restart one process, or when `name` is None the app's own server and
+/// its processes: Dev start/stop. Dev start leaves out the processes marked manual.
 #[tauri::command(async)]
 fn process_run(
     handle: AppHandle,
@@ -770,7 +773,15 @@ fn process_run(
         // By key, not detection: a row whose script was renamed or removed still stops.
         let keys = match &name {
             Some(n) => vec![anvil::processes::key(&s.name, n)],
-            None => app.apps.lock().unwrap().process_keys(&s.name),
+            // Scripts run once (`<site>#…`) aren't Dev's: they finish on their own.
+            None => app
+                .apps
+                .lock()
+                .unwrap()
+                .process_keys(&s.name)
+                .into_iter()
+                .filter(|k| !k.contains('#'))
+                .collect(),
         };
         for key in keys {
             app.apps.lock().unwrap().stop(&key);
@@ -780,7 +791,10 @@ fn process_run(
     if action != "stop" {
         for p in anvil::processes::detect_with(&s, Some(&cfg))
             .into_iter()
-            .filter(|p| name.as_deref().is_none_or(|n| n == p.id))
+            .filter(|p| match name.as_deref() {
+                Some(n) => n == p.id,
+                None => !p.manual,
+            })
         {
             let key = anvil::processes::key(&s.name, &p.id);
             let started = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld);
@@ -792,17 +806,15 @@ fn process_run(
     Ok(overview(&app, &cfg, &s))
 }
 
-/// Run one of the app's package.json commands once (`npm run <script>`); its
-/// output is the log source `once:<id>`.
+/// Run one of the app's one-off scripts by id (see `one_off_scripts`); its output is
+/// the log source `once:<id>`.
 #[tauri::command(async)]
-fn command_run(app: State<App>, site: String, script: String) -> Res<Overview> {
+fn command_run(app: State<App>, site: String, id: String) -> Res<Overview> {
     let (cfg, s) = find_site_cfg(&site)?;
-    if !anvil::processes::package_scripts(&s.path)
-        .1
-        .contains(&script)
-    {
-        return Err(format!("{site} has no command named {script}"));
-    }
+    let script = anvil::processes::one_off_scripts(&s)
+        .into_iter()
+        .find(|c| c.id == id)
+        .ok_or_else(|| format!("{site} has no script {id}"))?;
     app.apps
         .lock()
         .unwrap()
@@ -964,6 +976,7 @@ fn set_process(
     top: Option<bool>,
     host: Option<String>,
     reset_host: Option<bool>,
+    manual: Option<bool>,
 ) -> Res<Overview> {
     if !id.is_empty() && !plain(&id, false) {
         return Err(format!("Not a process: {id}"));
@@ -978,6 +991,9 @@ fn set_process(
     if id.is_empty() {
         if hidden == Some(true) {
             return Err("The app's own row can't be hidden".into());
+        }
+        if manual == Some(true) {
+            return Err("The app's own server always starts with Dev".into());
         }
         if top.is_some() {
             return Err("The app's own row is always first".into());
@@ -997,6 +1013,7 @@ fn set_process(
             hidden,
             pinned,
             top,
+            manual,
             host: if reset_host == Some(true) {
                 Some(None)
             } else {
@@ -1042,6 +1059,62 @@ fn set_process(
     }
     changed(&handle);
     let (cfg, s) = find_site_cfg(&site)?;
+    Ok(overview(&app, &cfg, &s))
+}
+
+/// Add a process of the user's own (Configure's + Add process); `name` is also its id.
+#[tauri::command(async)]
+fn process_add(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    name: String,
+    command: String,
+) -> Res<Overview> {
+    let (mut cfg, s) = find_site_cfg(&site)?;
+    anvil::processes::add_process(&mut cfg, &s, &name, &command).map_err(err)?;
+    changed(&handle);
+    Ok(overview(&app, &cfg, &s))
+}
+
+/// Configure's Reset to detected (`processes::reset_processes`). A process that is no
+/// longer listed stops; a changed route reloads the web server in the background.
+#[tauri::command(async)]
+fn processes_reset(handle: AppHandle, app: State<App>, site: String) -> Res<Overview> {
+    let (mut cfg, s) = find_site_cfg(&site)?;
+    let routes = |c: &Config| {
+        anvil::processes::server_rows(c, &s)
+            .into_iter()
+            .map(|r| (r.id, r.host, r.port))
+            .collect::<Vec<_>>()
+    };
+    let before = routes(&cfg);
+    anvil::processes::reset_processes(&mut cfg, &s).map_err(err)?;
+    let listed: Vec<String> = anvil::processes::detect_with(&s, Some(&cfg))
+        .into_iter()
+        .map(|p| anvil::processes::key(&s.name, &p.id))
+        .collect();
+    let gone: Vec<String> = app
+        .apps
+        .lock()
+        .unwrap()
+        .process_keys(&s.name)
+        .into_iter()
+        .filter(|k| k.contains('@') && !listed.contains(k))
+        .collect();
+    for k in gone {
+        app.apps.lock().unwrap().stop(&k);
+        app.app_errors.lock().unwrap().remove(&k);
+    }
+    if routes(&cfg) != before {
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+            if let Ok(cfg) = anvil::load() {
+                sites_changed(&handle, &handle.state::<App>(), &cfg);
+            }
+        });
+    }
+    changed(&handle);
     Ok(overview(&app, &cfg, &s))
 }
 
@@ -1953,6 +2026,7 @@ struct Settings {
     git_clients: Vec<String>,
     theme: Option<String>,
     dock_icon: bool,
+    trim_app_logs: bool,
     https_default: bool,
     login: bool,
     config_dir: std::path::PathBuf,
@@ -2076,6 +2150,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         terminal: cfg.terminal,
         theme: cfg.theme,
         dock_icon: cfg.dock_icon,
+        trim_app_logs: cfg.trim_app_logs,
         https_default: cfg.https_default == Some(true),
         hidden: cfg.hidden.clone(),
         paths: cfg.paths,
@@ -2217,6 +2292,33 @@ fn set_dock_icon(handle: AppHandle, on: bool) -> Res<Settings> {
     );
     update_dock(&handle);
     s
+}
+
+/// Settings › Storage › Trim app logs weekly (`anvil::logs::retention`).
+#[tauri::command(async)]
+fn set_trim_app_logs(handle: AppHandle, on: bool) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.trim_app_logs = on;
+            Ok(())
+        },
+        false,
+    )
+}
+
+/// Anvil's logs capped, and apps' trimmed weekly when that is on.
+fn trim_logs() {
+    let Ok(cfg) = anvil::load() else {
+        return;
+    };
+    let sites: Vec<std::path::PathBuf> = anvil::sites(&cfg).into_iter().map(|s| s.path).collect();
+    anvil::logs::retention(
+        &anvil::home(),
+        cfg.trim_app_logs,
+        &sites,
+        std::time::SystemTime::now(),
+    );
 }
 
 #[tauri::command(async)]
@@ -2467,7 +2569,7 @@ fn app_menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .separator()
         .item(&item("tab:overview", "Overview", Some("CmdOrCtrl+1"))?)
         .item(&item("tab:git", "Git", Some("CmdOrCtrl+2"))?)
-        .item(&item("tab:watch", "Watch", Some("CmdOrCtrl+3"))?)
+        .item(&item("tab:dev", "Dev", Some("CmdOrCtrl+3"))?)
         .item(&item("tab:logs", "Logs", Some("CmdOrCtrl+4"))?)
         .item(&item("tab:packages", "Packages", Some("CmdOrCtrl+5"))?)
         .item(&item("tab:resources", "Resources", Some("CmdOrCtrl+6"))?)
@@ -2698,6 +2800,7 @@ fn main() {
             container_log,
             service_log,
             set_dock_icon,
+            set_trim_app_logs,
             set_login,
             open_config_dir,
             services,
@@ -2718,6 +2821,8 @@ fn main() {
             app_run,
             set_app,
             set_process,
+            process_add,
+            processes_reset,
             resources,
             packages,
             package_updates,
@@ -2749,6 +2854,13 @@ fn main() {
                     let state = handle.state::<App>();
                     // A fresh Anvil shows only this run's output, as a new terminal would.
                     anvil::apps::clear_stale_logs();
+                    // Log retention now and hourly, off the start's way.
+                    std::thread::spawn(|| {
+                        loop {
+                            trim_logs();
+                            std::thread::sleep(std::time::Duration::from_secs(3600));
+                        }
+                    });
                     start(&state, &cfg);
                     let failed = state.services.lock().unwrap().start_enabled(&cfg);
                     state.service_errors.lock().unwrap().extend(failed);

@@ -47,41 +47,6 @@ describe("setup", () => {
   });
 });
 
-describe("commands", () => {
-  test("a row click doesn't run; ▶ asks first, Run runs", async () => {
-    await select("vuefinder");
-    const row = $$(".proc.cmd").find((r) => r.querySelector(".proc-name")?.textContent === "build")!;
-    row.click();
-    await wait();
-    expect(calls("command_run")).toHaveLength(0);
-    (row.querySelector('button[aria-label^="Run"]') as HTMLElement).click();
-    const pop = $(".pop-confirm");
-    expect(pop.textContent).toContain("Run npm run build?");
-    (pop.querySelector(".primary") as HTMLElement).click();
-    await wait();
-    expect(calls("command_run").map(([, a]) => a.script)).toEqual(["build"]);
-  });
-});
-
-describe("processes", () => {
-  test("a crashed row offers Restart and ■ to dismiss it", async () => {
-    await select("shop");
-    const logs = $$(".proc").find((r) => r.querySelector(".proc-name")?.textContent === "logs")!;
-    expect(logs.classList.contains("crashed")).toBe(true);
-    const labels = [...logs.querySelectorAll(".proc-actions button")].map((b) => b.getAttribute("aria-label"));
-    expect(labels).toContain("Restart logs");
-    expect(labels).toContain("Dismiss logs");
-  });
-
-  test("open in the browser is an outline globe, not an emoji", async () => {
-    await select("shop");
-    const b = $('[aria-label="Open shop.test in the browser"]');
-    expect(b.querySelector("svg")).not.toBeNull();
-    expect(b.textContent).toBe("");
-    expect(b.title).toBe("https://shop.test");
-  });
-});
-
 describe("https", () => {
   test("the row shows a spinner while HTTPS is turned on or off", async () => {
     w.mockDelay = { set_secure: 200 };
@@ -97,67 +62,104 @@ describe("https", () => {
   });
 });
 
-describe("watch", () => {
-  const row = (name: string) => $$(".procs .proc").find((r) => r.querySelector(".proc-name")?.textContent === name)!;
-  const watchTab = () => $('.tabs [data-tab="watch"]');
-  const chosen = () => $(".watch-item[aria-selected=true]")?.dataset.key;
-
-  test("a command row click still shows its last output in the console", async () => {
+describe("overview", () => {
+  test("one Dev line with a dot per process, and no process or command lists", async () => {
     await select("vuefinder");
-    row("test").click();
+    const line = $(".procs .dev-summary");
+    expect(line.textContent).toContain("Dev");
+    expect(line.querySelector(".dev-summary-state")!.textContent).toBe("1 of 3 running");
+    expect([...line.querySelectorAll(".dot")].map((d) => d.className)).toEqual(["dot ", "dot on", "dot "]);
+    expect($$(".procs .proc")).toHaveLength(0);
+    expect($$("#site .res-sub").map((h) => h.textContent)).not.toContain("Commands");
+    expect($$("#site .res-sub").map((h) => h.textContent)).not.toContain("Processes");
+    expect($('[data-field="path"]').textContent).toBe("~/Sites/vuefinder");
+    line.click();
     await wait(80);
-    expect($(".console").hidden).toBe(false);
-    expect($(".console-out span.ansi2")).not.toBeNull();
-    ($(".console-close") as HTMLElement).click();
-  });
-
-  test("a stopped row click doesn't open the console nor read its output", async () => {
-    const before = calls("log_text").length;
-    row("docs:site").click();
-    await wait();
-    expect(calls("log_text")).toHaveLength(before);
-    expect($(".console").hidden).toBe(true);
-    expect(row("docs:site").querySelector('[aria-label^="Watch"]')).toBeNull();
-  });
-
-  test("All is the default and merges the processes' lines, each tagged with its name", async () => {
-    w.mockLogs = { app: "server up\n", "proc:docs-site": "" };
-    expect(watchTab().hidden).toBe(false);
-    watchTab().click();
-    await wait(80);
-    expect($('[data-panel="watch"]').hidden).toBe(false);
-    expect(chosen()).toBe("all");
-    const lines = $$(".watch-line").map((l) => l.textContent);
-    expect(lines).toContain("dev       │ server up");
-    expect(lines.some((l) => l!.startsWith("docs:dev  │ ✓ built in"))).toBe(true);
-    // Each process keeps its color, in the list and on its lines: by its place in the list.
-    const tag = (name: string) => $$(".watch-line .watch-tag").find((t) => t.textContent!.startsWith(`${name} `))!.className;
-    const named = (name: string) => $$(".watch-item .watch-name").find((n) => n.textContent === name)!.className;
-    expect(tag("dev")).toBe("watch-tag pc0");
-    expect(tag("docs:dev")).toBe("watch-tag pc1");
-    expect(named("dev")).toBe("watch-name pc0");
-    expect(named("docs:dev")).toBe("watch-name pc1");
-    expect(named("All")).toBe("watch-name");
-  });
-
-  test("Watch on a running row opens the tab on that process, with its colored output", async () => {
+    expect($('.tabs [data-tab="dev"]').getAttribute("aria-selected")).toBe("true");
     $('.tabs [data-tab="overview"]').click();
-    const watch = row("docs:dev").querySelector('[aria-label="Watch docs:dev"]') as HTMLElement;
-    const actions = [...row("docs:dev").querySelectorAll(".proc-actions button")].map((b) => b.textContent);
-    expect(actions.indexOf("Watch")).toBe(actions.indexOf("Restart") - 1);
-    watch.click();
+  });
+
+  test("the header's Start is Dev start: processes left out of it don't keep it shown", async () => {
+    await select("vuefinder");
+    const ov = w.mockOv.vuefinder;
+    const before = structuredClone(ov.rows);
+    for (const r of ov.rows) r.running = r.id !== "docs-site";
+    ov.rows.find((r) => r.id === "docs-site").manual = true;
+    await select("shop");
+    await select("vuefinder");
+    expect($('#site [data-all="start"]').hidden).toBe(true);
+    expect($("#site .state-text").textContent).toBe("2 running");
+    ov.rows = before;
+    await select("shop");
+  });
+});
+
+describe("dev", () => {
+  const devTab = () => $('.tabs [data-tab="dev"]');
+  const chosen = () => $(".dev-item[aria-selected=true]")?.dataset.key;
+  const item = (key: string) => $(`.dev-item[data-key="${key}"]`);
+  const lines = () => $$(".dev-out .dev-line").map((l) => l.textContent);
+
+  test("the list: All, each process in its color, then the runs with how they ended", async () => {
+    w.mockLogs = { app: "server up\n", "proc:docs-site": "" };
+    await select("vuefinder");
+    devTab().click();
     await wait(80);
-    expect(watchTab().getAttribute("aria-selected")).toBe("true");
+    expect(devTab().textContent).toBe("Dev");
+    expect($('[data-panel="dev"]').hidden).toBe(false);
+    expect(chosen()).toBe("all");
+    expect($$(".dev-item").map((i) => i.dataset.key)).toEqual([
+      "all",
+      "app",
+      "proc:docs-dev",
+      "proc:docs-site",
+      "once:test",
+      "once:preview",
+      "once:format",
+    ]);
+    const named = (key: string) => item(key).querySelector(".dev-name")!.className;
+    expect([named("all"), named("app"), named("proc:docs-dev"), named("proc:docs-site")]).toEqual([
+      "dev-name",
+      "dev-name pc0",
+      "dev-name pc1",
+      "dev-name pc2",
+    ]);
+    expect($(".dev-list .dev-divider")).not.toBeNull();
+    expect(item("once:test").querySelector(".dot.on")).not.toBeNull();
+    expect(item("once:preview").querySelector(".dev-exit")!.textContent).toBe("✓");
+    const bad = item("once:format").querySelector(".dev-exit")!;
+    expect([bad.textContent, bad.className]).toEqual(["1", "dev-exit bad"]);
+  });
+
+  test("All merges the processes' lines, each tagged with its name in its color", async () => {
+    await wait(600);
+    expect(lines()).toContain("dev       │ server up");
+    expect(lines().some((l) => l!.startsWith("docs:dev  │ ✓ built in"))).toBe(true);
+    const tag = (name: string) => $$(".dev-out .dev-tag").find((t) => t.textContent!.startsWith(`${name} `))!.className;
+    expect(tag("dev")).toBe("dev-tag pc0");
+    expect(tag("docs:dev")).toBe("dev-tag pc1");
+  });
+
+  test("one process: colored output, new output appended without redrawing, \\r redraws the last line", async () => {
+    w.mockLogs["proc:docs-dev"] = "\x1b[32mready\x1b[39m in 412 ms\n12%\r50%";
+    item("proc:docs-dev").click();
+    await wait(600);
     expect(chosen()).toBe("proc:docs-dev");
-    expect($(".watch-head .console-title").textContent).toBe("docs:dev");
-    expect($(".watch-head .watch-cmd").textContent).toBe("npm run docs:dev");
-    expect($(".watch-out span.ansi2")).not.toBeNull();
-    expect($(".watch-out").textContent).toContain("built in 1.2s");
+    expect($(".dev-head .console-title").textContent).toBe("docs:dev");
+    expect($(".dev-head .dev-cmd").textContent).toBe("npm run docs:dev");
+    expect($(".dev-out span.ansi2").textContent).toBe("ready");
+    expect(lines()).toEqual(["ready in 412 ms", "50%"]);
+    const first = $(".dev-out .dev-line");
+    w.mockLogs["proc:docs-dev"] += "\r100%\nwatching for changes\n";
+    await wait(600);
+    expect(lines()).toEqual(["ready in 412 ms", "100%", "watching for changes"]);
+    expect($(".dev-out .dev-line")).toBe(first);
+    expect($(".dev-empty").hidden).toBe(true);
   });
 
   test("Restart in the pane restarts that process", async () => {
     const before = calls("process_run").length;
-    ($('.watch-head [aria-label="Restart docs:dev"]') as HTMLElement).click();
+    ($('.dev-head [aria-label="Restart docs:dev"]') as HTMLElement).click();
     await wait();
     expect(
       calls("process_run")
@@ -166,18 +168,121 @@ describe("watch", () => {
     ).toEqual([{ site: "vuefinder", name: "docs-dev", action: "restart" }]);
   });
 
-  test("↓ moves the selection; a stopped process without output says so", async () => {
-    $(".watch-list").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    await wait(80);
-    expect(chosen()).toBe("proc:docs-site");
-    expect($(".watch-out").dataset.empty).toBe("Not running");
-    expect($(".watch-out").textContent).toBe("");
-    expect($('.watch-head [aria-label="Start docs:site"]')).not.toBeNull();
+  test("a right-click offers Stop, Restart, Open in Browser and Clear; Clear empties it", async () => {
+    item("proc:docs-dev").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait();
+    const menu = w.mockMenu as any[];
+    expect(menu.map((i) => i.text ?? i.item)).toEqual(["Stop", "Restart", "Open in Browser", "Separator", "Clear"]);
+    menu.find((i) => i.text === "Clear").action();
+    await wait();
+    expect(calls("log_clear").at(-1)![1]).toEqual({ site: "vuefinder", source: "proc:docs-dev" });
+    expect(lines()).toEqual([]);
   });
 
-  test("an app without processes has no Watch tab", async () => {
+  test("↓ moves the selection; a stopped process says Not running, with a small ▶", async () => {
+    $(".dev-list").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    await wait(600);
+    expect(chosen()).toBe("proc:docs-site");
+    expect($(".dev-empty").hidden).toBe(false);
+    expect($(".dev-empty").textContent).toContain("Not running");
+    const before = calls("process_run").length;
+    ($('.dev-empty [aria-label="Start docs:site"]') as HTMLElement).click();
+    await wait();
+    expect(calls("process_run").slice(before)[0][1]).toEqual({ site: "vuefinder", name: "docs-site", action: "start" });
+  });
+
+  test("Run ▾ lists the one-off scripts only, and runs one after a confirm", async () => {
+    $(".dev-bar .dev-run").click();
+    const names = $$(".dev-run-menu .dev-run-name").map((n) => n.textContent);
+    expect(names).toEqual(w.mockOv.vuefinder.commands.map((c) => c.name));
+    expect(names).not.toContain("docs:dev");
+    const build = $$(".dev-run-item").find((b) => b.querySelector(".dev-run-name")!.textContent === "build")!;
+    expect(build.querySelector(".dev-run-cmd")!.textContent).toBe("vite build");
+    build.click();
+    await wait();
+    expect(calls("command_run")).toHaveLength(0);
+    const pop = $(".pop-confirm");
+    expect(pop.textContent).toContain("Run npm run build?");
+    (pop.querySelector(".primary") as HTMLElement).click();
+    await wait(80);
+    expect(calls("command_run").map(([, a]) => a)).toEqual([{ site: "vuefinder", id: "build" }]);
+    expect(chosen()).toBe("once:build");
+    expect($(".dev-head .dev-cmd").textContent).toBe("npm run build");
+  });
+
+  test("a run's × dismisses it", async () => {
+    (item("once:preview").querySelector(".dev-dismiss") as HTMLElement).click();
+    await wait(80);
+    expect(calls("once_stop").at(-1)![1]).toEqual({ site: "vuefinder", id: "preview" });
+    expect(item("once:preview")).toBeNull();
+  });
+
+  test("Configure: edit a command, leave one out of Dev start, add a process, reset", async () => {
+    $(".dev-bar .dev-configure").click();
+    await wait();
+    expect($(".dev-main").hidden).toBe(true);
+    const names = () => $$(".dev-conf-table .dev-conf-name").map((n) => n.textContent);
+    expect(names()).toEqual(["dev", "docs:dev", "docs:site"]);
+    const box = (aria: string) => $(`.dev-conf [aria-label="${aria}"]`) as HTMLInputElement;
+    expect(box("dev in Dev start").disabled).toBe(true);
+    expect($('.dev-conf [aria-label="Remove dev"]')).toBeNull();
+
+    const cmd = box("Command for docs:dev");
+    cmd.value = "npm run docs:dev -- --open";
+    cmd.dispatchEvent(new Event("change"));
+    await wait();
+    expect(calls("set_process").at(-1)![1]).toEqual({ site: "vuefinder", id: "docs-dev", command: "npm run docs:dev -- --open" });
+
+    box("docs:site in Dev start").click();
+    await wait();
+    expect(calls("set_process").at(-1)![1]).toEqual({ site: "vuefinder", id: "docs-site", manual: true });
+    expect(box("docs:site in Dev start").checked).toBe(false);
+
+    // An empty command is refused inline, not in a toast.
+    const empty = box("Command for docs:site");
+    empty.value = " ";
+    empty.dispatchEvent(new Event("change"));
+    await wait();
+    expect($(".dev-conf-error").textContent).toBe("The command can't be empty");
+    expect($("#toast").hidden).toBe(true);
+
+    $$(".dev-conf-foot button")
+      .find((b) => b.textContent === "+ Add process")!
+      .click();
+    const n = box("Name of the new process");
+    const c = box("Command of the new process");
+    n.value = "worker";
+    n.dispatchEvent(new Event("input"));
+    c.value = "node worker.js";
+    c.dispatchEvent(new Event("input"));
+    c.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    await wait();
+    expect(calls("process_add").at(-1)![1]).toEqual({ site: "vuefinder", name: "worker", command: "node worker.js" });
+    expect(names()).toEqual(["dev", "docs:dev", "docs:site", "worker"]);
+    expect($(".dev-conf-draft")).toBeNull();
+
+    const reset = $$(".dev-conf-foot button").find((b) => b.textContent === "Reset to detected")!;
+    reset.click();
+    expect(calls("processes_reset")).toHaveLength(0);
+    ($(".pop-confirm .primary") as HTMLElement).click();
+    await wait();
+    expect(calls("processes_reset")).toHaveLength(1);
+    expect(names()).toEqual(["dev", "docs:dev", "docs:site"]);
+    expect(box("docs:site in Dev start").checked).toBe(true);
+
+    $$(".dev-conf-foot button")
+      .find((b) => b.textContent === "Done")!
+      .click();
+    await wait();
+    expect($(".dev-main").hidden).toBe(false);
+    expect($(".dev-conf").hidden).toBe(true);
+  });
+
+  test("a crashed process has a red dot; a folder has no Dev tab", async () => {
+    await select("shop");
+    expect(item("proc:logs").querySelector(".dot.bad")).not.toBeNull();
     await select("notes");
-    expect(watchTab().hidden).toBe(true);
+    expect(devTab().hidden).toBe(true);
     expect($('.tabs [data-tab="overview"]').getAttribute("aria-selected")).toBe("true");
     w.mockLogs = null;
   });
@@ -190,18 +295,6 @@ describe("audit fixes", () => {
     expect($(`#list [data-name="vuefinder"] .lock`)).not.toBeNull();
     expect($('[data-field="runtime"]')).toBeNull();
     expect($('[data-field="path"]').textContent).toBe("~/Sites/notes");
-  });
-
-  test("a running command has ■ Stop, which calls once_stop without opening the console", async () => {
-    await select("vuefinder");
-    const row = $$(".proc.cmd").find((r) => r.querySelector(".proc-name")?.textContent === "test")!;
-    const stop = row.querySelector('[aria-label="Stop npm run test"]') as HTMLElement;
-    expect(stop.textContent).toBe("■ Stop");
-    expect(row.querySelector('[aria-label="Run test"]')).toBeNull();
-    stop.click();
-    await wait();
-    expect(calls("once_stop").at(-1)![1]).toEqual({ site: "vuefinder", id: "test" });
-    expect($(".console").hidden).toBe(true);
   });
 
   test("adding a folder or creating an app selects it without a toast", async () => {

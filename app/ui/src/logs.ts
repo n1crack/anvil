@@ -78,7 +78,7 @@ export function buildLogs(s) {
     tail: null,
     entries: [],
     shown: 0,
-    follow: localStorage.getItem("logsFollow") === "1",
+    follow: localStorage.getItem("logsFollow") !== "0", // live unless turned off
     token: 0,
   };
 

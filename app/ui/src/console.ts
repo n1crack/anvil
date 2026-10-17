@@ -1,7 +1,7 @@
 import { el, invoke } from "./app";
 
 /* Reading a process's or command's output (`log_text`) and drawing it as a terminal
- * shows it; shared by the Overview's console and the Watch tab. */
+ * shows it; shared by the Dev tab and the Logs tab. */
 
 export type Tail = { site: string; source: string; from: number; raw: string; busy: boolean; [k: string]: any };
 
@@ -19,7 +19,8 @@ export async function readTail(t: Tail): Promise<string | null> {
   } finally {
     t.busy = false;
   }
-  if (page.end_offset < t.from) t.raw = ""; // cleared: start over
+  // Cleared (a restart, Clear): start over, and say so for views that append.
+  if (page.end_offset < t.from) [t.raw, t.cleared] = ["", true];
   t.from = page.end_offset;
   if (!page.text) return null;
   t.raw += page.text;

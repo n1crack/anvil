@@ -1,22 +1,15 @@
 import type { Overview } from "./types";
-import { ansi, clean } from "./term";
-import { type Tail, readTail, tail, termOut } from "./console";
-import { $, M, call, el, invoke, mode, popAt, renderSite, selected, showError, snap, tab } from "./app";
+import { $, el, invoke, mode, popAt, renderSite, selected, showError, showTab, snap, tab } from "./app";
 import { late } from "./late";
 
-/* Processes: an app's own server (or the site Anvil serves), queue worker, log tailer,
- * extra dev servers, one-off commands and Docker Compose containers, first in the
- * Overview. Each row starts and stops on its own; the header's Start/Stop run them all.
- * A running row's Watch opens its output in the Watch tab (watch.ts); a command's
- * output opens in a console below. Shares $, el, invoke, call,
- * snap, selected, tab, mode, M, render, toast and showError with app.js; clean and
- * ansi with term.js. */
+/* An app's processes as the Overview and the header see them: the backend's overview
+ * (rows, one-off scripts, Docker Compose containers), the header's Dev start/stop, one
+ * "Dev · 3 of 4 running" line that opens the Dev tab (dev.ts), and the containers. */
 
 export const procCache = new Map<string, Overview>(); // site name -> overview from the backend
 export const procLoading = new Set<string>(); // site names with a request on its way
 export const procBusy = new Map<string, string>(); // "site/service" -> "starting…" while Docker works
 export const procLogs = new Map<string, string>(); // "site/service" -> container log text, while shown
-export let procEdit: any = null; // { site, id, field, value, error } while a row's command or address is edited
 
 /** Called by renderSite: draw what is known, then ask again. */
 window.renderProcesses = (s) => {
@@ -80,149 +73,6 @@ export function procBtn(label, aria, onclick) {
   return b;
 }
 
-/** Below a button, as the other menus. */
-export function popup(menu, btn) {
-  const r = btn.getBoundingClientRect();
-  const dpi = (window.__TAURI__ as any).dpi;
-  menu.popup(dpi ? new dpi.LogicalPosition(r.left, r.bottom + 4) : undefined);
-}
-
-/** A pin outline in currentColor, for "Add to processes" and rows kept on top. */
-export const PIN = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4M6.75 2.5v4L4.5 9.25h7L9.25 6.5v-4M8 9.25v4.25" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
-/** A globe outline in currentColor, for "Open in the browser". */
-export const GLOBE = `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M1.75 8h12.5M8 1.75C6.1 3.45 5.25 5.55 5.25 8s.85 4.55 2.75 6.25M8 1.75c1.9 1.7 2.75 3.8 2.75 6.25s-.85 4.55-2.75 6.25"/></svg>`;
-
-export const setProc = (name, id, change) => loadProcs(name, "set_process", { id, ...change });
-
-/** An address's subdomain label and the fixed rest: ["docs", ".vuefinder.test"]. */
-export function hostParts(address) {
-  const host = new URL(address).hostname;
-  const dot = host.indexOf(".");
-  return [host.slice(0, dot), host.slice(dot)];
-}
-
-/** ⋯ on a row: edit its command or address, start it with Anvil, reset or remove it. */
-export async function procMenu(name, r, btn) {
-  const edit = (field, value) => () => {
-    procEdit = { site: name, id: r.id, field, value, error: null };
-    drawProcs(name);
-  };
-  const items = [
-    M.MenuItem.new({ text: "Edit command…", action: edit("command", r.command) }),
-    M.CheckMenuItem.new({ text: "Start with Anvil", checked: r.autostart, action: () => setProc(name, r.id, { autostart: !r.autostart }) }),
-  ];
-  if (r.edited) items.push(M.MenuItem.new({ text: "Reset command", action: () => setProc(name, r.id, { reset: true }) }));
-  if (r.address) items.push(M.MenuItem.new({ text: "Edit address…", action: edit("host", hostParts(r.address)[0]) }));
-  if (r.host_edited) items.push(M.MenuItem.new({ text: "Reset address", action: () => setProc(name, r.id, { resetHost: true }) }));
-  if (!r.main) {
-    items.push(
-      // The app's own row is always first already.
-      M.CheckMenuItem.new({ text: "Keep on Top", checked: !!r.top, action: () => setProc(name, r.id, { top: !r.top }) }),
-      M.PredefinedMenuItem.new({ item: "Separator" }),
-      r.pinned
-        ? M.MenuItem.new({ text: "Unpin", action: () => setProc(name, r.id, { pinned: false }) })
-        : M.MenuItem.new({ text: "Remove from processes", action: () => setProc(name, r.id, { hidden: true }) }),
-    );
-  }
-  popup(await M.Menu.new({ items: await Promise.all(items) }), btn);
-}
-
-/** Hidden rows, to bring back one at a time. */
-export async function hiddenMenu(name, hidden, btn) {
-  const items = hidden.map((h) => M.MenuItem.new({ text: h.name, action: () => setProc(name, h.id, { hidden: false }) }));
-  popup(await M.Menu.new({ items: await Promise.all(items) }), btn);
-}
-
-/** The row's command, or its address's label before the fixed rest, as a one-line
- * field: Return saves, Esc cancels. */
-export function editField(name, r) {
-  const host = procEdit.field === "host";
-  const form = el("form", "proc-edit");
-  form.onclick = (e) => e.stopPropagation();
-  const input = el("input");
-  input.value = procEdit.value;
-  input.spellcheck = false;
-  input.setAttribute("aria-label", String(host ? `Address of ${r.name}` : `Command for ${r.name}`));
-  input.oninput = () => (procEdit.value = input.value);
-  const cancel = () => {
-    procEdit = null;
-    drawProcs(name);
-  };
-  input.onkeydown = (e) => {
-    if (e.key === "Escape") cancel(); // a handler returning false would swallow every other key
-  };
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    try {
-      procCache.set(name, await invoke("set_process", { site: name, id: r.id, [procEdit.field]: procEdit.value.trim() }));
-      procEdit = null;
-    } catch (err) {
-      procEdit.error = String(err);
-    }
-    if (selected === name) drawProcs(name);
-  };
-  const save = el("button", null, "Save");
-  save.type = "submit";
-  const no = el("button", null, "Cancel");
-  no.type = "button";
-  no.onclick = cancel;
-  form.append(input);
-  if (host) form.append(el("span", "proc-suffix", hostParts(r.address)[1]));
-  form.append(save, no);
-  if (procEdit.error) form.append(el("span", "proc-last error-text", procEdit.error));
-  return form;
-}
-
-/** One line: dot, name, detail, then the on-top pin, the auto tag, the globe, Watch, Restart and ■ (or ▶) and ⋯. */
-export function procRow({ name, state, detail, error, title, busy, open, run, watch, top, auto, web, menu, edit }: Record<string, any>) {
-  const row = el("div", `proc ${state}`);
-  const dot = el("span", `dot ${state === "running" ? "on" : state === "crashed" ? "bad" : ""}`);
-  dot.title = { running: "Running", crashed: "Crashed", stopped: "Stopped" }[state];
-  const label = el(open ? "button" : "span", "proc-name", name);
-  label.title = title;
-  if (open) row.onclick = open;
-  row.append(dot, label);
-  if (edit) row.append(edit);
-  else {
-    const last = el("span", error ? "proc-last error-text" : "proc-last", busy ?? error ?? detail);
-    last.title = last.textContent;
-    row.append(last);
-  }
-  const actions = el("span", "proc-actions");
-  if (top) actions.append(Object.assign(el("span", "proc-top"), { title: "Kept on top", innerHTML: PIN }));
-  if (auto) actions.append(Object.assign(el("span", "proc-tag", "auto"), { title: "Starts with Anvil" }));
-  // Only something running has a page to open.
-  if (web && state === "running") {
-    const b = procBtn("", `Open ${name} in the browser`, () => invoke("open_url", { url: web }).catch((e) => showError(String(e))));
-    b.innerHTML = GLOBE;
-    b.className = "proc-web";
-    b.title = web;
-    actions.append(b);
-  }
-  if (watch && state === "running" && !busy && !edit) actions.append(procBtn("Watch", `Watch ${name}`, watch));
-  if (run && !busy && !edit) {
-    if (state !== "stopped") actions.append(procBtn("Restart", `Restart ${name}`, () => run("restart")));
-    // On a crashed row ■ dismisses the crash.
-    if (state !== "stopped") actions.append(procBtn("■", state === "crashed" ? `Dismiss ${name}` : `Stop ${name}`, () => run("stop")));
-    if (state === "stopped") actions.append(procBtn("▶", `Start ${name}`, () => run("start")));
-  }
-  if (menu && !edit) actions.append(procBtn("⋯", `More for ${name}`, menu));
-  row.append(actions);
-  return row;
-}
-
-export const CMD_MAX = 6; // commands listed before "Show all"
-
-/** "now", "5m", "2h", "3d" since unix seconds `at`. */
-export function agoShort(at) {
-  const s = Date.now() / 1000 - at;
-  if (s < 60) return "now";
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  return `${Math.floor(s / 86400)}d`;
-}
-
 /** A small confirm bubble under `anchor`: Enter or Run confirms, Esc or a click elsewhere cancels. */
 export function confirmPop(anchor, text, label, onYes) {
   const pop = el("div", "pop-confirm");
@@ -241,52 +91,32 @@ export function confirmPop(anchor, text, label, onYes) {
   };
 }
 
-/** One package.json command: name, script, then the pin (on hover) and ▶, then how the
- * last run went, if it ran. A click shows its output once there is some. */
-export function cmdRow(name, c) {
-  const row = el("div", "proc cmd");
-  const label = `npm run ${c.name}`;
-  const show = () => openConsole(name, `once:${c.id}`, label);
-  const run = async () => {
-    if (await loadProcs(name, "command_run", { script: c.name })) show();
-  };
-  // A click only shows output that exists; running is ▶'s job, after a confirm.
-  if (c.running || c.exit) row.onclick = show;
-  row.title = c.running ? `${label} is running. Click to show its output.` : c.exit ? `Click to show the last output of ${label}.` : label;
-  const script = el("span", "proc-last", c.command);
-  row.append(el("span", "proc-name", c.name), script);
+/** A container: dot, name, detail, then Restart and ■ (or ▶). A click shows its log. */
+function containerRow({ name, state, detail, busy, open, run }: Record<string, any>) {
+  const row = el("div", `proc ${state}`);
+  const dot = el("span", `dot ${state === "running" ? "on" : ""}`);
+  dot.title = state === "running" ? "Running" : "Stopped";
+  const label = el("button", "proc-name", name);
+  label.title = "Click to show its log";
+  row.onclick = open;
+  const last = el("span", "proc-last", busy ?? detail);
+  last.title = last.textContent;
+  row.append(dot, label, last);
   const actions = el("span", "proc-actions");
-  const pin = procBtn("", `Add ${c.name} to processes`, () => setProc(name, c.id, { pinned: true }));
-  pin.innerHTML = PIN;
-  pin.title = "Add to processes";
-  pin.className = "cmd-hover cmd-pin";
-  actions.append(pin);
-  if (c.running) {
-    const stop = procBtn("■ Stop", `Stop ${label}`, () => stopOnce(name, c.id));
-    stop.title = "Stop";
-    actions.append(stop);
-  } else {
-    const play = procBtn("▶", `Run ${c.name}`, () => confirmPop(play, `Run ${label}?`, "Run", run));
-    play.title = "Run";
-    actions.append(play);
+  if (!busy) {
+    if (state !== "stopped") actions.append(procBtn("Restart", `Restart ${name}`, () => run("restart")));
+    if (state !== "stopped") actions.append(procBtn("■", `Stop ${name}`, () => run("stop")));
+    if (state === "stopped") actions.append(procBtn("▶", `Start ${name}`, () => run("start")));
   }
   row.append(actions);
-  // Only a command that ran gets a result column; otherwise ▶ sits flush right.
-  if (!c.running && !c.exit) return row;
-  const result = el("span", "cmd-result");
-  if (c.running) {
-    result.append(el("span", "dot warm"));
-    result.title = "Running";
-  } else if (c.exit) {
-    const ok = c.exit.code === 0;
-    result.append(el("span", ok ? "cmd-ok" : "cmd-bad", ok ? "✓" : "✗"), ` ${agoShort(c.exit.at)}`);
-    result.title = `${ok ? "Succeeded" : "Failed"} ${new Date(c.exit.at * 1000).toLocaleString()}`;
-  }
-  row.append(result);
   return row;
 }
 
-/** The header: how many run, and Start/Stop for all; a PHP site alone says whether it's served. */
+/** The app's own server when it is a process, then every other process: what Dev runs. */
+export const devRows = (o?: Overview | null) => (o?.rows ?? []).filter((r) => r.kind !== "site");
+
+/** The header: how many run, and Dev start/stop: Start starts the app and every process
+ * in Dev start, Stop stops them all. A PHP site alone says whether it's served. */
 export function drawRunBox(name, rows, containers) {
   const box = $("#site .run-box");
   if (!box) return;
@@ -310,7 +140,8 @@ export function drawRunBox(name, rows, containers) {
   $(".dot", box).className = `dot ${crashed ? "bad" : running ? "on" : ""}`;
   text.textContent = [running && `${running} running`, crashed && `${crashed} crashed`].filter(Boolean).join(", ") || "Stopped";
   text.classList.toggle("error-text", !!crashed);
-  start.hidden = running === total;
+  // Done when everything Dev start would start runs; processes left out don't count.
+  start.hidden = own.every((r) => r.running || r.manual) && containers.every(up);
   stop.hidden = !running;
   const all = (action) => {
     loadProcs(name, "process_run", { name: null, action });
@@ -346,184 +177,67 @@ export function drawRunBox(name, rows, containers) {
   };
 }
 
+/** "Dev · 3 of 4 running" with a dot per process; a click opens the Dev tab. */
+function devLine(rows) {
+  const b = el("button", "dev-summary");
+  const running = rows.filter((r) => r.running).length;
+  const dots = el("span", "dev-summary-dots");
+  for (const r of rows) {
+    const d = el("span", `dot ${r.running ? "on" : r.crashed ? "bad" : ""}`);
+    d.title = r.name;
+    dots.append(d);
+  }
+  b.append(el("span", "dev-summary-title", "Dev"), el("span", "dev-summary-state", `${running} of ${rows.length} running`), dots);
+  b.title = "Show the Dev tab (⌘3)";
+  b.onclick = () => showTab($("#site"), "dev");
+  return b;
+}
+
 export function drawProcs(name) {
   const box = $("#site .procs");
   if (!box) return;
   const o = procCache.get(name);
   const rows = o?.rows ?? [];
-  const commands = o?.commands ?? [];
+  const dev = devRows(o);
   const containers = o?.containers ?? [];
-  const hidden = o?.hidden ?? [];
   const compose = !!(o?.containers || o?.docker_error);
   drawRunBox(name, rows, containers);
-  late.drawWatch?.(name);
-  box.hidden = !(rows.length || commands.length || compose || hidden.length);
+  late.drawDev?.(name);
+  box.hidden = !(dev.length || compose);
   box.replaceChildren();
-  drawConsole(name);
   if (box.hidden) return;
-  let focus: HTMLElement | null = null;
-
-  if (rows.length || hidden.length) {
-    const head = el("div", "procs-head");
-    head.append(el("h3", "res-sub", "Processes"));
-    if (hidden.length) {
-      const more = el("button", "proc-link", `Show hidden (${hidden.length})`);
-      more.onclick = () => hiddenMenu(name, hidden, more);
-      head.append(more);
-    }
-    box.append(head);
+  if (dev.length) box.append(devLine(dev));
+  if (!compose) return;
+  box.append(el("h3", "res-sub", "Containers"));
+  if (o!.docker_error) {
+    const note = el("div", "procs-containers");
+    note.append(el("p", "procs-note", o!.docker_error));
+    return box.append(note);
   }
-
-  if (rows.length) {
-    const list = el("div", "group procs-list");
-    for (const r of rows) {
-      const site = r.kind === "site";
-      const where = r.address ?? (r.port ? `:${r.port}` : null);
-      const exit = r.crashed && !r.running ? `Exited${r.crashed.code == null ? "" : ` with code ${r.crashed.code}`}` : null;
-      const editing = procEdit?.site === name && procEdit.id === r.id;
-      const edit = editing ? editField(name, r) : null;
-      if (edit) focus = $("input", edit);
-      list.append(
-        procRow({
-          name: r.name,
-          state: r.running ? "running" : r.crashed ? "crashed" : "stopped",
-          detail: exit ?? where ?? r.command,
-          error: r.error,
-          title: site ? (r.running ? "Served by Anvil" : "Start Anvil to serve it") : `${r.command}\nFrom ${r.source}.`,
-          watch: site ? null : () => late.openWatch(name, r.main ? "app" : `proc:${r.id}`),
-          run: site
-            ? null
-            : r.main
-              ? (action) => call("app_run", { site: name, action })
-              : (action) => loadProcs(name, "process_run", { name: r.id, action }),
-          top: r.top && !r.main,
-          auto: r.autostart,
-          web: r.web,
-          menu: site ? null : (btn) => procMenu(name, r, btn),
-          edit,
-        }),
-      );
-    }
-    box.append(list);
+  const list = el("div", "group procs-list procs-containers");
+  const up = (c) => c.state === "running";
+  for (const c of containers) {
+    const key = `${name}/${c.service}`;
+    list.append(
+      containerRow({
+        name: c.service,
+        state: up(c) ? "running" : "stopped",
+        detail: [...c.ports.map((p) => `:${p}`), c.health ?? c.state].join(" · "),
+        busy: procBusy.get(key),
+        open: () => toggleContainerLog(name, c.service),
+        run: (action) => containerRun(name, [c.service], action, c.service),
+      }),
+    );
+    if (procLogs.has(key)) list.append(el("pre", "proc-log", procLogs.get(key)));
   }
-
-  if (compose) {
-    box.append(el("h3", "res-sub", "Containers"));
-    if (o.docker_error) {
-      const note = el("div", "procs-containers");
-      note.append(el("p", "procs-note", o.docker_error));
-      box.append(note);
-    } else {
-      const list = el("div", "group procs-list procs-containers");
-      const up = (c) => c.state === "running";
-      for (const c of containers) {
-        const key = `${name}/${c.service}`;
-        list.append(
-          procRow({
-            name: c.service,
-            state: up(c) ? "running" : "stopped",
-            detail: [...c.ports.map((p) => `:${p}`), c.health ?? c.state].join(" · "),
-            title: "Click to show its log",
-            busy: procBusy.get(key),
-            open: () => toggleContainerLog(name, c.service),
-            run: (action) => containerRun(name, [c.service], action, c.service),
-          }),
-        );
-        if (procLogs.has(key)) list.append(el("pre", "proc-log", procLogs.get(key)));
-      }
-      box.append(list);
-    }
-  }
-
-  if (commands.length) {
-    const head = el("div", "procs-head");
-    head.append(el("h3", "res-sub", "Commands"));
-    const key = `anvil.commands.all.${name}`;
-    const all = localStorage.getItem(key) === "1";
-    if (commands.length > CMD_MAX) {
-      const more = el("button", "proc-link", all ? "Show fewer" : `Show all (${commands.length})`);
-      more.onclick = () => {
-        localStorage.setItem(key, all ? "0" : "1");
-        drawProcs(name);
-      };
-      head.append(more);
-    }
-    box.append(head);
-    // package.json's order, so rows don't move when one runs.
-    const list = el("div", "group procs-list");
-    for (const c of all ? commands : commands.slice(0, CMD_MAX)) list.append(cmdRow(name, c));
-    box.append(list);
-  }
-  focus?.focus();
+  box.append(list);
 }
 
-/* ---------- Console: a command's output, as a terminal shows it ---------- */
-
-export const conBox = el("section", "console");
-conBox.setAttribute("aria-label", "Output");
-conBox.innerHTML = `<header class="console-head"><span class="console-title"></span><span class="proc-actions"></span><button class="icon-btn console-close" aria-label="Close output">×</button></header>`;
-export const conTerm = termOut("console-out");
-conBox.append(conTerm.out);
-export let con: Tail | null = null; // and its label
-$(".console-close", conBox).onclick = () => {
-  con = null;
-  conBox.hidden = true;
-};
-
-export function openConsole(site, source, label) {
-  if (con?.site !== site || con?.source !== source) {
-    con = tail(site, source, { label });
-    conTerm.out.replaceChildren();
-    conTerm.atEnd = true;
-  }
-  drawConsole(site);
-  conTail();
-}
-
-/** Stop a command run once (a watcher such as vitest never ends by itself). */
-export const stopOnce = (site, id) =>
-  invoke("once_stop", { site, id }).then(
-    () => loadProcs(site),
-    (e) => showError(String(e)),
-  );
-
-/** Under the Commands; what it shows, ■ while running, ↻ for a command that ended. */
-export function drawConsole(name) {
-  const box = $("#site .procs");
-  if (!box) return;
-  if (box.nextElementSibling !== conBox) {
-    box.after(conBox);
-    conTerm.restore();
-  }
-  conBox.hidden = con?.site !== name;
-  if (!con || conBox.hidden) return;
-  const id = con.source.slice("once:".length);
-  const chip = procCache.get(name)?.commands.find((c) => c.id === id);
-  $(".console-title", conBox).textContent = con.label;
-  const actions = $(".proc-actions", conBox);
-  actions.replaceChildren();
-  if (chip?.running) {
-    actions.append(procBtn("■ Stop", `Stop ${con.label}`, () => stopOnce(name, id)));
-  } else if (chip) {
-    actions.append(procBtn("↻ Run again", `Run ${con.label} again`, () => loadProcs(name, "command_run", { script: chip.name })));
-  }
-}
-
-/** New output since the last look; all of it is drawn again so a line redrawn
- * with \r, or a color begun earlier, comes out right. */
-export async function conTail() {
-  const c = con;
-  if (!c || !(await readTail(c)) || c !== con) return;
-  conTerm.out.replaceChildren(ansi(clean(c.raw, true)));
-  conTerm.follow();
-}
-
-// While the Overview is shown, keep states and the console fresh.
+// While the Overview is shown, keep the Dev line and the containers fresh.
 setInterval(() => {
   if (document.hidden || mode !== "apps" || !selected || tab !== "overview") return;
-  if (con?.site === selected) conTail();
   const o = procCache.get(selected);
-  if (procLoading.has(selected) || !(o?.rows.length || o?.commands.length || o?.containers || o?.docker_error || o?.hidden.length)) return;
+  if (procLoading.has(selected) || !(devRows(o).length || o?.containers || o?.docker_error)) return;
   loadProcs(selected);
 }, 2000);
 

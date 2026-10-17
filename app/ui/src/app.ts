@@ -645,7 +645,7 @@ export async function newGroup(s) {
   if (group) await call("set_group", { site: s.name, group });
 }
 
-export let tab = localStorage.getItem("tab") ?? "overview";
+export let tab = (localStorage.getItem("tab") ?? "overview").replace(/^watch$/, "dev");
 export const kindLabel = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
 export const RUNTIME = {
   next: "Node.js",
@@ -671,7 +671,7 @@ export function showTab(root, name) {
   for (const p of root.querySelectorAll("[role=tabpanel]")) p.hidden = p.dataset.panel !== name;
   $(".res-reload", root).hidden = name !== "resources";
   window.logsTab?.(root, name === "logs");
-  if (name === "watch") late.watchTab?.();
+  if (name === "dev") late.devTab?.();
   // Measuring (du, lsof, docker) only happens when someone looks at it.
   if (name === "resources" && selected) loadResources(selected);
 }
@@ -1564,7 +1564,7 @@ $("#error-close").onclick = () => showError(null);
 // Keyboard: ⌘1–9 tabs in order, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
 /* ---------- Shortcuts: the menu bar and the keyboard run the same actions ---------- */
 
-export const TAB_KEYS = { 1: "overview", 2: "git", 3: "watch", 4: "logs", 5: "packages", 6: "resources", 7: "settings" };
+export const TAB_KEYS = { 1: "overview", 2: "git", 3: "dev", 4: "logs", 5: "packages", 6: "resources", 7: "settings" };
 export let lastAction = { name: "", at: 0 };
 
 /** Run a menu action. The same key can reach both the page and the menu bar, so

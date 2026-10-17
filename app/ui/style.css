@@ -833,22 +833,8 @@ button, select, input { font: inherit; color: inherit; }
 .procs-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .procs-head .res-sub { margin: 0; }
 .procs-head:not(:first-child) { margin-top: 20px; }
-.proc-link { padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; }
-.proc-link:hover { color: var(--text); text-decoration: underline; }
 .proc-actions { display: flex; align-items: center; gap: 6px; }
 .proc-actions button:disabled { opacity: 0.4; }
-.proc-tag {
-  padding: 0 5px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 16px;
-}
-.proc-edit { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.proc-edit input { flex: 1; min-width: 0; height: 24px; font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
-.proc-edit .error-text { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
-.proc-edit button,
 .proc-actions button {
   height: 24px;
   min-width: 28px;
@@ -901,25 +887,6 @@ button.proc-name:hover { text-decoration: underline; }
 
 .proc-last.error-text { color: var(--danger); }
 
-/* Commands: tighter rows; the pin only while hovered, ▶ flush right, then how the last
- * run went in a 4th column that only a command that ran has. */
-.proc.cmd { grid-template-columns: auto 1fr auto; min-height: 30px; padding: 3px 14px; }
-.cmd-hover { visibility: hidden; }
-.cmd:hover .cmd-hover,
-.cmd-hover:focus-visible { visibility: visible; }
-.cmd .proc-actions button { height: 22px; padding: 0 6px; }
-.cmd .proc-actions .cmd-pin { display: grid; place-items: center; min-width: 22px; padding: 0; border: 0; background: none; color: var(--muted); }
-.cmd .proc-actions .cmd-pin:hover { color: var(--text); }
-.cmd-pin svg,
-.proc-top svg { width: 14px; height: 14px; }
-.proc-actions .proc-web { display: grid; place-items: center; padding: 0; }
-.proc-web svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
-.proc-top { display: grid; place-items: center; color: var(--muted); opacity: 0.8; }
-.cmd-result { grid-column: 4; display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 32px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.cmd-ok { color: var(--ok-text); }
-.cmd-bad { color: var(--danger); }
-.proc-suffix { color: var(--muted); font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
-
 /* The console: a terminal's colors on a dark surface, in light mode too. */
 .console {
   margin: -12px 0 24px;
@@ -971,26 +938,74 @@ button.proc-name:hover { text-decoration: underline; }
 .pc0, .pc1, .pc2, .pc3, .pc4, .pc5 { color: var(--pc); }
 .pc0 { --pc: var(--pc0); } .pc1 { --pc: var(--pc1); } .pc2 { --pc: var(--pc2); }
 .pc3 { --pc: var(--pc3); } .pc4 { --pc: var(--pc4); } .pc5 { --pc: var(--pc5); }
-.watch-out .pc0 { --pc: #93c5fd; } .watch-out .pc1 { --pc: #c4b5fd; } .watch-out .pc2 { --pc: #fb7185; }
-.watch-out .pc3 { --pc: #fdba74; } .watch-out .pc4 { --pc: #86efac; } .watch-out .pc5 { --pc: #67e8f9; }
+.dev-out .pc0 { --pc: #93c5fd; } .dev-out .pc1 { --pc: #c4b5fd; } .dev-out .pc2 { --pc: #fb7185; }
+.dev-out .pc3 { --pc: #fdba74; } .dev-out .pc4 { --pc: #86efac; } .dev-out .pc5 { --pc: #67e8f9; }
 
-/* Watch: the app's processes on the left, the chosen one's output on the console's
- * terminal surface; "All" tags each line with its process's name. */
-.watch { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 12px; align-items: start; }
-.watch-list { max-width: none; overflow: hidden; outline: none; }
-.watch-list:focus-visible { box-shadow: 0 0 0 2px var(--selected); }
-.watch-item { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 12px; font-size: 12px; }
-.watch-item[aria-selected="true"] { background: var(--selected); }
-.watch-item .dot { flex: none; }
-.watch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.watch-pane { margin: 0; }
-.watch-head .console-title { flex: none; }
-.watch-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.watch-out { height: max(260px, calc(100vh - 330px)); }
-.watch-out:empty::before { content: attr(data-empty); }
-.watch-line { display: flex; }
-.watch-tag { flex: none; white-space: pre; }
-.watch-text { min-width: 0; }
+/* Dev: a toolbar, the app's processes on the left, the chosen one's output on the
+ * console's terminal surface; "All" tags each line with its process's name. */
+.dev { display: flex; flex-direction: column; gap: 10px; }
+.dev-bar { display: flex; justify-content: flex-end; gap: 6px; }
+.dev-bar [aria-pressed="true"] { background: var(--selected); }
+.dev-main { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 12px; align-items: start; }
+.dev-main[hidden], .dev-conf[hidden] { display: none; }
+.dev-list { max-width: none; overflow: hidden; outline: none; }
+.dev-list:focus-visible { box-shadow: 0 0 0 2px var(--selected); }
+.dev-list > .dev-divider { height: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.dev-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; font-size: 12px; }
+.dev-item[aria-selected="true"] { background: var(--selected); }
+.dev-item .dot { flex: none; }
+.dev-item .dot-none { visibility: hidden; }
+.dev-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-exit { flex: none; color: var(--muted); font: 11px ui-monospace, "SF Mono", Menlo, monospace; }
+.dev-exit.bad { color: var(--danger); }
+.dev-dismiss { flex: none; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; line-height: 1; }
+.dev-dismiss:hover { color: var(--text); }
+.dev-none { margin: 0; padding: 8px 12px; color: var(--muted); font-size: 12px; }
+.dev-pane { position: relative; margin: 0; }
+.dev-head .console-title { flex: none; }
+.dev-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.dev-pane.is-empty .dev-head-start { display: none; }
+.dev-out { height: max(260px, calc(100vh - 360px)); }
+.dev-out:empty::before { content: none; }
+.dev-empty { position: absolute; top: 44px; left: 14px; display: flex; align-items: center; gap: 8px; color: #8d959f; font: 11px ui-monospace, "SF Mono", Menlo, monospace; }
+.dev-empty[hidden] { display: none; }
+.dev-empty button { height: 20px; padding: 0 7px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: rgba(255, 255, 255, 0.08); color: #e8ebee; font-size: 10px; }
+.dev-line { display: flex; }
+.dev-tag { flex: none; white-space: pre; }
+.dev-text { min-width: 0; }
+.dev-text:empty::before { content: "\200b"; }
+
+/* Run ▾: the app's scripts, each with its script muted. */
+.dev-run-menu { display: flex; flex-direction: column; min-width: 240px; max-width: 460px; max-height: 360px; padding: 4px; overflow-y: auto; }
+.dev-run-group { padding: 6px 8px 2px; color: var(--muted); font-size: 11px; }
+.dev-run-item { display: flex; align-items: baseline; gap: 12px; padding: 5px 8px; border: 0; border-radius: var(--radius-s); background: none; color: var(--text); font-size: 12px; text-align: left; }
+.dev-run-item:hover, .dev-run-item:focus-visible { background: var(--selected); outline: none; }
+.dev-run-name { flex: none; }
+.dev-run-cmd { min-width: 0; overflow: hidden; color: var(--muted); font: 11px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Configure: one row per process. */
+.dev-conf-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.dev-conf-table th { padding: 0 8px 6px; color: var(--muted); font-weight: 500; text-align: left; white-space: nowrap; }
+.dev-conf-table td { padding: 5px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
+.dev-conf-table th:nth-child(1), .dev-conf-table td:nth-child(1) { width: 150px; }
+.dev-conf-table th:nth-child(3), .dev-conf-table td:nth-child(3),
+.dev-conf-table th:nth-child(4), .dev-conf-table td:nth-child(4) { width: 76px; text-align: center; }
+.dev-conf-table th:nth-child(5), .dev-conf-table td:nth-child(5) { width: 64px; text-align: right; white-space: nowrap; }
+.dev-conf-name { font-weight: 500; }
+.dev-conf-input { width: 100%; height: 26px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
+.dev-conf-input::placeholder { color: var(--muted); }
+.dev-conf-table td:nth-child(1) .dev-conf-input { font-family: inherit; }
+.dev-conf-remove { width: 22px; height: 22px; color: var(--muted); }
+.dev-conf-error { margin: 8px 0 0; font-size: 12px; }
+.dev-conf-foot { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.dev-conf-foot .spacer { flex: 1; }
+
+/* The Overview's one line about Dev. */
+button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--steel-raised); color: var(--text); font-size: 13px; text-align: left; }
+.dev-summary-title { font-weight: 600; }
+.dev-summary-state { color: var(--muted); }
+.dev-summary-state::before { content: "·"; margin-right: 8px; }
+.dev-summary-dots { display: flex; gap: 4px; margin-left: auto; }
 
 .path {
   overflow-wrap: anywhere;
@@ -1128,6 +1143,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 }
 
 /* Storage: Anvil's files or the applications', then groups with their size. */
+#storage > .group { margin-bottom: 12px; }
 .storage-tabs {
   display: inline-flex;
   gap: 2px;
@@ -2270,18 +2286,20 @@ button.log-file:hover { text-decoration-color: currentColor; }
 
 /* Watch and Logs take the whole pane, down to the window's bottom: the header and
  * tabs widen with them, the panel fills the height and only the output scrolls. */
-#site:has(> :is([data-panel="watch"], [data-panel="logs"]):not([hidden])) {
+#site:has(> :is([data-panel="dev"], [data-panel="logs"]):not([hidden])) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
   padding-bottom: 20px;
 }
-#site:has(> :is([data-panel="watch"], [data-panel="logs"]):not([hidden])) > * { flex: none; max-width: none; }
-#site > :is([data-panel="watch"], [data-panel="logs"]):not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-[data-panel="watch"] > .watch { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
-[data-panel="watch"] .watch-list { max-height: 100%; overflow-y: auto; }
-[data-panel="watch"] .watch-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-[data-panel="watch"] .watch-out { flex: 1; height: auto; min-height: 0; }
+#site:has(> :is([data-panel="dev"], [data-panel="logs"]):not([hidden])) > * { flex: none; max-width: none; }
+#site > :is([data-panel="dev"], [data-panel="logs"]):not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+[data-panel="dev"] > .dev { flex: 1; min-height: 0; }
+[data-panel="dev"] .dev-main { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+[data-panel="dev"] .dev-list { max-height: 100%; overflow-y: auto; }
+[data-panel="dev"] .dev-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+[data-panel="dev"] .dev-out { flex: 1; height: auto; min-height: 0; }
+[data-panel="dev"] .dev-conf { flex: 1; min-height: 0; overflow-y: auto; }
 [data-panel="logs"] > .logs { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 [data-panel="logs"] .logs > * { flex: none; }
 [data-panel="logs"] .logs > .logs-list:not(:has(> .empty, > .logs-large)) {
@@ -2326,6 +2344,9 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .logs-large-actions button,
 .res-cells .del,
 .clean-all,
+.dev-bar button,
+.dev-conf-foot button,
+.dev-conf-draft button:not(.dev-conf-remove),
 .git-btn {
   height: 26px;
   padding: 0 12px;
@@ -2342,6 +2363,8 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .logs-large-actions button:hover,
 .res-cells .del:hover,
 .clean-all:hover,
+.dev-bar button:hover,
+.dev-conf-foot button:hover,
 .git-btn:hover { border-color: var(--cold); }
 
 /* ---------- Processes window ---------- */

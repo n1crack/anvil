@@ -1,90 +1,263 @@
-import { $, call, el, mode, selected, showTab, tab } from "./app";
+import type { CommandChip, ProcessRow } from "./types";
+import { $, M, PHP_KINDS, PROCESS_KINDS, call, el, invoke, mode, popAt, selected, showError, showTab, snap, tab } from "./app";
 import { type Tail, readTail, tail, termOut } from "./console";
 import { late } from "./late";
-import { loadProcs, procBtn, procCache, procLoading } from "./processes";
-import { ansi, clean } from "./term";
+import { confirmPop, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
+import { type Sgr, clean, colorize, sgr } from "./term";
 
-/* Watch tab: the app's processes on the left, the chosen one's live output on the right,
- * as `php artisan dev` shows them. "All" (the default) merges every process's output,
- * each line tagged with its process's name in its own color. */
+/* Dev tab: the app's dev processes on the left, the chosen one's output live on the right,
+ * as `php artisan dev` shows them in a terminal. "All" (the default) merges every
+ * process's output, each line tagged with its name in its color. Run ▾ runs a one-off
+ * script, listed below the processes until dismissed; Configure edits the processes. */
 
-export const watchSel = new Map<string, string>(); // site name -> "all", "app" or "proc:<id>"
+export const devSel = new Map<string, string>(); // site name -> "all", "app", "proc:<id>" or "once:<id>"
 const COLORS = 6; // name colors pc0…pc5 (blue, purple, pink, orange, green, cyan), as concurrently gives them
-const MAX_LINES = 2000; // merged lines kept in All
+const MAX_LINES = 5000; // lines kept on screen
 
-/** The app's own server when it is a process, then every other process row. */
-const entries = (name: string) =>
-  (procCache.get(name)?.rows ?? [])
-    .filter((r) => r.kind !== "site")
-    .map((r, i) => ({ key: r.main ? "app" : `proc:${r.id}`, row: r, color: `pc${i % COLORS}` }));
-const stateOf = (r) => (r.running ? "on" : r.crashed ? "bad" : "");
+type Item = { key: string; name: string; color: string; running: boolean; crashed: boolean; row?: ProcessRow; run?: CommandChip };
 
-const box = el("div", "watch");
-const list = el("div", "group procs-list watch-list");
+/** The app's own server when it is a process, then every other process, each in its color. */
+const procItems = (name: string): Item[] =>
+  devRows(procCache.get(name)).map((r, i) => ({
+    key: r.main ? "app" : `proc:${r.id}`,
+    name: r.name,
+    color: `pc${i % COLORS}`,
+    running: r.running,
+    crashed: !!r.crashed && !r.running,
+    row: r,
+  }));
+/** Scripts run from Run ▾ that are running or ended and not yet dismissed. */
+const runItems = (name: string): Item[] =>
+  (procCache.get(name)?.commands ?? [])
+    .filter((c) => c.running || c.exit)
+    .map((c) => ({ key: `once:${c.id}`, name: c.name, color: "", running: c.running, crashed: !c.running && c.exit?.code !== 0, run: c }));
+const scriptLabel = (c: CommandChip) => (c.source === "composer.json" ? `composer ${c.name}` : `npm run ${c.name}`);
+
+const box = el("div", "dev");
+const bar = el("div", "dev-bar");
+const main = el("div", "dev-main");
+const list = el("div", "group procs-list dev-list");
 list.tabIndex = 0;
 list.setAttribute("role", "listbox");
 list.setAttribute("aria-label", "Processes");
-const pane = el("section", "console watch-pane");
-const head = el("header", "console-head watch-head");
-const term = termOut("console-out watch-out");
-pane.append(head, term.out);
-box.append(list, pane);
+const pane = el("section", "console dev-pane");
+const head = el("header", "console-head dev-head");
+const term = termOut("console-out dev-out");
+const empty = el("div", "dev-empty");
+pane.append(head, term.out, empty);
+main.append(list, pane);
+const conf = el("div", "dev-conf");
+box.append(bar, main, conf);
 
-// The output shown: which app and entry, each source's reader, for All its unfinished last
-// line, and whether each process ran when last drawn.
-type View = { site: string; key: string; tails: Map<string, Tail>; pending: Map<string, string>; ran: Map<string, boolean> };
+// What is shown: which app and entry, each source's reader, its unfinished last line and
+// the style it ends in, whether each entry ran when last drawn, and the live last line.
+type View = {
+  site: string;
+  key: string;
+  tails: Map<string, Tail>;
+  pending: Map<string, string>;
+  styles: Map<string, Sgr>;
+  ran: Map<string, boolean>;
+  live: HTMLElement | null;
+};
 let view: View | null = null;
+let configuring: string | null = null; // the site whose processes are being configured
+let draft: { name: string; command: string } | null = null; // a process being added
+let confError = "";
 
-/** A process (re)started: its log began again (`Apps::spawn`), so its output here does too. */
+function syncEmpty() {
+  const none = !term.out.querySelector(".dev-line");
+  empty.hidden = !none;
+  pane.classList.toggle("is-empty", none);
+}
+
+/** An entry's output began again (a restart, Clear): its lines go, and so does its reader. */
 function forget(v: View, key: string) {
   v.tails.delete(key);
   v.pending.delete(key);
-  if (v.key === key) term.out.replaceChildren();
-  else if (v.key === "all") for (const l of term.out.querySelectorAll(`[data-key="${key}"]`)) l.remove();
+  v.styles.delete(key);
+  if (v.live?.dataset.key === key) v.live = null;
+  for (const l of term.out.querySelectorAll(`[data-key="${key}"]`)) l.remove();
+  syncEmpty();
 }
 
 function pick(name: string, key: string) {
-  watchSel.set(name, key);
-  drawWatch(name);
-  watchTick();
+  devSel.set(name, key);
+  drawDev(name);
+  devTick();
 }
 
 list.onkeydown = (e) => {
   if ((e.key !== "ArrowDown" && e.key !== "ArrowUp") || !view) return;
   e.preventDefault();
-  const keys = ["all", ...entries(view.site).map((x) => x.key)];
+  const keys = ["all", ...procItems(view.site).map((x) => x.key), ...runItems(view.site).map((x) => x.key)];
   const i = keys.indexOf(view.key) + (e.key === "ArrowDown" ? 1 : -1);
   if (i >= 0 && i < keys.length) pick(view.site, keys[i]);
 };
 
-function item(name: string, key: string, label: string, dot: string, color = "") {
-  const it = el("div", "watch-item");
+/** Start, stop or restart a process; a restart starts its output over. */
+async function runProc(name: string, x: Item, action: string) {
+  const r = x.row!;
+  if (r.main) {
+    await call("app_run", { site: name, action });
+    await loadProcs(name);
+  } else await loadProcs(name, "process_run", { name: r.id, action });
+  if (action === "restart" && view?.site === name) forget(view, x.key);
+}
+
+async function runScript(name: string, c: CommandChip) {
+  if (await loadProcs(name, "command_run", { id: c.id })) pick(name, `once:${c.id}`);
+}
+
+const dismiss = (name: string, c: CommandChip) =>
+  invoke("once_stop", { site: name, id: c.id }).then(
+    () => loadProcs(name),
+    (e) => showError(String(e)),
+  );
+
+async function clearOutput(name: string, x: Item) {
+  // A process that never wrote has no log to empty.
+  await invoke("log_clear", { site: name, source: x.key }).catch(() => {});
+  if (view?.site === name) forget(view, x.key);
+}
+
+/** Right-click on an entry: what can be done to it. */
+async function itemMenu(name: string, x: Item, at: HTMLElement) {
+  const item = (text, action) => M.MenuItem.new({ text, action });
+  const items: Promise<any>[] = [];
+  if (x.run) {
+    const c = x.run;
+    if (c.running) items.push(item("Stop", () => dismiss(name, c)));
+    else items.push(item("Run Again…", () => confirmPop(at, `Run ${scriptLabel(c)}?`, "Run", () => runScript(name, c))));
+    items.push(item("Clear", () => clearOutput(name, x)));
+    if (!c.running) items.push(item("Dismiss", () => dismiss(name, c)));
+  } else {
+    const r = x.row!;
+    if (r.running)
+      items.push(
+        item("Stop", () => runProc(name, x, "stop")),
+        item("Restart", () => runProc(name, x, "restart")),
+      );
+    else items.push(item("Start", () => runProc(name, x, "start")));
+    const web = r.web ?? r.address;
+    if (web) items.push(item("Open in Browser", () => invoke("open_url", { url: web }).catch((e) => showError(String(e)))));
+    items.push(
+      M.PredefinedMenuItem.new({ item: "Separator" }),
+      item("Clear", () => clearOutput(name, x)),
+    );
+  }
+  (await M.Menu.new({ items: await Promise.all(items) })).popup();
+}
+
+function entry(name: string, x: Item) {
+  const it = el("div", "dev-item");
   it.setAttribute("role", "option");
-  it.setAttribute("aria-selected", String(key === view?.key));
-  it.dataset.key = key;
-  it.append(el("span", `dot ${dot}`), el("span", `watch-name ${color}`.trim(), label));
+  it.setAttribute("aria-selected", String(x.key === view?.key));
+  it.dataset.key = x.key;
+  const done = x.run && !x.running;
+  const dot = el("span", `dot ${x.running ? "on" : x.crashed && !x.run ? "bad" : ""}`);
+  if (done) dot.classList.add("dot-none");
+  it.append(dot, el("span", `dev-name ${x.color}`.trim(), x.name));
+  if (x.run) {
+    const c = x.run;
+    if (done) {
+      const ok = c.exit!.code === 0;
+      const mark = el("span", ok ? "dev-exit" : "dev-exit bad", ok ? "✓" : String(c.exit!.code ?? "signal"));
+      mark.title = ok ? "Succeeded" : c.exit!.code == null ? "Ended by a signal" : `Exited with code ${c.exit!.code}`;
+      it.append(mark);
+    }
+    const x2 = procBtn("×", c.running ? `Stop and dismiss ${c.name}` : `Dismiss ${c.name}`, () => dismiss(name, c));
+    x2.className = "dev-dismiss";
+    x2.title = c.running ? "Stop and dismiss" : "Dismiss";
+    it.append(x2);
+  }
   it.onclick = () => {
-    pick(name, key);
+    pick(name, x.key);
     list.focus();
   };
+  if (x.key !== "all")
+    it.oncontextmenu = (e) => {
+      e.preventDefault();
+      itemMenu(name, x, it);
+    };
   return it;
 }
 
-/** Called whenever the Overview's processes are drawn, and when the tab is shown. */
-export function drawWatch(name: string) {
-  const root = $("#site");
-  const panel = $('[data-panel="watch"]', root);
-  if (!panel) return;
-  const all = entries(name);
-  // Like Git: no tab for an app without processes, once that is known.
-  $('.tabs [data-tab="watch"]', root).hidden = !all.length;
-  if (procCache.has(name) && !all.length && tab === "watch") showTab(root, "overview");
-  if (!all.length) return panel.replaceChildren();
+/** Run ▾: the app's one-off scripts, each with its script muted; choosing one asks first. */
+function runMenu(name: string, btn: HTMLElement) {
+  const cmds = procCache.get(name)?.commands ?? [];
+  const pop = el("div", "dev-run-menu");
+  pop.setAttribute("role", "menu");
+  const sources = [...new Set(cmds.map((c) => c.source))];
+  for (const src of sources) {
+    if (sources.length > 1) pop.append(el("div", "dev-run-group", src));
+    for (const c of cmds.filter((c) => c.source === src)) {
+      const b = el("button", "dev-run-item");
+      b.setAttribute("role", "menuitem");
+      b.append(el("span", "dev-run-name", c.name), el("span", "dev-run-cmd", c.command));
+      b.title = c.command;
+      b.onclick = () => {
+        close();
+        confirmPop(btn, `Run ${scriptLabel(c)}?`, "Run", () => runScript(name, c));
+      };
+      pop.append(b);
+    }
+  }
+  pop.addEventListener("keydown", (e) => {
+    const items = [...pop.querySelectorAll("button")] as HTMLElement[];
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "ArrowDown") items[Math.min(i + 1, items.length - 1)]?.focus();
+    else if (e.key === "ArrowUp") items[Math.max(i - 1, 0)]?.focus();
+    else return;
+    e.preventDefault();
+  });
+  const close = popAt(btn, pop, pop.querySelector("button"));
+}
 
-  let key = watchSel.get(name) ?? "all";
-  if (key !== "all" && !all.some((x) => x.key === key)) key = "all";
+function drawBar(name: string) {
+  bar.replaceChildren();
+  const cmds = procCache.get(name)?.commands ?? [];
+  if (cmds.length && configuring !== name) {
+    const run = el("button", "dev-run", "Run ▾");
+    run.title = "Run one of the app’s scripts";
+    run.setAttribute("aria-haspopup", "menu");
+    run.onclick = () => runMenu(name, run);
+    bar.append(run);
+  }
+  const cfg = el("button", "dev-configure", "Configure");
+  cfg.setAttribute("aria-pressed", String(configuring === name));
+  cfg.title = "Choose the processes Dev runs and their commands";
+  cfg.onclick = () => {
+    configuring = configuring === name ? null : name;
+    draft = null;
+    confError = "";
+    drawDev(name);
+    devTick();
+  };
+  bar.append(cfg);
+}
+
+/** Called whenever the app's processes are drawn, and when the tab is shown. */
+export function drawDev(name: string) {
+  const root = $("#site");
+  const panel = $('[data-panel="dev"]', root);
+  if (!panel) return;
+  const o = procCache.get(name);
+  const procs = procItems(name);
+  const runs = runItems(name);
+  const kind = snap?.sites.find((s) => s.name === name)?.kind ?? "";
+  // Apps that run processes, or could; a plain folder has nothing to run.
+  const show = !!(procs.length || o?.commands.length || PHP_KINDS.has(kind) || PROCESS_KINDS.has(kind));
+  $('.tabs [data-tab="dev"]', root).hidden = !show;
+  if (o && !show && tab === "dev") showTab(root, "overview");
+  if (!show) return panel.replaceChildren();
+
+  if (configuring && configuring !== name) configuring = null;
+  const items = [...procs, ...runs];
+  let key = devSel.get(name) ?? "all";
+  if (key !== "all" && !items.some((x) => x.key === key)) key = "all";
   if (view?.site !== name || view.key !== key) {
-    view = { site: name, key, tails: new Map(), pending: new Map(), ran: new Map() };
+    view = { site: name, key, tails: new Map(), pending: new Map(), styles: new Map(), ran: new Map(), live: null };
     term.out.replaceChildren();
     term.atEnd = true;
   }
@@ -92,98 +265,298 @@ export function drawWatch(name: string) {
     panel.replaceChildren(box);
     term.restore();
   }
-
   const v = view;
-  for (const x of all) {
-    if (v.ran.get(x.key) === false && x.row.running) forget(v, x.key);
-    v.ran.set(x.key, !!x.row.running);
+  for (const x of items) {
+    if (v.ran.get(x.key) === false && x.running) forget(v, x.key);
+    v.ran.set(x.key, x.running);
   }
-  const running = all.filter((x) => x.row.running).length;
-  const crashed = all.some((x) => x.row.crashed && !x.row.running);
+
+  drawBar(name);
+  main.hidden = configuring === name;
+  conf.hidden = configuring !== name;
+  if (configuring === name) return drawConf(name);
+
+  const running = procs.filter((x) => x.running).length;
+  const anyBad = procs.some((x) => x.crashed);
   list.replaceChildren(
-    item(name, "all", "All", crashed ? "bad" : running ? "on" : ""),
-    ...all.map((x) => item(name, x.key, x.row.name, stateOf(x.row), x.color)),
+    entry(name, { key: "all", name: "All", color: "", running: !!running, crashed: anyBad }),
+    ...procs.map((x) => entry(name, x)),
   );
+  if (!procs.length) list.append(el("p", "dev-none", "No processes yet. Configure adds one."));
+  if (runs.length) list.append(el("div", "dev-divider"), ...runs.map((x) => entry(name, x)));
 
   head.replaceChildren();
   const actions = el("span", "proc-actions");
-  const one = all.find((x) => x.key === key);
+  const one = items.find((x) => x.key === key);
   if (!one) {
-    head.append(el("span", "console-title", "All"), el("span", "watch-cmd", `${running} of ${all.length} running`));
-    // As the Overview's header: name null runs every process and the app's own server.
-    const run = (action) => loadProcs(name, "process_run", { name: null, action });
-    if (running < all.length) actions.append(procBtn("▶ Start all", "Start all processes", () => run("start")));
-    if (running) actions.append(procBtn("■ Stop all", "Stop all processes", () => run("stop")));
-  } else {
-    const r = one.row;
-    head.append(el("span", "console-title", r.name), el("span", "watch-cmd", r.command));
-    const run = (action) =>
-      (r.main ? call("app_run", { site: name, action }) : loadProcs(name, "process_run", { name: r.id, action })).then(
-        () => action === "restart" && view === v && forget(v, key),
+    head.append(el("span", "console-title", "All"), el("span", "dev-cmd", `${running} of ${procs.length} running`));
+  } else if (one.run) {
+    const c = one.run;
+    head.append(el("span", "console-title", c.name), el("span", "dev-cmd", scriptLabel(c)));
+    if (c.running) actions.append(procBtn("■ Stop", `Stop ${scriptLabel(c)}`, () => dismiss(name, c)));
+    else {
+      const again = procBtn("↻ Run again", `Run ${scriptLabel(c)} again`, () =>
+        confirmPop(again, `Run ${scriptLabel(c)}?`, "Run", () => runScript(name, c)),
       );
+      actions.append(again);
+    }
+  } else {
+    const r = one.row!;
+    head.append(el("span", "console-title", r.name), el("span", "dev-cmd", r.command));
     if (r.running || r.crashed) {
-      actions.append(procBtn("Restart", `Restart ${r.name}`, () => run("restart")));
-      actions.append(procBtn("■", r.running ? `Stop ${r.name}` : `Dismiss ${r.name}`, () => run("stop")));
-    } else actions.append(procBtn("▶ Start", `Start ${r.name}`, () => run("start")));
+      actions.append(procBtn("Restart", `Restart ${r.name}`, () => runProc(name, one, "restart")));
+      actions.append(procBtn("■", r.running ? `Stop ${r.name}` : `Dismiss ${r.name}`, () => runProc(name, one, "stop")));
+    } else {
+      const start = procBtn("▶ Start", `Start ${r.name}`, () => runProc(name, one, "start"));
+      start.classList.add("dev-head-start");
+      actions.append(start);
+    }
   }
   head.append(actions);
-  term.out.dataset.empty = (one ? one.row.running : running) ? "No output yet" : "Not running";
+
+  // Nothing on screen yet: whether it runs, and ▶ for a stopped process.
+  empty.replaceChildren();
+  const stopped = one ? !one.running : !running;
+  if (!stopped) empty.append(el("span", null, "No output yet"));
+  else if (one?.run) empty.append(el("span", null, "No output"));
+  else {
+    empty.append(el("span", null, "Not running"));
+    if (one || procs.length) {
+      const go = one
+        ? procBtn("▶", `Start ${one.name}`, () => runProc(name, one, "start"))
+        : procBtn("▶", "Start all processes", () => loadProcs(name, "process_run", { name: null, action: "start" }));
+      go.title = one ? `Start ${one.name}` : "Start Dev";
+      empty.append(go);
+    }
+  }
+  syncEmpty();
 }
 
-/** New output for what is shown: one process redrawn whole (so \r and colors come out
- * right), or All's new complete lines appended in the order they arrive. */
-export async function watchTick() {
+/** One line of output, its style carried on in `s`; in All, tagged with its process. */
+function line(x: Item, text: string, s: Sgr, width: number) {
+  const d = el("div", "dev-line");
+  d.dataset.key = x.key;
+  // The text in its own column, so a wrapped line stays right of the tag.
+  const body = el("span", "dev-text");
+  body.append(colorize(clean(text, true), s));
+  if (width >= 0) d.append(el("span", `dev-tag ${x.color}`.trim(), `${x.name.padEnd(width)} │ `));
+  d.append(body);
+  return d;
+}
+
+/** New output appended as it comes, nothing drawn twice. One process's unfinished last
+ * line (a progress bar redrawn with \r) is drawn live; All shows a line once it ends. */
+function append(v: View, x: Item, text: string, width: number) {
+  const lines = ((v.pending.get(x.key) ?? "") + text).split("\n");
+  const rest = lines.pop()!;
+  v.pending.set(x.key, rest);
+  if (!v.styles.has(x.key)) v.styles.set(x.key, sgr());
+  const s = v.styles.get(x.key)!;
+  const out = document.createDocumentFragment();
+  for (const l of lines) out.append(line(x, l, s, width));
+  v.live?.remove();
+  v.live = null;
+  if (width < 0 && rest) {
+    const live = line(x, rest, { ...s }, width);
+    v.live = live;
+    out.append(live);
+  }
+  term.out.append(out);
+  while (term.out.childElementCount > MAX_LINES) term.out.firstElementChild.remove();
+  term.follow();
+  syncEmpty();
+}
+
+/** New output for what is shown. */
+export async function devTick() {
   const v = view;
-  if (!v) return;
-  const all = entries(v.site);
-  const shown = v.key === "all" ? all : all.filter((x) => x.key === v.key);
-  const width = Math.max(...shown.map((x) => x.row.name.length));
+  if (!v || configuring === v.site) return;
+  const procs = procItems(v.site);
+  const shown = v.key === "all" ? procs : [...procs, ...runItems(v.site)].filter((x) => x.key === v.key);
+  const width = v.key === "all" ? Math.max(0, ...shown.map((x) => x.name.length)) : -1;
   await Promise.all(
     shown.map(async (x) => {
       if (!v.tails.has(x.key)) v.tails.set(x.key, tail(v.site, x.key));
       const t = v.tails.get(x.key)!;
       const text = await readTail(t);
-      if (!text || v !== view || v.tails.get(x.key) !== t) return;
-      if (v.key !== "all") {
-        term.out.replaceChildren(ansi(clean(t.raw, true)));
-        return term.follow();
+      if (v !== view || v.tails.get(x.key) !== t) return;
+      if (t.cleared) {
+        t.cleared = false;
+        forget(v, x.key);
+        v.tails.set(x.key, t);
       }
-      // ponytail: a line shows once it ends; a progress bar without \n waits for its last redraw.
-      const lines = ((v.pending.get(x.key) ?? "") + text).split("\n");
-      v.pending.set(x.key, lines.pop()!);
-      for (const l of lines) {
-        const line = el("div", "watch-line");
-        line.dataset.key = x.key;
-        // The text in its own column, so a wrapped line stays right of the tag.
-        const body = el("span", "watch-text");
-        body.append(ansi(clean(l, true)));
-        line.append(el("span", `watch-tag ${x.color}`, `${x.row.name.padEnd(width)} │ `), body);
-        term.out.append(line);
-      }
-      while (term.out.childElementCount > MAX_LINES) term.out.firstElementChild.remove();
-      term.follow();
+      if (text) append(v, x, text, width);
     }),
   );
 }
 
-/** Open the tab on one process (a row's Watch button). */
-export function openWatch(name: string, key: string) {
-  watchSel.set(name, key);
-  showTab($("#site"), "watch");
+/* ---------- Configure: the processes as a table ---------- */
+
+/** Save one change to a process; a failure shows below the table. */
+async function save(name: string, args: Record<string, unknown>, cmd = "set_process") {
+  try {
+    procCache.set(name, await invoke(cmd, { site: name, ...args }));
+    confError = "";
+    return true;
+  } catch (e) {
+    confError = String(e);
+    return false;
+  } finally {
+    if (selected === name) {
+      drawProcs(name);
+      drawConf(name, true);
+    }
+  }
 }
 
-late.drawWatch = drawWatch;
-late.watchTab = () => {
-  if (!selected) return;
-  drawWatch(selected);
-  watchTick();
-};
-late.openWatch = openWatch;
+function check(checked: boolean, aria: string, onchange: (on: boolean) => void) {
+  const c = el("input");
+  c.type = "checkbox";
+  c.setAttribute("role", "switch");
+  c.checked = checked;
+  c.setAttribute("aria-label", aria);
+  c.onchange = () => onchange(c.checked);
+  return c;
+}
 
-// Only while the tab is shown: output every second, the processes' states every two.
+function cell(...kids: (Node | string)[]) {
+  const td = el("td");
+  td.append(...kids);
+  return td;
+}
+
+/** A one-line field: Return saves, Esc puts back what it was. */
+function field(value: string, aria: string, placeholder: string, onsave: ((v: string) => void) | null) {
+  const input = el("input", "dev-conf-input");
+  input.value = input.defaultValue = value;
+  input.spellcheck = false;
+  input.placeholder = placeholder;
+  input.setAttribute("aria-label", aria);
+  input.onkeydown = (e) => {
+    if (e.key === "Escape") input.value = input.defaultValue;
+    if (onsave && (e.key === "Enter" || e.key === "Escape")) input.blur();
+  };
+  if (onsave) input.onchange = () => input.value.trim() !== input.defaultValue && onsave(input.value.trim());
+  return input;
+}
+
+function drawConf(name: string, force = false) {
+  // Someone is typing: a poll doesn't wipe it.
+  const active = document.activeElement as HTMLInputElement | null;
+  if (!force && active && conf.contains(active) && active.value !== active.defaultValue) return;
+  const rows = devRows(procCache.get(name));
+  const table = el("table", "dev-conf-table");
+  const headRow = el("tr");
+  for (const [h, tip] of [
+    ["Name", ""],
+    ["Command", "Runs in the app’s folder"],
+    ["Dev start", "Started by the header’s Start"],
+    ["With Anvil", "Started when Anvil starts"],
+    ["", ""],
+  ]) {
+    const th = el("th", null, h);
+    if (tip) th.title = tip;
+    headRow.append(th);
+  }
+  const thead = el("thead");
+  thead.append(headRow);
+  const body = el("tbody");
+  for (const r of rows) {
+    const tr = el("tr");
+    const id = r.main ? "" : r.id;
+    const dev = check(r.main || !r.manual, `${r.name} in Dev start`, (on) => save(name, { id, manual: !on }));
+    if (r.main) {
+      dev.disabled = true;
+      dev.title = "The app itself always starts with Dev";
+    }
+    const remove = r.main ? "" : procBtn("×", `Remove ${r.name}`, () => save(name, { id, hidden: true }));
+    if (remove) {
+      remove.className = "icon-btn dev-conf-remove";
+      remove.title = r.added ? "Remove" : "Remove (Reset to detected brings it back)";
+    }
+    tr.append(
+      cell(el("span", "dev-conf-name", r.name)),
+      cell(field(r.command, `Command for ${r.name}`, "command", (c) => save(name, { id, command: c }))),
+      cell(dev),
+      cell(check(r.autostart, `Start ${r.name} with Anvil`, (on) => save(name, { id, autostart: on }))),
+      cell(remove),
+    );
+    body.append(tr);
+  }
+  if (draft) {
+    const d = draft;
+    const tr = el("tr", "dev-conf-draft");
+    const n = field(d.name, "Name of the new process", "name", null);
+    const c = field(d.command, "Command of the new process", "command", null);
+    n.oninput = () => (d.name = n.value);
+    c.oninput = () => (d.command = c.value);
+    const add = async () => {
+      if (await save(name, { name: d.name.trim(), command: d.command.trim() }, "process_add")) draft = null;
+      drawConf(name, true);
+    };
+    for (const i of [n, c])
+      i.onkeydown = (e) => {
+        if (e.key === "Enter") add();
+        if (e.key === "Escape") {
+          draft = null;
+          confError = "";
+          drawConf(name, true);
+        }
+      };
+    const addBtn = procBtn("Add", "Add the process", add);
+    const cancel = procBtn("×", "Cancel adding", () => {
+      draft = null;
+      confError = "";
+      drawConf(name, true);
+    });
+    cancel.className = "icon-btn dev-conf-remove";
+    tr.append(cell(n), cell(c), cell(), cell(), cell(addBtn, cancel));
+    body.append(tr);
+  }
+  table.append(thead, body);
+  const error = el("p", "error-text dev-conf-error", confError);
+  error.hidden = !confError;
+  const foot = el("div", "dev-conf-foot");
+  const plus = el("button", null, "+ Add process");
+  plus.disabled = !!draft;
+  plus.onclick = () => {
+    draft = { name: "", command: "" };
+    drawConf(name, true);
+    ($(".dev-conf-draft input", conf) as HTMLInputElement | null)?.focus();
+  };
+  const reset = el("button", null, "Reset to detected");
+  reset.title = "What the app’s dev script (php artisan dev, package.json) starts";
+  reset.onclick = () => confirmPop(reset, "Reset to the detected processes?", "Reset", () => save(name, {}, "processes_reset"));
+  const done = el("button", null, "Done");
+  done.onclick = () => {
+    configuring = null;
+    draft = null;
+    confError = "";
+    drawDev(name);
+    devTick();
+  };
+  foot.append(plus, reset, el("span", "spacer"), done);
+  conf.replaceChildren(table, error, foot);
+}
+
+/** Open the tab, on one entry if given. */
+export function openDev(name: string, key?: string) {
+  if (key) devSel.set(name, key);
+  showTab($("#site"), "dev");
+}
+
+late.drawDev = drawDev;
+late.devTab = () => {
+  if (!selected) return;
+  drawDev(selected);
+  devTick();
+};
+late.openDev = openDev;
+
+// Only while the tab is shown: output twice a second, the processes' states every two.
 let ticks = 0;
 setInterval(() => {
-  if (document.hidden || mode !== "apps" || !selected || tab !== "watch") return;
-  if (view?.site === selected) watchTick();
-  if (++ticks % 2 === 0 && !procLoading.has(selected)) loadProcs(selected);
-}, 1000);
+  if (document.hidden || mode !== "apps" || !selected || tab !== "dev") return;
+  if (view?.site === selected) devTick();
+  if (++ticks % 4 === 0 && !procLoading.has(selected)) loadProcs(selected);
+}, 500);

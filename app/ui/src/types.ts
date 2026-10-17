@@ -71,6 +71,10 @@ export interface Process {
   edited: boolean;
   pinned: boolean;
   top: boolean;
+  /** Left out of Dev start. */
+  manual: boolean;
+  /** Added in Anvil, not detected. */
+  added: boolean;
 }
 
 export interface ProcessRow extends Process {
@@ -90,6 +94,7 @@ export interface CommandChip {
   name: string;
   id: string;
   command: string;
+  source: "package.json" | "composer.json";
   running: boolean;
   exit: Exit | null;
 }
@@ -170,6 +175,7 @@ export interface Settings {
   git_clients: string[];
   theme: string | null;
   dock_icon: boolean;
+  trim_app_logs: boolean;
   https_default: boolean;
   login: boolean;
   config_dir: string;
