@@ -477,7 +477,8 @@ button, select, input { font: inherit; color: inherit; }
 /* The app's name, actions and tabs stay in place while a tab's content scrolls. */
 .site-top {
   position: sticky;
-  top: 0;
+  /* Sticky stops at the pane's padding; -8px reaches its top edge, so nothing shows above. */
+  top: -8px;
   z-index: 2;
   margin: -8px -36px 0;
   padding: 8px 36px 0;
