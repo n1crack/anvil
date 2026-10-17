@@ -1259,9 +1259,83 @@ pub fn clean(site: &Site, path: &str, app_running: bool) -> Result<u64> {
     Ok(freed)
 }
 
+/// The newest file change under `dir` in unix seconds: when the code was last
+/// edited. Dependency, build and hidden folders are skipped. It stops after 5000
+/// entries or 300 ms and returns the newest seen so far.
+pub fn touched(dir: &Path) -> Option<u64> {
+    const SKIP: [&str; 9] = [
+        "node_modules",
+        "vendor",
+        ".git",
+        "storage",
+        "dist",
+        "build",
+        "target",
+        ".next",
+        ".nuxt",
+    ];
+    let start = std::time::Instant::now();
+    let mut seen = 0;
+    let mut newest = None;
+    let mut dirs = vec![dir.to_path_buf()];
+    while let Some(d) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            seen += 1;
+            if seen > 5000 || start.elapsed() > std::time::Duration::from_millis(300) {
+                return newest;
+            }
+            let Ok(ty) = e.file_type() else { continue };
+            if ty.is_dir() {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                if !name.starts_with('.') && !SKIP.contains(&&*name) {
+                    dirs.push(e.path());
+                }
+            } else if let Some(t) = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            {
+                newest = newest.max(Some(t.as_secs()));
+            }
+        }
+    }
+    newest
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn touched_skips_dependencies_and_hidden_folders() {
+        let dir = std::env::temp_dir().join(format!("anvil-touched-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let now = std::time::SystemTime::now();
+        let old = now - std::time::Duration::from_secs(3600);
+        for (file, at) in [
+            ("src/app.rs", old),
+            ("node_modules/x/index.js", now),
+            (".idea/workspace.xml", now),
+            ("vendor/a.php", now),
+        ] {
+            let path = dir.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::File::create(&path)
+                .unwrap()
+                .set_modified(at)
+                .unwrap();
+        }
+        let secs =
+            |t: std::time::SystemTime| t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        assert_eq!(touched(&dir), Some(secs(old)));
+        assert_eq!(touched(&dir.join("missing")), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn usage_sums_a_group() {
