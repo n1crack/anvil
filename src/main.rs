@@ -5,20 +5,20 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
-/// `--help` in One Dark's colors (the 256-color versions, which every terminal
-/// shows): headings in its orange, what you can type in blue, placeholders grey.
+/// `--help` colors: khaki headings, commands and flags in a soft green,
+/// placeholders grey. The descriptions get an off-white in `help_text`.
 const HELP_STYLES: clap::builder::Styles = {
     use clap::builder::styling::{Ansi256Color, Color, Style};
     const fn fg(c: u8) -> Style {
         Style::new().fg_color(Some(Color::Ansi256(Ansi256Color(c))))
     }
     clap::builder::Styles::styled()
-        .header(fg(173).bold())
-        .usage(fg(173).bold())
-        .literal(fg(75))
+        .header(fg(144).bold())
+        .usage(fg(144).bold())
+        .literal(fg(150))
         .placeholder(fg(245))
         .error(fg(168).bold())
-        .valid(fg(114))
+        .valid(fg(150))
         .invalid(fg(180))
 };
 
@@ -394,7 +394,14 @@ fn run() -> Result<()> {
         let tool = args.next().context("usage: anvil shim <tool> [args…]")?;
         return shim(&tool, args);
     }
-    let cmd = Cli::parse().cmd;
+    let cmd = match Cli::try_parse() {
+        Ok(cli) => cli.cmd,
+        Err(e) if e.kind() == clap::error::ErrorKind::DisplayHelp && style::enabled() => {
+            print!("{}", style::help_text(&e.render().ansi().to_string()));
+            std::process::exit(0);
+        }
+        Err(e) => e.exit(),
+    };
     // A broken config must not stop an uninstall; it then keeps ~/.anvil.
     let loaded = load();
     let config_ok = loaded.is_ok();

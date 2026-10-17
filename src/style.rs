@@ -30,6 +30,21 @@ fn paint(code: &str, s: impl Display, stderr: bool) -> String {
     }
 }
 
+/// Whether stdout gets color.
+pub fn enabled() -> bool {
+    color(false)
+}
+
+/// Rendered `--help` with its plain text (the descriptions) in an off-white, a
+/// step softer than the terminal's white; clap's own styles stay as they are.
+pub fn help_text(ansi: &str) -> String {
+    const SOFT: &str = "\x1b[38;5;252m";
+    format!(
+        "{SOFT}{}\x1b[0m",
+        ansi.replace("\x1b[0m", &format!("\x1b[0m{SOFT}"))
+    )
+}
+
 /// One Dark's palette: 24-bit where the terminal says it can (COLORTERM), else
 /// the nearest of the 256 colors every terminal has.
 fn tone(rgb: (u8, u8, u8), ansi256: u8) -> String {
@@ -84,4 +99,18 @@ pub fn commands(s: &str) -> String {
             _ => part.to_string(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_text_softens_plain_text_after_each_reset() {
+        let out = help_text("\x1b[1mUsage:\x1b[0m anvil");
+        assert_eq!(
+            out,
+            "\x1b[38;5;252m\x1b[1mUsage:\x1b[0m\x1b[38;5;252m anvil\x1b[0m"
+        );
+    }
 }
