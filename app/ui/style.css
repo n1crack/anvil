@@ -386,32 +386,78 @@ button, select, input { font: inherit; color: inherit; }
   font-variant-numeric: tabular-nums;
 }
 
-/* Fold control for a site's linked domains. */
+/* Fold control for a site's linked domains: a fixed trailing slot on every row
+ * (empty without aliases), so the kind labels before it share one column. */
 .item .disclosure {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 26px;
-  padding: 0 8px 0 10px;
-  border-radius: 13px;
-  background: var(--steel-hover);
+  justify-content: flex-end;
+  gap: 3px;
+  width: 30px;
+  height: 22px;
+  padding-right: 4px;
+  border-radius: 11px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.item .disclosure:hover {
+.item .disclosure:not(:empty):hover {
   background: var(--steel-raised);
   color: var(--text);
 }
 
+/* A fixed square, so it turns in place. */
 .item .chevron {
-  display: inline-block;
-  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  font-size: 14px;
   line-height: 1;
+  transform-origin: 50% 50%;
   transition: transform 0.22s ease;
 }
+
+/* Running: a badge on the mark's corner, with a ring cut out of the mark so it
+ * reads on any row background (the native vibrancy, hover, selection). */
+.item .mark-box { position: relative; width: 32px; height: 32px; }
+.item .mark-box.running .mark {
+  -webkit-mask: radial-gradient(circle at calc(100% - 3px) calc(100% - 3px), transparent 6px, #000 6.5px);
+  mask: radial-gradient(circle at calc(100% - 3px) calc(100% - 3px), transparent 6px, #000 6.5px);
+}
+.run-badge {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.run-badge.warm { background: var(--heat-white); animation: pulse 1.2s ease-in-out infinite; }
+
+/* Hovering a row: a short summary next to the list. */
+.hover-card {
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  gap: 2px;
+  max-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  pointer-events: none;
+}
+.hover-card > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hover-card .muted { color: var(--muted); }
+.hover-card .hc-addr { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; }
+.hover-card .hc-run { color: var(--ok-text); }
 
 .item[aria-expanded="true"] .chevron { transform: rotate(90deg); }
 
@@ -632,6 +678,12 @@ button, select, input { font: inherit; color: inherit; }
   gap: 8px;
   flex: none;
 }
+
+/* Hovering the state lists what runs (popAt). */
+.run-pop { display: grid; gap: 4px; min-width: 180px; }
+.run-pop-row { display: flex; align-items: center; gap: 8px; }
+.run-pop-name { font-weight: 600; }
+.run-pop-where { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; }
 
 .run-box .state {
   display: inline-flex;
@@ -2353,7 +2405,7 @@ body.activity {
 
 @media (prefers-color-scheme: light) {
   .act-row.starting .act-status { color: #a15c00; }
-  .act-status .dot.amber { background: #d98a00; }
+  .act-status .dot.amber, .run-badge.warm { background: #d98a00; }
 }
 
 /* A small confirm bubble next to the button that asked. */

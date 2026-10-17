@@ -246,8 +246,17 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
   else $(".sub", text).remove();
   if (!path && !child) b.classList.add("compact");
 
+  // Kind labels line up in one column: the version comes before the kind, and every
+  // row ends in the same fixed slot (the aliases' "2 ›", or empty).
   const end = document.createElement("span");
   end.className = "end";
+  // Only call out sites that differ from the default.
+  if (s.php_pinned) {
+    const ver = document.createElement("span");
+    ver.className = "ver";
+    ver.textContent = `PHP ${s.php}`;
+    end.append(ver);
+  }
   if (child) end.append(el("span", "alias", "alias"));
   // A plain PHP app shows only its pinned version, not "PHP" twice.
   // Under a type heading the type would only repeat it.
@@ -257,26 +266,10 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
     kind.textContent = snap.kinds.find(([id]) => id === s.kind)?.[1] ?? s.kind;
     end.append(kind);
   }
-  // Only call out sites that differ from the default.
-  if (s.php_pinned) {
-    const ver = document.createElement("span");
-    ver.className = "ver";
-    ver.textContent = `PHP ${s.php}`;
-    end.append(ver);
-  }
-  // The running dot always sits last, as in the services list.
-  const state = snap.app_states[s.name];
-  if (state) {
-    const dot = document.createElement("span");
-    dot.className = `dot ${state === "running" ? "on" : "warm"}`;
-    dot.title = state === "running" ? "Running" : "Starting";
-    end.append(dot);
-  }
+  const d = el("span", "disclosure");
   if (kids) {
     const open = !collapsed.has(s.name);
     b.setAttribute("aria-expanded", open);
-    const d = document.createElement("span");
-    d.className = "disclosure";
     d.title = open ? "Hide linked domains" : "Show linked domains";
     d.innerHTML = `<span class="count"></span><span class="chevron" aria-hidden="true">›</span>`;
     $(".count", d).textContent = kids;
@@ -284,17 +277,95 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
       e.stopPropagation();
       toggle(s.name);
     };
-    end.append(d);
   }
+  end.append(d);
   if (child) b.append(text, end);
-  else b.append(mark(s), text, end);
+  else {
+    // Running: a small badge on the mark's corner (amber while starting).
+    const m = el("span", "mark-box");
+    m.append(mark(s));
+    const state = snap.app_states[s.name];
+    if (state) {
+      const badge = el("span", `run-badge ${state === "running" ? "on" : "warm"}`);
+      badge.title = state === "running" ? "Running" : "Starting";
+      m.append(badge);
+      m.classList.add("running");
+    }
+    b.append(m, text, end);
+  }
   b.onclick = () => select(s.name);
   b.oncontextmenu = (e) => {
     e.preventDefault();
+    hideCard();
+    cardMuted = s.name;
     select(s.name);
     siteMenu(s);
   };
+  b.onmouseenter = (e) => {
+    // The list redraws while the mouse rests on it (a starting app polls): keep that row's card.
+    if (cardFor === s.name) return;
+    hideCard();
+    // Not while dragging, nor on a row whose context menu was opened until the mouse leaves it.
+    if (e.buttons || cardMuted === s.name) return;
+    cardFor = s.name;
+    hoverTimer = setTimeout(() => showCard(s, b), 500);
+  };
+  b.onmouseleave = () => {
+    hideCard();
+    cardMuted = null;
+  };
+  b.onmousedown = hideCard;
   return b;
+}
+
+/* ---------- Hover card ---------- */
+
+let hoverTimer = null;
+let cardMuted = null; // the row a context menu was opened on
+let cardFor = null; // the site whose card is shown or on its way
+const cardProcs = new Map(); // site name -> { at, req: promise of the `processes` overview }
+
+function hideCard() {
+  clearTimeout(hoverTimer);
+  hoverTimer = cardFor = null;
+  $(".hover-card")?.remove();
+}
+
+/** A short summary next to the list: kind, address, what runs, branch and last edit. */
+function showCard(s, row) {
+  const card = el("div", "hover-card");
+  card.setAttribute("role", "tooltip");
+  const draw = () => {
+    const lines = [el("strong", null, s.name), el("span", "muted", kindLabel(s.kind))];
+    if (serves(s)) lines.push(el("span", "hc-addr", url(s).replace("https://", "")));
+    const o = cardProcs.get(s.name)?.data;
+    const up = o
+      ? [...(o.rows ?? []).filter((r) => r.kind !== "site" && r.running).map((r) => r.name),
+         ...(o.containers ?? []).filter((c) => c.state === "running").map((c) => c.service)]
+      : [];
+    const state = snap.app_states[s.name];
+    if (up.length) lines.push(el("span", "hc-run", `${up.length} running: ${up.join(", ")}`));
+    else if (state) lines.push(el("span", "hc-run", state === "running" ? "Running" : "Starting"));
+    const g = typeof gitCache === "undefined" ? null : gitCache.get(s.name);
+    if (g && !g.error && g.branch) lines.push(el("span", "branch", g.branch));
+    const secs = touchedOf(s, () => card.isConnected && draw());
+    if (secs) lines.push(el("span", "muted", `edited ${ago(new Date(secs * 1000))}`));
+    card.replaceChildren(...lines);
+  };
+  // `processes` at most once per hover, kept ~10 s.
+  const c = cardProcs.get(s.name);
+  if (!c || Date.now() - c.at > 10000) {
+    const entry = { at: Date.now(), data: c?.data };
+    cardProcs.set(s.name, entry);
+    invoke("processes", { site: s.name })
+      .then((o) => { entry.data = o; }, () => {})
+      .then(() => card.isConnected && draw());
+  }
+  draw();
+  const r = row.getBoundingClientRect();
+  const list = $("#list").getBoundingClientRect();
+  Object.assign(card.style, { left: `${list.right + 8}px`, top: `${Math.max(8, r.top)}px` });
+  document.body.append(card);
 }
 
 /** "Laravel only" with a Clear button above a filtered list. */
@@ -554,6 +625,21 @@ function ago(d) {
 
 const touchedCache = new Map(); // site name -> { at: ms when asked, secs: newest edit }
 
+/** The newest edit (seconds) as known; asks again after 30 s and calls `done` with the answer. */
+function touchedOf(s, done) {
+  const t = touchedCache.get(s.name);
+  if (!t || Date.now() - t.at > 30000) {
+    touchedCache.set(s.name, { at: Date.now(), secs: t?.secs });
+    invoke("touched", { site: s.name })
+      .catch(() => null)
+      .then((secs) => {
+        touchedCache.set(s.name, { at: Date.now(), secs });
+        done();
+      });
+  }
+  return t?.secs;
+}
+
 /** The line under the name: address (+ aliases), type, last edit and git branch. */
 function drawMeta() {
   const box = $("#site .meta");
@@ -591,18 +677,9 @@ function drawMeta() {
     parts.push(addr);
   }
   parts.push(el("span", null, kindLabel(s.kind)));
-  const t = touchedCache.get(s.name);
-  if (!t || Date.now() - t.at > 30000) {
-    touchedCache.set(s.name, { at: Date.now(), secs: t?.secs });
-    invoke("touched", { site: s.name })
-      .catch(() => null)
-      .then((secs) => {
-        touchedCache.set(s.name, { at: Date.now(), secs });
-        if (selected === s.name) drawMeta();
-      });
-  }
-  if (t?.secs) {
-    const d = new Date(t.secs * 1000);
+  const secs = touchedOf(s, () => selected === s.name && drawMeta());
+  if (secs) {
+    const d = new Date(secs * 1000);
     const edited = el("span", null, `edited ${ago(d)}`);
     edited.title = `Last file change ${d.toLocaleString()}`;
     parts.push(edited);
@@ -648,7 +725,7 @@ function popAt(anchor, pop, focus) {
   Object.assign(pop.style, { top: `${r.bottom + window.scrollY + 6}px`, right: `${document.documentElement.clientWidth - r.right}px` });
   document.body.append(pop);
   document.addEventListener("mousedown", outside, true);
-  focus.focus();
+  focus?.focus();
   return close;
 }
 
@@ -1332,6 +1409,8 @@ $("#search").oninput = (e) => {
 };
 
 // Arrow keys move through the list like a native outline: up/down to move, left/right to fold.
+// The hover card goes when the list (or what holds it) scrolls; logs scrolling elsewhere don't count.
+document.addEventListener("scroll", (e) => e.target.contains?.($("#list")) && hideCard(), true);
 $("#list").onkeydown = (e) => {
   if (mode === "services") return serviceKeys(e);
   const cur = $(`.item[data-name="${CSS.escape(selected ?? "")}"]`);

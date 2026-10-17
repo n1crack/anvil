@@ -270,6 +270,7 @@ function drawRunBox(name, rows, containers) {
     text.textContent = serving ? "Serving" : "Not serving";
     text.classList.remove("error-text");
     start.hidden = stop.hidden = true;
+    $(".state", box).onmouseenter = null;
     return;
   }
   $(".dot", box).className = `dot ${crashed ? "bad" : running ? "on" : ""}`;
@@ -284,6 +285,29 @@ function drawRunBox(name, rows, containers) {
   };
   start.onclick = () => all("start");
   stop.onclick = () => all("stop");
+  // Hover the state: which run (and which crashed), with their address or command.
+  const shown = [
+    ...own.filter((r) => r.running || r.crashed).map((r) => [r.running ? "on" : "bad", r.name, r.address ?? (r.port ? `:${r.port}` : r.command)]),
+    ...containers.filter(up).map((c) => ["on", c.service, "container"]),
+  ];
+  const state = $(".state", box);
+  state.onmouseenter = () => {
+    clearTimeout(box.hideTimer);
+    if (!shown.length || $(".pop.run-pop")) return;
+    const pop = el("div", "run-pop");
+    for (const [cls, n, where] of shown) {
+      const line = el("div", "run-pop-row");
+      line.append(el("span", `dot ${cls}`), el("span", "run-pop-name", n), el("span", "run-pop-where", where ?? ""));
+      pop.append(line);
+    }
+    pop.onmouseenter = () => clearTimeout(box.hideTimer);
+    pop.onmouseleave = state.onmouseleave;
+    box.closePop = popAt(state, pop);
+  };
+  state.onmouseleave = () => {
+    clearTimeout(box.hideTimer);
+    box.hideTimer = setTimeout(() => box.closePop?.(), 250);
+  };
 }
 
 function drawProcs(name) {
