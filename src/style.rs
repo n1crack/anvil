@@ -30,33 +30,46 @@ fn paint(code: &str, s: impl Display, stderr: bool) -> String {
     }
 }
 
+/// One Dark's palette: 24-bit where the terminal says it can (COLORTERM), else
+/// the nearest of the 256 colors every terminal has.
+fn tone(rgb: (u8, u8, u8), ansi256: u8) -> String {
+    static TRUE: OnceLock<bool> = OnceLock::new();
+    let truecolor = *TRUE
+        .get_or_init(|| std::env::var("COLORTERM").is_ok_and(|v| v == "truecolor" || v == "24bit"));
+    if truecolor {
+        format!("38;2;{};{};{}", rgb.0, rgb.1, rgb.2)
+    } else {
+        format!("38;5;{ansi256}")
+    }
+}
+
 /// Names and headings.
 pub fn bold(s: impl Display) -> String {
     paint("1", s, false)
 }
 /// Secondary columns: kinds, paths, hints.
 pub fn dim(s: impl Display) -> String {
-    paint("2", s, false)
+    paint(&tone((0x7f, 0x84, 0x8e), 245), s, false)
 }
 /// Something running.
 pub fn green(s: impl Display) -> String {
-    paint("32", s, false)
+    paint(&tone((0x98, 0xc3, 0x79), 114), s, false)
 }
 /// Warnings.
 pub fn yellow(s: impl Display) -> String {
-    paint("33", s, false)
+    paint(&tone((0xe5, 0xc0, 0x7b), 180), s, false)
 }
 /// Addresses and commands to copy.
 pub fn cyan(s: impl Display) -> String {
-    paint("36", s, false)
+    paint(&tone((0x61, 0xaf, 0xef), 75), s, false)
 }
 /// Errors on stdout.
 pub fn red(s: impl Display) -> String {
-    paint("31", s, false)
+    paint(&tone((0xe0, 0x6c, 0x75), 168), s, false)
 }
 /// Errors on stderr.
 pub fn error(s: impl Display) -> String {
-    paint("31", s, true)
+    paint(&tone((0xe0, 0x6c, 0x75), 168), s, true)
 }
 
 /// A message with each `command` in it highlighted.

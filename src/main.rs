@@ -5,25 +5,21 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
-/// `--help` in the CLI's colors: headings in the brand's orange, commands and
-/// flags in cyan like everything you can type, placeholders dimmed.
+/// `--help` in One Dark's colors (the 256-color versions, which every terminal
+/// shows): headings in its orange, what you can type in blue, placeholders grey.
 const HELP_STYLES: clap::builder::Styles = {
-    use clap::builder::styling::{Ansi256Color, AnsiColor, Color, Effects, Style};
-    const ORANGE: Style = Style::new()
-        .bold()
-        .fg_color(Some(Color::Ansi256(Ansi256Color(208))));
+    use clap::builder::styling::{Ansi256Color, Color, Style};
+    const fn fg(c: u8) -> Style {
+        Style::new().fg_color(Some(Color::Ansi256(Ansi256Color(c))))
+    }
     clap::builder::Styles::styled()
-        .header(ORANGE)
-        .usage(ORANGE)
-        .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan))))
-        .placeholder(Style::new().effects(Effects::DIMMED))
-        .error(
-            Style::new()
-                .bold()
-                .fg_color(Some(Color::Ansi(AnsiColor::Red))),
-        )
-        .valid(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
-        .invalid(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow))))
+        .header(fg(173).bold())
+        .usage(fg(173).bold())
+        .literal(fg(75))
+        .placeholder(fg(245))
+        .error(fg(168).bold())
+        .valid(fg(114))
+        .invalid(fg(180))
 };
 
 #[derive(Parser)]
