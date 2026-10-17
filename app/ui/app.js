@@ -506,7 +506,7 @@ function renderSite() {
   for (const input of root.querySelectorAll("[data-ini]")) {
     const key = input.dataset.ini;
     input.value = s.ini[key] ?? "";
-    input.placeholder = snap.ini[key] ?? base[key];
+    input.placeholder = `${snap.ini[key] ?? base[key]} (default)`;
     input.onchange = async () => {
       const value = input.value.trim() || null;
       await call("set_site_ini", { site: s.name, key, value });
