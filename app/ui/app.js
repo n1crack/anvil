@@ -916,6 +916,7 @@ function openNewApp() {
   preview();
   $("#new-error").hidden = true;
   $("#new-log").hidden = true;
+  $("#new-existing").hidden = false;
   setBusy(false);
   dlg.showModal();
   name.focus();
@@ -927,6 +928,25 @@ function setBusy(busy) {
   for (const i of $("#new-form").querySelectorAll("input, select")) i.disabled = busy;
 }
 
+/** Serve one existing project folder. Resolves to whether one was added. */
+async function addAppFolder() {
+  const path = await window.__TAURI__.dialog.open({ directory: true, title: "Choose a project folder" });
+  if (!path) return false;
+  try {
+    const name = await invoke("link_folder", { path });
+    await call("state");
+    select(name);
+    toast(`Added ${name}.${snap.tld}`);
+    return true;
+  } catch (e) {
+    showError(String(e));
+    return false;
+  }
+}
+
+$("#new-existing").onclick = async () => {
+  if (await addAppFolder()) $("#new-app").close();
+};
 $("#new-cancel").onclick = () => $("#new-app").close();
 $("#new-log").onclick = () => invoke("open_create_log", { name: $("#new-name").value });
 $("#new-form").onsubmit = async (e) => {
@@ -936,6 +956,7 @@ $("#new-form").onsubmit = async (e) => {
   if (!name || !parent) return;
   setBusy(true);
   $("#new-log").hidden = false;
+  $("#new-existing").hidden = true;
   $("#new-error").hidden = true;
   try {
     const site = await invoke("create_app", { kind: newKind, name, parent });
@@ -966,21 +987,7 @@ $("#add").onclick = async () => {
           toast("Folder added");
         },
       }),
-      M.MenuItem.new({
-        text: "Add Application Folder…",
-        action: async () => {
-          const path = await pick("Choose a project folder");
-          if (!path) return;
-          try {
-            const name = await invoke("link_folder", { path });
-            await call("state");
-            select(name);
-            toast(`Added ${name}.${snap.tld}`);
-          } catch (e) {
-            showError(String(e));
-          }
-        },
-      }),
+      M.MenuItem.new({ text: "Add Application Folder…", action: addAppFolder }),
     ]),
   });
   menu.popup();
