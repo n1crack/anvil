@@ -494,7 +494,7 @@ function drawContents(svc, root, c) {
         buttons.push(act("Drop…", async () => {
           if (await confirm(`Drop ${name}?`, `Every table in ${name} is deleted. This can’t be undone.`, "Drop"))
             renderContents(svc, root, { id: svc.id, action: "drop", name });
-        }));
+        }, "link danger"));
       }
       line(name, bytes(size), ...buttons);
     }
@@ -526,7 +526,7 @@ function drawContents(svc, root, c) {
       row.append(act("Flush All…", async () => {
         if (await confirm(`Flush ${svc.id}?`, "Every key in every database is deleted.", "Flush"))
           renderContents(svc, root, { id: svc.id, action: "empty" });
-      }, "plain"));
+      }, "plain danger"));
       list.append(row);
     }
   } else {
@@ -535,7 +535,7 @@ function drawContents(svc, root, c) {
     if (n) buttons.push(act("Delete All…", async () => {
       if (await confirm(`Delete ${n} messages?`, `Every message caught by ${svc.id} is deleted.`, "Delete"))
         renderContents(svc, root, { id: svc.id, action: "empty" });
-    }));
+    }, "link danger"));
     line(n === 1 ? "1 message" : `${n} messages`, null, ...buttons);
   }
   box.replaceChildren(list);
