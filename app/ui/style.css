@@ -932,10 +932,13 @@ button.proc-name:hover { text-decoration: underline; }
 /* Backgrounds deeper than the text colors, so white on blue (Laravel's INFO) reads;
  * black on any of them is the surface's near-black, not ansi0's grey. */
 .ansi-bg0 { background: #30363d; } .ansi-bg1 { background: #da3633; } .ansi-bg2 { background: #2ea043; } .ansi-bg3 { background: #d29922; }
-.ansi-bg4 { background: #1f6feb; } .ansi-bg5 { background: #8957e5; } .ansi-bg6 { background: #39c5cf; } .ansi-bg7 { background: #d7dce1; color: #121518; }
+.ansi-bg4 { background: #1f5fcf; } .ansi-bg5 { background: #8957e5; } .ansi-bg6 { background: #39c5cf; } .ansi-bg7 { background: #d7dce1; color: #121518; }
 .ansi-bg8 { background: #484f58; } .ansi-bg9 { background: #f85149; } .ansi-bg10 { background: #3fb950; } .ansi-bg11 { background: #e3b341; }
 .ansi-bg12 { background: #388bfd; } .ansi-bg13 { background: #a371f7; } .ansi-bg14 { background: #56d4dd; } .ansi-bg15 { background: #ffffff; color: #121518; }
-[class*="ansi-bg"].ansi0 { color: #121518; }
+/* Badges: black and bright black (Pint's PASS is 90;42) are real black on a colored ground,
+ * white is white; on the two grey grounds they stay as they are. */
+[class*="ansi-bg"]:is(.ansi0, .ansi8):not(.ansi-bg0, .ansi-bg8) { color: #000; }
+[class*="ansi-bg"]:is(.ansi7, .ansi15):not(.ansi-bg7, .ansi-bg15) { color: #fff; }
 .ansi-dim { opacity: 0.6; } .ansi-i { font-style: italic; } .ansi-u { text-decoration: underline; }
 .term-time { color: #8b949e; }
 /* Process names: on the terminal surface always the dark theme's, in lists the theme's. */
