@@ -397,9 +397,15 @@ fn activity(app: State<App>) -> Res<Activity> {
         .as_ref()
         .map(|s| s.pids())
         .unwrap_or_default();
-    let (listed, crashed) = {
+    let (listed, crashed, scripts) = {
         let mut apps = app.apps.lock().unwrap();
-        (apps.list(), apps.crashed())
+        let listed = apps.list();
+        // Commands run once show their script (`build:all`), not the id in their key.
+        let scripts: std::collections::HashMap<String, String> = listed
+            .iter()
+            .filter_map(|(k, _, _)| Some((k.clone(), apps.once_name(k)?.to_string())))
+            .collect();
+        (listed, apps.crashed(), scripts)
     };
     let (infos, service_pids) = {
         let mut services = app.services.lock().unwrap();
@@ -470,7 +476,8 @@ fn activity(app: State<App>) -> Res<Activity> {
                     r
                 } else {
                     let id = &rest[1..];
-                    let mut r = row(key.clone(), name(id), "running", true);
+                    let shown = scripts.get(key).cloned().unwrap_or_else(|| name(id));
+                    let mut r = row(key.clone(), shown, "running", true);
                     r.port = found(id).and_then(|p| p.port);
                     r
                 };

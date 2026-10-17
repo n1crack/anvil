@@ -377,8 +377,8 @@ pub struct Apps {
     children: BTreeMap<String, Child>,
     /// Keys of `children` that are an app's other processes, not apps.
     processes: std::collections::BTreeSet<String>,
-    /// Keys of `processes` started by `run_once`: they are meant to end.
-    once: std::collections::BTreeSet<String>,
+    /// Keys of `processes` started by `run_once`, with the script's name: they are meant to end.
+    once: BTreeMap<String, String>,
     /// How children that ended without `stop` ended, until stopped or started again.
     exits: BTreeMap<String, Exit>,
 }
@@ -436,9 +436,14 @@ impl Apps {
         }
         self.exits
             .iter()
-            .filter(|(k, _)| !self.once.contains(*k))
+            .filter(|(k, _)| !self.once.contains_key(*k))
             .map(|(k, e)| (k.clone(), e.clone()))
             .collect()
+    }
+
+    /// The script a `run_once` key runs (`build:all` for `<site>#build-all`).
+    pub fn once_name(&self, key: &str) -> Option<&str> {
+        self.once.get(key).map(String::as_str)
     }
 
     /// Every running or crashed process of `site`, `<site>@…` and `<site>#…`, whether
@@ -483,7 +488,7 @@ impl Apps {
         let command = format!("npm run '{}'", script.replace('\'', r"'\''"));
         self.spawn(&key, &site.path, &command, crate::processes::env(site))?;
         self.processes.insert(key.clone());
-        self.once.insert(key);
+        self.once.insert(key, script.to_string());
         Ok(())
     }
 
@@ -937,6 +942,8 @@ mod tests {
         // No package.json: npm fails (or is missing), which still must not count as a crash.
         apps.run_once(&site, "build:all").unwrap();
         assert!(apps.processes.contains("shop#build-all"));
+        // The Processes window shows the script, not its id.
+        assert_eq!(apps.once_name("shop#build-all"), Some("build:all"));
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while apps.finished("shop#build-all").is_none() {
             assert!(std::time::Instant::now() < deadline, "npm never ended");
