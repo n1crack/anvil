@@ -644,6 +644,8 @@ const mockHandle = (cmd, a) => {
       ov.hidden = [];
       return ov;
     case "log_clear":
+      // Like the backend, which empties the file: its next read finds nothing.
+      (window.mockCleared ??= new Set()).add(`${a.site}/${a.source}`);
       return null;
     case "set_process": {
       if (a.command === "") throw "The command can't be empty";
@@ -676,7 +678,9 @@ const mockHandle = (cmd, a) => {
       return structuredClone(ov);
     }
     case "log_text": {
-      const text = window.mockLogs?.[a.source] ?? mockSiteLogs[a.site]?.[a.source] ?? (a.source === "once:build" ? mockBuild : mockLog);
+      const text = window.mockCleared?.has(`${a.site}/${a.source}`)
+        ? ""
+        : (window.mockLogs?.[a.source] ?? mockSiteLogs[a.site]?.[a.source] ?? (a.source === "once:build" ? mockBuild : mockLog));
       return { text: text.slice(a.from > text.length ? 0 : a.from), end_offset: text.length };
     }
     case "log_sources":
