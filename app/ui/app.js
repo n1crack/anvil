@@ -99,7 +99,7 @@ function render() {
   showError(snap.error);
 
   const power = $("#power");
-  power.setAttribute("aria-checked", snap.running);
+  power.dataset.on = snap.running;
   $("#power-label").textContent = snap.running ? "Serving" : "Stopped";
 
   if (!snap.sites.some((s) => s.name === selected)) selected = snap.sites[0]?.name;
@@ -874,11 +874,33 @@ async function open(target) {
   }
 }
 
+/** Applications served, each folder once: an alias shares its app's folder. */
+function servedCount() {
+  const parked = new Set(snap.sites.filter((s) => !s.linked).map((s) => s.path));
+  return snap.sites.filter((s) => !s.linked || !parked.has(s.path)).length;
+}
+
+// Stopped: one click starts. Serving: a menu with what is served, Restart and Stop.
 $("#power").onclick = async (e) => {
   const btn = e.currentTarget;
-  btn.disabled = true;
-  await call("set_running", { on: !snap.running });
-  btn.disabled = false;
+  const run = async (on) => {
+    btn.disabled = true;
+    await call("set_running", { on });
+    btn.disabled = false;
+  };
+  if (!snap.running) return run(true);
+  const n = servedCount();
+  const menu = await M.Menu.new({
+    items: await Promise.all([
+      M.MenuItem.new({ text: `Serving ${n} ${n === 1 ? "application" : "applications"}`, enabled: false }),
+      M.PredefinedMenuItem.new({ item: "Separator" }),
+      M.MenuItem.new({ text: "Restart", action: () => run(true) }),
+      M.MenuItem.new({ text: "Stop", action: () => run(false) }),
+    ]),
+  });
+  const r = btn.getBoundingClientRect();
+  const dpi = window.__TAURI__.dpi;
+  menu.popup(dpi ? new dpi.LogicalPosition(r.left, r.bottom + 4) : undefined);
 };
 
 $("#open-settings").onclick = () => invoke("show_settings");
