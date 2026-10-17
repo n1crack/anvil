@@ -12,6 +12,9 @@ const filterOf = (m) => (filters[m] ??= { kind: null, running: false });
 
 const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 // A standard port (443, or 80 without HTTPS) isn't written out.
+// Compose projects and plain folders get no address from Anvil.
+const serves = (s) => !["compose", "folder"].includes(s.kind);
+
 const url = (s) => {
   const [scheme, port, std] = s.secure ? ["https", snap.https_port, 443] : ["http", snap.http_port, 80];
   return `${scheme}://${s.host}${port === std ? "" : `:${port}`}`;
@@ -421,7 +424,7 @@ async function siteMenu(s) {
   const groups = [...new Set(["Favorites", ...Object.keys(snap.groups)])];
 
   const items = [];
-  if (s.kind !== "compose") {
+  if (serves(s)) {
     items.push(
       await M.CheckMenuItem.new({ text: "HTTPS", checked: s.secure, action: () => call("set_secure", { site: s.name, on: !s.secure }) }),
       await sep(),
@@ -530,6 +533,7 @@ function renderSite() {
   $(".site-name", root).textContent = s.name;
   $(".site-title .mark", root).replaceWith(Object.assign(mark(s), { className: "mark big" }));
   const link = $(".site-url", root);
+  link.hidden = !serves(s);
   link.textContent = url(s).replace("https://", "");
   link.onclick = (e) => { e.preventDefault(); if (snap.running) open("browser"); };
   // A stopped server can't answer: the address looks and acts off.
@@ -582,6 +586,8 @@ function renderSite() {
   }
   $('[data-field="path"]', root).textContent = tilde(s.path);
   $('[data-field="root"]', root).textContent = tilde(s.root);
+  // Nothing is served from a folder or a Compose project: no web root.
+  if (!serves(s)) $('[data-field="root"]', root).closest(".row")?.remove();
 
   if (process) renderRun(s, root);
   if (s.kind === "django") djangoHint(root);

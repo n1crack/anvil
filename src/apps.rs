@@ -12,9 +12,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 /// Every kind Anvil knows, in detection order.
-pub const KINDS: [&str; 16] = [
+pub const KINDS: [&str; 17] = [
     "laravel", "statamic", "symfony", "php", "next", "nuxt", "vite", "node", "rust", "go",
-    "dotnet", "django", "fastapi", "flask", "compose", "static",
+    "dotnet", "django", "fastapi", "flask", "compose", "static", "folder",
 ];
 
 pub fn label(kind: &str) -> &'static str {
@@ -34,6 +34,7 @@ pub fn label(kind: &str) -> &'static str {
         "fastapi" => "FastAPI",
         "flask" => "Flask",
         "compose" => "Docker Compose",
+        "folder" => "Folder",
         _ => "Static",
     }
 }
@@ -107,10 +108,26 @@ pub fn detect(dir: &Path) -> &'static str {
             "node"
         };
     }
-    if crate::compose::file(dir).is_some() && !has("index.html") && !has("public/index.html") {
+    // A page to serve: any .html at the top or in public/.
+    let page = |d: &Path| {
+        fs::read_dir(d).into_iter().flatten().flatten().any(|e| {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            n.ends_with(".html") || n.ends_with(".htm")
+        })
+    };
+    let pages = page(dir) || page(&dir.join("public"));
+    if crate::compose::file(dir).is_some() && !pages {
         return "compose";
     }
-    "static"
+    // Nothing to serve: a project folder, not a site.
+    if pages { "static" } else { "folder" }
+}
+
+/// Whether Anvil gives the app an address: a Compose project's containers answer on
+/// their own ports, and a plain folder has no page.
+pub fn serves(kind: &str) -> bool {
+    !matches!(kind, "compose" | "folder")
 }
 
 /// PHP kinds go through PHP-FPM; these run their own server behind the proxy.
@@ -677,7 +694,7 @@ mod tests {
 
     #[test]
     fn detects_kinds() {
-        let cases: [(&[(&str, &str)], &str); 21] = [
+        let cases: [(&[(&str, &str)], &str); 24] = [
             (
                 &[("artisan", ""), ("package.json", "{\"vite\":1}")],
                 "laravel",
@@ -731,7 +748,11 @@ mod tests {
             ),
             (&[("requirements.txt", "FastAPI==0.115\n")], "fastapi"),
             (&[("pyproject.toml", "dependencies = [\"flask\"]")], "flask"),
-            (&[("manage.py", "print(1)")], "static"),
+            (&[("manage.py", "print(1)")], "folder"),
+            // Nothing to serve: a project folder, not a site.
+            (&[("README.md", ""), ("Cargo.lock", "")], "folder"),
+            (&[("about.htm", "")], "static"),
+            (&[("public/landing.html", "")], "static"),
             // Next.js with an API that uses Flask stays Next.js; with an entry file it's Flask.
             (
                 &[

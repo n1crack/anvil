@@ -257,7 +257,7 @@ struct HiddenRow {
 /// static app, running while the web server is). A Compose project has none.
 fn main_row(cfg: &Config, site: &Site, serving: bool, running: bool) -> Option<ProcessRow> {
     let server = anvil::apps::runs_process(&site.kind);
-    if !server && site.kind == "compose" {
+    if !server && !anvil::apps::serves(&site.kind) {
         return None;
     }
     let command = site.command.clone().unwrap_or_default();
