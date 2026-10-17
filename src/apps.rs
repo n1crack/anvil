@@ -102,7 +102,8 @@ pub fn detect(dir: &Path) -> &'static str {
             "next"
         } else if pkg.contains("\"nuxt\"") {
             "nuxt"
-        } else if pkg.contains("\"vite\"") {
+        } else if pkg.contains("\"vite\"") || pkg.contains("\"vite-plus\"") {
+            // Vite+ is Vite: its `vp dev` needs `--port`, as $PORT means nothing to it.
             "vite"
         } else {
             "node"
@@ -727,7 +728,7 @@ mod tests {
 
     #[test]
     fn detects_kinds() {
-        let cases: [(&[(&str, &str)], &str); 24] = [
+        let cases: [(&[(&str, &str)], &str); 25] = [
             (
                 &[("artisan", ""), ("package.json", "{\"vite\":1}")],
                 "laravel",
@@ -754,6 +755,14 @@ mod tests {
             (
                 &[("package.json", "{\"scripts\":{\"start\":\"node .\"}}")],
                 "node",
+            ),
+            // Vite+ (`vp dev`) is Vite, so it is given --port.
+            (
+                &[(
+                    "package.json",
+                    "{\"devDependencies\":{\"vite-plus\":\"1\"}}",
+                )],
+                "vite",
             ),
             (&[("index.html", "")], "static"),
             (&[("docker-compose.yml", ""), ("README.md", "")], "compose"),

@@ -640,7 +640,7 @@ fn all_rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
         .collect()
 }
 
-/// The flags that pin a script that is itself `vite`, `vitepress` or `astro` (maybe through
+/// The flags that pin a script that is itself `vite`, `vp dev`, `vitepress` or `astro` (maybe through
 /// npx/yarn/pnpm exec), so `-- --port …` reaches it. A wrapper like `run-s` would take them itself.
 fn pin_flags(command: &str) -> Option<&'static str> {
     let words = shell_words(command);
@@ -656,9 +656,12 @@ fn pin_flags(command: &str) -> Option<&'static str> {
     {
         return None;
     }
-    match first {
-        Some("vite" | "vitepress") => Some("--port $PORT --strictPort --host 127.0.0.1"),
-        Some("astro") => Some("--port $PORT --host 127.0.0.1"),
+    match (first, w.next()) {
+        // Vite+ (`vp dev`) is Vite: it takes the same flags.
+        (Some("vite" | "vitepress"), _) | (Some("vp"), Some("dev")) => {
+            Some("--port $PORT --strictPort --host 127.0.0.1")
+        }
+        (Some("astro"), _) => Some("--port $PORT --host 127.0.0.1"),
         _ => None,
     }
 }
@@ -746,7 +749,7 @@ pub fn is_server_script(name: &str, command: &str) -> bool {
 fn program_serves(program: &str, arg: Option<&str>) -> bool {
     match program {
         "vite" => !matches!(arg, Some("build" | "preview")),
-        "vitepress" | "nuxt" | "next" | "astro" | "storybook" => arg == Some("dev"),
+        "vp" | "vitepress" | "nuxt" | "next" | "astro" | "storybook" => arg == Some("dev"),
         _ => false,
     }
 }
@@ -1220,6 +1223,38 @@ mod tests {
             runtime_version: None,
             runtime_pinned: false,
         }
+    }
+
+    #[test]
+    fn vite_plus_dev_is_pinned_like_vite() {
+        let flags = Some("--port $PORT --strictPort --host 127.0.0.1");
+        assert_eq!(pin_flags("vp dev"), flags);
+        assert_eq!(pin_flags("vp dev docs"), flags);
+        assert_eq!(pin_flags("pnpm exec vp dev"), flags);
+        assert_eq!(pin_flags("vite"), flags);
+        assert_eq!(pin_flags("vp build"), None);
+        assert_eq!(pin_flags("vp dev && echo"), None);
+        assert!(is_server_script("docs", "vp dev docs"));
+        assert!(!is_server_script("check", "vp lint"));
+        assert_eq!(
+            start_command("docs", "vp dev docs", &serde_json::Map::new()),
+            "npm run docs -- --port $PORT --strictPort --host 127.0.0.1"
+        );
+    }
+
+    #[test]
+    fn laravels_vite_keeps_its_port_and_shows_none() {
+        // laravel-vite-plugin writes the URL vite really took to public/hot, so a
+        // collision is harmless; Anvil neither forces a port nor claims one.
+        let dir = std::env::temp_dir().join(format!("anvil-lvite-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let composer = serde_json::json!({ "scripts": { "dev": [LARAVEL] } });
+        fs::write(dir.join("composer.json"), composer.to_string()).unwrap();
+        fs::write(dir.join("package.json"), r#"{"scripts":{"dev":"vp dev"}}"#).unwrap();
+        let rows = detect(&site(&dir, "laravel"));
+        fs::remove_dir_all(&dir).unwrap();
+        let vite = rows.iter().find(|p| p.name == "vite").unwrap();
+        assert_eq!((vite.command.as_str(), vite.port), ("npm run dev", None));
     }
 
     #[test]
