@@ -1556,7 +1556,7 @@ $("#error-close").onclick = () => showError(null);
 // Keyboard: ⌘1–9 tabs in order, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
 /* ---------- Shortcuts: the menu bar and the keyboard run the same actions ---------- */
 
-export const TAB_KEYS = { 1: "overview", 2: "git", 3: "logs", 4: "packages", 5: "resources", 6: "settings" };
+export const TAB_KEYS = { 1: "overview", 2: "git", 3: "watch", 4: "logs", 5: "packages", 6: "resources", 7: "settings" };
 export let lastAction = { name: "", at: 0 };
 
 /** Run a menu action. The same key can reach both the page and the menu bar, so
