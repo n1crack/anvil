@@ -98,8 +98,10 @@ anvil runtime install node 22
 Besides the site, an app often needs a few programs running while you work on
 it: a queue worker, a log tailer, Vite. The **Processes** group in an app's
 Overview lists them, with each one's newest line and Start/Stop; a name opens
-its output in the Logs tab. They run with Anvil's PHP and newest Node.js, and
-stop when Anvil quits.
+its output in the Logs tab. They run with Anvil's Node.js (the project's
+`.nvmrc` version when installed, else the newest) and, for PHP apps, the app's
+PHP. Nothing starts until you press Start; they stop when Anvil quits or the
+app is removed.
 
 Anvil reads them from, in this order:
 

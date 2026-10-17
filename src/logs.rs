@@ -114,7 +114,8 @@ fn inside(path: &Path, root: &Path) -> bool {
 pub fn find(site: &Site, id: &str) -> Result<LogSource> {
     sources(site)
         .into_iter()
-        .find(|s| s.id == id || s.label.eq_ignore_ascii_case(id))
+        // A process is found by its id only: its name could be another log's label.
+        .find(|s| s.id == id || (!s.id.starts_with("proc:") && s.label.eq_ignore_ascii_case(id)))
         .with_context(|| format!("{} has no log named {id}", site.name))
 }
 

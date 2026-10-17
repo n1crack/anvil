@@ -236,7 +236,11 @@ fn find_site(name: &str) -> Res<Site> {
 
 #[tauri::command(async)]
 fn processes(app: State<App>, site: String) -> Res<Vec<ProcessRow>> {
-    Ok(process_rows(&app, &find_site(&site)?))
+    let s = find_site(&site)?;
+    if let Some(e) = anvil::processes::project_file_error(&s) {
+        return Err(e);
+    }
+    Ok(process_rows(&app, &s))
 }
 
 /// Start, stop or restart one process, or all of them when `name` is None.
@@ -676,6 +680,15 @@ fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) ->
 /// Unlinks linked names and hides parked folders. Never deletes files.
 #[tauri::command(async)]
 fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    // Its processes stop with it: afterwards nothing could reach them.
+    if let Ok(s) = find_site(&site) {
+        for p in anvil::processes::detect(&s) {
+            app.apps
+                .lock()
+                .unwrap()
+                .stop(&anvil::processes::key(&site, &p.name));
+        }
+    }
     let mut cfg = anvil::load().map_err(err)?;
     anvil::remove(&mut cfg, &site).map_err(err)?;
     sites_changed(&handle, &app, &cfg);
