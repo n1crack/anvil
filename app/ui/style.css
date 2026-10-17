@@ -1766,3 +1766,19 @@ kbd {
   background: var(--steel-pane);
   color: var(--text);
 }
+
+.site-url.off { color: var(--muted); cursor: default; }
+.site-url.off:hover { text-decoration: none; }
+.quick button:disabled { opacity: 0.45; }
+
+/* A small action at the end of a line of text (Install PHP, Show Logs). */
+.inline-action {
+  height: 22px;
+  margin-left: 4px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--steel-raised);
+  color: var(--text);
+  font-size: 12px;
+}
