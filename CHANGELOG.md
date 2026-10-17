@@ -49,7 +49,7 @@ The first public release of Anvil, a macOS development environment.
   dependencies with locked versions and an optional update check
   (`anvil packages`).
 - Native macOS app with a menu bar icon: applications and services side by
-  side, an application panel with Overview, Logs, Packages, Resources and
+  side, an application panel with Overview, Git, Logs, Packages, Resources and
   Settings tabs, a Settings window (General, PHP, Languages, Storage, Shortcuts,
   About), keyboard shortcuts and launch at login.
 - `anvil --version` prints the release version.
@@ -62,7 +62,13 @@ The first public release of Anvil, a macOS development environment.
 - php.ini keys and values are validated before they reach the PHP-FPM
   configuration.
 - Clean-up only accepts paths Anvil knows for that kind of application and
-  never follows a symlinked folder out of the project.
+  never follows a symlinked folder out of the project; removing a language
+  version or an Anvil cache only accepts what is actually installed.
+- The config file is written atomically, so the app and the CLI never read a
+  half-written one.
+- Git runs with `core.fsmonitor` disabled, so a repository can't make Anvil
+  run a program; a folder whose path would break the web server config is not
+  served.
 
 [Unreleased]: https://github.com/OWNER/anvil/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/OWNER/anvil/releases/tag/v0.1.0

@@ -99,6 +99,7 @@ Every command is in the [CLI reference](docs/cli.md); `anvil --help` lists them 
 - [CLI reference](docs/cli.md)
 - [Configuration](docs/configuration.md): `config.toml` and the `~/.anvil` folder
 - [Architecture](docs/architecture.md): how the pieces fit together
+- [Code signing](docs/signing.md): how releases get signed on macOS, Linux and Windows
 - [Changelog](CHANGELOG.md)
 
 ## Contributing
