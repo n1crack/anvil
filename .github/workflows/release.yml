@@ -1,0 +1,119 @@
+name: Release
+
+# Push a tag like v0.1.0 (see CONTRIBUTING.md, "Releases"). This builds the
+# macOS app and the anvil CLI and creates a DRAFT GitHub Release; review and
+# publish it by hand.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS app and CLI
+    runs-on: macos-latest
+    permissions:
+      contents: write # create the draft release and upload its assets
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the Cargo version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "anvil") | .version')
+          test "$TAG" = "v$version" || { echo "Tag $TAG does not match Cargo.toml version $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          # Everything between "## [<version>]" and the next "## [" heading,
+          # without the link definitions at the end of the file.
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on && !/^\[[^]]*\]: / { print }
+          ' CHANGELOG.md > notes.md
+          grep -q '[^[:space:]]' notes.md || { echo "CHANGELOG.md has no section for $VERSION"; exit 1; }
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Signing and notarization only happen when the secrets exist. The Tauri
+      # bundler treats a variable that is set but empty as "sign with this", so
+      # each one is exported only when it has a value; without them the build
+      # is unsigned and still succeeds.
+      - name: Enable signing and notarization if configured
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            value=$(printenv "$name" || true)
+            if [ -n "$value" ]; then
+              { echo "$name<<__ANVIL_EOF__"; echo "$value"; echo "__ANVIL_EOF__"; } >> "$GITHUB_ENV"
+              echo "$name is set"
+            else
+              echo "$name is not set"
+            fi
+          done
+
+      # One universal .dmg runs natively on Apple Silicon and Intel, so there is
+      # no wrong download to pick. Without tagName/releaseId the action only
+      # builds; the release is created below together with the CLI.
+      - name: Build the app
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: app
+          args: --target universal-apple-darwin --bundles app,dmg
+
+      - name: Build the CLI
+        run: |
+          mkdir -p dist
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked -p anvil --target "$target"
+            stage="anvil-$VERSION-$target"
+            mkdir -p "$stage"
+            cp "target/$target/release/anvil" LICENSE README.md CHANGELOG.md "$stage/"
+            tar -czf "dist/$stage.tar.gz" "$stage"
+          done
+
+      - name: Collect assets and checksums
+        run: |
+          cp target/universal-apple-darwin/release/bundle/dmg/*.dmg dist/
+          cd dist
+          shasum -a 256 -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=""
+          case "$VERSION" in *-*) flags="--prerelease" ;; esac
+          gh release create "$TAG" dist/* --draft $flags --verify-tag \
+            --title "Anvil $VERSION" --notes-file notes.md
+
+  # ---------------------------------------------------------------------------
+  # PLACEHOLDER: Windows build and signing via SignPath. Not implemented.
+  # Anvil does not run on Windows yet. When it does, add a windows-latest job
+  # that builds the installer with tauri-apps/tauri-action, submits it to
+  # SignPath for signing (signpath/github-action-submit-signing-request) with
+  # SIGNPATH_API_TOKEN, SIGNPATH_ORGANIZATION_ID and SIGNPATH_PROJECT_SLUG
+  # secrets, and uploads the signed installer plus its checksum to the same
+  # draft release.
+  # ---------------------------------------------------------------------------
