@@ -5,20 +5,26 @@ larger changes, open an issue first so we can agree on the approach.
 
 ## Build
 
-You need macOS, [Rust](https://rustup.rs) (stable) and the Xcode command line
-tools.
+You need macOS, [Rust](https://rustup.rs) (stable), the Xcode command line
+tools, and [pnpm](https://pnpm.io) for the app's UI.
 
 ```sh
 cargo build --workspace          # the anvil CLI and the macOS app
 cargo run -q -- --help           # run the CLI from the source tree
 ```
 
-To bundle the app:
+The app's UI is a TypeScript project built with [Vite+](https://viteplus.dev):
 
 ```sh
+pnpm --dir app/ui install
 cargo install tauri-cli --version '^2' --locked
+cd app && cargo tauri dev        # the app with the UI hot-reloading
 cd app && cargo tauri build      # target/release/bundle/macos/Anvil.app
 ```
+
+`cargo tauri` builds the UI itself (`pnpm build` in `app/ui`). Plain `cargo
+build` of the app crate needs `app/ui/dist`, so run `pnpm --dir app/ui build`
+once first.
 
 Use `ANVIL_HOME=/tmp/anvil-dev` to keep a development run away from your real
 `~/.anvil`.
@@ -27,8 +33,9 @@ Use `ANVIL_HOME=/tmp/anvil-dev` to keep a development run away from your real
 
 - `src/`: the `anvil` crate, a library with the core plus the CLI in
   `src/main.rs`
-- `app/`: the `anvil-app` crate, the Tauri 2 app; the UI in `app/ui` is plain
-  HTML, CSS and JavaScript without a build step
+- `app/`: the `anvil-app` crate, the Tauri 2 app
+- `app/ui`: the windows' UI: HTML and CSS, TypeScript modules in `src/`
+  (`types.ts` mirrors what the backend sends), tests in `test/`
 
 User documentation lives on the website, [anvil.tr/docs](https://anvil.tr/docs), from its own repository; see [Architecture](https://anvil.tr/docs/architecture).
 
@@ -40,7 +47,7 @@ CI runs these; run them locally first:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-for f in app/ui/*.js; do node --check "$f"; done
+cd app/ui && pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test && pnpm build
 ```
 
 - Add a test for logic you change in `src/` where it is practical.
