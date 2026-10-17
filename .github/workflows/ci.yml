@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS (fmt, clippy, test)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Check UI scripts
+        run: for f in app/ui/*.js; do node --check "$f"; done
+
+      # The version lives only in Cargo.toml; the app bundle inherits it when
+      # tauri.conf.json has no "version" field.
+      - name: Check the version is single-sourced
+        run: |
+          node -e 'if ("version" in require("./app/tauri.conf.json")) { console.error("Remove \"version\" from app/tauri.conf.json; Cargo.toml is the source"); process.exit(1) }'
+          want=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "anvil") | .version')
+          got=$(cargo run -q --locked -- --version)
+          test "$got" = "anvil $want" || { echo "anvil --version printed '$got', expected 'anvil $want'"; exit 1; }
+
+  # The core library and CLI only use Unix APIs, so they build and their tests
+  # pass on Linux too (checked in a Debian container before this job was added).
+  # The Tauri app is macOS-only and is not built here.
+  linux:
+    name: Linux (anvil crate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build -p anvil --locked
+
+      - name: Test
+        run: cargo test -p anvil --locked
