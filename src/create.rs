@@ -8,14 +8,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Kinds that can be created, in the order the dialog shows them.
-pub const TEMPLATES: [&str; 11] = [
-    "laravel", "statamic", "php", "static", "next", "nuxt", "vite", "node", "rust", "go", "dotnet",
+pub const TEMPLATES: [&str; 12] = [
+    "laravel", "statamic", "symfony", "php", "static", "next", "nuxt", "vite", "node", "rust",
+    "go", "dotnet",
 ];
 
 /// What each template needs installed first: a PHP version or a runtime id.
 pub fn needs(kind: &str) -> Option<&'static str> {
     match kind {
-        "laravel" | "statamic" => Some("php"),
+        "laravel" | "statamic" | "symfony" => Some("php"),
         k => apps::runtime(k),
     }
 }
@@ -145,7 +146,7 @@ pub fn create(kind: &str, name: &str, parent: &Path, php: Option<&str>) -> Resul
     };
 
     let result = match kind {
-        "laravel" | "statamic" => {
+        "laravel" | "statamic" | "symfony" => {
             let v = php.context("Install a PHP version first")?;
             let php_bin = home().join("php").join(v).join("php");
             let path = format!(
@@ -153,10 +154,10 @@ pub fn create(kind: &str, name: &str, parent: &Path, php: Option<&str>) -> Resul
                 php_bin.parent().unwrap().display(),
                 std::env::var("PATH").unwrap_or_default()
             );
-            let package = if kind == "laravel" {
-                "laravel/laravel"
-            } else {
-                "statamic/statamic"
+            let package = match kind {
+                "laravel" => "laravel/laravel",
+                "statamic" => "statamic/statamic",
+                _ => "symfony/skeleton",
             };
             sh(Command::new(&php_bin)
                 .args(["-d", "memory_limit=-1"])

@@ -33,7 +33,7 @@ Anvil turns the folders on your Mac into running applications at local domains l
 | Local HTTPS with a trusted certificate authority | ✅ Available |
 | Park a folder: every sub-folder becomes an application | ✅ Available |
 | Link any folder, add extra domains to an application | ✅ Available |
-| Automatic detection: Laravel, Statamic, PHP, static, Next.js, Nuxt, Vite, Node.js, Rust, Go, .NET | ✅ Available |
+| Automatic detection: Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt, Vite, Node.js, Rust, Go, .NET | ✅ Available |
 | PHP 8.0 – 8.5, isolated, per-application version | ✅ Available |
 | php.ini settings per application (own PHP-FPM pool) and global defaults | ✅ Available |
 | Node.js, Go, Rust and .NET toolchains, isolated in `~/.anvil` | ✅ Available |
@@ -87,6 +87,7 @@ Anvil looks at the files in each folder to decide what kind of application it is
 |---|---|---|
 | Laravel | `artisan` | PHP-FPM |
 | Statamic | `artisan` and `statamic/cms` in `composer.json` | PHP-FPM |
+| Symfony | `bin/console` and `symfony/framework-bundle` in `composer.json` | PHP-FPM |
 | PHP | `composer.json`, `index.php` or `public/index.php` | PHP-FPM |
 | Rust | `Cargo.toml` | `cargo run` |
 | Go | `go.mod` | `go run .` |
@@ -125,7 +126,7 @@ When the usual port is taken, by another service or another program, the next fr
 
 ### New applications
 
-Create a project from a template with `anvil new` or the New Application sheet in the app: Laravel, Statamic, PHP, static, Next.js, Nuxt, Vite, Node.js, Rust, Go and .NET. Anvil uses its own PHP, Composer and language toolchains, so the matching PHP version or language must be installed first. Output goes to `~/.anvil/log/create-<name>.log`, and a failed create leaves nothing behind.
+Create a project from a template with `anvil new` or the New Application sheet in the app: Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt, Vite, Node.js, Rust, Go and .NET. Anvil uses its own PHP, Composer and language toolchains, so the matching PHP version or language must be installed first. Output goes to `~/.anvil/log/create-<name>.log`, and a failed create leaves nothing behind.
 
 ### Storage
 

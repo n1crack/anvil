@@ -12,14 +12,16 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 /// Every kind Anvil knows, in detection order.
-pub const KINDS: [&str; 11] = [
-    "laravel", "statamic", "php", "next", "nuxt", "vite", "node", "rust", "go", "dotnet", "static",
+pub const KINDS: [&str; 12] = [
+    "laravel", "statamic", "symfony", "php", "next", "nuxt", "vite", "node", "rust", "go",
+    "dotnet", "static",
 ];
 
 pub fn label(kind: &str) -> &'static str {
     match kind {
         "laravel" => "Laravel",
         "statamic" => "Statamic",
+        "symfony" => "Symfony",
         "php" => "PHP",
         "next" => "Next.js",
         "nuxt" => "Nuxt",
@@ -45,6 +47,11 @@ pub fn detect(dir: &Path) -> &'static str {
         } else {
             "laravel"
         };
+    }
+    if has("bin/console")
+        && read(&dir.join("composer.json")).contains("\"symfony/framework-bundle\"")
+    {
+        return "symfony";
     }
     if has("composer.json") || has("index.php") || has("public/index.php") {
         return "php";
@@ -93,7 +100,7 @@ pub fn runtime(kind: &str) -> Option<&'static str> {
 }
 
 pub fn is_php(kind: &str) -> bool {
-    matches!(kind, "laravel" | "statamic" | "php")
+    matches!(kind, "laravel" | "statamic" | "symfony" | "php")
 }
 
 /// The command Anvil runs when the app has no custom one. `$PORT` is set.
@@ -316,7 +323,7 @@ mod tests {
 
     #[test]
     fn detects_kinds() {
-        let cases: [(&[(&str, &str)], &str); 9] = [
+        let cases: [(&[(&str, &str)], &str); 10] = [
             (
                 &[("artisan", ""), ("package.json", "{\"vite\":1}")],
                 "laravel",
@@ -324,6 +331,13 @@ mod tests {
             (
                 &[("artisan", ""), ("composer.json", "{\"statamic/cms\":1}")],
                 "statamic",
+            ),
+            (
+                &[
+                    ("bin/console", ""),
+                    ("composer.json", "{\"symfony/framework-bundle\":1}"),
+                ],
+                "symfony",
             ),
             (&[("public/index.php", "")], "php"),
             (&[("Cargo.toml", "")], "rust"),

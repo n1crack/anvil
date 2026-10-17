@@ -667,6 +667,7 @@ $("#open-settings").onclick = () => invoke("show_settings");
 const TEMPLATES = [
   ["laravel", "Laravel", "PHP"],
   ["statamic", "Statamic", "PHP"],
+  ["symfony", "Symfony", "PHP"],
   ["php", "PHP", "Plain PHP"],
   ["static", "Static", "HTML"],
   ["next", "Next.js", "Node.js"],
