@@ -90,7 +90,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
         editor: cfg.editor.clone(),
-        git_client: git_client(&cfg),
+        git_client: git_client(&cfg).map(|c| app_label(&c)),
         groups: cfg.groups.clone(),
         ini: cfg.ini.clone(),
         running: running(app),
@@ -467,15 +467,6 @@ async fn clean_all_safe() -> Res<(u64, Vec<String>)> {
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-fn open_log(site: String) -> Res<()> {
-    let log = anvil::apps::log_file(&site);
-    if !log.exists() {
-        return Err("No log yet — start the app first".into());
-    }
-    anvil::run(Command::new("open").arg("-a").arg("Console").arg(log)).map_err(err)
 }
 
 #[tauri::command]
@@ -969,14 +960,24 @@ const EDITORS: [&str; 10] = [
     "Fleet",
 ];
 
-const GIT_CLIENTS: [&str; 6] = [
+const GIT_CLIENTS: [&str; 9] = [
     "GitHub Desktop",
     "Fork",
     "Tower",
     "Sourcetree",
     "GitKraken",
     "Sublime Merge",
+    "SmartGit",
+    "GitUp",
+    "Gitfox",
 ];
+
+/// An app's display name: "Fork" stays, "/Applications/Some App.app" becomes "Some App".
+fn app_label(app: &str) -> String {
+    std::path::Path::new(app)
+        .file_stem()
+        .map_or(app.to_string(), |s| s.to_string_lossy().into_owned())
+}
 
 /// The chosen git app, or the first one installed.
 fn git_client(cfg: &Config) -> Option<String> {
@@ -1132,6 +1133,13 @@ fn set_terminal(handle: AppHandle, terminal: Option<String>) -> Res<Settings> {
 
 #[tauri::command]
 fn set_git_client(handle: AppHandle, git_client: Option<String>) -> Res<Settings> {
+    // Any app can be picked by path ("Other app…"); it has to be a real .app bundle.
+    if let Some(c) = git_client.as_deref().filter(|c| c.contains('/')) {
+        let p = std::path::Path::new(c);
+        if p.extension().is_none_or(|e| e != "app") || !p.is_dir() {
+            return Err(format!("{c} isn't an app"));
+        }
+    }
     apply(
         &handle,
         |cfg| {
@@ -1527,7 +1535,6 @@ fn main() {
             open_url,
             app_run,
             set_app,
-            open_log,
             resources,
             packages,
             package_updates,

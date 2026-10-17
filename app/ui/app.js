@@ -162,9 +162,28 @@ function row(s, { child = false, kids = 0 } = {}) {
   return b;
 }
 
+/** "Laravel only" with a Clear button above a filtered list. */
+function filterNote(m, label) {
+  const f = filterOf(m);
+  if (!f.kind && !f.running) return null;
+  const what = [f.kind && label(f.kind), f.running && "running"].filter(Boolean).join(", ");
+  const note = el("div", "filter-note");
+  note.append(el("span", null, `Showing ${what} only`));
+  const clear = el("button", null, "Clear");
+  clear.onclick = () => {
+    Object.assign(f, { kind: null, running: false });
+    localStorage.setItem("filters", JSON.stringify(filters));
+    renderMain();
+  };
+  note.append(clear);
+  return note;
+}
+
 function renderList() {
   const list = $("#list");
   list.replaceChildren();
+  const note = filterNote("apps", kindLabel);
+  if (note && snap.sites.length) list.append(note);
 
   if (!snap.sites.length) {
     list.innerHTML = `<p class="empty">No applications yet. Add a folder of projects in Settings, or from Terminal:<code>anvil park ~/Sites</code></p>`;
@@ -426,6 +445,7 @@ function renderSite() {
   $(".res-reload", root).onclick = () => loadResources(s.name, true);
   loadResources(s.name);
   window.renderGit?.(s);
+  window.renderSiteServices?.(s, root);
   window.renderPackages?.(s, root);
 }
 
@@ -628,7 +648,6 @@ function renderRun(s, root) {
   const state = snap.app_states[s.name]; // "running" | "starting" | undefined
   const error = snap.app_errors[s.name];
   $(".run-box", root).hidden = false;
-  $(".show-log", root).hidden = false;
   $(".run-box .dot", root).className = `dot ${state === "running" ? "on" : state ? "warm" : ""}`;
   const text = $(".state-text", root);
   text.textContent = state === "running" ? "Running" : state ? "Starting…" : "Stopped";
@@ -639,7 +658,6 @@ function renderRun(s, root) {
   for (const b of root.querySelectorAll("[data-run]")) {
     b.onclick = () => call("app_run", { site: s.name, action: b.dataset.run });
   }
-  $(".show-log", root).onclick = () => invoke("open_log", { site: s.name }).catch((e) => showError(String(e)));
   const err = $(".run-error", root);
   err.textContent = error ?? "";
   err.hidden = !error;
@@ -929,10 +947,16 @@ document.addEventListener("keydown", (e) => {
     open(action);
     return;
   }
-  if (e.key === "l" && !$(".show-log", root)?.hidden) {
-    e.preventDefault();
-    $(".show-log", root).click();
-    return;
+  // ⌘L: the Logs tab for an app, the log file for a service.
+  if (e.key === "l") {
+    const logs = $('.tabs [data-tab="logs"]', root);
+    const svcLog = $(".show-log", root);
+    if (logs || svcLog) {
+      e.preventDefault();
+      if (logs) showTab(root, "logs");
+      else svcLog.click();
+      return;
+    }
   }
   if (e.key === "n") {
     e.preventDefault();

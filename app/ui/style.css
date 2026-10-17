@@ -1318,7 +1318,6 @@ kbd {
 .logs-bar[hidden] { display: none; }
 .logs-bar .spacer { flex: 1; }
 
-.logs-source,
 .logs-bar > button {
   height: 26px;
   padding: 0 10px;
@@ -1553,3 +1552,91 @@ kbd {
 
 .pkg-scripts .row { grid-template-columns: 180px 1fr; min-height: 36px; padding: 6px 14px; }
 .pkg-scripts dd { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
+
+/* Log files of the app, side by side; a very large one is marked. */
+.logs-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.logs-files[hidden] { display: none; }
+
+.logs-file {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: none;
+  text-align: left;
+}
+
+.logs-file strong { font-size: 12px; font-weight: 600; }
+.logs-file small { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.logs-file:hover { background: var(--steel-hover); }
+.logs-file[aria-selected="true"] { background: var(--selected); border-color: transparent; }
+.logs-file.large small { color: var(--heat-text); }
+
+.logs-large {
+  max-width: 560px;
+  margin: 16px 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+
+.logs-large p { margin: 6px 0 12px; }
+.logs-large-actions { display: flex; gap: 8px; }
+
+.logs-large-actions button {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+}
+
+/* Services attached to the app, under its address. */
+.site-services { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.site-services:empty { display: none; }
+
+.svc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.svc-chip:hover { color: var(--text); background: var(--steel-hover); }
+.svc-chip .dot { width: 6px; height: 6px; }
+
+/* Shown above a filtered list. */
+.filter-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 2px 0 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--heat) 12%, transparent);
+  color: var(--heat-text);
+  font-size: 12px;
+}
+
+.filter-note button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-weight: 600;
+}
