@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 /// How much one page reads.
@@ -66,6 +66,14 @@ fn source(id: &str, label: &str, path: &Path) -> Option<LogSource> {
     })
 }
 
+/// Source id and log file of one of an app's processes, both by its id.
+fn process_log(site: &str, p: &crate::processes::Process) -> (String, PathBuf) {
+    (
+        format!("proc:{}", p.id),
+        crate::processes::log_file(site, &p.id),
+    )
+}
+
 /// The log files an app has, newest modified first, then Anvil's own.
 pub fn sources(site: &Site) -> Vec<LogSource> {
     let dir = match site.kind.as_str() {
@@ -93,8 +101,8 @@ pub fn sources(site: &Site) -> Vec<LogSource> {
     }
     // The app's other processes, once they have written something.
     for p in crate::processes::detect(site) {
-        let path = crate::processes::log_file(&site.name, &p.name);
-        out.extend(source(&format!("proc:{}", p.name), &p.name, &path));
+        let (id, path) = process_log(&site.name, &p);
+        out.extend(source(&id, &p.name, &path));
     }
     if let Some(v) = site.php.as_ref().filter(|_| apps::is_php(&site.kind)) {
         let path = home().join("log").join(format!("php-{v}-fpm.log"));
@@ -509,6 +517,21 @@ mod tests {
 [2026-05-30 15:12:43] testing.WARNING: The width(-1) of chart,
        please check the style {\"url\":\"http://x\"}
 ";
+
+    #[test]
+    fn process_log_is_named_by_id() {
+        let p = crate::processes::Process {
+            id: "docs-dev".into(),
+            name: "docs:dev".into(),
+            command: String::new(),
+            source: "package.json",
+            server: true,
+            port: None,
+        };
+        let (id, path) = process_log("shop", &p);
+        assert_eq!(id, "proc:docs-dev");
+        assert_eq!(path.file_name().unwrap(), "app-shop@docs-dev.log");
+    }
 
     #[test]
     fn parses_monolog() {

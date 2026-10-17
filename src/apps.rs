@@ -347,7 +347,13 @@ pub fn running_anywhere(name: &str) -> bool {
 /// Stop a whole process group: `npm run dev` leaves node children behind otherwise.
 fn terminate_group(child: &mut Child, grace: Duration) {
     let group = format!("-{}", child.id());
-    let _ = Command::new("kill").args(["-TERM", "--", &group]).status();
+    let kill = |sig: &str| {
+        let _ = Command::new("kill")
+            .args([sig, "--", &group])
+            .stderr(Stdio::null())
+            .status();
+    };
+    kill("-TERM");
     let deadline = std::time::Instant::now() + grace;
     while std::time::Instant::now() < deadline {
         if let Ok(Some(_)) = child.try_wait() {
@@ -356,7 +362,7 @@ fn terminate_group(child: &mut Child, grace: Duration) {
         std::thread::sleep(Duration::from_millis(50));
     }
     // Anything in the group still alive gets killed.
-    let _ = Command::new("kill").args(["-KILL", "--", &group]).status();
+    kill("-KILL");
     let _ = child.wait();
 }
 
@@ -779,6 +785,7 @@ mod tests {
         );
         fs::remove_dir_all(dir).unwrap();
     }
+
     fn site_at(dir: &Path) -> Site {
         Site {
             name: "shop".into(),
@@ -846,6 +853,7 @@ mod tests {
         apps.stop("shop@boom");
         assert!(apps.crashed().is_empty());
         assert!(apps.list().is_empty());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -856,8 +864,12 @@ mod tests {
         // No package.json: npm fails (or is missing), which still must not count as a crash.
         apps.run_once(&site, "build:all").unwrap();
         assert!(apps.processes.contains("shop#build-all"));
-        std::thread::sleep(Duration::from_millis(2000));
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while apps.finished("shop#build-all").is_none() {
+            assert!(std::time::Instant::now() < deadline, "npm never ended");
+            std::thread::sleep(Duration::from_millis(50));
+        }
         assert!(apps.crashed().is_empty());
-        assert!(apps.finished("shop#build-all").is_some());
+        fs::remove_dir_all(dir).unwrap();
     }
 }

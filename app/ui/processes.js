@@ -44,7 +44,7 @@ function drawProcs(name) {
     dot.title = r.running ? "Running" : "Stopped";
     const label = el("button", "proc-name", r.name);
     label.title = `${r.command}\nFrom ${r.source}. Click to show its log.`;
-    label.onclick = () => window.showLog?.(name, `proc:${r.name}`);
+    label.onclick = () => window.showLog?.(name, `proc:${r.id}`);
     const last = el("span", r.error ? "proc-last error-text" : "proc-last", r.error ?? (r.last || r.command));
     last.title = last.textContent;
     const btn = el("button", null, r.running ? "Stop" : "Start");
