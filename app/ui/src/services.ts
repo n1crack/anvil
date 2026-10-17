@@ -1,15 +1,15 @@
-// @ts-nocheck
-import { $, appIconInto, bytes, el, filter, filterNote, filterOf, invoke, mark, markBox, mode, open, renderMain, row, select, selected, setMode, showError, snap, toast } from "./app";
+import type { ServiceRow } from "./types";
+import { $, appIconInto, listSection, resCache, bytes, el, filter, filterNote, filterOf, invoke, mark, markBox, mode, open, renderMain, row, select, selected, setMode, showError, snap, toast } from "./app";
 import { late } from "./late";
 
 /* Services in the main window: list in the sidebar, details on the right, and
  * the Add Service sheet. Shares $, snap, invoke, el, toast and friends with app.js. */
 
-export let services = [];
+export let services: ServiceRow[] = [];
 export let svcSelected = localStorage.getItem("service");
 export const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
 
-export async function serviceCall(cmd, args) {
+export async function serviceCall(cmd: string, args?: Record<string, unknown>) {
   try {
     services = await invoke(cmd, args);
     showError(null);
@@ -42,8 +42,8 @@ window.loadServices = () => serviceCall("services");
 
 
 export function renderModes() {
-  for (const b of document.querySelectorAll(".modes [role=tab]")) {
-    b.setAttribute("aria-selected", b.dataset.mode === mode);
+  for (const b of document.querySelectorAll<HTMLElement>(".modes [role=tab]")) {
+    b.setAttribute("aria-selected", String(b.dataset.mode === mode));
   }
   const running = services.filter((x) => x.running).length;
   $("#svc-running").textContent = running ? running : "";
@@ -55,7 +55,7 @@ export function renderModes() {
   $("#list").setAttribute("aria-label", apps ? "Applications" : "Services");
 }
 
-for (const b of document.querySelectorAll(".modes [role=tab]")) b.onclick = () => setMode(b.dataset.mode);
+for (const b of document.querySelectorAll<HTMLElement>(".modes [role=tab]")) b.onclick = () => setMode(b.dataset.mode);
 
 export function serviceMark(svc, cls = "mark") {
   const m = el("span", `${cls} svc-mark svc-${svc.kind}`, ABBR[svc.kind] ?? "?");
@@ -66,7 +66,7 @@ export function serviceMark(svc, cls = "mark") {
 export function serviceRow(svc) {
   const b = el("button", "item");
   b.dataset.name = svc.id;
-  b.setAttribute("aria-current", svc.id === svcSelected);
+  b.setAttribute("aria-current", String(svc.id === svcSelected));
   const text = el("span", "text");
   text.append(el("span", "name", svc.id), el("span", "sub", `${svc.name} ${svc.version} on port ${svc.port}`));
   // As an app's row: the run state is a badge on the mark, and every row ends in the
@@ -115,7 +115,7 @@ export function selectService(id) {
 export function serviceKeys(e) {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
-  const items = [...document.querySelectorAll("#list .item")].filter((b) => !b.closest(".closed"));
+  const items = [...document.querySelectorAll<HTMLElement>("#list .item")].filter((b) => !b.closest(".closed"));
   const i = items.findIndex((b) => b.dataset.name === svcSelected);
   const next = items[i + (e.key === "ArrowDown" ? 1 : -1)];
   if (next) selectService(next.dataset.name);
@@ -131,7 +131,7 @@ export function chips(root, values, label, save) {
       c.onclick = v.onclick;
     }
     const x = el("button", null, "×");
-    x.setAttribute("aria-label", `Remove ${v.text ?? v}`);
+    x.setAttribute("aria-label", String(`Remove ${v.text ?? v}`));
     x.onclick = (e) => {
       e.stopPropagation();
       save(values.map((w) => w.value ?? w).filter((w) => w !== (v.value ?? v)));
@@ -160,7 +160,7 @@ export function renderService() {
     return;
   }
   // Keep focus and typing in a field across refreshes of the same service.
-  if (root.dataset.service === svc.id && root.contains(document.activeElement) && document.activeElement.matches("input")) return;
+  if (root.dataset.service === svc.id && root.contains(document.activeElement) && document.activeElement?.matches("input")) return;
   root.dataset.service = svc.id;
   root.replaceChildren($("#service-tpl").content.cloneNode(true));
 
@@ -185,7 +185,7 @@ export function renderService() {
   // The data folder opens in Finder: its own icon, as on an app's page.
   const data = $('[data-svc-open="data"]', root);
   data.title = `Show ~/.anvil/data/${svc.id} in Finder`;
-  data.setAttribute("aria-label", data.title);
+  data.setAttribute("aria-label", String(data.title));
   appIconInto(data, "Finder");
   inbox.onclick = () => invoke("open_url", { url: svc.web }).catch((e) => showError(String(e)));
   for (const what of ["data", "log"]) {
@@ -260,7 +260,7 @@ export function renderService() {
     icon.innerHTML = DB_ICON;
     appIconInto(icon, client);
     const open = el("button", null, "Open");
-    open.setAttribute("aria-label", `Open ${svc.id} in ${client}`);
+    open.setAttribute("aria-label", String(`Open ${svc.id} in ${client}`));
     open.onclick = () => openClient(svc, client, chosenDb[svc.id]);
     clients.append(svcLine(icon, client, null, open));
   }
@@ -331,7 +331,7 @@ export async function removeService(svc) {
 
 /** The service's newest log lines under its page; the Log button opens the whole file. */
 export async function loadServiceLog(id) {
-  let lines = [];
+  let lines: any[] = [];
   try {
     lines = await invoke("service_log", { id });
   } catch {}
@@ -353,7 +353,7 @@ setInterval(() => {
 
 /* ---------- Add Service sheet: kind, name, port, app and tags, like creating a container ---------- */
 
-export let svcKinds = [];
+export let svcKinds: any[] = [];
 export let svcKind = localStorage.getItem("serviceKind") ?? "mysql";
 
 export async function openAddService() {
@@ -479,8 +479,8 @@ window.loadServices();
 
 /* ---------- What's inside: databases, keys, messages ---------- */
 
-export const contents = new Map(); // service id -> last contents
-export const chosenDb = {}; // service id -> database used in the .env lines
+export const contents = new Map<string, any>(); // service id -> last contents
+export const chosenDb: Record<string, string> = {}; // service id -> database used in the .env lines
 
 export function openClient(svc, client, database) {
   invoke("open_in_client", { id: svc.id, client, database: database ?? null }).catch((e) => showError(String(e)));
@@ -500,7 +500,7 @@ export function envFor(svc) {
 export const CONTENTS_TITLE = { mysql: "Databases", postgres: "Databases", redis: "Keys", mailpit: "Messages" };
 export const SYSTEM_DBS = new Set(["information_schema", "mysql", "performance_schema", "sys", "postgres", "template1"]);
 
-export async function renderContents(svc, root, action) {
+export async function renderContents(svc, root, action?) {
   $(".svc-contents-title", root).textContent = CONTENTS_TITLE[svc.kind];
   const box = $(".svc-contents", root);
   if (!svc.running) {
@@ -531,7 +531,7 @@ export function drawContents(svc, root, c) {
     list.append(row);
     return row;
   };
-  const act = (label, fn, cls) => {
+  const act = (label: string, fn: () => unknown, cls?: string) => {
     const b = el("button", cls, label);
     b.onclick = fn;
     return b;
@@ -554,7 +554,7 @@ export function drawContents(svc, root, c) {
     };
     const system = c.databases.filter(([n]) => SYSTEM_DBS.has(n));
     for (const [name, size] of c.databases.filter(([n]) => !SYSTEM_DBS.has(n))) {
-      const buttons = [];
+      const buttons: any[] = [];
       if (svc.clients[0]) buttons.push(act("Open", () => openClient(svc, svc.clients[0], name)));
       buttons.push(act("Drop…", async () => {
         if (await confirm(`Drop ${name}?`, `Every table in ${name} is deleted. This can’t be undone.`, "Drop"))

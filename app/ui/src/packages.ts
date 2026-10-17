@@ -1,13 +1,12 @@
-// @ts-nocheck
 import { $, el, invoke, renderMain, row, selected, showError, snap } from "./app";
 
 /* Packages tab: an app's dependencies from its manifests and lock files.
  * Shares $, el, invoke, selected and showError with app.js. */
 
-export const pkgCache = new Map(); // site name -> packages or { error }
-export const pkgUpdates = new Map(); // site name -> updates, "checking" or { error }
+export const pkgCache = new Map<string, any>(); // site name -> packages or { error }
+export const pkgUpdates = new Map<string, any>(); // site name -> updates, "checking" or { error }
 export let pkgQuery = ""; // one search over every list
-export const pkgView = new Map(); // site name -> the list shown: deps, dev, scripts or updates
+export const pkgView = new Map<string, string>(); // site name -> the list shown: deps, dev, scripts or updates
 export const REGISTRY = {
   composer: "https://packagist.org/packages/",
   npm: "https://www.npmjs.com/package/",
@@ -140,7 +139,7 @@ export function drawLists(body, name, ecosystems, updates) {
   for (const [id, label, rows] of shown) {
     const b = el("button", "chip-btn", label);
     b.setAttribute("role", "tab");
-    b.setAttribute("aria-selected", id === part[0]);
+    b.setAttribute("aria-selected", String(id === part[0]));
     b.append(el("span", "pkg-count", rows.length));
     b.onclick = () => {
       pkgView.set(name, id);

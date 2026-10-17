@@ -5,10 +5,11 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "strict": true,
+    "noImplicitAny": false,
     "noEmit": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "types": ["vite/client"]
+    "types": []
   },
   "include": ["src", "vite.config.ts"]
 }

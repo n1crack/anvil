@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, open, select, selected, showError, showTab, snap, tab, tilde, toast } from "./app";
 
 /* Logs tab: an app's log files, newest first. app.js calls logsTab() from showTab. */
@@ -16,11 +15,11 @@ export const levelGroup = (l) =>
     : l === "warning" || l === "warn" ? "warning"
       : l === "debug" ? "debug" : "info";
 
-export const logSource = new Map(); // site name -> chosen source id
+export const logSource = new Map<string, string>(); // site name -> chosen source id
 // An app's own output reads top to bottom like a terminal; log files show the newest first.
 export const chrono = (v) => v.source?.id === "app";
-export let lv = null; // the view: { site, node, ... }
-export let followTimer = null;
+export let lv: any = null; // the view: { site, node, ... }
+export let followTimer: ReturnType<typeof setInterval> | null = null;
 
 export function logTime(t) {
   if (!t) return null;
@@ -58,7 +57,7 @@ export function buildLogs(s) {
     <p class="logs-status muted"></p>
     <ol class="logs-list"></ol>
     <button class="logs-more" hidden>Load older</button>`;
-  const v = {
+  const v: any = {
     site: s.name,
     path: s.path,
     node,
@@ -106,7 +105,7 @@ export function buildLogs(s) {
       items: await Promise.all([
         M.MenuItem.new({
           text: "Open in Console",
-          action: () => invoke("log_open", { site: v.site, source: v.source.id }).catch((e) => showError(String(e))),
+          action: () => invoke("log_open", { site: v.site, source: v.source!.id }).catch((e) => showError(String(e))),
         }),
         M.PredefinedMenuItem.new({ item: "Separator" }),
         M.MenuItem.new({ text: `Clear ${v.source.label}…`, action: () => clearLog(v) }),
@@ -121,7 +120,7 @@ export function buildLogs(s) {
     v.atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
   };
   $(".logs-list", node).onclick = (e) => {
-    const head = e.target.closest(".log-head");
+    const head = (e.target as HTMLElement).closest(".log-head");
     if (head) toggleEntry(v, head.parentElement);
   };
 
@@ -152,7 +151,7 @@ export function drawFiles(v) {
   for (const src of v.sources) {
     const b = el("button", src.bytes >= LARGE_LOG ? "logs-file large" : "logs-file");
     b.setAttribute("role", "tab");
-    b.setAttribute("aria-selected", src === v.source);
+    b.setAttribute("aria-selected", String(src === v.source));
     b.title = src.path;
     const when = src.modified ? `, ${ago(new Date(src.modified * 1000))}` : "";
     b.append(el("strong", null, src.label), el("small", null, `${bytes(src.bytes)}${when}`));
@@ -168,7 +167,7 @@ export function drawFiles(v) {
 
 // Above this a log isn't opened until asked: it's usually a forgotten single-file log.
 export const LARGE_LOG = 100 * 1024 * 1024;
-export const largeOk = new Set(); // "site/source" opened anyway this session
+export const largeOk = new Set<string>(); // "site/source" opened anyway this session
 
 export function showLarge(v) {
   const box = el("li", "logs-large");
@@ -324,7 +323,7 @@ export function entryRow(v, e) {
 export function toggleEntry(v, li) {
   const head = $(".log-head", li);
   const open = head.getAttribute("aria-expanded") !== "true";
-  head.setAttribute("aria-expanded", open);
+  head.setAttribute("aria-expanded", String(open));
   if (!open) return $(".log-detail", li)?.remove();
   const e = li.entry;
   const box = el("div", "log-detail");
@@ -358,7 +357,7 @@ export function toggleEntry(v, li) {
 
 /** Follow: check for new entries every 2 s while the tab is shown and the window focused. */
 export function follow(on) {
-  clearInterval(followTimer);
+  clearInterval(followTimer ?? undefined);
   followTimer = on ? setInterval(followTick, 2000) : null;
 }
 

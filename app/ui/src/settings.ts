@@ -1,12 +1,12 @@
-// @ts-nocheck
+import type { Settings } from "./types";
 
 export const { invoke } = window.__TAURI__.core;
 
-export const $ = (sel, root = document) => root.querySelector(sel);
+export const $ = (sel: string, root: ParentNode = document): any => root.querySelector(sel);
 export const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
-export let s = null;
+export let s: Settings = null as unknown as Settings; // set by the first load
 
-export async function call(cmd, args) {
+export async function call(cmd: string, args?: Record<string, unknown>) {
   try {
     s = (await invoke(cmd, args)) ?? s;
     showError(null);
@@ -27,8 +27,8 @@ window.refresh = () => {
 
 /* ---------- Languages ---------- */
 
-export let runtimes = null;
-export const installing = new Set(); // "id@version"
+export let runtimes: any = null;
+export const installing = new Set<string>(); // "id@version"
 
 export async function loadRuntimes() {
   try {
@@ -64,7 +64,7 @@ export function renderRuntimes() {
       const x = document.createElement("button");
       x.textContent = "×";
       x.title = `Uninstall ${rt.name} ${v}`;
-      x.setAttribute("aria-label", x.title);
+      x.setAttribute("aria-label", String(x.title));
       x.onclick = async () => {
         const ok = await window.__TAURI__.dialog.ask(`Applications using it switch to another installed version, or stop starting until one is installed.`, {
           title: `Uninstall ${rt.name} ${v}?`, kind: "warning", okLabel: "Uninstall", cancelLabel: "Cancel",
@@ -85,7 +85,7 @@ export function renderRuntimes() {
     const actions = document.createElement("span");
     actions.className = "actions-inline";
     const pick = document.createElement("select");
-    pick.setAttribute("aria-label", `${rt.name} version to install`);
+    pick.setAttribute("aria-label", String(`${rt.name} version to install`));
     for (const v of rt.available.filter((v) => !rt.installed.includes(v))) pick.add(new Option(v, v));
     const key = () => `${rt.id}@${pick.value}`;
     const install = button("Install", async () => {
@@ -159,7 +159,7 @@ export async function loadAnvilStorage() {
   ];
   // Anything in a category not listed above still shows, last.
   const known = new Set(groups.map(([cat]) => cat));
-  for (const cat of new Set(st.items.map((i) => i.category))) if (!known.has(cat)) groups.push([cat, cat]);
+  for (const cat of new Set<string>(st.items.map((i) => i.category))) if (!known.has(cat)) groups.push([cat, cat]);
   for (const [cat, title] of groups) {
     const items = st.items.filter((i) => i.category === cat);
     if (!items.length) continue;
@@ -217,7 +217,7 @@ export function drawAnvilItem(list, i, withNote) {
 
 /* Application sizes: the last measurement shows at once, and a new one fills
  * in row by row as each app is counted. */
-export const sizes = new Map(); // app name -> { name, kind, total, safe, rebuild }
+export const sizes = new Map<string, any>(); // app name -> { name, kind, total, safe, rebuild }
 export let measuring = false;
 export let measuredAt = 0; // Unix seconds of the shown numbers
 export let drawQueued = false;
@@ -303,7 +303,7 @@ export function drawSizes() {
     const name = document.createElement("span");
     name.textContent = a.name;
     const note = document.createElement("small");
-    const parts = [];
+    const parts: any[] = [];
     if (a.rebuild) parts.push(`${bytes(a.rebuild)} rebuildable`);
     if (a.safe) parts.push(`${bytes(a.safe)} safe to delete`);
     note.textContent = parts.join(", ") || "Mostly source and data";
@@ -430,8 +430,8 @@ export function render() {
     versions.append(row);
   }
 
-  for (const input of document.querySelectorAll("[data-ini]")) {
-    if (document.activeElement !== input) input.value = s.ini[input.dataset.ini] ?? "";
+  for (const input of document.querySelectorAll<HTMLInputElement>("[data-ini]")) {
+    if (document.activeElement !== input) input.value = s.ini[input.dataset.ini ?? ""] ?? "";
   }
 }
 
@@ -464,7 +464,7 @@ $("#open-config-about").onclick = () => invoke("open_config_dir").catch((e) => s
 window.__TAURI__.app?.getVersion().then((v) => ($("#version").textContent = `Version ${v}`));
 $("#open-config").onclick = () => invoke("open_config_dir").catch((e) => showError(String(e)));
 
-for (const input of document.querySelectorAll("[data-ini]")) {
+for (const input of document.querySelectorAll<HTMLInputElement>("[data-ini]")) {
   input.onchange = async () => {
     const value = input.value.trim() || null;
     await call("set_ini", { site: null, key: input.dataset.ini, value });
@@ -478,16 +478,16 @@ for (const input of document.querySelectorAll("[data-ini]")) {
 // Storage: Anvil's own files or the applications', one at a time.
 export function showStorage(which) {
   localStorage.setItem("storageTab", which);
-  for (const b of document.querySelectorAll("[data-storage]")) b.setAttribute("aria-selected", b.dataset.storage === which);
-  for (const p of document.querySelectorAll("[data-storage-panel]")) p.hidden = p.dataset.storagePanel !== which;
+  for (const b of document.querySelectorAll<HTMLElement>("[data-storage]")) b.setAttribute("aria-selected", String(b.dataset.storage === which));
+  for (const p of document.querySelectorAll<HTMLElement>("[data-storage-panel]")) p.hidden = p.dataset.storagePanel !== which;
 }
-for (const b of document.querySelectorAll("[data-storage]")) b.onclick = () => showStorage(b.dataset.storage);
+for (const b of document.querySelectorAll<HTMLElement>("[data-storage]")) b.onclick = () => showStorage(b.dataset.storage);
 showStorage(localStorage.getItem("storageTab") === "apps" ? "apps" : "anvil");
 
-for (const b of document.querySelectorAll("[data-page]")) {
+for (const b of document.querySelectorAll<HTMLElement>("[data-page]")) {
   b.onclick = () => {
-    for (const other of document.querySelectorAll("[data-page]")) other.setAttribute("aria-current", other === b);
-    for (const page of document.querySelectorAll(".page")) page.hidden = page.id !== b.dataset.page;
+    for (const other of document.querySelectorAll<HTMLElement>("[data-page]")) other.setAttribute("aria-current", String(other === b));
+    for (const page of document.querySelectorAll<HTMLElement>(".page")) page.hidden = page.id !== b.dataset.page;
     if (b.dataset.page === "languages" && !runtimes) loadRuntimes();
     if (b.dataset.page === "storage") {
       loadAnvilStorage();
@@ -497,7 +497,7 @@ for (const b of document.querySelectorAll("[data-page]")) {
 }
 
 document.addEventListener("contextmenu", (e) => {
-  if (!e.target.closest("input, textarea")) e.preventDefault();
+  if (!(e.target as HTMLElement).closest("input, textarea")) e.preventDefault();
 });
 
 window.refresh();

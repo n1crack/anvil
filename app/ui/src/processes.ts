@@ -1,4 +1,4 @@
-// @ts-nocheck
+import type { Overview } from "./types";
 import { ansi, clean } from "./term";
 import { $, M, call, el, invoke, mode, open, popAt, renderSite, row, selected, showError, snap, tab } from "./app";
 import { more } from "./logs";
@@ -11,11 +11,11 @@ import { services } from "./services";
  * snap, selected, tab, mode, M, render, toast and showError with app.js; clean and
  * ansi with term.js. */
 
-export const procCache = new Map(); // site name -> overview from the backend
-export const procLoading = new Set(); // site names with a request on its way
-export const procBusy = new Map(); // "site/service" -> "starting…" while Docker works
-export const procLogs = new Map(); // "site/service" -> container log text, while shown
-export let procEdit = null; // { site, id, field, value, error } while a row's command or address is edited
+export const procCache = new Map<string, Overview>(); // site name -> overview from the backend
+export const procLoading = new Set<string>(); // site names with a request on its way
+export const procBusy = new Map<string, string>(); // "site/service" -> "starting…" while Docker works
+export const procLogs = new Map<string, string>(); // "site/service" -> container log text, while shown
+export let procEdit: any = null; // { site, id, field, value, error } while a row's command or address is edited
 
 /** Called by renderSite: draw what is known, then ask again. */
 window.renderProcesses = (s) => {
@@ -42,7 +42,7 @@ export async function loadProcs(name, cmd = "processes", args = {}) {
 
 /** Docker can take minutes: the rows say what they are doing until it is done.
  * Without a service, the whole project in compose's order. */
-export async function containerRun(name, services, action, service) {
+export async function containerRun(name, services, action, service?: string) {
   const keys = services.map((s) => `${name}/${s}`);
   const word = { start: "starting…", stop: "stopping…", restart: "restarting…" }[action];
   for (const k of keys) procBusy.set(k, word);
@@ -71,7 +71,7 @@ export async function toggleContainerLog(name, service) {
 
 export function procBtn(label, aria, onclick) {
   const b = el("button", null, label);
-  b.setAttribute("aria-label", aria);
+  b.setAttribute("aria-label", String(aria));
   b.onclick = (e) => {
     e.stopPropagation();
     onclick(b);
@@ -82,7 +82,7 @@ export function procBtn(label, aria, onclick) {
 /** Below a button, as the other menus. */
 export function popup(menu, btn) {
   const r = btn.getBoundingClientRect();
-  const dpi = window.__TAURI__.dpi;
+  const dpi = (window.__TAURI__ as any).dpi;
   menu.popup(dpi ? new dpi.LogicalPosition(r.left, r.bottom + 4) : undefined);
 }
 
@@ -139,7 +139,7 @@ export function editField(name, r) {
   const input = el("input");
   input.value = procEdit.value;
   input.spellcheck = false;
-  input.setAttribute("aria-label", host ? `Address of ${r.name}` : `Command for ${r.name}`);
+  input.setAttribute("aria-label", String(host ? `Address of ${r.name}` : `Command for ${r.name}`));
   input.oninput = () => (procEdit.value = input.value);
   const cancel = () => {
     procEdit = null;
@@ -171,7 +171,7 @@ export function editField(name, r) {
 }
 
 /** One line: dot, name, detail, then the on-top pin, the auto tag, 🌐, Restart and ■ (or ▶) and ⋯. */
-export function procRow({ name, state, detail, error, title, busy, open, run, top, auto, web, menu, edit }) {
+export function procRow({ name, state, detail, error, title, busy, open, run, top, auto, web, menu, edit }: Record<string, any>) {
   const row = el("div", `proc ${state}`);
   const dot = el("span", `dot ${state === "running" ? "on" : state === "crashed" ? "bad" : ""}`);
   dot.title = { running: "Running", crashed: "Crashed", stopped: "Stopped" }[state];
@@ -340,7 +340,7 @@ export function drawProcs(name) {
   box.replaceChildren();
   drawConsole(name);
   if (box.hidden) return;
-  let focus = null;
+  let focus: HTMLElement | null = null;
 
   if (rows.length || hidden.length) {
     const head = el("div", "procs-head");
@@ -434,7 +434,7 @@ export const conBox = el("section", "console");
 conBox.setAttribute("aria-label", "Output");
 conBox.innerHTML = `<header class="console-head"><span class="console-title"></span><span class="proc-actions"></span><button class="icon-btn console-close" aria-label="Close output">×</button></header><pre class="console-out"></pre>`;
 export const conOut = $(".console-out", conBox);
-export let con = null; // { site, source, label, raw, from, busy }
+export let con: any = null; // { site, source, label, raw, from, busy }
 export let conAtEnd = true; // follow new output only while the reader is at the bottom
 export let conTop = 0;
 conOut.onscroll = () => {

@@ -1,10 +1,10 @@
-// @ts-nocheck
+import type { Snapshot } from "./types";
 import { late } from "./late";
 
 export const { invoke } = window.__TAURI__.core;
 
-export const $ = (sel, root = document) => root.querySelector(sel);
-export let snap = null;
+export const $ = (sel: string, root: ParentNode = document): any => root.querySelector(sel);
+export let snap: Snapshot = null as unknown as Snapshot; // set by the first `state`
 export let selected = localStorage.getItem("selected");
 export let filter = "";
 // The sidebar shows applications or services; services.ts draws the latter.
@@ -16,7 +16,7 @@ export const filterOf = (m) => (filters[m] ??= { kind: null, running: false });
 export const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 // A standard port (443, or 80 without HTTPS) isn't written out.
 // Sites whose HTTPS is being turned on or off (the web server reloads meanwhile).
-export const securing = new Set();
+export const securing = new Set<string>();
 
 // Compose projects and plain folders get no address from Anvil.
 export const serves = (s) => !["compose", "folder"].includes(s.kind);
@@ -30,7 +30,7 @@ export const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden
 
 export let snapAt = 0; // when the last snapshot arrived
 
-export async function call(cmd, args) {
+export async function call(cmd: string, args?: Record<string, unknown>) {
   try {
     snap = (await invoke(cmd, args)) ?? snap;
     snapAt = Date.now();
@@ -47,7 +47,7 @@ export function showError(msg) {
 
 export let toastTimer;
 /** A short confirmation at the bottom of the window. */
-export function toast(msg, undo) {
+export function toast(msg: string, undo?: () => unknown) {
   const t = $("#toast");
   t.textContent = msg;
   if (undo) {
@@ -79,7 +79,7 @@ window.refresh = () => {
 // certificate and the terminal commands. One button does them all, one password.
 export const SETUP_FIELDS = ["resolver", "ports", "trusted", "shims"];
 
-export async function loadSetup(busy) {
+export async function loadSetup(busy?: string) {
   let st;
   try {
     st = await invoke("setup_status");
@@ -151,7 +151,7 @@ export function renderMain() {
   }
 }
 
-export const icons = new Map(); // site name -> data URL or null
+export const icons = new Map<string, string | null>(); // site name -> data URL or null
 
 export function mark(s) {
   const m = document.createElement("span");
@@ -181,7 +181,7 @@ export const folded = new Set(JSON.parse(localStorage.getItem("sections") ?? "[]
 export function listSection(key, title, rows, count) {
   const open = !!filter || !folded.has(key);
   const head = el("button", "section-head");
-  head.setAttribute("aria-expanded", open);
+  head.setAttribute("aria-expanded", String(open));
   head.append(el("span", "chevron", "›"), el("span", null, title), el("span", "section-count", count));
   const box = el("div", "rows");
   box.append(...rows);
@@ -194,7 +194,7 @@ export function listSection(key, title, rows, count) {
     if (opening) folded.delete(key);
     else folded.add(key);
     localStorage.setItem("sections", JSON.stringify([...folded]));
-    head.setAttribute("aria-expanded", opening);
+    head.setAttribute("aria-expanded", String(opening));
     fold.classList.toggle("closed", !opening);
   };
   const h = el("h2");
@@ -210,7 +210,7 @@ export function toggle(name, open = collapsed.has(name)) {
   localStorage.setItem("collapsed", JSON.stringify([...collapsed]));
   const parent = $(`.item[data-name="${CSS.escape(name)}"]`);
   if (!parent) return;
-  parent.setAttribute("aria-expanded", open);
+  parent.setAttribute("aria-expanded", String(open));
   $(".disclosure", parent).title = open ? "Hide linked domains" : "Show linked domains";
   parent.nextElementSibling?.classList.toggle("closed", !open);
 }
@@ -233,7 +233,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   const b = document.createElement("button");
   b.className = child ? "item child" : "item";
   b.dataset.name = s.name;
-  b.setAttribute("aria-current", s.name === selected);
+  b.setAttribute("aria-current", String(s.name === selected));
   if (child) {
     const branch = document.createElement("span");
     branch.className = "branch";
@@ -287,7 +287,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   const d = el("span", "disclosure");
   if (kids) {
     const open = !collapsed.has(s.name);
-    b.setAttribute("aria-expanded", open);
+    b.setAttribute("aria-expanded", String(open));
     d.title = open ? "Hide linked domains" : "Show linked domains";
     d.innerHTML = `<span class="count"></span><span class="chevron" aria-hidden="true">›</span>`;
     $(".count", d).textContent = kids;
@@ -329,13 +329,13 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
 
 /* ---------- Hover card ---------- */
 
-export let hoverTimer = null;
-export let cardMuted = null; // the row a context menu was opened on
-export let cardFor = null; // the site whose card is shown or on its way
-export const cardProcs = new Map(); // site name -> { at, req: promise of the `processes` overview }
+export let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+export let cardMuted: string | null = null; // the row a context menu was opened on
+export let cardFor: string | null = null; // the site whose card is shown or on its way
+export const cardProcs = new Map<string, any>(); // site name -> { at, req: promise of the `processes` overview }
 
 export function hideCard() {
-  clearTimeout(hoverTimer);
+  clearTimeout(hoverTimer ?? undefined);
   hoverTimer = cardFor = null;
   $(".hover-card")?.remove();
 }
@@ -431,7 +431,7 @@ export function renderList() {
   // A linked name pointing at a parked project's folder is an extra domain for that project.
   const parked = snap.sites.filter((s) => !s.linked);
   const byPath = new Map(parked.map((s) => [s.path, []]));
-  const linked = [];
+  const linked: any[] = [];
   for (const s of snap.sites.filter((s) => s.linked)) (byPath.get(s.path) ?? linked).push(s);
 
   const order = sortBy === "modified"
@@ -449,7 +449,7 @@ export function renderList() {
 
   // `key` remembers the fold; folders and Linked keep their old keys.
   const section = (title, sites, withChildren, path = true, kind = true, key = `apps:${title}`) => {
-    const rows = [];
+    const rows: any[] = [];
     for (const s of [...sites].sort(order)) {
       const kids = withChildren ? byPath.get(s.path) ?? [] : [];
       const parentHit = hit(s);
@@ -526,7 +526,7 @@ export async function siteMenu(s) {
   const groupOf = Object.keys(snap.groups).find((g) => snap.groups[g].includes(s.name));
   const groups = [...new Set(["Favorites", ...Object.keys(snap.groups)])];
 
-  const items = [];
+  const items: any[] = [];
   if (serves(s)) {
     items.push(
       await M.CheckMenuItem.new({ text: "HTTPS", checked: s.secure, action: () => setSecure(s) }),
@@ -560,7 +560,7 @@ export function setView(key, value) {
 /** Inline text prompt under the search field. Resolves to the text, or null when cancelled. */
 /** Inline text prompt under the search field. `preview` turns the text into what
  * it will create. Only Return or Esc ends it, so a stray click keeps the typing. */
-export function ask(label, placeholder, preview) {
+export function ask(label: string, placeholder?: string, preview?: (v: string) => string) {
   const form = $("#ask");
   const input = $("#ask-input");
   const hint = $("#ask-hint");
@@ -612,7 +612,7 @@ export function showTab(root, name) {
   localStorage.setItem("tab", name);
   // One stop in the Tab order; the arrow keys move between tabs.
   for (const b of root.querySelectorAll(".tabs [role=tab]")) {
-    b.setAttribute("aria-selected", b.dataset.tab === name);
+    b.setAttribute("aria-selected", String(b.dataset.tab === name));
     b.tabIndex = b.dataset.tab === name ? 0 : -1;
   }
   for (const p of root.querySelectorAll("[role=tabpanel]")) p.hidden = p.dataset.panel !== name;
@@ -632,13 +632,13 @@ export function ago(d) {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
 }
 
-export const touchedCache = new Map(); // site name -> { at: ms when asked, secs: newest edit }
+export const touchedCache = new Map<string, { at: number; secs: number | null }>(); // site name -> { at: ms when asked, secs: newest edit }
 
 /** The newest edit (seconds) as known; asks again after 30 s and calls `done` with the answer. */
 export function touchedOf(s, done) {
   const t = touchedCache.get(s.name);
   if (!t || Date.now() - t.at > 30000) {
-    touchedCache.set(s.name, { at: Date.now(), secs: t?.secs });
+    touchedCache.set(s.name, { at: Date.now(), secs: t?.secs ?? null });
     invoke("touched", { site: s.name })
       .catch(() => null)
       .then((secs) => {
@@ -654,7 +654,7 @@ export function drawMeta() {
   const box = $("#site .meta");
   const s = snap?.sites.find((x) => x.name === selected);
   if (!box || !s) return;
-  const parts = [];
+  const parts: any[] = [];
   if (serves(s)) {
     const addr = el("span", "addr");
     const link = el("a", "site-url", url(s).replace("https://", ""));
@@ -718,7 +718,7 @@ export function aliasPop(anchor, sites) {
 
 /** A small bubble under `anchor`, right-aligned with it. Esc or a click elsewhere
  * closes it; the close function is returned. */
-export function popAt(anchor, pop, focus) {
+export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | null) {
   document.querySelector(".pop")?.remove();
   pop.classList.add("pop");
   pop.setAttribute("role", "dialog");
@@ -738,7 +738,7 @@ export function popAt(anchor, pop, focus) {
   return close;
 }
 
-export const appIcons = new Map(); // app name -> promise of its icon as a data URL, or null
+export const appIcons = new Map<string, Promise<string | null>>(); // app name -> promise of its icon as a data URL, or null
 
 /** Finder, the terminal and the editor as their own colored icons; the outline stays when there is none. */
 export function drawOpenWith(root) {
@@ -749,7 +749,7 @@ export function drawOpenWith(root) {
     b.hidden = !name;
     if (!name) continue;
     b.title = `Open in ${name}${b.dataset.open === "editor" ? " (⌘E)" : ""}`;
-    b.setAttribute("aria-label", b.title);
+    b.setAttribute("aria-label", String(b.title));
     appIconInto(b, name);
   }
 }
@@ -757,7 +757,7 @@ export function drawOpenWith(root) {
 /** `box`'s content becomes the app's own icon once known; the outline stays otherwise. */
 export function appIconInto(box, name) {
   if (!appIcons.has(name)) appIcons.set(name, invoke("app_icon", { name }).catch(() => null));
-  appIcons.get(name).then((src) => {
+  appIcons.get(name)!.then((src) => {
     if (src) box.replaceChildren(Object.assign(new Image(), { src, alt: "" }));
   });
 }
@@ -909,7 +909,7 @@ export function nextHint(s, root) {
 
 /* ---------- Resources ---------- */
 
-export const resCache = new Map(); // site name -> resources
+export const resCache = new Map<string, any>(); // site name -> resources
 export const SAFETY = {
   safe: ["Safe to delete", "Nothing is lost"],
   rebuild: ["Rebuildable", "Delete to free space; it can be recreated"],
@@ -939,10 +939,10 @@ export async function loadResources(name, force = false) {
   if (selected === name) renderResources(name);
 }
 
-export function el(tag, cls, text) {
+export function el(tag: string, cls?: string | null, text?: string | number | null): any {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
-  if (text != null) e.textContent = text;
+  if (text != null) e.textContent = String(text);
   return e;
 }
 
@@ -994,7 +994,7 @@ export function renderResources(name) {
     const label = el("span");
     const sw = el("i", `swatch ${i.safety}`);
     sw.setAttribute("role", "img");
-    sw.setAttribute("aria-label", SAFETY[i.safety][0]);
+    sw.setAttribute("aria-label", String(SAFETY[i.safety][0]));
     // The whole name carries the explanation: a bigger target than the swatch.
     label.title = `${SAFETY[i.safety][0]}: ${i.note}`;
     label.append(sw, i.label);
@@ -1004,7 +1004,7 @@ export function renderResources(name) {
     dd.append(el("span", "size", bytes(i.bytes)));
     if (i.safety !== "keep") {
       const del = el("button", "del", "Delete");
-      del.setAttribute("aria-label", `Delete ${i.label}`);
+      del.setAttribute("aria-label", String(`Delete ${i.label}`));
       del.onclick = () => cleanItems(name, [i]);
       dd.append(del);
     } else {
@@ -1206,7 +1206,7 @@ $("#power").onclick = async (e) => {
     ]),
   });
   const r = btn.getBoundingClientRect();
-  const dpi = window.__TAURI__.dpi;
+  const dpi = (window.__TAURI__ as any).dpi;
   menu.popup(dpi ? new dpi.LogicalPosition(r.left, r.bottom + 4) : undefined);
 };
 
@@ -1400,7 +1400,7 @@ export function renderFilter() {
   btn.title = on
     ? `Filtered: ${[f.kind && "one type", f.running && "running only"].filter(Boolean).join(", ")}`
     : mode === "apps" ? "Group, sort and filter applications" : `Filter ${what}`;
-  btn.setAttribute("aria-label", btn.title);
+  btn.setAttribute("aria-label", String(btn.title));
 }
 
 $("#reload").onclick = async (e) => {
@@ -1413,7 +1413,7 @@ $("#reload").onclick = async (e) => {
 
 // No browser context menu (Reload, Inspect…) outside text fields; sites have their own.
 document.addEventListener("contextmenu", (e) => {
-  if (!e.target.closest("input, textarea")) e.preventDefault();
+  if (!(e.target as HTMLElement).closest("input, textarea")) e.preventDefault();
 });
 
 $("#search").oninput = (e) => {
@@ -1424,7 +1424,7 @@ $("#search").oninput = (e) => {
 
 // Arrow keys move through the list like a native outline: up/down to move, left/right to fold.
 // The hover card goes when the list (or what holds it) scrolls; logs scrolling elsewhere don't count.
-document.addEventListener("scroll", (e) => e.target.contains?.($("#list")) && hideCard(), true);
+document.addEventListener("scroll", (e) => (e.target as HTMLElement).contains?.($("#list")) && hideCard(), true);
 $("#list").onkeydown = (e) => {
   if (mode === "services") return late.serviceKeys(e);
   const cur = $(`.item[data-name="${CSS.escape(selected ?? "")}"]`);
@@ -1435,7 +1435,7 @@ $("#list").onkeydown = (e) => {
   }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
-  const items = [...document.querySelectorAll(".item")].filter((b) => !b.closest(".closed"));
+  const items = [...document.querySelectorAll<HTMLElement>(".item")].filter((b) => !b.closest(".closed"));
   const i = items.findIndex((b) => b.dataset.name === selected);
   const next = items[i + (e.key === "ArrowDown" ? 1 : -1)];
   if (next) select(next.dataset.name);
@@ -1496,7 +1496,7 @@ window.__TAURI__.event?.listen("menu", (e) => runAction(e.payload));
 document.addEventListener("keydown", (e) => {
   if (!e.metaKey || e.shiftKey || e.altKey) return;
   // In text fields only the app-wide keys apply; the rest belong to editing.
-  const typing = e.target.closest("input, textarea, select");
+  const typing = (e.target as HTMLElement).closest("input, textarea, select");
   const name = TAB_KEYS[e.key]
     ? `tab:${TAB_KEYS[e.key]}`
     : { o: "open:browser", e: "open:editor", t: "open:terminal", g: "open:git", l: "logs", n: "new", r: "reload", f: "find", ",": "settings" }[e.key];

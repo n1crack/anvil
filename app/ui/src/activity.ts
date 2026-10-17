@@ -1,19 +1,19 @@
-// @ts-nocheck
+import type { Activity } from "./types";
 import { clean } from "./term";
 
 /* The Processes window: everything Anvil runs, with usage, Restart/Stop (right-click)
  * and the selected row's log. Keys come from `activity`; the log is asked for by key. */
 export const { invoke } = window.__TAURI__.core;
 
-export const $ = (sel, root = document) => root.querySelector(sel);
-export let data = null;
+export const $ = (sel: string, root: ParentNode = document): any => root.querySelector(sel);
+export let data: Activity | null = null;
 export let drawn = ""; // what the table shows, to redraw only on a change
-export let selected = null; // row key
+export let selected: string | null = null; // row key
 export let logFrom = 0;
 export let logToken = 0;
-export let tailing = null; // token of the log request on its way
+export let tailing: number | null = null; // token of the log request on its way
 export let replace = true; // the next page replaces the log (new row, error shown, file rotated)
-export const busy = new Set(); // keys with an action on its way
+export const busy = new Set<string>(); // keys with an action on its way
 // Folded application groups, kept across windows like the main list's folds.
 export const folded = new Set(JSON.parse(localStorage.getItem("act-folded") ?? "[]"));
 
@@ -22,7 +22,7 @@ export function showError(msg) {
   $("#error").hidden = !msg;
 }
 
-export let loading = null; // the `activity` request on its way: a slow Docker must not stack them
+export let loading: Promise<void> | null = null; // the `activity` request on its way: a slow Docker must not stack them
 
 export function load() {
   loading ??= (async () => {
@@ -44,7 +44,7 @@ window.refresh = load;
 export const mb = (b) => `${(b / 1048576).toFixed(1)} MB`;
 export const status = { running: "Running", starting: "Starting", crashed: "Crashed" };
 
-export function td(text, cls) {
+export function td(text, cls?: string) {
   const c = document.createElement("td");
   if (cls) c.className = cls;
   c.textContent = text ?? "";
@@ -65,8 +65,8 @@ export function head(text, cls) {
 export function appHead(a) {
   const tr = head("", "act-app");
   const open = !folded.has(a.site);
-  tr.setAttribute("aria-expanded", open);
-  tr.firstChild.innerHTML = `<span class="chevron" aria-hidden="true">›</span><span class="act-site"></span><span class="act-count"></span>`;
+  tr.setAttribute("aria-expanded", String(open));
+  (tr.firstChild as HTMLElement).innerHTML = `<span class="chevron" aria-hidden="true">›</span><span class="act-site"></span><span class="act-count"></span>`;
   $(".act-site", tr).textContent = a.site;
   $(".act-count", tr).textContent = open ? "" : a.rows.length;
   tr.onclick = () => {
@@ -96,7 +96,7 @@ export function run(key, action) {
   return invoke("app_run", { site: key, action });
 }
 
-export async function act(key, action) {
+export async function act(key, action?) {
   busy.add(key);
   render();
   try {
@@ -115,7 +115,7 @@ export const M = window.__TAURI__.menu;
 
 /** Right-click: Restart, Stop (Dismiss once it crashed) and Open in Browser, by row state. */
 export async function rowMenu(r) {
-  const items = [];
+  const items: any[] = [];
   if (r.actions && !busy.has(r.key)) {
     if (!r.key.includes("#")) items.push(M.MenuItem.new({ text: "Restart", action: () => act(r.key, "restart") }));
     items.push(M.MenuItem.new({ text: r.state === "crashed" ? "Dismiss" : "Stop", action: () => act(r.key, "stop") }));
@@ -127,10 +127,10 @@ export async function rowMenu(r) {
   if (items.length) (await M.Menu.new({ items: await Promise.all(items) })).popup();
 }
 
-export function row(r, inner) {
+export function row(r, inner?: boolean) {
   const tr = document.createElement("tr");
   tr.className = `act-row ${r.state}${inner ? " inner" : ""}`;
-  tr.setAttribute("aria-selected", r.key === selected);
+  tr.setAttribute("aria-selected", String(r.key === selected));
   tr.dataset.key = r.key;
   tr.onclick = () => select(r.key);
   tr.oncontextmenu = (e) => {
@@ -177,7 +177,7 @@ export function render() {
   if (now === drawn) return;
   drawn = now;
   const body = $("#rows");
-  const out = [];
+  const out: any[] = [];
   if (data.web.length) out.push(head("Web server", "act-group"), ...data.web.map((r) => row(r)));
   if (data.apps.length) {
     out.push(head("Applications", "act-group"));
@@ -205,7 +205,7 @@ export function select(key) {
 }
 
 export const nameOf = (key) =>
-  [...data.web, ...data.apps.flatMap((a) => a.rows), ...data.services].find((r) => r.key === key)?.name ?? key;
+  (data ? [...data.web, ...data.apps.flatMap((a) => a.rows), ...data.services] : []).find((r) => r.key === key)?.name ?? key;
 
 export const line = (e) => [e.time ? `${e.time} ${e.message}` : e.message, e.context, ...e.trace].filter(Boolean).join("\n");
 
@@ -237,7 +237,7 @@ export async function tail() {
   const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
   const text = clean(page.entries.toReversed().map(line).join("\n"));
   // Containers come back whole (empty when unchanged); files only send new lines.
-  if (replace || (key.startsWith("container:") && page.entries.length)) {
+  if (replace || (key?.startsWith("container:") && page.entries.length)) {
     log.textContent = text;
     replace = false;
   } else if (text) {
@@ -269,7 +269,7 @@ split.onpointerdown = (e) => {
   split.onpointermove = (m) => (pane.style.width = `${fit(right - m.clientX - split.offsetWidth / 2)}px`);
   split.onpointerup = split.onlostpointercapture = () => {
     split.onpointermove = split.onpointerup = split.onlostpointercapture = null;
-    localStorage.setItem("act-log-width", parseInt(pane.style.width));
+    localStorage.setItem("act-log-width", String(parseInt(pane.style.width)));
   };
 };
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 /* Terminal output, shared by the main window's console and the Processes window. */
 
@@ -20,7 +19,7 @@ export function clean(text, colors = false) {
 /** `clean(text, true)` as nodes: colored and bold runs become spans (30–37, 90–97, 1). */
 export function ansi(text) {
   const out = document.createDocumentFragment();
-  let fg = null;
+  let fg: number | null = null;
   let bold = false;
   text.split(/\x1b\[([0-9;]*)m/).forEach((part, i) => {
     if (i % 2) {
