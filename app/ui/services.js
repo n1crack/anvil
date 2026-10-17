@@ -279,21 +279,18 @@ async function copy(text, done) {
 
 /** Remove a service; a second question decides whether its data goes too. */
 async function removeService(svc) {
-  const { ask } = window.__TAURI__.dialog;
-  const sure = await ask(`${svc.id} stops and is removed from Anvil.`, {
-    title: `Remove ${svc.id}?`,
-    kind: "warning",
-    okLabel: "Remove",
-    cancelLabel: "Cancel",
-  });
-  if (!sure) return;
+  // One question; the default button (Return) keeps the data, Escape cancels.
   const what = svc.kind === "mailpit" ? "caught mail" : svc.kind === "redis" ? "saved keys" : "databases";
-  const wipe = await ask(`Keep its ${what} to find them again if you add ${svc.id} later, or delete them for good.`, {
-    title: `Keep ${svc.id}’s data?`,
-    kind: "warning",
-    okLabel: "Delete Data",
-    cancelLabel: "Keep Data",
-  });
+  const answer = await window.__TAURI__.dialog.message(
+    `${svc.id} stops and is removed from Anvil. Keep its ${what} to find them again if you add ${svc.id} later.`,
+    {
+      title: `Remove ${svc.id}?`,
+      kind: "warning",
+      buttons: { yes: "Remove, Keep Data", no: "Remove and Delete Data", cancel: "Cancel" },
+    },
+  );
+  if (answer !== "Remove, Keep Data" && answer !== "Remove and Delete Data" && answer !== "Yes" && answer !== "No") return;
+  const wipe = answer === "Remove and Delete Data" || answer === "No";
   await serviceCall("remove_service", { id: svc.id, deleteData: wipe });
   toast(wipe ? `Removed ${svc.id} and its data` : `Removed ${svc.id}; its data is kept`);
 }

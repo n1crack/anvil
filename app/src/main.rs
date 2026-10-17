@@ -606,6 +606,14 @@ fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot
     snapshot(&app)
 }
 
+#[tauri::command(async)]
+fn unhide_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::unhide(&mut cfg, &site).map_err(err)?;
+    sites_changed(&handle, &app, &cfg);
+    snapshot(&app)
+}
+
 /// Pin an app to a language version (`None`: from the project, or the newest).
 #[tauri::command(async)]
 fn set_runtime(
@@ -932,6 +940,7 @@ struct PhpVersion {
 #[derive(Serialize)]
 struct Settings {
     paths: Vec<std::path::PathBuf>,
+    hidden: Vec<String>,
     tld: String,
     http_port: u16,
     https_port: u16,
@@ -1067,6 +1076,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         terminal: cfg.terminal,
         theme: cfg.theme,
         dock_icon: cfg.dock_icon,
+        hidden: cfg.hidden.clone(),
         paths: cfg.paths,
         tld: cfg.tld,
         http_port: cfg.http_port,
@@ -1511,6 +1521,7 @@ fn main() {
             open_create_log,
             park_folder,
             remove_site,
+            unhide_site,
             set_group,
             set_site_ini,
             set_runtime,
