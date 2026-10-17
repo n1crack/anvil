@@ -49,8 +49,8 @@ window.logsTab = (root, visible) => {
 function buildLogs(s) {
   const node = el("div", "logs");
   node.innerHTML = `
+    <div class="logs-files" role="tablist" aria-label="Log files"></div>
     <div class="logs-bar">
-      <select class="logs-source" aria-label="Log file"></select>
       <input class="logs-search" type="search" placeholder="Search this log" aria-label="Search this log" spellcheck="false">
       <label class="logs-follow" title="Show new entries as they are written"><input type="checkbox" role="switch">Follow</label>
     </div>
@@ -109,11 +109,6 @@ function buildLogs(s) {
     follow(v.follow);
   };
 
-  $(".logs-source", node).onchange = (e) => {
-    v.source = v.sources.find((x) => x.id === e.target.value);
-    logSource.set(v.site, v.source.id);
-    loadLogs(v);
-  };
   $(".logs-console", node).onclick = () =>
     invoke("log_open", { site: v.site, source: v.source.id }).catch((e) => showError(String(e)));
   $(".logs-clear", node).onclick = () => clearLog(v);
@@ -134,14 +129,60 @@ async function loadSources(v, s) {
     v.sources = [];
     showError(String(e));
   }
-  const sel = $(".logs-source", v.node);
-  sel.replaceChildren(...v.sources.map((x) => new Option(`${x.label} (${bytes(x.bytes)})`, x.id)));
-  sel.hidden = v.sources.length < 2;
   v.source = v.sources.find((x) => x.id === logSource.get(v.site)) ?? v.sources[0] ?? null;
   for (const b of v.node.querySelectorAll(".logs-bar")) b.hidden = !v.source;
+  drawFiles(v);
   if (!v.source) return showEmpty(v, noSourcesText(s));
-  sel.value = v.source.id;
   loadLogs(v);
+}
+
+/** Every log file of the app side by side: name, size and when it last changed. */
+function drawFiles(v) {
+  const strip = $(".logs-files", v.node);
+  strip.replaceChildren();
+  strip.hidden = !v.sources.length;
+  for (const src of v.sources) {
+    const b = el("button", src.bytes >= LARGE_LOG ? "logs-file large" : "logs-file");
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", src === v.source);
+    b.title = src.path;
+    const when = src.modified ? `, ${ago(new Date(src.modified * 1000))}` : "";
+    b.append(el("strong", null, src.label), el("small", null, `${bytes(src.bytes)}${when}`));
+    b.onclick = () => {
+      v.source = src;
+      logSource.set(v.site, src.id);
+      drawFiles(v);
+      loadLogs(v);
+    };
+    strip.append(b);
+  }
+}
+
+// Above this a log isn't opened until asked: it's usually a forgotten single-file log.
+const LARGE_LOG = 100 * 1024 * 1024;
+const largeOk = new Set(); // "site/source" opened anyway this session
+
+function showLarge(v) {
+  const box = el("li", "logs-large");
+  box.append(
+    el("strong", null, `${v.source.label} is ${bytes(v.source.bytes)}`),
+    el("p", "muted", v.site && v.source.label.endsWith(".log")
+      ? "A log this big slows searches and fills the disk. Laravel keeps adding to a single file unless LOG_STACK=daily (or LOG_CHANNEL=daily) is set, which keeps one file per day."
+      : "A log this big slows searches and fills the disk."),
+  );
+  const actions = el("div", "logs-large-actions");
+  const show = el("button", null, "Show Latest Entries");
+  show.onclick = () => {
+    largeOk.add(`${v.site}/${v.source.id}`);
+    loadLogs(v);
+  };
+  const clear = el("button", null, "Clear…");
+  clear.onclick = () => clearLog(v);
+  actions.append(show, clear);
+  box.append(actions);
+  $(".logs-list", v.node).replaceChildren(box);
+  $(".logs-status", v.node).textContent = "";
+  $(".logs-more", v.node).hidden = true;
 }
 
 function noSourcesText(s) {
@@ -164,6 +205,7 @@ const filtered = (v) => v.level !== "all" || v.query;
 /** First page for the current source and filters. */
 async function loadLogs(v, keepScroll = false) {
   const token = ++v.token;
+  if (v.source.bytes >= LARGE_LOG && !largeOk.has(`${v.site}/${v.source.id}`)) return showLarge(v);
   if (!keepScroll) $(".logs-status", v.node).textContent = filtered(v) ? "Searching…" : "Reading…";
   let page;
   try {
@@ -334,6 +376,7 @@ async function clearLog(v) {
   try {
     await invoke("log_clear", { site: v.site, source: src.id });
     src.bytes = 0;
+    drawFiles(v);
     toast(`Cleared ${src.label}`);
   } catch (e) {
     showError(String(e));

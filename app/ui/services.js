@@ -13,8 +13,26 @@ async function serviceCall(cmd, args) {
     showError(String(e));
   }
   if (mode === "services") renderMain();
+  else if (selected) window.renderSiteServices(snap?.sites.find((s) => s.name === selected), $("#site"));
   renderModes();
 }
+
+/** Services attached to an app, as small chips under its address. */
+window.renderSiteServices = (s, root) => {
+  const box = root && $(".site-services", root);
+  if (!box || !s) return;
+  box.replaceChildren();
+  for (const svc of services.filter((x) => x.apps.includes(s.name))) {
+    const chip = el("button", "svc-chip");
+    chip.title = `${svc.name} ${svc.version} on port ${svc.port}, ${svc.running ? "running" : "stopped"}`;
+    chip.append(el("span", `dot ${svc.running ? "on" : ""}`), el("span", null, svc.id));
+    chip.onclick = () => {
+      setMode("services");
+      selectService(svc.id);
+    };
+    box.append(chip);
+  }
+};
 
 window.loadServices = () => serviceCall("services");
 
@@ -76,6 +94,8 @@ function renderServiceList() {
     list.append(p);
     return;
   }
+  const note = filterNote("services", (k) => services.find((x) => x.kind === k)?.name ?? k);
+  if (note) list.append(note);
   const q = filter.toLowerCase();
   const f = filterOf("services");
   const hit = (x) =>
