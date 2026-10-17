@@ -475,6 +475,16 @@ button, select, input { font: inherit; color: inherit; }
   padding: 8px 36px 36px;
 }
 
+/* The app's name, actions and tabs stay in place while a tab's content scrolls. */
+.site-top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: -8px -36px 0;
+  padding: 8px 36px 0;
+  background: var(--steel-pane);
+}
+
 /* Header: name and address on the left, run state on the right. */
 .site-head {
   display: flex;
