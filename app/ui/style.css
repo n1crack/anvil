@@ -527,8 +527,8 @@ button, select, input { font: inherit; color: inherit; }
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  min-width: 76px;
-  padding: 8px 10px 6px;
+  width: 76px;
+  padding: 8px 4px 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
   background: var(--steel-hover);
@@ -550,13 +550,18 @@ button, select, input { font: inherit; color: inherit; }
 
 /* Tabs: text with an underline on the selected one. */
 .tabs {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 20px;
-  max-width: 640px;
   margin-bottom: 16px;
   border-bottom: 1px solid var(--line);
+  /* Narrow panes scroll the tabs instead of cutting the last one. */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+.tabs::-webkit-scrollbar { display: none; }
 
 .tabs [role="tab"] {
   position: relative;
@@ -582,14 +587,14 @@ button, select, input { font: inherit; color: inherit; }
   background: var(--heat);
 }
 
+/* Out of the flow, so the tab bar keeps its height on Resources. */
 .tabs .res-reload {
-  margin-left: auto;
-  margin-bottom: 8px;
+  position: absolute;
+  top: -4px;
+  right: 0;
   width: 24px;
   height: 24px;
 }
-
-[role="tabpanel"] { max-width: 640px; }
 
 .muted { color: var(--muted); }
 
@@ -904,7 +909,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   background: var(--steel-raised);
 }
 
-.run-error { margin: 0 0 16px; max-width: 640px; }
+.run-error { margin: 0 0 16px; }
 
 [hidden] { display: none !important; }
 
@@ -1350,7 +1355,6 @@ kbd {
 
 /* ---------- Logs ---------- */
 
-[role="tabpanel"][data-panel="logs"] { max-width: none; }
 
 .logs-bar {
   display: flex;
@@ -1632,7 +1636,7 @@ kbd {
 }
 
 /* Services attached to the app, under its address. */
-.site-services { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.site-services { flex-wrap: wrap; gap: 6px; }
 .site-services:empty { display: none; }
 
 .svc-chip {
@@ -1792,3 +1796,15 @@ kbd {
 }
 
 .svc-contents button.plain.danger { color: var(--danger); }
+
+/* One content column in the app and service pane: header, tabs and panels end together. */
+#site > *,
+#setup { max-width: 720px; }
+#site .group,
+#site .env,
+#site .pkg-tools,
+#site .pkg-fold { max-width: none; }
+
+/* Attached services sit on the address line, so every header has the same height. */
+.site-services { display: inline-flex; vertical-align: middle; margin: 0 0 0 10px; }
+.site-name { overflow-wrap: break-word; }

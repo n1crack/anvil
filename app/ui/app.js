@@ -443,8 +443,9 @@ function renderSite() {
   const editor = $(".editor-btn", root);
   if (snap.editor) {
     editor.hidden = false;
-    editor.title = `Open in ${snap.editor}`;
-    $("span", editor).textContent = snap.editor;
+    // The tile says what it does; which app is in the tooltip, so tiles stay one width.
+    editor.title = `Open in ${snap.editor} (⌘E)`;
+    $("span", editor).textContent = "Editor";
   }
   for (const b of root.querySelectorAll("[data-open]")) b.onclick = () => open(b.dataset.open);
   for (const el of root.querySelectorAll(".php-only")) el.hidden = process;
