@@ -1040,9 +1040,25 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
 
 /// Delete one of Anvil's own cleanable items: a cache folder, leftovers, or logs.
 /// Logs are truncated, not deleted, so running programs keep a valid file.
+/// Anvil's cache folders as they exist on disk; only these exact paths can be
+/// cleaned, so `cache/..` or a symlink trick never matches.
+fn cache_dirs(h: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(h.join("cache"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| h.join("cache").join(e.file_name()))
+        .collect()
+}
+
 pub fn clean_anvil(path: &str) -> Result<u64> {
     let h = home();
     let p = PathBuf::from(path);
+    let is_cache = p == h.join("build") || cache_dirs(&h).contains(&p);
+    if p != h.join("log") && !is_cache {
+        bail!("Anvil doesn't clean {path}");
+    }
     let freed: u64 = du(std::slice::from_ref(&p)).values().sum();
     if p == h.join("log") {
         for e in std::fs::read_dir(&p)?.flatten() {
@@ -1050,10 +1066,8 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
                 std::fs::write(e.path(), "")?;
             }
         }
-    } else if p == h.join("build") || p.parent() == Some(h.join("cache").as_path()) {
-        remove(&p)?;
     } else {
-        bail!("Anvil doesn't clean {path}");
+        remove(&p)?;
     }
     Ok(freed)
 }
@@ -1334,6 +1348,10 @@ mod tests {
         assert_eq!(url_port("redis://127.0.0.1"), None);
         assert!(clean_anvil("/etc").is_err());
         assert!(clean_anvil("/tmp/../etc").is_err());
+        // `..` after the cache folder used to pass the parent check and resolve to ~/.anvil.
+        let up = format!("{}/cache/..", home().display());
+        assert!(clean_anvil(&up).is_err());
+        assert!(clean_anvil(&format!("{}/cache/../data", home().display())).is_err());
     }
 
     fn project(name: &str, kind: &str, files: &[&str]) -> Site {
