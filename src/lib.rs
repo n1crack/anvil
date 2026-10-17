@@ -1742,15 +1742,23 @@ mod tests {
 /// the processes Anvil starts. This asks the user's login shell once.
 pub fn login_path() -> Option<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let mut child = Command::new(shell)
-        .args(["-lic", "printf '\\n__ANVIL_PATH__%s\\n' \"$PATH\""])
+    // A shell that waits on something (a prompt, a slow plugin) must not hold Anvil up.
+    let out = output_within(
+        Command::new(shell).args(["-lic", "printf '\\n__ANVIL_PATH__%s\\n' \"$PATH\""]),
+        std::time::Duration::from_secs(3),
+    )?;
+    parse_login_path(&out)
+}
+
+/// The standard output of `cmd`, or `None` when it can't start or takes longer than `limit`.
+pub fn output_within(cmd: &mut Command, limit: std::time::Duration) -> Option<String> {
+    let mut child = cmd
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
         .ok()?;
-    // A shell that waits on something (a prompt, a slow plugin) must not hold Anvil up.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let deadline = std::time::Instant::now() + limit;
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
@@ -1766,7 +1774,7 @@ pub fn login_path() -> Option<String> {
     }
     let mut out = String::new();
     std::io::Read::read_to_string(&mut child.stdout?, &mut out).ok()?;
-    parse_login_path(&out)
+    Some(out)
 }
 
 /// The PATH printed after the marker; shells may print banners around it.

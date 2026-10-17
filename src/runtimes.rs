@@ -463,6 +463,101 @@ pub fn info(id: &'static str, with_available: bool) -> RuntimeInfo {
     }
 }
 
+/// A package manager the Node apps Anvil runs would find, and where it comes from.
+#[derive(Serialize)]
+pub struct PackageManager {
+    pub name: &'static str,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    /// "Node.js 24" (npm bundled with Anvil's Node), "Corepack", "Anvil", "Homebrew" or "System".
+    pub source: Option<String>,
+}
+
+/// npm, pnpm, yarn and bun as an app sees them: looked up on the PATH an app
+/// gets (the newest Anvil Node first, then the login shell's), each asked for
+/// its version. Read-only: Corepack may not download anything here.
+pub fn package_managers() -> Vec<PackageManager> {
+    let node = installed("node").into_iter().next();
+    let mut envs = node.as_deref().map(|v| env("node", v)).unwrap_or_default();
+    if envs.is_empty() {
+        envs.push(("PATH".into(), std::env::var("PATH").unwrap_or_default()));
+    }
+    envs.push(("COREPACK_ENABLE_NETWORK".into(), "0".into()));
+    envs.push(("COREPACK_ENABLE_DOWNLOAD_PROMPT".into(), "0".into()));
+    let path = envs
+        .iter()
+        .find(|(k, _)| k == "PATH")
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default();
+    ["npm", "pnpm", "yarn", "bun"]
+        .into_iter()
+        .map(|name| {
+            let Some(bin) = which(name, &path) else {
+                return PackageManager {
+                    name,
+                    version: None,
+                    path: None,
+                    source: None,
+                };
+            };
+            let version = crate::output_within(
+                Command::new(&bin)
+                    .arg("--version")
+                    .envs(envs.clone())
+                    .current_dir(std::env::temp_dir()),
+                std::time::Duration::from_secs(3),
+            )
+            .and_then(|o| {
+                o.lines()
+                    .next()
+                    .map(|l| l.trim().trim_start_matches('v').to_string())
+            })
+            .filter(|v| !v.is_empty());
+            let real = fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
+            let source = match (name, &node) {
+                ("npm", Some(v)) if bin.starts_with(root("node").join(v)) => format!("Node.js {v}"),
+                _ => source_of(&real, &home()).into(),
+            };
+            PackageManager {
+                name,
+                version,
+                path: Some(bin.display().to_string()),
+                source: Some(source),
+            }
+        })
+        .collect()
+}
+
+/// The first executable `name` in a PATH string.
+fn which(name: &str, path: &str) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    path.split(':')
+        .filter(|d| !d.is_empty())
+        .map(|d| Path::new(d).join(name))
+        .find(|p| fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+}
+
+/// Where a program (its resolved path) comes from.
+fn source_of(real: &Path, anvil: &Path) -> &'static str {
+    let s = real.to_string_lossy();
+    if s.contains("/corepack/") {
+        "Corepack"
+    } else if real.starts_with(anvil) {
+        "Anvil"
+    } else if [
+        "/opt/homebrew/",
+        "/usr/local/Cellar/",
+        "/usr/local/Homebrew/",
+    ]
+    .iter()
+    .any(|p| s.starts_with(p))
+    {
+        "Homebrew"
+    } else {
+        "System"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -529,6 +624,42 @@ mod tests {
         for k in ["npm_config_cache", "npm_config_devdir", "COREPACK_HOME"] {
             assert!(node.iter().any(|n| n == k), "node env lacks {k}");
         }
+    }
+
+    #[test]
+    fn package_manager_sources() {
+        let anvil = Path::new("/Users/x/.anvil");
+        let src = |p: &str| source_of(Path::new(p), anvil);
+        assert_eq!(
+            src("/opt/homebrew/Cellar/pnpm/10.12.1/bin/pnpm"),
+            "Homebrew"
+        );
+        assert_eq!(src("/usr/local/Cellar/yarn/1.22.22/bin/yarn"), "Homebrew");
+        assert_eq!(
+            src("/opt/homebrew/lib/node_modules/corepack/dist/pnpm.js"),
+            "Corepack"
+        );
+        assert_eq!(
+            src("/Users/x/.anvil/runtimes/node/24/lib/node_modules/corepack/dist/yarn.js"),
+            "Corepack"
+        );
+        assert_eq!(
+            src("/Users/x/.anvil/runtimes/node/24/lib/node_modules/pnpm/bin/pnpm.cjs"),
+            "Anvil"
+        );
+        assert_eq!(src("/Users/x/.bun/bin/bun"), "System");
+        let dir = std::env::temp_dir().join(format!("anvil-which-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("pnpm"), "").unwrap();
+        // Not executable: skipped.
+        assert_eq!(which("pnpm", &dir.display().to_string()), None);
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir.join("pnpm"), fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            which("pnpm", &format!("/nope::{}", dir.display())),
+            Some(dir.join("pnpm"))
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
