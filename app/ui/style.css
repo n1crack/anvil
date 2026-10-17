@@ -976,8 +976,24 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-list:focus-visible { box-shadow: 0 0 0 2px var(--selected); }
 .dev-list > .dev-divider { height: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); }
 .dev-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; font-size: 12px; }
-/* Everything under "All" is one of its parts: indent it so All reads as the parent. */
-.dev-item:not([data-key="all"]) { padding-left: 26px; }
+/* Everything under "All" is one of its parts: a small branch arrow in the indent
+ * makes All read as the parent. */
+.dev-item:not([data-key="all"]) { position: relative; padding-left: 30px; }
+.dev-item:not([data-key="all"])::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -8px;
+  background: var(--muted);
+  opacity: 0.6;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 3v8a4 4 0 0 0 4 4h11'/%3E%3Cpath d='m16 11 4 4-4 4'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 3v8a4 4 0 0 0 4 4h11'/%3E%3Cpath d='m16 11 4 4-4 4'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+/* One-off runs are their own section, not parts of All: aligned, without the arrow. */
+.dev-item[data-key^="once:"]::before { content: none; }
 .dev-item[aria-selected="true"] { background: var(--selected); }
 /* The status column, one width for a process's dot and a run's spinner, ✓ or ✕. */
 .dev-item .dot { flex: none; margin: 0 2px; }
@@ -1011,7 +1027,9 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-text { min-width: 0; }
 .dev-text:empty::before { content: "\200b"; }
 /* Containers: the list has room for each one's port and health. */
-.containers .dev-main { grid-template-columns: 200px minmax(0, 1fr); }
+.containers .dev-main { grid-template-columns: 220px minmax(0, 1fr); }
+/* A container's name never gives way to its port and health. */
+.containers .dev-item > .dev-name { flex: none; }
 .containers .dev-exit { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
 
 /* Run ▾: the app's scripts, each with its script muted. */
@@ -2636,22 +2654,22 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .pkg-check { flex: none; }
 .pkg-check:disabled { opacity: 1; }
 
-/* Watch and Logs take the whole pane, down to the window's bottom: the header and
+/* Dev, Containers and Logs take the whole pane, down to the window's bottom: the header and
  * tabs widen with them, the panel fills the height and only the output scrolls. */
-#site:has(> :is([data-panel="dev"], [data-panel="logs"]):not([hidden])) {
+#site:has(> :is([data-panel="dev"], [data-panel="containers"], [data-panel="logs"]):not([hidden])) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
   padding-bottom: 20px;
 }
-#site:has(> :is([data-panel="dev"], [data-panel="logs"]):not([hidden])) > * { flex: none; max-width: none; }
-#site > :is([data-panel="dev"], [data-panel="logs"]):not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-[data-panel="dev"] > .dev { flex: 1; min-height: 0; }
-[data-panel="dev"] .dev-main { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
-[data-panel="dev"] .dev-list { max-height: 100%; overflow-y: auto; }
-[data-panel="dev"] .dev-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-[data-panel="dev"] .dev-out { flex: 1; height: auto; min-height: 0; }
-[data-panel="dev"] .dev-conf { flex: 1; min-height: 0; overflow-y: auto; }
+#site:has(> :is([data-panel="dev"], [data-panel="containers"], [data-panel="logs"]):not([hidden])) > * { flex: none; max-width: none; }
+#site > :is([data-panel="dev"], [data-panel="containers"], [data-panel="logs"]):not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+:is([data-panel="dev"], [data-panel="containers"]) > .dev { flex: 1; min-height: 0; }
+:is([data-panel="dev"], [data-panel="containers"]) .dev-main { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+:is([data-panel="dev"], [data-panel="containers"]) .dev-list { max-height: 100%; overflow-y: auto; }
+:is([data-panel="dev"], [data-panel="containers"]) .dev-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+:is([data-panel="dev"], [data-panel="containers"]) .dev-out { flex: 1; height: auto; min-height: 0; }
+:is([data-panel="dev"], [data-panel="containers"]) .dev-conf { flex: 1; min-height: 0; overflow-y: auto; }
 [data-panel="logs"] > .logs { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 [data-panel="logs"] .logs > * { flex: none; }
 [data-panel="logs"] .logs > .logs-list:not(:has(> .empty, > .logs-large)) {

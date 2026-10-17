@@ -1,5 +1,5 @@
 import type { Container } from "./types";
-import { $, M, el, invoke, mode, selected, showError, showTab, tab } from "./app";
+import { $, M, el, invoke, mode, selected, showError, showTab, snap, tab } from "./app";
 import { termOut } from "./console";
 import { COLORS, barBtn, icon, line } from "./dev";
 import { late } from "./late";
@@ -212,6 +212,11 @@ export function drawContainers(name: string) {
   const o = procCache.get(name);
   const show = !!(o?.containers || o?.docker_error);
   $('.tabs [data-tab="containers"]', root).hidden = !show;
+  // A compose project's logs are its containers'; a plain folder writes none.
+  const kind = snap?.sites.find((s) => s.name === name)?.kind ?? "";
+  const noLogs = kind === "compose" || kind === "folder";
+  $('.tabs [data-tab="logs"]', root).hidden = noLogs;
+  if (noLogs && tab === "logs") showTab(root, show ? "containers" : "overview");
   if (o && !show && tab === "containers") showTab(root, "overview");
   if (!show) return panel.replaceChildren();
 

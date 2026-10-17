@@ -226,6 +226,7 @@ export function noSourcesText(s) {
   if (s.kind === "symfony") return "No log files in var/log yet. They appear here once the app logs something.";
   if (PROCESS_KINDS.has(s.kind)) return "No output yet. Start the app and what it prints shows up here.";
   if (s.kind === "static") return "Static sites don’t write logs.";
+  if (s.kind === "compose") return "Container logs are in the Containers tab.";
   return "No logs yet. PHP errors show up here once a PHP version serves this app.";
 }
 
