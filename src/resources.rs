@@ -1064,7 +1064,8 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
     let freed: u64 = du(std::slice::from_ref(&p)).values().sum();
     if p == h.join("log") {
         for e in std::fs::read_dir(&p)?.flatten() {
-            if e.path().is_file() {
+            // file_type doesn't follow links: a link here is not emptied through.
+            if e.file_type().is_ok_and(|t| t.is_file()) {
                 std::fs::write(e.path(), "")?;
             }
         }

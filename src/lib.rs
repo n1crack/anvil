@@ -134,6 +134,17 @@ pub struct Site {
     pub runtime_pinned: bool,
 }
 
+/// `run` (sockets, pid files, generated configs) and `log`. `run` is private:
+/// the Postgres socket there accepts anyone who can reach it (`--auth=trust`).
+pub fn state_dirs() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let run = home().join("run");
+    fs::create_dir_all(&run)?;
+    fs::set_permissions(&run, fs::Permissions::from_mode(0o700))?;
+    fs::create_dir_all(home().join("log"))?;
+    Ok(())
+}
+
 pub fn home() -> PathBuf {
     std::env::var_os("ANVIL_HOME")
         .map(PathBuf::from)
@@ -945,9 +956,7 @@ impl Server {
                 bail!("PHP {v} is used but not installed — run `anvil php install {v}`");
             }
         }
-        for d in ["run", "log"] {
-            fs::create_dir_all(home().join(d))?;
-        }
+        state_dirs()?;
 
         let mut server = Server { children: vec![] };
         for v in &versions {

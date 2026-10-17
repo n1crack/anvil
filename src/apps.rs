@@ -236,9 +236,7 @@ impl Apps {
         let port = site.port.context("No port assigned")?;
 
         kill_orphans(&pid_file(&site.name), true);
-        for d in ["run", "log"] {
-            fs::create_dir_all(home().join(d))?;
-        }
+        crate::state_dirs()?;
         let log = fs::OpenOptions::new()
             .create(true)
             .append(true)
