@@ -446,10 +446,13 @@ fn run() -> Result<()> {
                 .unwrap_or(0);
             for s in &all {
                 println!(
-                    "{} {} {:<5} {}",
-                    cyan(format!("{:<host$}", s.host)),
+                    "{:<host$} {} {} {}",
+                    s.host,
                     dim(format!("{:<kind$}", apps::label(&s.kind))),
-                    s.php.as_deref().unwrap_or("-"),
+                    match &s.php {
+                        Some(v) => green(format!("{v:<5}")),
+                        None => dim(format!("{:<5}", "-")),
+                    },
                     dim(s.root.display())
                 );
             }
