@@ -45,7 +45,22 @@ its own settings gets its own PHP-FPM pool.
 Node.js, Go, Rust (through rustup) and .NET are installed into
 `~/.anvil/runtimes` and only put on `PATH` for the applications Anvil runs.
 Their package and build caches go to `~/.anvil/cache`, so `~/.npm`, `~/go`,
-`~/.cargo` and `~/.nuget` stay untouched.
+`~/.cargo` and `~/.nuget` stay untouched. So do the caches of tools those
+runtimes run: node-gyp, Corepack, and anything that follows `XDG_CACHE_HOME`
+or `XDG_STATE_HOME` (giget, yarn, pnpm's state), unless you set those
+variables yourself. Next.js and Nuxt telemetry is off.
+
+Two things stay where the tools themselves keep them:
+
+- **Go telemetry.** Go writes small local usage counters to
+  `~/Library/Application Support/go/telemetry`, the folder your own Go uses
+  too. Nothing is uploaded unless you ran `go telemetry on`. Go only lets the
+  home folder move it, and changing that would hide your `~/.gitconfig`,
+  `~/.netrc` and Go settings from builds, so Anvil leaves it. `anvil uninstall`
+  doesn't remove it, since it isn't only Anvil's.
+- **Shared package stores** a project already uses, like pnpm's store in
+  `~/Library/pnpm`: moving it would make pnpm refuse the project's existing
+  `node_modules`.
 
 ```sh
 anvil runtime list
