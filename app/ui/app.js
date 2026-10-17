@@ -656,6 +656,12 @@ async function cleanItems(name, items) {
 const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet"]);
 
 function renderRun(s, root) {
+  renderRunState(s, root);
+  renderRunSettings(s, root);
+}
+
+/** Only the run box and its error: safe to redraw while the user types elsewhere. */
+function renderRunState(s, root) {
   const state = snap.app_states[s.name]; // "running" | "starting" | undefined
   const error = snap.app_errors[s.name];
   $(".run-box", root).hidden = false;
@@ -672,7 +678,9 @@ function renderRun(s, root) {
   const err = $(".run-error", root);
   err.textContent = error ?? "";
   err.hidden = !error;
+}
 
+function renderRunSettings(s, root) {
   // Language version: automatic (project file or newest) or pinned.
   const rtId = { next: "node", nuxt: "node", vite: "node", node: "node", rust: "rust", go: "go", dotnet: "dotnet" }[s.kind];
   const versions = snap.runtimes?.[rtId] ?? [];
@@ -704,9 +712,20 @@ function renderRun(s, root) {
   auto.onchange = () => call("set_app", { site: s.name, autostart: auto.checked });
 }
 
-// While an app is starting, check back until its port answers.
-setInterval(() => {
-  if (snap && Object.values(snap.app_states).includes("starting")) call("state");
+// While an app is starting, check back until its port answers. Only the list dots
+// and the run box change, so nothing the user is typing gets redrawn.
+setInterval(async () => {
+  if (!snap || !Object.values(snap.app_states).includes("starting")) return;
+  try {
+    snap = await invoke("state");
+  } catch {
+    return;
+  }
+  if (mode !== "apps") return;
+  renderList();
+  const s = snap.sites.find((x) => x.name === selected);
+  const root = $("#site");
+  if (s && PROCESS_KINDS.has(s.kind) && $(".run-box", root)) renderRunState(s, root);
 }, 1500);
 
 function select(name) {
