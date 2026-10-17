@@ -882,6 +882,8 @@ async fn add_service(
     })
     .await
     .map_err(|e| e.to_string())?;
+    // The install can take minutes; pick up changes made meanwhile before saving.
+    let mut cfg = anvil::load().map_err(err)?;
     if let Err(e) = installed {
         let _ = anvil::services::remove(&mut cfg, &id, false);
         return Err(err(e));

@@ -142,16 +142,22 @@ pub fn home() -> PathBuf {
         })
 }
 
+/// The config, or the defaults when there is none yet. Any other read error is
+/// reported: treating it as "no config" would let the next save wipe it.
 pub fn load() -> Result<Config> {
     match fs::read_to_string(home().join("config.toml")) {
         Ok(s) => Ok(toml::from_str(&s).context("config.toml is invalid")?),
-        Err(_) => Ok(Config::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+        Err(e) => Err(e).context("couldn't read config.toml"),
     }
 }
 
+/// Write the config atomically: readers (the app, the CLI) never see a half-written file.
 pub fn save(cfg: &Config) -> Result<()> {
     fs::create_dir_all(home())?;
-    fs::write(home().join("config.toml"), toml::to_string_pretty(cfg)?)?;
+    let tmp = home().join(format!("config.toml.{}.tmp", std::process::id()));
+    fs::write(&tmp, toml::to_string_pretty(cfg)?)?;
+    fs::rename(&tmp, home().join("config.toml"))?;
     Ok(())
 }
 
@@ -417,6 +423,8 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
             "memory_limit = 512M\nupload_max_filesize = 100M\npost_max_size = 100M\nmax_execution_time = 120\n",
         )?;
     }
+    // The download took a while; save on top of the config as it is now.
+    *cfg = load()?;
     if cfg.php.is_none() {
         cfg.php = Some(minor.into());
         save(cfg)?;
