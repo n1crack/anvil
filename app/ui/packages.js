@@ -53,7 +53,9 @@ function drawPackages(name) {
   }
 
   // What the app is built on, as one quiet line: Laravel 13.12 · Vite 8.0 · PHP ^8.3.
-  const facts = [...p.highlights, ...p.ecosystems.flatMap((e) => e.facts)];
+  // With one manager, it is named here (e.g. pnpm 11.20.0) since rows don't say.
+  const one = p.ecosystems.length === 1 ? p.ecosystems[0] : null;
+  const facts = [...p.highlights, ...p.ecosystems.flatMap((e) => e.facts), ...(one?.manager ? [[one.manager.split(" ")[0], one.manager.split(" ")[1]]] : [])];
   if (facts.length) {
     const line = el("p", "pkg-summary");
     facts.forEach(([label, v], i) => {
@@ -114,7 +116,10 @@ function drawLists(body, name, ecosystems, updates) {
   const needle = pkgQuery.trim().toLowerCase();
   const many = ecosystems.length > 1;
   const newer = new Map(updates.map((u) => [`${u.ecosystem}/${u.name}`, u]));
-  const pkgs = ecosystems.flatMap((e) => e.packages.map((x) => ({ ...x, eco: e })));
+  // One list reads by name, whichever manager a package comes from.
+  const pkgs = ecosystems
+    .flatMap((e) => e.packages.map((x) => ({ ...x, eco: e })))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const hit = (x) => !needle || x.name.toLowerCase().includes(needle);
   const parts = [
     ["deps", "Dependencies", pkgs.filter((x) => !x.dev && hit(x))],
@@ -147,7 +152,7 @@ function drawLists(body, name, ecosystems, updates) {
     return body.append(el("p", "muted pkg-none", needle ? `Nothing matches “${pkgQuery.trim()}”.` : "None."));
   }
   // The manager is only worth a word when there is more than one.
-  const tag = (e) => (many ? el("span", "pkg-eco", e.manager && e.id === "npm" ? e.manager : e.id) : "");
+  const tag = (e) => (many ? el("span", "pkg-eco", e.manager && e.id === "npm" ? e.manager.split(" ")[0] : e.id) : "");
   const list = el("dl", `group res-list ${id === "scripts" ? "pkg-scripts" : "pkg-list"}`);
   for (const x of rows) {
     if (id === "scripts") {
