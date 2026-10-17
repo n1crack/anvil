@@ -49,8 +49,10 @@ pub struct Page {
     pub truncated: bool,
 }
 
+/// A log file; a symlink is not one. A cloned project could point
+/// `storage/logs/x.log` at any file, and Clear would empty it.
 fn source(id: &str, label: &str, path: &Path) -> Option<LogSource> {
-    let meta = fs::metadata(path).ok().filter(|m| m.is_file())?;
+    let meta = fs::symlink_metadata(path).ok().filter(|m| m.is_file())?;
     Some(LogSource {
         id: id.into(),
         label: label.into(),
@@ -70,7 +72,9 @@ pub fn sources(site: &Site) -> Vec<LogSource> {
         "laravel" | "statamic" => Some(site.path.join("storage/logs")),
         "symfony" => Some(site.path.join("var/log")),
         _ => None,
-    };
+    }
+    // The log folder itself may be a link out of the project.
+    .filter(|d| inside(d, &site.path));
     let mut out: Vec<LogSource> = dir
         .and_then(|d| fs::read_dir(d).ok())
         .into_iter()
@@ -92,6 +96,13 @@ pub fn sources(site: &Site) -> Vec<LogSource> {
         out.extend(source("php-fpm", &format!("PHP-FPM {v}"), &path));
     }
     out
+}
+
+fn inside(path: &Path, root: &Path) -> bool {
+    match (path.canonicalize(), root.canonicalize()) {
+        (Ok(p), Ok(r)) => p.starts_with(r),
+        _ => false,
+    }
 }
 
 /// One of the app's sources by id or label; anything else is refused.
@@ -553,6 +564,9 @@ mod tests {
         )
         .unwrap();
         fs::write(dir.join("other.log"), "keep").unwrap();
+        // A link to a file outside the logs is not a log.
+        std::os::unix::fs::symlink(dir.join("other.log"), dir.join("storage/logs/evil.log"))
+            .unwrap();
         let site = Site {
             name: "shop".into(),
             path: dir.clone(),
@@ -574,6 +588,7 @@ mod tests {
         };
         let ids: Vec<String> = sources(&site).into_iter().map(|s| s.id).collect();
         assert_eq!(ids, ["laravel.log"]);
+        assert!(clear(&site, "evil.log").is_err());
         assert!(clear(&site, "../../other.log").is_err());
         assert!(clear(&site, dir.join("other.log").to_str().unwrap()).is_err());
         clear(&site, "laravel.log").unwrap();
@@ -584,6 +599,19 @@ mod tests {
             0
         );
         assert_eq!(fs::read_to_string(dir.join("other.log")).unwrap(), "keep");
+
+        // A log folder that links out of the project is not read at all.
+        let elsewhere = dir.join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::write(elsewhere.join("secret.log"), "keep").unwrap();
+        let linked = dir.join("linked");
+        fs::create_dir_all(linked.join("storage")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, linked.join("storage/logs")).unwrap();
+        let other = Site {
+            path: linked,
+            ..site
+        };
+        assert!(sources(&other).is_empty());
         fs::remove_dir_all(dir).unwrap();
     }
 

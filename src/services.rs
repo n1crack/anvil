@@ -738,9 +738,7 @@ impl Services {
                 bail!("{id}: port {p} is already in use by another program — pick another port");
             }
         }
-        for d in ["run", "log"] {
-            fs::create_dir_all(home().join(d))?;
-        }
+        crate::state_dirs()?;
         let log = fs::OpenOptions::new()
             .create(true)
             .append(true)
