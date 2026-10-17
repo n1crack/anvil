@@ -623,7 +623,7 @@ function renderSite() {
 /** Django checks the host name and, behind HTTPS, the scheme: two settings it needs once. */
 function djangoHint(root) {
   // Only in debug: in production another proxy decides what these headers may say.
-  const lines = `if DEBUG:  # Anvil\n    ALLOWED_HOSTS += [".${snap.tld}"]\n    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`;
+  const lines = `if DEBUG:  # Anvil\n    ALLOWED_HOSTS += [".${snap.tld}", "localhost", "127.0.0.1"]\n    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`;
   const box = el("div", "django-hint");
   box.append(
     el("h3", "res-sub", "Django settings"),

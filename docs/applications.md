@@ -48,7 +48,7 @@ is. You can override the type with `anvil app type <site> <kind>` or in the app.
 
   ```python
   if DEBUG:  # Anvil
-      ALLOWED_HOSTS += [".test"]
+      ALLOWED_HOSTS += [".test", "localhost", "127.0.0.1"]
       SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
   ```
 
