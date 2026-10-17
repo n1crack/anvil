@@ -144,7 +144,7 @@ function toggle(name, open = collapsed.has(name)) {
   parent.nextElementSibling?.classList.toggle("closed", !open);
 }
 
-function row(s, { child = false, kids = 0 } = {}) {
+function row(s, { child = false, kids = 0, path = true } = {}) {
   const b = document.createElement("button");
   b.className = child ? "item child" : "item";
   b.dataset.name = s.name;
@@ -160,18 +160,16 @@ function row(s, { child = false, kids = 0 } = {}) {
   text.className = "text";
   text.innerHTML = `<span class="name"></span><span class="sub"></span>`;
   $(".name", text).textContent = `${s.name}.${snap.tld}`;
-  $(".sub", text).textContent = child ? "Linked domain" : tilde(s.path) + "/";
+  // In a folder's section the path only repeats the heading; linked apps and groups keep it.
+  if (path && !child) $(".sub", text).textContent = tilde(s.path) + "/";
+  else $(".sub", text).remove();
+  if (!path && !child) b.classList.add("compact");
 
   const end = document.createElement("span");
   end.className = "end";
-  const state = snap.app_states[s.name];
-  if (state) {
-    const dot = document.createElement("span");
-    dot.className = `dot ${state === "running" ? "on" : "warm"}`;
-    dot.title = state === "running" ? "Running" : "Starting";
-    end.append(dot);
-  }
-  if (!child && s.kind !== "static") {
+  if (child) end.append(el("span", "alias", "alias"));
+  // A plain PHP app shows only its pinned version, not "PHP" twice.
+  if (!child && s.kind !== "static" && !(s.kind === "php" && s.php_pinned)) {
     const kind = document.createElement("span");
     kind.className = `kind kind-${s.kind}`;
     kind.textContent = snap.kinds.find(([id]) => id === s.kind)?.[1] ?? s.kind;
@@ -183,6 +181,14 @@ function row(s, { child = false, kids = 0 } = {}) {
     ver.className = "ver";
     ver.textContent = `PHP ${s.php}`;
     end.append(ver);
+  }
+  // The running dot always sits last, as in the services list.
+  const state = snap.app_states[s.name];
+  if (state) {
+    const dot = document.createElement("span");
+    dot.className = `dot ${state === "running" ? "on" : "warm"}`;
+    dot.title = state === "running" ? "Running" : "Starting";
+    end.append(dot);
   }
   if (kids) {
     const open = !collapsed.has(s.name);
@@ -198,7 +204,8 @@ function row(s, { child = false, kids = 0 } = {}) {
     };
     end.append(d);
   }
-  b.append(mark(s), text, end);
+  if (child) b.append(text, end);
+  else b.append(mark(s), text, end);
   b.onclick = () => select(s.name);
   b.oncontextmenu = (e) => {
     e.preventDefault();
@@ -277,14 +284,14 @@ function renderList() {
     (!q || `${s.name}.${snap.tld} ${s.path}`.toLowerCase().includes(q));
   let count = 0;
 
-  const section = (title, sites, withChildren) => {
+  const section = (title, sites, withChildren, path = true) => {
     const rows = [];
     for (const s of [...sites].sort(order)) {
       const kids = withChildren ? byPath.get(s.path) ?? [] : [];
       const parentHit = hit(s);
       const shownKids = kids.filter((k) => parentHit || hit(k));
       if (!parentHit && !shownKids.length) continue;
-      rows.push(row(s, { kids: kids.length }));
+      rows.push(row(s, { kids: kids.length, path }));
       if (shownKids.length) {
         // Always rendered so folding can slide; while searching, matches stay open.
         const wrap = document.createElement("div");
@@ -314,7 +321,7 @@ function renderList() {
   }
   const dirs = [...new Set(parked.map((s) => s.parked_in))].sort();
   for (const dir of dirs) {
-    section(tilde(dir), parked.filter((s) => s.parked_in === dir && !grouped.has(s.name)), true);
+    section(tilde(dir), parked.filter((s) => s.parked_in === dir && !grouped.has(s.name)), true, false);
   }
   section("Linked", linked, false);
 
