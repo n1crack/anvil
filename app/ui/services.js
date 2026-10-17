@@ -4,8 +4,6 @@
 let services = [];
 let svcSelected = localStorage.getItem("service");
 const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
-// Tiles are one width: long app names get a short label, the full name is in the tooltip.
-const CLIENT_LABEL = { "Another Redis Desktop Manager": "Redis Desktop", "Beekeeper Studio": "Beekeeper" };
 
 async function serviceCall(cmd, args) {
   try {
@@ -75,12 +73,12 @@ function serviceRow(svc) {
   b.setAttribute("aria-current", svc.id === svcSelected);
   const text = el("span", "text");
   text.append(el("span", "name", svc.id), el("span", "sub", `${svc.name} ${svc.version} on port ${svc.port}`));
+  // As an app's row: the run state is a badge on the mark, and every row ends in the
+  // same fixed (here empty) slot, so the tags line up with the apps' kind labels.
   const end = el("span", "end");
   for (const t of svc.tags.slice(0, 2)) end.append(el("span", "tag", t));
-  const dot = el("span", `dot ${svc.running ? "on" : ""}`);
-  dot.title = svc.running ? "Running" : svc.error ? "Failed to start" : "Stopped";
-  end.append(dot);
-  b.append(serviceMark(svc), text, end);
+  end.append(el("span", "disclosure"));
+  b.append(markBox(serviceMark(svc), svc.running ? "on" : svc.error ? "bad" : null), text, end);
   b.onclick = () => selectService(svc.id);
   return b;
 }
@@ -172,12 +170,11 @@ function renderService() {
 
   $(".site-name", root).textContent = svc.id;
   $(".site-title .mark", root).replaceWith(serviceMark(svc, "mark big"));
-  $(".svc-what", root).textContent = svc.installed ? `${svc.name} ${svc.version}` : `${svc.name}, not installed`;
+  drawServiceMeta(svc, root);
 
-  $(".run-box .dot", root).className = `dot ${svc.running ? "on" : ""}`;
+  $(".run-box .dot", root).className = `dot ${svc.running ? "on" : svc.error ? "bad" : ""}`;
   $(".state-text", root).textContent = svc.running ? "Running" : "Stopped";
   $('[data-svc="start"]', root).hidden = svc.running;
-  $('[data-svc="restart"]', root).hidden = !svc.running;
   $('[data-svc="stop"]', root).hidden = !svc.running;
   for (const b of root.querySelectorAll("[data-svc]")) {
     b.onclick = () => serviceCall("service_run", { id: svc.id, action: b.dataset.svc });
@@ -189,6 +186,11 @@ function renderService() {
   const inbox = $('[data-svc-open="inbox"]', root);
   inbox.hidden = !svc.web;
   inbox.disabled = !svc.running;
+  // The data folder opens in Finder: its own icon, as on an app's page.
+  const data = $('[data-svc-open="data"]', root);
+  data.title = `Show ~/.anvil/data/${svc.id} in Finder`;
+  data.setAttribute("aria-label", data.title);
+  appIconInto(data, "Finder");
   inbox.onclick = () => invoke("open_url", { url: svc.web }).catch((e) => showError(String(e)));
   for (const what of ["data", "log"]) {
     $(`[data-svc-open="${what}"]`, root).onclick = () =>
@@ -250,22 +252,52 @@ function renderService() {
   };
   tagsBox.append(tagInput);
 
-  $('[data-svc-open="data"]', root).title = `Show ~/.anvil/data/${svc.id} in Finder`;
   const env = envFor(svc);
   $(".svc-env", root).textContent = env;
   $(".svc-copy", root).onclick = () => copy(env, `Copied ${svc.id}’s settings`);
 
-  // Database apps installed on this Mac open the service directly.
+  // Database apps installed on this Mac open the service directly: a row each.
+  const clients = $(".svc-clients", root);
+  clients.hidden = $(".svc-clients-head", root).hidden = !svc.clients.length;
   for (const client of svc.clients) {
-    const b = el("button");
-    b.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.75" rx="5.25" ry="2"/><path d="M2.75 3.75v8.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-8.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/></svg>`;
-    b.append(el("span", "tile-label", CLIENT_LABEL[client] ?? client));
-    b.title = `Open ${svc.id} in ${client}`;
-    b.onclick = () => openClient(svc, client, chosenDb[svc.id]);
-    $(".quick", root).append(b);
+    const icon = el("span", "svc-icon");
+    icon.innerHTML = DB_ICON;
+    appIconInto(icon, client);
+    const open = el("button", null, "Open");
+    open.setAttribute("aria-label", `Open ${svc.id} in ${client}`);
+    open.onclick = () => openClient(svc, client, chosenDb[svc.id]);
+    clients.append(svcLine(icon, client, null, open));
   }
   renderContents(svc, root);
   $(".svc-remove", root).onclick = () => removeService(svc);
+}
+
+const DB_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.75" rx="5.25" ry="2"/><path d="M2.75 3.75v8.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-8.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/></svg>`;
+
+/** The line under the name, as an app's: kind · version · port · data size (once
+ * an app's Resources measured it) · what is notable about its state. */
+function drawServiceMeta(svc, root) {
+  const parts = [svc.name, svc.version, `port ${svc.port}`];
+  const use = [...resCache.values()].flatMap((r) => r?.services ?? []).find((u) => u.anvil === svc.id && u.data_bytes != null);
+  if (use) parts.push(`data ${bytes(use.data_bytes)}`);
+  if (!svc.installed) parts.push("not installed");
+  else if (svc.enabled) parts.push("starts with Anvil");
+  const spans = parts.map((t) => el("span", null, t));
+  $(".meta", root).replaceChildren(...spans.flatMap((p, i) => (i ? [el("span", "sep", "·"), p] : [p])));
+}
+
+/** A row of a service's lists, in the Processes look: an optional icon, the
+ * name, a muted detail, then buttons. */
+function svcLine(lead, name, detail, ...buttons) {
+  const row = el("div", lead ? "proc svc-row with-icon" : "proc svc-row");
+  if (lead) row.append(lead);
+  row.append(el("span", "proc-name", name));
+  const last = el("span", "proc-last", detail ?? "");
+  last.title = detail ?? "";
+  const actions = el("span", "proc-actions");
+  actions.append(...buttons);
+  row.append(last, actions);
+  return row;
 }
 
 async function copy(text, done) {
@@ -307,10 +339,14 @@ async function loadServiceLog(id) {
   try {
     lines = await invoke("service_log", { id });
   } catch {}
-  const pre = $("#site .svc-log");
-  if (!pre || svcSelected !== id) return;
-  pre.textContent = lines.join("\n") || "Nothing logged yet.";
-  pre.classList.toggle("muted", !lines.length);
+  const box = $("#site .svc-log");
+  if (!box || svcSelected !== id) return;
+  const line = (t) => {
+    const row = el("div", "proc svc-line");
+    row.append(Object.assign(el("span", "proc-last", t), { title: t }));
+    return row;
+  };
+  box.replaceChildren(...(lines.length ? lines.map(line) : [line("Nothing logged yet.")]));
 }
 
 // A running service keeps adding to its log; refresh the lines while it is shown.
@@ -472,13 +508,13 @@ async function renderContents(svc, root, action) {
   $(".svc-contents-title", root).textContent = CONTENTS_TITLE[svc.kind];
   const box = $(".svc-contents", root);
   if (!svc.running) {
-    box.replaceChildren(el("p", "muted", `Start ${svc.id} to see what’s inside.`));
+    box.replaceChildren(el("p", "procs-note", `Start ${svc.id} to see what’s inside.`));
     contents.delete(svc.id);
     return;
   }
   const cached = contents.get(svc.id);
   if (cached && !action) drawContents(svc, root, cached);
-  else if (!cached) box.replaceChildren(el("p", "muted", "Looking inside…"));
+  else if (!cached) box.replaceChildren(el("p", "procs-note", "Looking inside…"));
   try {
     const c = action
       ? await invoke("service_data", action)
@@ -487,26 +523,20 @@ async function renderContents(svc, root, action) {
     if (root.dataset.service === svc.id) drawContents(svc, root, c);
   } catch (e) {
     if (action) showError(String(e));
-    else box.replaceChildren(el("p", "muted", String(e)));
+    else box.replaceChildren(el("p", "procs-note", String(e)));
   }
 }
 
 function drawContents(svc, root, c) {
   const box = $(".svc-contents", root);
-  const list = el("dl", "group res-list");
+  const list = el("div", "group procs-list svc-list");
   const line = (name, value, ...buttons) => {
-    const row = el("div", "row");
-    const dt = el("dt");
-    dt.append(el("span", null, name));
-    const dd = el("dd", "res-cells");
-    if (value != null) dd.append(el("span", "size", value));
-    dd.append(...buttons);
-    row.append(dt, dd);
+    const row = svcLine(null, name, value, ...buttons);
     list.append(row);
-    return dt;
+    return row;
   };
   const act = (label, fn, cls) => {
-    const b = el("button", cls ?? "link", label);
+    const b = el("button", cls, label);
     b.onclick = fn;
     return b;
   };
@@ -529,23 +559,20 @@ function drawContents(svc, root, c) {
     const system = c.databases.filter(([n]) => SYSTEM_DBS.has(n));
     for (const [name, size] of c.databases.filter(([n]) => !SYSTEM_DBS.has(n))) {
       const buttons = [];
-      {
-        if (svc.clients[0]) buttons.push(act("Open", () => openClient(svc, svc.clients[0], name)));
-        buttons.push(act("Drop…", async () => {
-          if (await confirm(`Drop ${name}?`, `Every table in ${name} is deleted. This can’t be undone.`, "Drop"))
-            renderContents(svc, root, { id: svc.id, action: "drop", name });
-        }, "link danger hover-only"));
-      }
+      if (svc.clients[0]) buttons.push(act("Open", () => openClient(svc, svc.clients[0], name)));
+      buttons.push(act("Drop…", async () => {
+        if (await confirm(`Drop ${name}?`, `Every table in ${name} is deleted. This can’t be undone.`, "Drop"))
+          renderContents(svc, root, { id: svc.id, action: "drop", name });
+      }, "danger hover-only"));
       line(name, bytes(size), ...buttons);
     }
     // The server's own databases: one quiet line instead of a row each.
     if (system.length) {
-      const dt = line("Server databases", bytes(system.reduce((a, [, b]) => a + b, 0)));
-      dt.classList.add("muted");
-      dt.append(el("small", "path", system.map(([n]) => n).join(", ")));
+      const row = line("Server databases", `${bytes(system.reduce((a, [, b]) => a + b, 0))} · ${system.map(([n]) => n).join(", ")}`);
+      row.classList.add("muted");
     }
     // New database: name field plus Create.
-    const row = el("div", "row");
+    const row = el("div", "proc svc-row svc-new");
     const input = el("input");
     input.placeholder = "New database name";
     input.spellcheck = false;
@@ -557,19 +584,19 @@ function drawContents(svc, root, c) {
     input.onkeydown = (e) => {
       if (e.key === "Enter") create();
     };
-    row.append(input, act("Create", create, "plain"));
+    const actions = el("span", "proc-actions");
+    actions.append(act("Create", create));
+    row.append(input, actions);
     list.append(row);
   } else if (svc.kind === "redis") {
     if (!c.keys.length) line("No keys yet", null);
     for (const [db, keys] of c.keys) line(db, `${keys} ${keys === 1 ? "key" : "keys"}`);
-    line("Memory", c.memory ?? "–");
+    const mem = line("Memory", c.memory ?? "–");
     if (c.keys.length) {
-      const row = el("div", "row");
-      row.append(act("Flush All…", async () => {
+      mem.lastChild.append(act("Flush All…", async () => {
         if (await confirm(`Flush ${svc.id}?`, "Every key in every database is deleted.", "Flush"))
           renderContents(svc, root, { id: svc.id, action: "empty" });
-      }, "plain danger"));
-      list.append(row);
+      }, "danger"));
     }
   } else {
     const n = c.messages ?? 0;
@@ -577,7 +604,7 @@ function drawContents(svc, root, c) {
     if (n) buttons.push(act("Delete All…", async () => {
       if (await confirm(`Delete ${n} messages?`, `Every message caught by ${svc.id} is deleted.`, "Delete"))
         renderContents(svc, root, { id: svc.id, action: "empty" });
-    }, "link danger"));
+    }, "danger"));
     line(n === 1 ? "1 message" : `${n} messages`, null, ...buttons);
   }
   box.replaceChildren(list);

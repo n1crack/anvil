@@ -438,6 +438,7 @@ button, select, input { font: inherit; color: inherit; }
   background: var(--ok);
 }
 .run-badge.warm { background: var(--heat-white); animation: pulse 1.2s ease-in-out infinite; }
+.run-badge.bad { background: var(--danger); }
 
 /* Hovering a row: a short summary next to the list. */
 .hover-card {
@@ -661,6 +662,7 @@ button, select, input { font: inherit; color: inherit; }
   color: var(--muted);
 }
 .open-with button:hover { background: var(--steel-hover); color: var(--text); }
+.open-with button:disabled { opacity: 0.45; }
 .open-with img { width: 26px; height: 26px; }
 .open-with svg {
   width: 18px;
@@ -699,49 +701,6 @@ button, select, input { font: inherit; color: inherit; }
   border: 1px solid var(--line);
   border-radius: 13px;
   background: var(--steel-raised);
-}
-
-/* Quick actions: icon over label, one quiet row. */
-.quick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 24px;
-}
-
-.quick button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: 76px;
-  padding: 8px 4px 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-m);
-  background: var(--steel-hover);
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.quick button:hover { color: var(--text); background: var(--steel-raised); }
-
-/* A name too long for the tile ends in an ellipsis after two lines. */
-.tile-label {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  text-align: center;
-}
-
-.quick svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 /* Tabs: text with an underline on the selected one. */
@@ -1633,8 +1592,6 @@ kbd {
   font-weight: 500;
 }
 
-.svc-what { font-size: 13px; }
-
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -1687,17 +1644,23 @@ kbd {
 
 .svc-env-hint { margin: 0 0 8px; }
 
-/* A service's newest log lines: a quiet box; long lines scroll sideways. */
-.svc-log {
-  max-width: 720px;
-  margin: 0 0 8px;
-  padding: 10px 12px;
-  overflow-x: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-m);
-  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
-  white-space: pre;
-}
+/* A service's lists (contents, clients, log lines) in the Processes look. */
+.proc.svc-row { grid-template-columns: auto 1fr auto; }
+.proc.svc-row.with-icon { grid-template-columns: 22px auto 1fr auto; }
+.proc.svc-row.muted .proc-name { font-weight: 400; color: var(--muted); }
+.proc.svc-new { grid-template-columns: minmax(0, 260px) auto; justify-content: space-between; }
+.svc-new input { height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--steel-raised); }
+.svc-row .proc-actions .danger { color: var(--danger); }
+/* Destructive row actions show on the row you point at or tab into. */
+.svc-row .hover-only { visibility: hidden; }
+.svc-row:hover .hover-only,
+.svc-row:focus-within .hover-only { visibility: visible; }
+.svc-icon { display: grid; place-items: center; width: 22px; height: 22px; color: var(--muted); }
+.svc-icon img { width: 22px; height: 22px; }
+.svc-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+.proc.svc-line { grid-template-columns: minmax(0, 1fr); min-height: 28px; padding: 3px 14px; }
+.svc-log { margin-bottom: 8px; }
+.svc-settings { margin-top: 20px; }
 .svc-remove { margin-top: 16px; color: var(--danger); }
 #svc-port-edit, #svc-web-edit { max-width: 100px; }
 .res-list dt .link {
@@ -1712,34 +1675,6 @@ kbd {
 #filter.active {
   background: var(--selected);
   color: var(--text);
-}
-
-.svc-contents .res-cells { gap: 12px; }
-.svc-contents .row:has(> input) { display: flex; gap: 8px; }
-.svc-contents .row > input {
-  flex: 1;
-  max-width: 260px;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-s);
-  background: var(--steel-raised);
-}
-.svc-contents button.link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--text);
-}
-
-.svc-contents button.link:hover { text-decoration: underline; }
-.svc-contents button.link.danger { color: var(--danger); }
-.svc-contents button.plain {
-  height: 26px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-s);
-  background: var(--steel-raised);
 }
 
 /* ---------- Logs ---------- */
@@ -2171,7 +2106,6 @@ kbd {
 
 .site-url.off { color: var(--muted); cursor: default; }
 .site-url.off:hover { text-decoration: none; }
-.quick button:disabled { opacity: 0.45; }
 
 /* A small action at the end of a line of text (Install PHP, Show Logs). */
 .inline-action {
@@ -2185,8 +2119,6 @@ kbd {
   font-size: 12px;
 }
 
-.svc-contents button.plain.danger { color: var(--danger); }
-
 /* One content column in the app and service pane: header, tabs and panels end together. */
 #site > *,
 #setup { max-width: 720px; }
@@ -2199,11 +2131,6 @@ kbd {
 /* Attached services sit on the address line, so every header has the same height. */
 .site-services { display: inline-flex; vertical-align: middle; margin: 0 0 0 10px; }
 .site-name { overflow-wrap: break-word; }
-
-/* Destructive row actions show on the row you point at or tab into. */
-.res-list .row .hover-only { visibility: hidden; }
-.res-list .row:hover .hover-only,
-.res-list .row:focus-within .hover-only { visibility: visible; }
 
 .connect-head { display: flex; align-items: center; gap: 10px; }
 .connect-head select {
@@ -2244,7 +2171,6 @@ kbd {
 .logs-large-actions button,
 .res-cells .del,
 .clean-all,
-.svc-contents button.plain,
 .git-btn,
 .pkg-check {
   height: 26px;
@@ -2262,7 +2188,6 @@ kbd {
 .logs-large-actions button:hover,
 .res-cells .del:hover,
 .clean-all:hover,
-.svc-contents button.plain:hover,
 .git-btn:hover,
 .pkg-check:hover { border-color: var(--cold); }
 

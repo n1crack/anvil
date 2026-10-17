@@ -211,6 +211,20 @@ function toggle(name, open = collapsed.has(name)) {
   parent.nextElementSibling?.classList.toggle("closed", !open);
 }
 
+/** A sidebar mark with its run state as a badge on the corner: `on`, `warm` (starting)
+ * or `bad` (failed); none when stopped. Apps and services both use it. */
+function markBox(m, badge) {
+  const box = el("span", "mark-box");
+  box.append(m);
+  if (badge) {
+    const b = el("span", `run-badge ${badge}`);
+    b.title = { on: "Running", warm: "Starting", bad: "Failed to start" }[badge];
+    box.append(b);
+    box.classList.add("running");
+  }
+  return box;
+}
+
 function row(s, { child = false, kids = 0, path = true, kind: showKind = true } = {}) {
   const b = document.createElement("button");
   b.className = child ? "item child" : "item";
@@ -281,17 +295,8 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
   end.append(d);
   if (child) b.append(text, end);
   else {
-    // Running: a small badge on the mark's corner (amber while starting).
-    const m = el("span", "mark-box");
-    m.append(mark(s));
     const state = snap.app_states[s.name];
-    if (state) {
-      const badge = el("span", `run-badge ${state === "running" ? "on" : "warm"}`);
-      badge.title = state === "running" ? "Running" : "Starting";
-      m.append(badge);
-      m.classList.add("running");
-    }
-    b.append(m, text, end);
+    b.append(markBox(mark(s), state && (state === "running" ? "on" : "warm")), text, end);
   }
   b.onclick = () => select(s.name);
   b.oncontextmenu = (e) => {
@@ -741,11 +746,16 @@ function drawOpenWith(root) {
     if (!name) continue;
     b.title = `Open in ${name}${b.dataset.open === "editor" ? " (⌘E)" : ""}`;
     b.setAttribute("aria-label", b.title);
-    if (!appIcons.has(name)) appIcons.set(name, invoke("app_icon", { name }).catch(() => null));
-    appIcons.get(name).then((src) => {
-      if (src) b.replaceChildren(Object.assign(new Image(), { src, alt: "" }));
-    });
+    appIconInto(b, name);
   }
+}
+
+/** `box`'s content becomes the app's own icon once known; the outline stays otherwise. */
+function appIconInto(box, name) {
+  if (!appIcons.has(name)) appIcons.set(name, invoke("app_icon", { name }).catch(() => null));
+  appIcons.get(name).then((src) => {
+    if (src) box.replaceChildren(Object.assign(new Image(), { src, alt: "" }));
+  });
 }
 
 function renderSite() {

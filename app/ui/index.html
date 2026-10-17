@@ -196,44 +196,49 @@
   </dialog>
 
   <template id="service-tpl">
+    <div class="site-top">
     <header class="site-head">
       <div class="site-title">
         <span class="mark big" aria-hidden="true"></span>
         <div>
           <h1 class="site-name"></h1>
-          <span class="svc-what muted"></span>
+          <div class="site-meta"><span class="meta"></span></div>
         </div>
       </div>
-      <div class="run-box">
-        <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text"></span></span>
-        <button data-svc="start">Start</button>
-        <button data-svc="restart">Restart</button>
-        <button data-svc="stop">Stop</button>
+      <div class="head-side">
+        <div class="run-box">
+          <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text" aria-live="polite"></span></span>
+          <button data-svc="start">Start</button>
+          <button data-svc="stop">Stop</button>
+        </div>
+        <div class="open-with">
+          <button data-svc-open="inbox" title="Open the Mailpit inbox" aria-label="Open the Mailpit inbox" hidden>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5"/><path d="m2.5 4.5 5.5 4 5.5-4"/></svg>
+          </button>
+          <button data-svc-open="data">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>
+          </button>
+          <button data-svc-open="log" title="Open the service’s log" aria-label="Open the service’s log">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.75 1.75h6l2.5 2.5v10h-8.5z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
+          </button>
+        </div>
       </div>
     </header>
     <p class="run-error error" hidden></p>
-
-    <div class="quick">
-      <button data-svc-open="inbox" title="Open the Mailpit inbox" hidden>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5"/><path d="m2.5 4.5 5.5 4 5.5-4"/></svg>Inbox
-      </button>
-      <button data-svc-open="data" title="Show the data folder in Finder">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>Data
-      </button>
-      <button class="show-log" data-svc-open="log" title="Open the service’s log">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.75 1.75h6l2.5 2.5v10h-8.5z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>Log
-      </button>
     </div>
 
-    <dl class="group">
+    <div class="procs-head"><h3 class="res-sub svc-contents-title">Databases</h3></div>
+    <div class="svc-contents"></div>
+
+    <div class="procs-head svc-clients-head" hidden><h3 class="res-sub">Open with</h3></div>
+    <div class="group procs-list svc-list svc-clients" hidden></div>
+
+    <dl class="group svc-settings">
       <div class="row"><dt><label for="svc-port-edit">Port</label></dt><dd><input id="svc-port-edit" inputmode="numeric"></dd></div>
       <div class="row svc-web" hidden><dt><label for="svc-web-edit">Inbox port</label></dt><dd><input id="svc-web-edit" inputmode="numeric"></dd></div>
       <div class="row row-top"><dt>Applications</dt><dd class="chips svc-apps"></dd></div>
       <div class="row row-top"><dt>Tags</dt><dd class="chips svc-tags"></dd></div>
     </dl>
-
-    <h3 class="res-sub svc-contents-title">Databases</h3>
-    <div class="svc-contents"></div>
 
     <h3 class="res-sub connect-head">Connect <select class="svc-db" aria-label="Database for the .env lines" hidden></select></h3>
     <p class="muted svc-env-hint">Paste into an application’s <code>.env</code>.</p>
@@ -243,7 +248,7 @@
     </div>
 
     <h3 class="res-sub">Log</h3>
-    <pre class="svc-log muted" tabindex="0" aria-label="Newest log lines">Reading…</pre>
+    <div class="group procs-list svc-list svc-log" tabindex="0" aria-label="Newest log lines"><div class="proc svc-line"><span class="proc-last">Reading…</span></div></div>
 
     <div class="below"><button class="svc-remove">Remove Service…</button></div>
   </template>
