@@ -1473,7 +1473,20 @@ kbd {
 }
 
 .chip-btn:hover { color: var(--text); }
-.chip-btn[aria-checked="true"] { background: var(--selected); color: var(--text); }
+.chip-btn[aria-checked="true"],
+.chip-btn[aria-selected="true"] { background: var(--selected); color: var(--text); }
+
+/* Packages: which manager, then which list. */
+.pkg-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 4px 0 10px;
+}
+
+.pkg-seg { display: flex; flex-wrap: wrap; gap: 2px; }
+.pkg-seg + .pkg-seg { padding-left: 16px; border-left: 1px solid var(--line); }
+.pkg-count { margin-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .logs-status { margin: 4px 0 8px; font-size: 12px; }
 
@@ -1771,28 +1784,9 @@ kbd {
   background: var(--steel-raised);
 }
 
-.pkg-fold { max-width: 640px; margin-top: 8px; }
 
-.pkg-fold summary {
-  width: fit-content;
-  padding: 4px 0;
-  color: var(--muted);
-  font-size: 12px;
-  cursor: default;
-  list-style: none;
-}
 
-.pkg-fold summary::before {
-  content: "›";
-  display: inline-block;
-  width: 12px;
-  transition: transform 0.15s ease;
-}
 
-.pkg-fold[open] summary::before { transform: rotate(90deg); }
-.pkg-fold summary:hover { color: var(--text); }
-.pkg-fold summary::-webkit-details-marker { display: none; }
-.pkg-fold > .group { margin-top: 4px; }
 
 /* First run and empty panes: one message, one primary action. */
 .welcome {
@@ -1877,8 +1871,7 @@ kbd {
 #setup { max-width: 720px; }
 #site .group,
 #site .env,
-#site .pkg-tools,
-#site .pkg-fold { max-width: none; }
+#site .pkg-tools { max-width: none; }
 
 /* Attached services sit on the address line, so every header has the same height. */
 .site-services { display: inline-flex; vertical-align: middle; margin: 0 0 0 10px; }
