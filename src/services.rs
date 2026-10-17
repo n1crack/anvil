@@ -5,7 +5,10 @@
 //! Everything listens on 127.0.0.1 only and runs independently of the web
 //! server, so changing a site never restarts a database.
 
-use crate::{Config, fetch_tgz, home, kill_orphans, platform, run, save, terminate};
+use crate::{
+    Config, fetch_text, fetch_tgz, home, kill_orphans, platform, published_sum, replace_dir, run,
+    save, terminate,
+};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -413,68 +416,86 @@ pub fn install(id: &str, version: &str) -> Result<()> {
     let (_, caddy_plat) = platform()?;
     let mac = caddy_plat.starts_with("mac");
     let arm = caddy_plat.ends_with("arm64");
-    let d = dir(id, version);
-    let _ = fs::remove_dir_all(&d);
-    let result = match id {
-        "mysql" => {
-            // ponytail: macOS builds only; Linux uses the glibc .tar.xz with the Linux port.
-            if !mac {
-                bail!("MySQL install is macOS-only for now");
+    replace_dir(&dir(id, version), |d| {
+        match id {
+            "mysql" => {
+                // ponytail: macOS builds only; Linux uses the glibc .tar.xz with the Linux port.
+                if !mac {
+                    bail!("MySQL install is macOS-only for now");
+                }
+                let arch = if arm { "arm64" } else { "x86_64" };
+                let minor = version.rsplit_once('.').map_or(version, |m| m.0);
+                let file = format!("mysql-{version}-macos15-{arch}.tar.gz");
+                let url = format!("https://cdn.mysql.com/Downloads/MySQL-{minor}/{file}");
+                // MySQL only publishes MD5: catches a broken download, not a forged one.
+                let sum = published_sum(&format!("{url}.md5"), &file)?;
+                fetch_tgz(&url, d, true, Some(&sum))
             }
-            let arch = if arm { "arm64" } else { "x86_64" };
-            let minor = version.rsplit_once('.').map_or(version, |m| m.0);
-            fetch_tgz(
-                &format!(
-                    "https://cdn.mysql.com/Downloads/MySQL-{minor}/mysql-{version}-macos15-{arch}.tar.gz"
-                ),
-                &d,
-                true,
-            )
-        }
-        "postgres" => {
-            let target = match (mac, arm) {
-                (true, true) => "aarch64-apple-darwin",
-                (true, false) => "x86_64-apple-darwin",
-                (false, true) => "aarch64-unknown-linux-gnu",
-                (false, false) => "x86_64-unknown-linux-gnu",
-            };
-            fetch_tgz(
-                &format!(
-                    "https://github.com/theseus-rs/postgresql-binaries/releases/download/{version}/postgresql-{version}-{target}.tar.gz"
-                ),
-                &d,
-                true,
-            )
-        }
-        "redis" => build_redis(&d, version),
-        _ => {
-            let os = if mac { "darwin" } else { "linux" };
-            let arch = if arm { "arm64" } else { "amd64" };
-            fetch_tgz(
-                &format!(
-                    "https://github.com/axllent/mailpit/releases/download/v{version}/mailpit-{os}-{arch}.tar.gz"
-                ),
-                &d,
-                false,
-            )
-        }
-    };
-    if result.is_err() {
-        let _ = fs::remove_dir_all(&d);
-    }
-    result?;
-    fs::write(d.join("VERSION"), version)?;
-    Ok(())
+            "postgres" => {
+                let target = match (mac, arm) {
+                    (true, true) => "aarch64-apple-darwin",
+                    (true, false) => "x86_64-apple-darwin",
+                    (false, true) => "aarch64-unknown-linux-gnu",
+                    (false, false) => "x86_64-unknown-linux-gnu",
+                };
+                let file = format!("postgresql-{version}-{target}.tar.gz");
+                let url = format!(
+                    "https://github.com/theseus-rs/postgresql-binaries/releases/download/{version}/{file}"
+                );
+                let sum = published_sum(&format!("{url}.sha256"), &file)?;
+                fetch_tgz(&url, d, true, Some(&sum))
+            }
+            "redis" => build_redis(d, version),
+            _ => {
+                let os = if mac { "darwin" } else { "linux" };
+                let arch = if arm { "arm64" } else { "amd64" };
+                let file = format!("mailpit-{os}-{arch}.tar.gz");
+                let sum = github_digest("axllent/mailpit", &format!("v{version}"), &file)?;
+                fetch_tgz(
+                    &format!(
+                        "https://github.com/axllent/mailpit/releases/download/v{version}/{file}"
+                    ),
+                    d,
+                    false,
+                    Some(&sum),
+                )
+            }
+        }?;
+        fs::write(d.join("VERSION"), version)?;
+        Ok(())
+    })
+}
+
+/// Mailpit publishes no checksums file; GitHub records a SHA-256 of every
+/// release asset at upload, so check against that.
+fn github_digest(repo: &str, tag: &str, file: &str) -> Result<String> {
+    let release: serde_json::Value = serde_json::from_str(&fetch_text(&format!(
+        "https://api.github.com/repos/{repo}/releases/tags/{tag}"
+    ))?)?;
+    release["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|a| a["name"] == file)
+        .and_then(|a| a["digest"].as_str()?.strip_prefix("sha256:"))
+        .map(String::from)
+        .with_context(|| format!("GitHub lists no checksum for {file}"))
 }
 
 /// Redis publishes no macOS binaries, so build it (needs the Xcode command line tools).
 fn build_redis(prefix: &std::path::Path, version: &str) -> Result<()> {
     let src = home().join("build").join(format!("redis-{version}"));
     let _ = fs::remove_dir_all(&src);
+    let file = format!("redis-{version}.tar.gz");
+    let sum = published_sum(
+        "https://raw.githubusercontent.com/redis/redis-hashes/master/README",
+        &file,
+    )?;
     fetch_tgz(
-        &format!("https://download.redis.io/releases/redis-{version}.tar.gz"),
+        &format!("https://download.redis.io/releases/{file}"),
         &src,
         true,
+        Some(&sum),
     )?;
     let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
     // Only the server and CLI: the bundled modules need a newer GNU Make than macOS ships.

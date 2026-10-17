@@ -2,7 +2,7 @@
 //! .NET. Each lives inside `~/.anvil` and is only put on PATH for the apps Anvil
 //! runs, so system installs are never touched.
 
-use crate::{fetch_tgz, home, platform, run};
+use crate::{download, fetch_text, fetch_tgz, home, platform, published_sum, replace_dir, run};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::fs;
@@ -142,24 +142,30 @@ pub fn install(id: &str, version: &str) -> Result<()> {
                 .with_context(|| format!("No Node.js {version} release"))?;
             let os = if mac { "darwin" } else { "linux" };
             let arch = if arm { "arm64" } else { "x64" };
-            let dir = root("node").join(version);
-            let _ = fs::remove_dir_all(&dir);
-            fetch_tgz(
-                &format!("https://nodejs.org/dist/{full}/node-{full}-{os}-{arch}.tar.gz"),
-                &dir,
-                true,
-            )
+            let base = format!("https://nodejs.org/dist/{full}/");
+            let file = format!("node-{full}-{os}-{arch}.tar.gz");
+            let sum = published_sum(&format!("{base}SHASUMS256.txt"), &file)?;
+            replace_dir(&root("node").join(version), |d| {
+                fetch_tgz(&format!("{base}{file}"), d, true, Some(&sum))
+            })
         }
         "go" => {
             let os = if mac { "darwin" } else { "linux" };
             let arch = if arm { "arm64" } else { "amd64" };
-            let dir = root("go").join(version);
-            let _ = fs::remove_dir_all(&dir);
-            fetch_tgz(
-                &format!("https://go.dev/dl/go{version}.{os}-{arch}.tar.gz"),
-                &dir,
-                true,
-            )
+            let file = format!("go{version}.{os}-{arch}.tar.gz");
+            let list: Vec<serde_json::Value> =
+                serde_json::from_str(&fetch_text("https://go.dev/dl/?mode=json&include=all")?)?;
+            let sum = list
+                .iter()
+                .filter_map(|r| r["files"].as_array())
+                .flatten()
+                .find(|f| f["filename"] == file.as_str())
+                .and_then(|f| f["sha256"].as_str())
+                .with_context(|| format!("go.dev lists no checksum for {file}"))?
+                .to_string();
+            replace_dir(&root("go").join(version), |d| {
+                fetch_tgz(&format!("https://go.dev/dl/{file}"), d, true, Some(&sum))
+            })
         }
         "rust" => {
             let target = match (mac, arm) {
@@ -168,14 +174,9 @@ pub fn install(id: &str, version: &str) -> Result<()> {
                 (false, true) => "aarch64-unknown-linux-gnu",
                 (false, false) => "x86_64-unknown-linux-gnu",
             };
-            let init = home().join("build").join("rustup-init");
-            fs::create_dir_all(init.parent().unwrap())?;
-            run(Command::new("curl")
-                .args(["-fsSL", "-o"])
-                .arg(&init)
-                .arg(format!(
-                    "https://static.rust-lang.org/rustup/dist/{target}/rustup-init"
-                )))?;
+            let url = format!("https://static.rust-lang.org/rustup/dist/{target}/rustup-init");
+            let sum = published_sum(&format!("{url}.sha256"), "rustup-init")?;
+            let init = download(&url, Some(&sum))?;
             run(Command::new("chmod").arg("+x").arg(&init))?;
             run(Command::new(&init)
                 .args(["-y", "--no-modify-path", "--profile", "minimal"])
@@ -185,12 +186,8 @@ pub fn install(id: &str, version: &str) -> Result<()> {
             Ok(())
         }
         _ => {
-            let script = home().join("build").join("dotnet-install.sh");
-            fs::create_dir_all(script.parent().unwrap())?;
-            run(Command::new("curl")
-                .args(["-fsSL", "-o"])
-                .arg(&script)
-                .arg("https://dot.net/v1/dotnet-install.sh"))?;
+            // Microsoft publishes no checksum for dotnet-install.sh; HTTPS is the only check.
+            let script = download("https://dot.net/v1/dotnet-install.sh", None)?;
             run(Command::new("bash")
                 .arg(&script)
                 .args(["--channel", version, "--install-dir"])

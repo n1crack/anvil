@@ -32,8 +32,27 @@ Anvil is meant for your own machine only:
   folder can issue certificates your Mac trusts. Remove the authority from
   Keychain Access when you uninstall Anvil.
 - Anvil downloads PHP, Caddy, language toolchains and service programs over
-  HTTPS from their upstream projects. The downloads are not checksum-verified
-  yet; HTTPS is the only integrity check.
+  HTTPS from their upstream projects, and checks each download against the
+  checksum its publisher lists before unpacking or running it:
+  - Node.js: SHA-256 from the release's `SHASUMS256.txt` (the file's GPG
+    signature is not checked).
+  - Go: SHA-256 from `go.dev/dl/?mode=json`.
+  - Caddy: SHA-512 from the release's `caddy_<version>_checksums.txt` (its
+    cosign signature is not checked).
+  - PostgreSQL: SHA-256 from the `.sha256` file next to each theseus-rs build.
+  - Redis: SHA-256 from the `redis/redis-hashes` list.
+  - Composer: SHA-256 from `composer.phar.sha256`.
+  - Rust: SHA-256 from the `rustup-init.sha256` file next to the installer.
+  - Mailpit publishes no checksums; Anvil uses the SHA-256 GitHub records for
+    each release file, which shows the download is the uploaded file.
+  - MySQL publishes only MD5 (`.md5` next to each download). That catches a
+    broken download but not a deliberately altered one.
+  - PHP (static-php-cli builds) and the .NET install script publish no
+    checksums; for them HTTPS is the only integrity check.
+
+  A checksum fetched from the same host as the file guards against broken or
+  swapped downloads, not against a compromised upstream. A failed or
+  mismatched download leaves an existing install untouched.
 
 Reports about these boundaries (for example something reachable from another
 machine, or a file served that should not be) are welcome.

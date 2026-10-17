@@ -344,19 +344,131 @@ pub fn run(cmd: &mut Command) -> Result<()> {
     Ok(())
 }
 
-/// Download a .tar.gz and unpack it into `dir`.
+pub(crate) fn fetch_text(url: &str) -> Result<String> {
+    let out = Command::new("curl").args(["-fsSL", url]).output()?;
+    if !out.status.success() {
+        bail!("couldn't fetch {url}");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The digest for `file` in a checksums listing: the hex word on the line naming
+/// it, or the only word of a file that holds just a digest.
+pub(crate) fn sum_in(text: &str, file: &str) -> Option<String> {
+    let hex =
+        |w: &&str| matches!(w.len(), 32 | 64 | 128) && w.bytes().all(|b| b.is_ascii_hexdigit());
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if let [w] = words[..] {
+        return Some(w).filter(hex).map(String::from);
+    }
+    text.lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>())
+        .find(|ws| {
+            ws.iter()
+                .any(|w| w.trim_start_matches(['*', '.', '/']) == file)
+        })?
+        .into_iter()
+        .find(hex)
+        .map(String::from)
+}
+
+/// Fetch a published checksums file and pick the digest for `file` from it.
+pub(crate) fn published_sum(url: &str, file: &str) -> Result<String> {
+    sum_in(&fetch_text(url)?, file).with_context(|| format!("{url} lists no checksum for {file}"))
+}
+
+/// Hash `file` and compare with `sum` (hex MD5, SHA-256 or SHA-512, told apart by length).
+/// openssl rather than shasum: one tool for all three, and every Mac has it.
+pub(crate) fn verify(file: &Path, sum: &str, what: &str) -> Result<()> {
+    let algo = match sum.len() {
+        32 => "md5",
+        64 => "sha256",
+        128 => "sha512",
+        _ => bail!("The published checksum of {what} is malformed"),
+    };
+    let out = Command::new("openssl")
+        .args(["dgst", &format!("-{algo}"), "-r"])
+        .arg(file)
+        .output()
+        .context("failed to run openssl")?;
+    if !out.status.success() {
+        bail!("openssl couldn't hash the download of {what}");
+    }
+    let got = String::from_utf8_lossy(&out.stdout);
+    if !got
+        .split_whitespace()
+        .next()
+        .is_some_and(|g| g.eq_ignore_ascii_case(sum))
+    {
+        bail!("The download of {what} didn't match its published checksum");
+    }
+    println!("{what}: {algo} checksum verified");
+    Ok(())
+}
+
+/// Download `url` into ~/.anvil/build and check it against `sum` when the
+/// publisher provides one. Returns the downloaded file.
+pub(crate) fn download(url: &str, sum: Option<&str>) -> Result<PathBuf> {
+    let name = url.rsplit('/').next().unwrap_or("download");
+    let build = home().join("build");
+    fs::create_dir_all(&build)?;
+    // Keep the published name: rustup-init decides what it is from it.
+    let tmp = build.join(name);
+    let ok = run(Command::new("curl").args(["-fL#", "-o"]).arg(&tmp).arg(url))
+        .and_then(|_| sum.map_or(Ok(()), |s| verify(&tmp, s, name)));
+    if let Err(e) = ok {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(tmp)
+}
+
+/// Download a .tar.gz, verify it against `sum` if given, and unpack it into `dir`.
 /// With `strip`, the archive's single top-level folder is dropped.
-pub(crate) fn fetch_tgz(url: &str, dir: &Path, strip: bool) -> Result<()> {
-    fs::create_dir_all(dir)?;
-    let tmp = dir.join(".download.tar.gz");
-    run(Command::new("curl").args(["-fL#", "-o"]).arg(&tmp).arg(url))?;
+pub(crate) fn fetch_tgz(url: &str, dir: &Path, strip: bool, sum: Option<&str>) -> Result<()> {
+    let tmp = download(url, sum)?;
     let mut tar = Command::new("tar");
     tar.arg("-xzf").arg(&tmp).arg("-C").arg(dir);
     if strip {
         tar.arg("--strip-components=1");
     }
-    run(&mut tar)?;
-    fs::remove_file(tmp)?;
+    let ok = fs::create_dir_all(dir)
+        .map_err(Into::into)
+        .and_then(|_| run(&mut tar));
+    let _ = fs::remove_file(tmp);
+    ok
+}
+
+/// Install into a hidden sibling of `dir` and swap it in only once `fill`
+/// succeeds, so a failed reinstall leaves the working one untouched.
+pub(crate) fn replace_dir(dir: &Path, fill: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
+    let parent = dir.parent().context("no parent folder")?;
+    let name = dir.file_name().context("no folder name")?.to_string_lossy();
+    let (new, old) = (
+        parent.join(format!(".{name}.new")),
+        parent.join(format!(".{name}.old")),
+    );
+    let _ = fs::remove_dir_all(&new);
+    let _ = fs::remove_dir_all(&old);
+    let ok = fs::create_dir_all(&new)
+        .map_err(Into::into)
+        .and_then(|_| fill(&new));
+    if let Err(e) = ok {
+        let _ = fs::remove_dir_all(&new);
+        return Err(e);
+    }
+    if dir.exists()
+        && let Err(e) = fs::rename(dir, &old)
+    {
+        let _ = fs::remove_dir_all(&new);
+        return Err(e.into());
+    }
+    if let Err(e) = fs::rename(&new, dir) {
+        let _ = fs::rename(&old, dir);
+        let _ = fs::remove_dir_all(&new);
+        return Err(e.into());
+    }
+    let _ = fs::remove_dir_all(&old);
     Ok(())
 }
 
@@ -389,7 +501,9 @@ pub fn installed_php() -> Vec<String> {
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|e| e.path().join("php-fpm").exists())
+        .filter(|e| {
+            e.path().join("php-fpm").exists() && !e.file_name().to_string_lossy().starts_with('.')
+        })
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     v.sort();
@@ -419,20 +533,27 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     let full = format!("{minor}.{patch}");
     let dir = php_dir(minor);
     println!("Installing PHP {full}…");
-    for kind in ["fpm", "cli"] {
-        fetch_tgz(
-            &format!("{PHP_INDEX}php-{full}-{kind}-{plat}.tar.gz"),
-            &dir,
-            false,
-        )?;
-    }
-    let ini = dir.join("php.ini");
-    if !ini.exists() {
-        fs::write(
-            &ini,
-            "memory_limit = 512M\nupload_max_filesize = 100M\npost_max_size = 100M\nmax_execution_time = 120\n",
-        )?;
-    }
+    replace_dir(&dir, |new| {
+        for kind in ["fpm", "cli"] {
+            // static-php-cli publishes no checksums; HTTPS is the only check.
+            fetch_tgz(
+                &format!("{PHP_INDEX}php-{full}-{kind}-{plat}.tar.gz"),
+                new,
+                false,
+                None,
+            )?;
+        }
+        let ini = dir.join("php.ini");
+        if ini.exists() {
+            fs::copy(ini, new.join("php.ini"))?;
+        } else {
+            fs::write(
+                new.join("php.ini"),
+                "memory_limit = 512M\nupload_max_filesize = 100M\npost_max_size = 100M\nmax_execution_time = 120\n",
+            )?;
+        }
+        Ok(())
+    })?;
     // The download took a while; save on top of the config as it is now.
     *cfg = load()?;
     if cfg.php.is_none() {
@@ -473,12 +594,14 @@ pub fn ensure_caddy() -> Result<()> {
     }
     let (_, plat) = platform()?;
     println!("Downloading Caddy {CADDY_VERSION}…");
+    let base = format!("https://github.com/caddyserver/caddy/releases/download/v{CADDY_VERSION}/");
+    let file = format!("caddy_{CADDY_VERSION}_{plat}.tar.gz");
+    let sum = published_sum(&format!("{base}caddy_{CADDY_VERSION}_checksums.txt"), &file)?;
     fetch_tgz(
-        &format!(
-            "https://github.com/caddyserver/caddy/releases/download/v{CADDY_VERSION}/caddy_{CADDY_VERSION}_{plat}.tar.gz"
-        ),
+        &format!("{base}{file}"),
         &home().join("bin"),
         false,
+        Some(&sum),
     )
 }
 
@@ -928,6 +1051,78 @@ mod tests {
             runtime_version: None,
             runtime_pinned: false,
         }
+    }
+
+    #[test]
+    fn checksum_listings() {
+        let node = "aaaa  node-v22.11.0-darwin-arm64.tar.xz\n\
+            2e89afe6f4e3aa6c7e21c560d8a0453d84807e97850bbb819b998531a22bdfde  node-v22.11.0-darwin-arm64.tar.gz\n\
+            1111111111111111111111111111111111111111111111111111111111111111  node-v22.11.0-darwin-x64.tar.gz\n";
+        assert_eq!(
+            sum_in(node, "node-v22.11.0-darwin-arm64.tar.gz").unwrap(),
+            "2e89afe6f4e3aa6c7e21c560d8a0453d84807e97850bbb819b998531a22bdfde"
+        );
+        assert_eq!(sum_in(node, "node-v22.11.0-linux-x64.tar.gz"), None);
+        let sha512 = "68f592df8f0ec058fbdb9b137b64e9a0aa792d28c06e1e3b9ec12d0e7fb371683a54e73ef6d8e6d0dd70dc6b941a5b5d5b73faedd3f89de119ad2eb78bdc668e";
+        let caddy = format!(
+            "{}  caddy_2.11.7_linux_amd64.tar.gz\n{sha512}  caddy_2.11.7_mac_arm64.tar.gz\n",
+            "f".repeat(128)
+        );
+        assert_eq!(
+            sum_in(&caddy, "caddy_2.11.7_mac_arm64.tar.gz").unwrap(),
+            sha512
+        );
+        // rustup: "<hex> *./rustup-init"; composer: just the digest; redis-hashes: digest mid-line.
+        let h = "ec1b9233e7f72990ecd8e62063fa7f6c3dfc2bec8e97f88bff165f9100ac696a";
+        assert_eq!(
+            sum_in(&format!("{h} *./rustup-init\n"), "rustup-init").unwrap(),
+            h
+        );
+        assert_eq!(sum_in(&format!("{h}\n"), "composer.phar").unwrap(), h);
+        let redis = format!(
+            "hash redis-8.10.2.tar.gz sha256 {h} http://download.redis.io/releases/redis-8.10.2.tar.gz\n"
+        );
+        assert_eq!(sum_in(&redis, "redis-8.10.2.tar.gz").unwrap(), h);
+        assert_eq!(sum_in("<html>not found</html>", "composer.phar"), None);
+    }
+
+    #[test]
+    fn verify_compares_digests() {
+        let f = std::env::temp_dir().join(format!("anvil-verify-{}", std::process::id()));
+        fs::write(&f, "hello\n").unwrap();
+        let sha256 = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03";
+        verify(&f, sha256, "hello").unwrap();
+        verify(&f, &sha256.to_uppercase(), "hello").unwrap();
+        verify(&f, "b1946ac92492d2347c6235b4d2611184", "hello").unwrap(); // md5
+        let bad = sha256.replace('5', "6");
+        let err = verify(&f, &bad, "hello").unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "The download of hello didn't match its published checksum"
+        );
+        assert!(verify(&f, "abc", "hello").is_err());
+        fs::remove_file(f).unwrap();
+    }
+
+    #[test]
+    fn failed_reinstall_keeps_the_old_one() {
+        let root = std::env::temp_dir().join(format!("anvil-replace-{}", std::process::id()));
+        let dir = root.join("22");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("node"), "old").unwrap();
+
+        let err = replace_dir(&dir, |d| {
+            fs::write(d.join("node"), "half")?;
+            bail!("download failed")
+        });
+        assert!(err.is_err());
+        assert_eq!(fs::read_to_string(dir.join("node")).unwrap(), "old");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+
+        replace_dir(&dir, |d| Ok(fs::write(d.join("node"), "new")?)).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("node")).unwrap(), "new");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
