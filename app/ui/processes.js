@@ -173,7 +173,8 @@ function procRow({ name, state, detail, error, title, busy, open, run, auto, web
   }
   if (run && !busy && !edit) {
     if (state !== "stopped") actions.append(procBtn("Restart", `Restart ${name}`, () => run("restart")));
-    if (state === "running") actions.append(procBtn("■", `Stop ${name}`, () => run("stop")));
+    // On a crashed row ■ dismisses the crash.
+    if (state !== "stopped") actions.append(procBtn("■", state === "crashed" ? `Dismiss ${name}` : `Stop ${name}`, () => run("stop")));
     if (state === "stopped") actions.append(procBtn("▶", `Start ${name}`, () => run("start")));
   }
   if (menu && !edit) actions.append(procBtn("⋯", `More for ${name}`, menu));
