@@ -565,6 +565,14 @@ function renderResources(name) {
         none: sv.port ? `Nothing is listening on port ${sv.port}` : "",
       }[sv.source];
       if (where) dt.append(el("small", "path", where));
+      if (sv.anvil) {
+        const go = el("button", "link", "Show service");
+        go.onclick = () => {
+          setMode("services");
+          selectService(sv.anvil);
+        };
+        dt.append(go);
+      }
       const dd = el("dd", "res-cells");
       if (sv.memory != null) dd.append(el("span", "muted", `${bytes(sv.memory)} memory`));
       if (sv.data_bytes != null) dd.append(el("span", "size", `${bytes(sv.data_bytes)} data`));

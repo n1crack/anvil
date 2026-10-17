@@ -94,6 +94,10 @@ enum ServiceCmd {
         #[arg(long)]
         delete_data: bool,
     },
+    /// Set a service's tags (none clears them)
+    Tag { id: String, tags: Vec<String> },
+    /// Set the applications that use a service (none clears them)
+    Link { id: String, apps: Vec<String> },
     /// Remove a program no service uses anymore, e.g. `uninstall redis`
     Uninstall { kind: String },
     /// Start the service with Anvil
@@ -302,6 +306,8 @@ fn main() -> Result<()> {
                 );
             }
             ServiceCmd::Remove { id, delete_data } => services::remove(&mut cfg, &id, delete_data)?,
+            ServiceCmd::Tag { id, tags } => services::set_tags(&mut cfg, &id, &tags)?,
+            ServiceCmd::Link { id, apps } => services::set_apps(&mut cfg, &id, &apps)?,
             ServiceCmd::Uninstall { kind } => {
                 if let Some(id) = services::instances(&cfg)
                     .into_iter()
