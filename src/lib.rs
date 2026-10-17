@@ -922,7 +922,10 @@ mod tests {
                 .all(|s| s.name != "shop" && s.name != "admin.shop")
         );
         assert!(dir.join("shop").is_dir());
-        assert!(!cfg.groups.contains_key("Clients"));
+        // Hiding keeps the app's group, so showing it again restores it as it was.
+        assert_eq!(cfg.groups["Clients"], ["shop"]);
+        unhide(&mut cfg, "shop").unwrap();
+        assert!(sites(&cfg).iter().any(|s| s.name == "shop"));
         fs::remove_dir_all(dir).unwrap();
     }
 
