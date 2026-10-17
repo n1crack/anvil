@@ -696,9 +696,10 @@ fn parse_log_key<'a>(key: &'a str, services: &[String]) -> Res<LogKey<'a>> {
     parsed.ok_or_else(|| format!("Not a log: {key}"))
 }
 
-/// New log content for a row of the Processes window, by key (see `parse_log_key`).
+/// New log content for a row of the Processes window, by key (see `parse_log_key`):
+/// raw, so a process's colors survive.
 #[tauri::command(async)]
-fn activity_log(key: String, from: u64) -> Res<anvil::logs::Page> {
+fn activity_log(key: String, from: u64) -> Res<anvil::logs::Text> {
     let log = anvil::home().join("log");
     // The service list is read only for a service key; Caddy and PHP logs need no config.
     let services = if key.starts_with("service:") {
@@ -726,26 +727,16 @@ fn activity_log(key: String, from: u64) -> Res<anvil::logs::Page> {
             let text = anvil::compose::logs(&find_site(site)?.path, service).map_err(err)?;
             // ponytail: no incremental tail for containers; the whole text again unless its size is unchanged.
             let end = text.len() as u64;
-            let mut entries: Vec<_> = anvil::logs::split(&text)
-                .into_iter()
-                .map(anvil::logs::entry)
-                .collect();
-            entries.reverse();
-            if from == end {
-                entries.clear();
-            }
-            return Ok(anvil::logs::Page {
-                entries,
-                start_offset: 0,
+            return Ok(anvil::logs::Text {
+                text: if from == end { String::new() } else { text },
                 end_offset: end,
-                truncated: false,
             });
         }
     };
     if !file.exists() {
-        return Ok(anvil::logs::Page::default());
+        return Ok(anvil::logs::Text::default());
     }
-    anvil::logs::tail(&file, from).map_err(err)
+    anvil::logs::tail_text(&file, from).map_err(err)
 }
 
 #[tauri::command(async)]
@@ -2756,6 +2747,8 @@ fn main() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     let state = handle.state::<App>();
+                    // A fresh Anvil shows only this run's output, as a new terminal would.
+                    anvil::apps::clear_stale_logs();
                     start(&state, &cfg);
                     let failed = state.services.lock().unwrap().start_enabled(&cfg);
                     state.service_errors.lock().unwrap().extend(failed);

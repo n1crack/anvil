@@ -352,8 +352,33 @@ fn log_in(home: &Path, name: &str) -> PathBuf {
     home.join("log").join(format!("app-{name}.log"))
 }
 
-fn pid_file(name: &str) -> PathBuf {
-    pid_in(&home(), name)
+/// Empty the output of every app and process that no Anvil runs now: their screens
+/// show only the current run. Commands run once (`<site>#<id>`) keep their logs.
+pub fn clear_stale_logs() {
+    clear_stale_in(&home());
+}
+
+fn clear_stale_in(home: &Path) {
+    let Ok(dir) = fs::read_dir(home.join("log")) else {
+        return;
+    };
+    for f in dir.flatten() {
+        let name = f.file_name().to_string_lossy().into_owned();
+        let Some(key) = name
+            .strip_prefix("app-")
+            .and_then(|n| n.strip_suffix(".log"))
+        else {
+            continue;
+        };
+        // A symlink is not ours to empty.
+        let file = f.file_type().is_ok_and(|t| t.is_file());
+        if !key.contains('#') && file && !running_in(home, key) {
+            let _ = fs::OpenOptions::new()
+                .write(true)
+                .open(f.path())
+                .and_then(|l| l.set_len(0));
+        }
+    }
 }
 
 fn pid_in(home: &Path, name: &str) -> PathBuf {
@@ -362,7 +387,11 @@ fn pid_in(home: &Path, name: &str) -> PathBuf {
 
 /// Whether any Anvil (the app or `anvil start`) is running this app right now.
 pub fn running_anywhere(name: &str) -> bool {
-    fs::read_to_string(pid_file(name)).is_ok_and(|f| f.lines().skip(1).any(crate::alive))
+    running_in(&home(), name)
+}
+
+fn running_in(home: &Path, name: &str) -> bool {
+    fs::read_to_string(pid_in(home, name)).is_ok_and(|f| f.lines().skip(1).any(crate::alive))
 }
 
 /// Stop a whole process group: `npm run dev` leaves node children behind otherwise.
@@ -503,7 +532,13 @@ impl Apps {
             return Ok(());
         }
         let command = format!("npm run '{}'", script.replace('\'', r"'\''"));
-        self.spawn(&key, &site.path, &command, crate::processes::env(site))?;
+        self.spawn(
+            &key,
+            &site.path,
+            &command,
+            crate::processes::env(site),
+            false,
+        )?;
         self.processes.insert(key.clone());
         self.once.insert(key, script.to_string());
         Ok(())
@@ -542,7 +577,7 @@ impl Apps {
                 format!(".{tld}"),
             ),
         ]);
-        self.spawn(&site.name, &site.path, &command, env)
+        self.spawn(&site.name, &site.path, &command, env, true)
     }
 
     /// One of an app's other processes (queue, Vite…), see `processes`; `tld` as in `start`.
@@ -556,31 +591,46 @@ impl Apps {
         if self.running(&key) {
             return Ok(());
         }
-        self.spawn(&key, &site.path, &p.command, process_env(site, p, tld))?;
+        self.spawn(
+            &key,
+            &site.path,
+            &p.command,
+            process_env(site, p, tld),
+            true,
+        )?;
         self.processes.insert(key);
         Ok(())
     }
 
-    /// Run `command` in `dir` as its own process group, output to `log_file(key)`.
+    /// Run `command` in `dir` as its own process group, output to `log_file(key)`, with
+    /// colors as in a terminal. `fresh` empties the log first, as a new terminal starts
+    /// empty; a command run once keeps adding to its log.
     fn spawn(
         &mut self,
         key: &str,
         dir: &Path,
         command: &str,
         env: Vec<(String, String)>,
+        fresh: bool,
     ) -> Result<()> {
+        // Its old shell, if a crashed Anvil left one, ends first: nothing writes the log meanwhile.
         kill_orphans(&pid_in(&self.home, key), true);
         crate::state_dirs_in(&self.home)?;
         let log = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_in(&self.home, key))?;
+        if fresh {
+            log.set_len(0)?;
+        }
+        let command = crate::processes::with_ansi(command);
         // The trailing argument is $0: it tags the shell with Anvil's home so a
         // crashed Anvil's leftovers can be recognised and cleaned up.
         let tag = format!("anvil:{}:{key}", self.home.display());
         let child = Command::new("/bin/sh")
-            .args(["-c", command, &tag])
+            .args(["-c", &command, &tag])
             .current_dir(dir)
+            .envs(crate::processes::COLOR_ENV)
             .envs(env)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
@@ -953,6 +1003,63 @@ mod tests {
         assert!(apps.crashed().is_empty());
         assert_eq!(apps.process_keys("shopping"), ["shopping@w"]);
         apps.stop("shopping@w");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_start_begins_with_an_empty_colored_log() {
+        let dir = project(&[("fresh/x", "")]);
+        let mut apps = Apps::in_home(dir.join("home"));
+        let site = site_at(&dir);
+        let p = proc(
+            "env",
+            "echo \"$FORCE_COLOR $COLORTERM $TERM $CLICOLOR_FORCE\"; echo run",
+        );
+        let log = dir.join("home/log/app-shop@env.log");
+        let wait_for = |want: &str| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !fs::read_to_string(&log).unwrap_or_default().contains(want) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "no {want:?} in the log"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+        apps.start_process(&site, &p, "test").unwrap();
+        wait_for("run");
+        apps.stop("shop@env");
+        apps.start_process(&site, &p, "test").unwrap();
+        wait_for("run");
+        std::thread::sleep(Duration::from_millis(100));
+        // Only the second run's output, with the color variables set.
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            "1 truecolor xterm-256color 1\nrun\n"
+        );
+        apps.stop("shop@env");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_anvil_empties_only_logs_of_what_no_longer_runs() {
+        let dir = project(&[("stale/x", "")]);
+        let home = dir.join("home");
+        fs::create_dir_all(home.join("log")).unwrap();
+        fs::create_dir_all(home.join("run")).unwrap();
+        for key in ["shop", "shop@queue", "shop@vite", "shop#build"] {
+            fs::write(log_in(&home, key), "old run\n").unwrap();
+        }
+        // vite still runs (this test process stands in for it); queue's pid file is stale.
+        let me = std::process::id();
+        fs::write(pid_in(&home, "shop@vite"), format!("{me}\n{me}")).unwrap();
+        fs::write(pid_in(&home, "shop@queue"), "999999\n999999").unwrap();
+        clear_stale_in(&home);
+        let text = |key| fs::read_to_string(log_in(&home, key)).unwrap();
+        assert_eq!(text("shop"), "");
+        assert_eq!(text("shop@queue"), "");
+        assert_eq!(text("shop@vite"), "old run\n");
+        assert_eq!(text("shop#build"), "old run\n");
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -823,6 +823,34 @@ fn shell_words(s: &str) -> Vec<String> {
     words
 }
 
+/// What makes a process without a terminal print colors anyway: chalk/picocolors
+/// (Vite, concurrently), Symfony Console (artisan), and BSD/GNU tools. Truecolor so
+/// hex colors stay hex.
+pub const COLOR_ENV: [(&str, &str); 4] = [
+    ("FORCE_COLOR", "1"),
+    ("CLICOLOR_FORCE", "1"),
+    ("COLORTERM", "truecolor"),
+    ("TERM", "xterm-256color"),
+];
+
+/// `php artisan <cmd> …` with `--ansi` (a global Symfony Console option every command
+/// takes), unless it says `--ansi`/`--no-ansi`, ends its options with `--`, or is more
+/// than one command (the flag would land on the last one).
+pub fn with_ansi(command: &str) -> String {
+    let words = shell_words(command);
+    let artisan =
+        words.len() > 2 && words[0].rsplit('/').next() == Some("php") && words[1] == "artisan";
+    let plain = !command.contains([';', '|', '&', '\n']);
+    let free = !words
+        .iter()
+        .any(|w| matches!(w.as_str(), "--ansi" | "--no-ansi" | "--"));
+    if artisan && plain && free {
+        format!("{command} --ansi")
+    } else {
+        command.to_string()
+    }
+}
+
 /// Key for the process manager, pid and log files: `<site>@<process>`. Site
 /// names never contain `@`, so a key can't be another app's name.
 pub fn key(site: &str, process: &str) -> String {
@@ -1591,6 +1619,38 @@ echo '{DEV_JSON}'
         assert!(saved.contains("top = true"), "{saved}");
         apply_process_change(&mut sc, "queue", top(false)).unwrap();
         assert!(sc.processes.is_empty());
+    }
+
+    #[test]
+    fn artisan_commands_get_ansi() {
+        let ansi = |c: &str| with_ansi(c);
+        assert_eq!(
+            ansi("php artisan queue:listen --tries=1 --timeout=0"),
+            "php artisan queue:listen --tries=1 --timeout=0 --ansi"
+        );
+        assert_eq!(
+            ansi("php artisan pail --timeout=0"),
+            "php artisan pail --timeout=0 --ansi"
+        );
+        assert_eq!(
+            ansi("php artisan serve --port=$PORT"),
+            "php artisan serve --port=$PORT --ansi"
+        );
+        assert_eq!(
+            ansi("/x/php/8.4/php artisan serve --host=localhost"),
+            "/x/php/8.4/php artisan serve --host=localhost --ansi"
+        );
+        for same in [
+            "php artisan serve --ansi",
+            "php artisan pail --no-ansi",
+            "php artisan",
+            "php artisan migrate && php artisan serve",
+            "php artisan tinker -- x",
+            "npm run dev",
+            "php -S localhost:8000",
+        ] {
+            assert_eq!(ansi(same), same);
+        }
     }
 
     #[test]
