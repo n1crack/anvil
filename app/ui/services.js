@@ -194,6 +194,7 @@ function renderService() {
     $(`[data-svc-open="${what}"]`, root).onclick = () =>
       invoke("open_service", { id: svc.id, what }).catch((e) => showError(String(e)));
   }
+  loadServiceLog(svc.id);
 
   const portInput = (sel, value, web) => {
     const input = $(sel, root);
@@ -300,6 +301,24 @@ async function removeService(svc) {
   toast(wipe ? `Removed ${svc.id} and its data` : `Removed ${svc.id}; its data is kept`);
 }
 
+/** The service's newest log lines under its page; the Log button opens the whole file. */
+async function loadServiceLog(id) {
+  let lines = [];
+  try {
+    lines = await invoke("service_log", { id });
+  } catch {}
+  const pre = $("#site .svc-log");
+  if (!pre || svcSelected !== id) return;
+  pre.textContent = lines.join("\n") || "Nothing logged yet.";
+  pre.classList.toggle("muted", !lines.length);
+}
+
+// A running service keeps adding to its log; refresh the lines while it is shown.
+setInterval(() => {
+  if (document.hidden || mode !== "services" || !svcSelected) return;
+  if (services.find((x) => x.id === svcSelected)?.running) loadServiceLog(svcSelected);
+}, 3000);
+
 /* ---------- Add Service sheet: kind, name, port, app and tags, like creating a container ---------- */
 
 let svcKinds = [];
@@ -352,6 +371,12 @@ function fillService() {
   }
   ver.value = k.default_version;
   ver.disabled = k.versions.length < 2;
+  const port = $("#svc-port");
+  port.value = k.suggested_port;
+  // Say why it isn't the usual port, as the next free one was picked.
+  $("#svc-port-note").textContent = k.suggested_port === k.default_port
+    ? ""
+    : `Suggested: the usual port ${k.default_port} is in use`;
   noteService();
   $("#svc-error").hidden = true;
 }
@@ -366,7 +391,7 @@ function noteService() {
     : k.kind === "redis"
       ? `Redis ${v} is built from source first (about a minute). `
       : `${k.name} ${v} is downloaded first. `;
-  $("#svc-note").textContent = `${fetch}Port ${k.suggested_port}, data in ~/.anvil/data/${name}`;
+  $("#svc-note").textContent = `${fetch}Data in ~/.anvil/data/${name}`;
 }
 
 function setServiceBusy(on) {
@@ -376,6 +401,7 @@ function setServiceBusy(on) {
 }
 
 $("#svc-version").onchange = noteService;
+$("#svc-port").oninput = (e) => (e.target.value = e.target.value.replace(/\D/g, "").slice(0, 5));
 $("#svc-cancel").onclick = () => $("#new-service").close();
 $("#svc-name").oninput = (e) => {
   e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-");
@@ -390,7 +416,7 @@ $("#svc-form").onsubmit = async (e) => {
     services = await invoke("add_service", {
       kind: svcKind,
       name: name || null,
-      port: null,
+      port: Number.parseInt($("#svc-port").value, 10) || null,
       version: $("#svc-version").value || null,
       tags: [],
       apps: app ? [app] : [],

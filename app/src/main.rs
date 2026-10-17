@@ -942,6 +942,28 @@ fn open_service(id: String, what: String) -> Res<()> {
     anvil::run(Command::new("open").arg("-a").arg(app).arg(path)).map_err(err)
 }
 
+/// The newest lines of a service's log, oldest first; none when it hasn't written one.
+#[tauri::command(async)]
+fn service_log(app: State<App>, id: String) -> Res<Vec<String>> {
+    let cfg = anvil::load().map_err(err)?;
+    let info = app.services.lock().unwrap().info(&cfg);
+    let svc = info
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or("No such service")?;
+    let Ok(page) = anvil::logs::read(&svc.log, None, 16 * 1024) else {
+        return Ok(vec![]);
+    };
+    let mut lines: Vec<String> = page
+        .entries
+        .into_iter()
+        .take(8)
+        .map(|e| e.message.lines().next().unwrap_or("").to_string())
+        .collect();
+    lines.reverse();
+    Ok(lines)
+}
+
 /// Databases, keys or messages in a running service.
 #[tauri::command]
 async fn service_contents(id: String) -> Res<anvil::databases::Contents> {
@@ -1733,6 +1755,7 @@ fn main() {
             set_tld,
             processes,
             process_run,
+            service_log,
             set_dock_icon,
             set_login,
             open_config_dir,

@@ -279,6 +279,8 @@ pub struct Kind {
     /// Name and port the Add Service sheet starts with.
     pub suggested_name: String,
     pub suggested_port: u16,
+    /// The kind's usual port; differs from `suggested_port` when that one is taken.
+    pub default_port: u16,
 }
 
 /// What can be added, with a free name and port for each.
@@ -297,6 +299,7 @@ pub fn kinds(cfg: &Config) -> Vec<Kind> {
                 installed_versions: installed_versions(kind),
                 suggested_name: free_name(cfg, kind),
                 suggested_port: free_port(&taken, default_port(kind)),
+                default_port: default_port(kind),
             }
         })
         .collect()

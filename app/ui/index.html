@@ -243,6 +243,9 @@
       <button class="svc-copy">Copy</button>
     </div>
 
+    <h3 class="res-sub">Log</h3>
+    <pre class="svc-log"></pre>
+
     <div class="below"><button class="svc-remove">Remove Service…</button></div>
   </template>
 
@@ -261,6 +264,11 @@
       <label class="field">
         <span>Version</span>
         <select id="svc-version"></select>
+      </label>
+      <label class="field">
+        <span>Port</span>
+        <input id="svc-port" inputmode="numeric" autocomplete="off" spellcheck="false">
+        <small id="svc-port-note"></small>
       </label>
       <label class="field">
         <span>Application</span>
