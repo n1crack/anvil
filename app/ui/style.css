@@ -661,6 +661,22 @@ button, select, input { font: inherit; color: inherit; }
   min-width: 0;
 }
 
+/* A path with a button that shows it in Finder. */
+.path-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.path-open {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  background: none;
+}
+
+.path-open:hover { background: var(--steel-hover); }
+
 .path {
   overflow-wrap: anywhere;
   user-select: text;

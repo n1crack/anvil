@@ -868,7 +868,7 @@ function select(name) {
 async function open(target) {
   try {
     await invoke("open", { site: selected, target });
-    toast({ browser: "Opened in your browser", finder: "Shown in Finder", terminal: "Opened in Terminal", editor: `Opened in ${snap.editor}`, git: `Opened in ${snap.git_client}` }[target]);
+    toast({ browser: "Opened in your browser", finder: "Shown in Finder", root: "Shown in Finder", terminal: "Opened in Terminal", editor: `Opened in ${snap.editor}`, git: `Opened in ${snap.git_client}` }[target]);
   } catch (e) {
     showError(String(e));
   }
