@@ -389,6 +389,44 @@ window.mockServices = [
   window.mockPackages = pk;
   window.mockUpdates = updates;
 }
+// The Processes window: the web server, two apps and two services.
+const actRow = (key, name, state, o = {}) => ({
+  key,
+  name,
+  pid: null,
+  port: null,
+  cpu: null,
+  memory: null,
+  state,
+  detail: null,
+  actions: true,
+  web: null,
+  ...o,
+});
+window.mockActivity = {
+  web: [actRow("server", "Web server", "running", { pid: 412, port: 443, cpu: 0.3, memory: 18350080, actions: false, detail: "Caddy" })],
+  apps: [
+    {
+      site: "shop",
+      rows: [
+        actRow("shop@queue", "queue", "running", { pid: 9121, cpu: 0.8, memory: 61865984 }),
+        actRow("shop@vite", "vite", "running", { pid: 9133, port: 5174, cpu: 2.4, memory: 142606336, web: "https://shop.test" }),
+        actRow("shop@logs", "logs", "crashed", { detail: "exited with code 1" }),
+      ],
+    },
+    {
+      site: "vuefinder",
+      rows: [
+        actRow("vuefinder", "dev", "starting", { pid: 9302, port: 5173, cpu: 14.1, memory: 98566144 }),
+        actRow("vuefinder@docs-dev", "docs:dev", "running", { pid: 9310, port: 5180, cpu: 0.1, memory: 75497472 }),
+      ],
+    },
+  ],
+  services: [
+    actRow("service:mysql", "MySQL", "running", { pid: 801, port: 3306, cpu: 1.2, memory: 412090368, detail: "8.4.2" }),
+    actRow("service:cache", "Redis", "running", { pid: 822, port: 6379, cpu: 0.2, memory: 9437184, detail: "7.4.1" }),
+  ],
+};
 const mockHandle = (cmd, a) => {
   const ov = a?.site && mockOv[a.site];
   switch (cmd) {
@@ -453,6 +491,15 @@ const mockHandle = (cmd, a) => {
       return window.mockPackages;
     case "package_updates":
       return window.mockUpdates;
+    case "activity":
+      return window.mockActivity;
+    case "activity_log":
+      return {
+        entries: [{ time: null, env: null, level: "info", message: "ready in 412 ms", context: null, trace: [] }],
+        start_offset: 0,
+        end_offset: 10,
+        truncated: false,
+      };
     case "services":
     case "service_run":
       return mockServices;

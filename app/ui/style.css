@@ -2307,25 +2307,32 @@ body.activity {
   justify-content: center;
 }
 
-.activity h1 { margin: 0; color: var(--muted); font-size: 13px; font-weight: 600; pointer-events: none; }
+/* Web server · Apps · Services, in the titlebar like a native toolbar's segments. */
+.act-tabs button { height: 24px; padding: 0 14px; font-size: 12px; font-weight: 500; }
+.act-count:not(:empty) { margin-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .activity .error { margin: 0 16px 8px; }
 
 .act-main { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--line); }
 .act-table { flex: 1; min-width: 0; overflow: auto; }
 .act-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 
+/* The column header is its own band: raised in dark, grey on white in light. */
 .act-table thead th {
   position: sticky;
   top: 0;
   z-index: 1;
   padding: 6px 10px;
   border-bottom: 1px solid var(--line);
-  background: var(--steel-pane);
+  background: var(--steel-raised);
   color: var(--muted);
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
 }
+
+/* Names on the left; numbers right-aligned in narrow columns so their digits line up. */
+.act-table .num { width: 72px; text-align: right; }
+.act-table .act-st, .act-status { width: 190px; padding-left: 24px; padding-right: 16px; }
 
 .act-table td {
   padding: 4px 10px;
@@ -2334,20 +2341,6 @@ body.activity {
   white-space: nowrap;
 }
 .act-table td:first-child, .act-table thead th:first-child { padding-left: 16px; }
-
-/* Headers stand apart from rows: a faint tint and colored text, from the tokens so both themes hold. */
-.act-group th {
-  padding: 14px 16px 4px;
-  border-bottom: 1px solid var(--line);
-  background: var(--group-bg);
-  color: var(--group-text);
-  font-size: 11px;
-  font-weight: 600;
-  text-align: left;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 
 .act-app th {
   padding: 8px 16px 4px;

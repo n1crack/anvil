@@ -8,18 +8,23 @@
 </head>
 <body class="activity">
   <header class="titlebar" data-tauri-drag-region>
-    <h1 data-tauri-drag-region>Processes</h1>
+    <h1 class="visually-hidden">Processes</h1>
+    <div id="tabs" class="seg act-tabs" role="tablist" aria-label="Show">
+      <button role="tab" data-tab="web">Web server<span class="act-count"></span></button>
+      <button role="tab" data-tab="apps">Apps<span class="act-count"></span></button>
+      <button role="tab" data-tab="services">Services<span class="act-count"></span></button>
+    </div>
   </header>
   <p id="error" class="error" role="alert" hidden></p>
   <div class="act-main">
   <div class="act-table">
     <table>
       <thead>
-        <tr><th>Name</th><th>PID</th><th>Port</th><th>CPU</th><th>Memory</th><th>Status</th></tr>
+        <tr><th>Name</th><th class="num">Port</th><th class="num">PID</th><th class="num">CPU</th><th class="num">Memory</th><th class="act-st">Status</th></tr>
       </thead>
       <tbody id="rows"></tbody>
     </table>
-    <p id="empty" class="act-empty" hidden>Nothing is running</p>
+    <p id="empty" class="act-empty" hidden>Nothing running</p>
   </div>
   <div id="split" class="act-split" role="separator" aria-orientation="vertical" aria-label="Resize log" hidden></div>
   <aside id="pane" class="act-pane" hidden>

@@ -74,3 +74,29 @@ describe("processes window", () => {
     expect(document.querySelector('tr[data-key="vuefinder@dev"]')).not.toBeNull();
   });
 });
+
+describe("processes tabs", () => {
+  const tabBtn = (t: string) => $(`#tabs [data-tab="${t}"]`);
+  test("each tab counts its rows and shows only them; the tab is remembered", async () => {
+    expect(tabBtn("apps").textContent).toBe("Apps4");
+    expect(tabBtn("web").textContent).toBe("Web server");
+    expect(tabBtn("apps").getAttribute("aria-selected")).toBe("true");
+    tabBtn("services").click();
+    expect(tabBtn("services").getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelectorAll("#rows tr")).toHaveLength(0);
+    expect($("#empty").hidden).toBe(false);
+    expect($("#empty").textContent).toBe("Nothing running");
+    expect(localStorage.getItem("act-tab")).toBe("services");
+    tabBtn("apps").click();
+    expect($("#empty").hidden).toBe(true);
+    expect(document.querySelector('tr[data-key="shop@queue"]')).not.toBeNull();
+  });
+
+  test("the selected row's log stays open on another tab", async () => {
+    $('tr[data-key="shop@queue"]').click();
+    await wait();
+    tabBtn("web").click();
+    expect($("#pane").hidden).toBe(false);
+    tabBtn("apps").click();
+  });
+});

@@ -16,6 +16,9 @@ export let replace = true; // the next page replaces the log (new row, error sho
 export const busy = new Set<string>(); // keys with an action on its way
 // Folded application groups, kept across windows like the main list's folds.
 export const folded = new Set(JSON.parse(localStorage.getItem("act-folded") ?? "[]"));
+// Which tab is shown: web, apps or services; the last one comes back.
+export const TABS = ["web", "apps", "services"];
+export let tab = TABS.includes(localStorage.getItem("act-tab")!) ? localStorage.getItem("act-tab")! : "apps";
 
 export function showError(msg) {
   $("#error").textContent = msg ?? "";
@@ -41,7 +44,11 @@ export function load() {
 
 window.refresh = load;
 
-export const mb = (b) => `${(b / 1048576).toFixed(1)} MB`;
+/** 9.4 MB, 136 MB, 1.2 GB: as many digits as help to compare. */
+export const mb = (b) => {
+  const m = b / 1048576;
+  return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${m < 10 ? m.toFixed(1) : Math.round(m)} MB`;
+};
 export const status = { running: "Running", starting: "Starting", crashed: "Crashed" };
 
 export function td(text, cls?: string) {
@@ -171,33 +178,56 @@ export function row(r, inner?: boolean) {
     d.textContent = r.detail;
     st.append(" ", d);
   }
-  tr.append(name, td(r.pid), td(r.port), td(r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`), td(r.memory == null ? "" : mb(r.memory)), st);
+  tr.append(
+    name,
+    td(r.port, "num"),
+    td(r.pid, "num"),
+    td(r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`, "num"),
+    td(r.memory == null ? "" : mb(r.memory), "num"),
+    st,
+  );
   return tr;
 }
 
+/** The rows of each tab, for the counts and the table. */
+export const tabRows = (d: Activity) => ({ web: d.web, apps: d.apps.flatMap((a) => a.rows), services: d.services });
+
 export function render() {
   if (!data) return;
-  const keys = [...data.web, ...data.apps.flatMap((a) => a.rows), ...data.services].map((r) => r.key);
+  const rows = tabRows(data);
+  const keys = Object.values(rows).flatMap((rs) => rs.map((r) => r.key));
   if (selected && !keys.includes(selected)) select(null);
   // Redraw only on a change, so hover and focus survive the polling.
-  const now = JSON.stringify([data, selected, [...busy]]);
+  const now = JSON.stringify([data, selected, [...busy], tab]);
   if (now === drawn) return;
   drawn = now;
-  const body = $("#rows");
+  for (const b of document.querySelectorAll("#tabs [role=tab]") as NodeListOf<HTMLElement>) {
+    b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+    const n = rows[b.dataset.tab!].length;
+    $(".act-count", b).textContent = n ? String(n) : "";
+  }
   const out: any[] = [];
-  if (data.web.length) out.push(head("Web server", "act-group"), ...data.web.map((r) => row(r)));
-  if (data.apps.length) {
-    out.push(head("Applications", "act-group"));
+  if (tab === "web") out.push(...data.web.map((r) => row(r)));
+  if (tab === "services") out.push(...data.services.map((r) => row(r)));
+  if (tab === "apps") {
     for (const a of data.apps) {
       out.push(appHead(a));
       if (!folded.has(a.site)) out.push(...a.rows.map((r) => row(r, true)));
     }
   }
-  if (data.services.length) out.push(head("Services", "act-group"), ...data.services.map((r) => row(r)));
-  body.replaceChildren(...out);
-  $("#empty").hidden = keys.length > 0;
-  $(".act-table table").hidden = !keys.length;
+  $("#rows").replaceChildren(...out);
+  $("#empty").hidden = rows[tab].length > 0;
+  $(".act-table table").hidden = !rows[tab].length;
 }
+
+/** Show a tab; the log of the selected row stays open whichever tab is shown. */
+export function showTab(name) {
+  tab = name;
+  localStorage.setItem("act-tab", name);
+  render();
+}
+
+for (const b of document.querySelectorAll("#tabs [role=tab]") as NodeListOf<HTMLElement>) b.onclick = () => showTab(b.dataset.tab);
 
 export function select(key) {
   selected = key;
