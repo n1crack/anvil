@@ -627,7 +627,9 @@ fn main() -> Result<()> {
                 let ago = match now.saturating_sub(c.time) {
                     s if s < 3600 => format!("{} minutes ago", s / 60),
                     s if s < 86400 => format!("{} hours ago", s / 3600),
-                    s => format!("{} days ago", s / 86400),
+                    s if s < 60 * 86400 => format!("{} days ago", s / 86400),
+                    s if s < 730 * 86400 => format!("{} months ago", s / (30 * 86400)),
+                    s => format!("{} years ago", s / (365 * 86400)),
                 };
                 println!("Commit   {} {} ({}, {ago})", c.hash, c.subject, c.author);
             }
