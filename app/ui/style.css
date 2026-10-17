@@ -1457,6 +1457,18 @@ kbd {
 }
 
 .svc-env-hint { margin: 0 0 8px; }
+
+/* A service's newest log lines: a quiet box, cut at the right edge. */
+.svc-log {
+  max-width: 720px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre;
+}
 .svc-remove { margin-top: 16px; color: var(--danger); }
 #svc-port-edit, #svc-web-edit { max-width: 100px; }
 .res-list dt .link {
