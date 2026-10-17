@@ -1,4 +1,4 @@
-import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, selected, showError, showTab, snap, tab, tilde, toast } from "./app";
+import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, selected, showError, showTab, snap, tab, tilde } from "./app";
 
 /* Logs tab: an app's log files, newest first. app.js calls logsTab() from showTab. */
 
@@ -424,7 +424,6 @@ export async function clearLog(v) {
     drawFiles(v);
     // Show the file as it is now: empty, not the entries read before.
     await loadLogs(v);
-    toast(`Cleared ${src.label}`);
   } catch (e) {
     showError(String(e));
   }

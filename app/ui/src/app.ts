@@ -927,7 +927,10 @@ export function renderSite() {
   };
 
   // Resources (also feeds the Overview's disk and services rows)
-  $(".res-reload", root).onclick = () => loadResources(s.name, true);
+  $(".res-reload", root).onclick = () => {
+    freedNote.delete(s.name);
+    loadResources(s.name, true);
+  };
   window.renderGit?.(s);
   window.renderProcesses?.(s);
   window.renderSiteServices?.(s, root);
@@ -949,7 +952,7 @@ export function djangoHint(root) {
   );
   const env = el("div", "env");
   const copyBtn = el("button", null, "Copy");
-  copyBtn.onclick = () => late.copy(lines, "Copied the Django settings");
+  copyBtn.onclick = () => late.copy(lines, copyBtn);
   env.append(el("pre", null, lines), copyBtn);
   box.append(env);
   $('[data-panel="overview"] .group', root).after(box);
@@ -1025,6 +1028,8 @@ export function renderResources(name) {
   // Total on the left, the one-click clean-up on the right.
   const head = el("div", "res-head");
   head.append(el("strong", "res-total", bytes(r.total)));
+  const freed = freedNote.get(name);
+  if (freed) head.append(el("span", "muted res-freed", freed));
   const safeItems = r.items.filter((i) => i.safety === "safe" && i.bytes > 0);
   if (safeItems.length) {
     const all = el("button", "clean-all", `Clean up ${bytes(safe)}`);
@@ -1131,6 +1136,8 @@ export function renderResources(name) {
   }
 }
 
+export const freedNote = new Map<string, string>(); // site -> what the last clean-up freed
+
 /** Confirm with a native dialog, then delete the items one by one. */
 export async function cleanItems(name, items) {
   const total = items.reduce((a, i) => a + i.bytes, 0);
@@ -1155,7 +1162,8 @@ export async function cleanItems(name, items) {
       break;
     }
   }
-  if (freed) toast(`Freed ${bytes(freed)}`);
+  // Said next to Clean up, not in a toast; it stays until the next clean-up or reload.
+  if (freed) freedNote.set(name, `Freed ${bytes(freed)}`);
   loadResources(name, true);
 }
 
@@ -1380,7 +1388,6 @@ export async function addAppFolder() {
     const name = await invoke("link_folder", { path });
     await call("state");
     select(name);
-    toast(`Added ${name}.${snap.tld}`);
     return true;
   } catch (e) {
     showError(String(e));
@@ -1407,7 +1414,6 @@ $("#new-form").onsubmit = async (e) => {
     $("#new-app").close();
     await call("state");
     select(site);
-    toast(`Created ${site}.${snap.tld}`);
   } catch (err) {
     $("#new-error").textContent = String(err);
     $("#new-error").hidden = false;
@@ -1428,7 +1434,6 @@ $("#add").onclick = async () => {
           const path = await pick("Every project inside this folder becomes an application");
           if (!path) return;
           await call("park_folder", { path });
-          toast("Folder added");
         },
       }),
       M.MenuItem.new({ text: "Add Application Folder…", action: addAppFolder }),

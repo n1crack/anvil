@@ -1278,6 +1278,9 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   margin-bottom: 10px;
 }
 
+/* What the last clean-up freed, just before Clean up (or alone on the right). */
+.res-freed { margin-left: auto; margin-right: 10px; font-size: 12px; }
+
 .res-total {
   font: 600 22px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
   letter-spacing: -0.01em;

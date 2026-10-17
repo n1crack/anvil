@@ -282,7 +282,7 @@ export function renderService() {
 
   const env = envFor(svc);
   $(".svc-env", root).textContent = env;
-  $(".svc-copy", root).onclick = () => copy(env, `Copied ${svc.id}’s settings`);
+  $(".svc-copy", root).onclick = (e) => copy(env, e.currentTarget);
 
   // Database apps installed on this Mac open the service directly: a row each.
   const clients = $(".svc-clients", root);
@@ -327,7 +327,8 @@ export function svcLine(lead, name, detail, ...buttons) {
   return row;
 }
 
-export async function copy(text, done) {
+/** Copy `text`; the button says "Copied" for a moment instead of a toast. */
+export async function copy(text, btn) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -339,7 +340,10 @@ export async function copy(text, done) {
     document.execCommand("copy");
     t.remove();
   }
-  toast(done);
+  const label = btn.dataset.label ?? btn.textContent;
+  btn.dataset.label = label;
+  btn.textContent = "Copied";
+  setTimeout(() => (btn.textContent = label), 1500);
 }
 
 /** Remove a service; a second question decides whether its data goes too. */
@@ -495,7 +499,6 @@ $("#svc-form").onsubmit = async (e) => {
     if (mode !== "services") setMode("services");
     else renderMain();
     renderModes();
-    toast(`Added ${name}`);
   } catch (err) {
     $("#svc-error").textContent = String(err);
     $("#svc-error").hidden = false;
@@ -577,7 +580,7 @@ export function drawContents(svc, root, c) {
       chosenDb[svc.id] = pick.value || undefined;
       const env = envFor(svc);
       $(".svc-env", root).textContent = env;
-      $(".svc-copy", root).onclick = () => copy(env, `Copied ${svc.id}’s settings`);
+      $(".svc-copy", root).onclick = (e) => copy(env, e.currentTarget);
     };
     const system = c.databases.filter(([n]) => SYSTEM_DBS.has(n));
     for (const [name, size] of c.databases.filter(([n]) => !SYSTEM_DBS.has(n))) {
