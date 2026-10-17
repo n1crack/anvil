@@ -14,6 +14,8 @@ const levelGroup = (l) =>
       : l === "debug" ? "debug" : "info";
 
 const logSource = new Map(); // site name -> chosen source id
+// An app's own output reads top to bottom like a terminal; log files show the newest first.
+const chrono = (v) => v.source?.id === "app";
 let lv = null; // the view: { site, node, ... }
 let followTimer = null;
 
@@ -43,6 +45,9 @@ window.logsTab = (root, visible) => {
   if (!s) return;
   if (lv?.site !== s.name) lv = buildLogs(s);
   panel.replaceChildren(lv.node);
+  // Re-attaching resets the scroll box; put it back where the reader left it.
+  const list = $(".logs-list", lv.node);
+  list.scrollTop = lv.atEnd ? list.scrollHeight : lv.scrollTop;
   if (lv.follow) follow(true);
 };
 
@@ -68,6 +73,8 @@ function buildLogs(s) {
     level: "all",
     query: "",
     page: null, // last page from the backend (offsets)
+    scrollTop: 0,
+    atEnd: true, // app output: keep showing the newest line
     entries: [],
     shown: 0,
     follow: localStorage.getItem("logsFollow") === "1",
@@ -114,6 +121,11 @@ function buildLogs(s) {
     menu.popup();
   };
   $(".logs-more", node).onclick = () => more(v);
+  const list = $(".logs-list", node);
+  list.onscroll = () => {
+    v.scrollTop = list.scrollTop;
+    v.atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  };
   $(".logs-list", node).onclick = (e) => {
     const head = e.target.closest(".log-head");
     if (head) toggleEntry(v, head.parentElement);
@@ -141,8 +153,8 @@ async function loadSources(v, s) {
 function drawFiles(v) {
   const strip = $(".logs-files", v.node);
   strip.replaceChildren();
-  // One file needs no picker.
-  strip.hidden = v.sources.length < 2;
+  // Shown even for one file: it says which log this is.
+  strip.hidden = !v.sources.length;
   for (const src of v.sources) {
     const b = el("button", src.bytes >= LARGE_LOG ? "logs-file large" : "logs-file");
     b.setAttribute("role", "tab");
@@ -224,8 +236,16 @@ async function loadLogs(v, keepScroll = false) {
   v.tailFrom = page.end_offset;
   v.entries = page.entries;
   v.shown = 0;
-  $(".logs-list", v.node).replaceChildren();
+  const list = $(".logs-list", v.node);
+  list.replaceChildren();
+  // A terminal's older lines are above it, so is the button that loads them.
+  list.classList.toggle("chrono", chrono(v));
+  list.classList.toggle("untimed", !v.entries.some((e) => e.time));
+  if (chrono(v)) list.before($(".logs-more", v.node));
+  else list.after($(".logs-more", v.node));
   showMore(v);
+  v.atEnd = true;
+  if (chrono(v)) list.scrollTop = list.scrollHeight;
 }
 
 function fetchPage(v, before) {
@@ -260,8 +280,16 @@ function showMore(v) {
   const list = $(".logs-list", v.node);
   const frag = document.createDocumentFragment();
   const next = v.entries.slice(v.shown, v.shown + STEP);
-  for (const e of next) frag.append(entryRow(v, e));
-  list.append(frag);
+  if (chrono(v)) {
+    // Older lines go on top without moving what is on screen.
+    for (const e of next.toReversed()) frag.append(entryRow(v, e));
+    const below = list.scrollHeight - list.scrollTop;
+    list.prepend(frag);
+    list.scrollTop = list.scrollHeight - below;
+  } else {
+    for (const e of next) frag.append(entryRow(v, e));
+    list.append(frag);
+  }
   v.shown += next.length;
   if (!v.entries.length) {
     showEmpty(v, filtered(v)
@@ -363,7 +391,13 @@ async function followTick() {
   if (!fresh.length) return;
   const list = $(".logs-list", v.node);
   if (!v.entries.length) list.replaceChildren();
-  list.prepend(...fresh.map((e) => entryRow(v, e)));
+  if (chrono(v)) {
+    // Stay at the bottom only if that is where the reader was.
+    list.append(...fresh.toReversed().map((e) => entryRow(v, e)));
+    if (v.atEnd) list.scrollTop = list.scrollHeight;
+  } else {
+    list.prepend(...fresh.map((e) => entryRow(v, e)));
+  }
   v.entries.unshift(...fresh);
   v.shown += fresh.length;
   status(v);
