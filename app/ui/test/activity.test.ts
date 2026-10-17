@@ -19,12 +19,14 @@ const row = (key: string, name: string, state: string) => ({
   actions: true,
 });
 
+let activity: any;
+
 beforeAll(async () => {
   localStorage.clear();
   localStorage.setItem("act-folded", '["vuefinder"]');
   const html = readFileSync(resolve(import.meta.dirname, "../processes.html"), "utf8");
   document.documentElement.innerHTML = html.replace(/<!doctype html>/i, "").replace(/<script[\s\S]*?<\/script>|<link[^>]*>/g, "");
-  const activity = {
+  activity = {
     web: [],
     apps: [
       { site: "shop", rows: [row("shop@queue", "queue", "running")] },
@@ -40,6 +42,7 @@ beforeAll(async () => {
     services: [],
   };
   w.__TAURI__ = {
+    event: { listen: async (name: string, cb: any) => ((w.listeners ??= {})[name] = cb) },
     core: { invoke: async (cmd: string) => (cmd === "activity" ? structuredClone(activity) : { text: LOG, end_offset: LOG.length }) },
     menu: {
       Menu: { new: async ({ items }) => ({ popup: () => (w.mockMenu = items) }) },
@@ -121,5 +124,19 @@ describe("processes tabs", () => {
     tabBtn("anvil").click();
     expect($("#pane").hidden).toBe(false);
     tabBtn("apps").click();
+  });
+});
+
+describe("asked to show a row", () => {
+  test("the service page's log button: its tab, the row selected, its log open", async () => {
+    activity.services.push(row("service:cache", "Redis", "running"));
+    w.listeners["activity-select"]({ payload: "service:cache" });
+    await wait(60);
+    expect($('#tabs [data-tab="services"]').getAttribute("aria-selected")).toBe("true");
+    expect($('tr[data-key="service:cache"]').getAttribute("aria-selected")).toBe("true");
+    expect($("#pane").hidden).toBe(false);
+    expect($("#log-title").textContent).toBe("Redis · log");
+    activity.services.pop();
+    $('#tabs [data-tab="apps"]').click();
   });
 });

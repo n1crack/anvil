@@ -288,6 +288,17 @@ export async function tail() {
   if (atEnd) log.scrollTop = log.scrollHeight;
 }
 
+/** Show one row with its log, on its tab: a service page's log button asks for it, as
+ * `window.activitySelect` when it opens this window, then by the event. */
+export async function reveal(key: string) {
+  showTab(key.startsWith("service:") ? "services" : key.startsWith("web:") ? "anvil" : "apps");
+  // A service started a moment ago may not be in the last poll yet.
+  await load();
+  select(key);
+}
+window.__TAURI__.event?.listen("activity-select", (e) => reveal(e.payload));
+if (window.activitySelect) reveal(window.activitySelect);
+
 // Fresh while the window is shown, focused or not.
 setInterval(() => {
   if (document.hidden) return;

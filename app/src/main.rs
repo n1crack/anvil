@@ -2473,18 +2473,30 @@ fn show_settings(handle: AppHandle) {
     open_settings(&handle);
 }
 
-/// The task-manager window: everything Anvil runs, with usage and logs.
-fn open_processes(handle: &AppHandle) {
+/// The task-manager window: everything Anvil runs, with usage and logs. With `select`
+/// (a row key such as "service:cache"), that row is shown on its tab with its log.
+fn open_processes(handle: &AppHandle, select: Option<&str>) {
     if let Some(w) = handle.get_webview_window("processes") {
+        if let Some(key) = select {
+            let _ = handle.emit_to("processes", "activity-select", key);
+        }
         let _ = w.show();
         let _ = w.set_focus();
         return;
     }
+    // A row key is plain (see `parse_log_key`), so it goes into the script as it is.
+    let pick = select
+        .filter(|k| {
+            k.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_.:/@#".contains(c))
+        })
+        .map_or("null".into(), |k| format!("\"{k}\""));
     let built = WebviewWindowBuilder::new(
         handle,
         "processes",
         WebviewUrl::App("processes.html".into()),
     )
+    .initialization_script(format!("window.activitySelect = {pick};"))
     .title("Processes")
     .inner_size(820.0, 560.0)
     .min_inner_size(640.0, 420.0)
@@ -2498,8 +2510,8 @@ fn open_processes(handle: &AppHandle) {
 }
 
 #[tauri::command(async)]
-fn show_processes(handle: AppHandle) {
-    open_processes(&handle);
+fn show_processes(handle: AppHandle, select: Option<String>) {
+    open_processes(&handle, select.as_deref());
 }
 
 #[tauri::command(async)]
