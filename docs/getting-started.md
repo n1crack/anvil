@@ -7,6 +7,9 @@
 - Xcode command line tools (`xcode-select --install`) if you want Redis, which
   Anvil builds from source
 
+The details (macOS versions, disk space, network hosts, ports and password
+prompts) are in [System requirements](requirements.md).
+
 ## Install from source
 
 ```sh
