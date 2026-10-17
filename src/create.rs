@@ -8,10 +8,38 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Kinds that can be created, in the order the dialog shows them.
-pub const TEMPLATES: [&str; 12] = [
+pub const TEMPLATES: [&str; 15] = [
     "laravel", "statamic", "symfony", "php", "static", "next", "nuxt", "vite", "node", "rust",
-    "go", "dotnet",
+    "go", "dotnet", "django", "fastapi", "flask",
 ];
+
+const FASTAPI_MAIN: &str = r#"from fastapi import FastAPI
+
+app = FastAPI()
+
+
+@app.get("/")
+def root():
+    return {"hello": "FastAPI"}
+"#;
+
+const FLASK_APP: &str = r#"from flask import Flask
+
+app = Flask(__name__)
+
+
+@app.get("/")
+def root():
+    return "Hello from Flask"
+"#;
+
+/// Appended to a new Django project's settings.py: what Django needs behind
+/// Anvil's HTTPS proxy at `.<tld>`, and only in debug.
+fn django_settings(tld: &str) -> String {
+    format!(
+        "\n\n# Anvil serves this app over HTTPS at its local address.\nif DEBUG:\n    ALLOWED_HOSTS += [\".{tld}\"]\n    SECURE_PROXY_SSL_HEADER = (\"HTTP_X_FORWARDED_PROTO\", \"https\")\n"
+    )
+}
 
 /// What each template needs installed first: a PHP version or a runtime id.
 pub fn needs(kind: &str) -> Option<&'static str> {
@@ -214,6 +242,38 @@ pub fn create(kind: &str, name: &str, parent: &Path, php: Option<&str>) -> Resul
                 .args(["mod", "init", name]))
         }
         "dotnet" => sh(Command::new("dotnet").args(["new", "web", "-o", name])),
+        // Python projects through uv; requirements.txt says what they need.
+        "django" => sh(Command::new("uv").args([
+            "run",
+            "--with",
+            "django",
+            "django-admin",
+            "startproject",
+            name,
+        ]))
+        .and_then(|_| {
+            let settings = dir.join(name).join("settings.py");
+            let mut text = fs::read_to_string(&settings)?;
+            let tld = crate::load()
+                .map(|c| c.tld)
+                .unwrap_or_else(|_| "test".into());
+            text.push_str(&django_settings(&tld));
+            fs::write(settings, text)?;
+            Ok(fs::write(dir.join("requirements.txt"), "django\n")?)
+        }),
+        "fastapi" => {
+            fs::create_dir_all(&dir)?;
+            fs::write(dir.join("main.py"), FASTAPI_MAIN)?;
+            Ok(fs::write(
+                dir.join("requirements.txt"),
+                "fastapi\nuvicorn\n",
+            )?)
+        }
+        "flask" => {
+            fs::create_dir_all(&dir)?;
+            fs::write(dir.join("app.py"), FLASK_APP)?;
+            Ok(fs::write(dir.join("requirements.txt"), "flask\n")?)
+        }
         "node" => {
             fs::create_dir_all(&dir)?;
             fs::write(

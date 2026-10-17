@@ -39,7 +39,7 @@ function drawProcs(name) {
 
   const list = el("div", "group procs-list");
   for (const r of rows) {
-    const row = el("div", "proc");
+    const row = el("div", r.running ? "proc running" : "proc");
     const dot = el("span", `dot ${r.running ? "on" : ""}`);
     dot.title = r.running ? "Running" : "Stopped";
     const label = el("button", "proc-name", r.name);

@@ -123,7 +123,8 @@ Anvil reads them from, in this order:
 
 Create a project from a template with `anvil new <kind> <name>` or the New
 Application sheet in the app: Laravel, Statamic, Symfony, PHP, static, Next.js,
-Nuxt, Vite, Node.js, Rust, Go and .NET. Anvil uses its own PHP, Composer and
+Nuxt, Vite, Node.js, Rust, Go, .NET, Django, FastAPI and Flask. A new Django
+project already has the settings Anvil's HTTPS needs. Anvil uses its own PHP, Composer and
 language toolchains, so the matching PHP version or language must be installed
 first. Output goes to `~/.anvil/log/create-<name>.log`, and a failed create
 leaves nothing behind. A new application outside a parked folder is linked.

@@ -968,6 +968,9 @@ const TEMPLATES = [
   ["rust", "Rust", "Cargo"],
   ["go", "Go", "Server"],
   ["dotnet", ".NET", "ASP.NET"],
+  ["django", "Django", "Python"],
+  ["fastapi", "FastAPI", "Python"],
+  ["flask", "Flask", "Python"],
 ];
 let newKind = localStorage.getItem("newKind") ?? "laravel";
 
