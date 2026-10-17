@@ -1,11 +1,12 @@
+use anvil::style::{bold, commands, cyan, dim, green, red, yellow};
 use anvil::*;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, ExitCode};
 
 #[derive(Parser)]
-#[command(version, about = "Anvil — your tools, your rules.")]
+#[command(version, about = "Anvil — your tools, your rules.", styles = clap::builder::Styles::styled())]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -226,36 +227,41 @@ fn start(cfg: &Config) -> Result<()> {
     })?;
     let mut services = services::Services::default();
     for (id, e) in services.start_enabled(cfg) {
-        eprintln!("  {id}: {e}");
+        eprintln!("  {id}: {}", style::error(e));
     }
     let mut server = Server::start(cfg)?;
     let mut apps = apps::Apps::default();
     for site in sites(cfg).iter().filter(|s| s.autostart) {
         match apps.start(site, &cfg.tld) {
             Ok(()) => println!(
-                "  {} ({}) on 127.0.0.1:{}",
-                site.name,
-                apps::label(&site.kind),
-                site.port.unwrap_or(0)
+                "  {} ({}) on {}",
+                green(&site.name),
+                dim(apps::label(&site.kind)),
+                cyan(format!("127.0.0.1:{}", site.port.unwrap_or(0)))
             ),
-            Err(e) => eprintln!("  {}: {e:#}", site.name),
+            Err(e) => eprintln!("  {}: {}", site.name, style::error(format!("{e:#}"))),
         }
     }
     for s in sites(cfg) {
         println!(
-            "  https://{}:{}  (PHP {})",
-            s.host,
-            cfg.https_port,
-            s.php.as_deref().unwrap_or("-")
+            "  {}  {}",
+            cyan(format!("https://{}:{}", s.host, cfg.https_port)),
+            dim(format!("(PHP {})", s.php.as_deref().unwrap_or("-")))
         );
     }
     println!(
-        "Anvil running, logs in {}. Ctrl-C to stop.",
+        "{}, logs in {}. Ctrl-C to stop.",
+        green("Anvil running"),
         home().join("log").display()
     );
 
     for s in services.info(cfg).iter().filter(|s| s.running) {
-        println!("  {} ({}) on 127.0.0.1:{}", s.id, s.name, s.port);
+        println!(
+            "  {} ({}) on {}",
+            green(&s.id),
+            dim(s.name),
+            cyan(format!("127.0.0.1:{}", s.port))
+        );
     }
 
     let pids = server.pids();
@@ -280,13 +286,29 @@ fn print_resolver_step(cfg: &Config) {
         return;
     }
     println!(
-        "Run once so *.{tld} resolves to Anvil (or use `anvil tld localhost`, which needs no password):\n\n  sudo mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport {port}\\n' | sudo tee /etc/resolver/{tld}\n",
-        tld = cfg.tld,
-        port = cfg.dns_port
+        "{}\n\n  {}\n",
+        commands(&format!(
+            "Run once so *.{} resolves to Anvil (or use `anvil tld localhost`, which needs no password):",
+            cfg.tld
+        )),
+        cyan(format!(
+            "sudo mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport {port}\\n' | sudo tee /etc/resolver/{tld}",
+            tld = cfg.tld,
+            port = cfg.dns_port
+        ))
     );
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
+    // Same output as returning the Result, with `Error:` in red on a terminal.
+    if let Err(e) = run() {
+        eprintln!("{} {e:?}", style::error("Error:"));
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
+fn run() -> Result<()> {
     let cmd = Cli::parse().cmd;
     // A broken config must not stop an uninstall; it then keeps ~/.anvil.
     let loaded = load();
@@ -313,7 +335,11 @@ fn main() -> Result<()> {
             let p = dir_or_cwd(None)?;
             let name = name.unwrap_or_else(|| p.file_name().unwrap().to_string_lossy().into());
             let name = link(&mut cfg, &name, p.clone())?;
-            println!("Linked {name}.{} -> {}", cfg.tld, p.display());
+            println!(
+                "Linked {} -> {}",
+                cyan(format!("{name}.{}", cfg.tld)),
+                p.display()
+            );
         }
         Cmd::Unlink { name } => {
             cfg.links.remove(&name);
@@ -322,11 +348,11 @@ fn main() -> Result<()> {
         Cmd::Sites => {
             for s in sites(&cfg) {
                 println!(
-                    "{:<40} {:<9} {:<5} {}",
-                    s.host,
-                    apps::label(&s.kind),
+                    "{} {} {:<5} {}",
+                    cyan(format!("{:<40}", s.host)),
+                    dim(format!("{:<9}", apps::label(&s.kind))),
                     s.php.as_deref().unwrap_or("-"),
-                    s.root.display()
+                    dim(s.root.display())
                 );
             }
         }
@@ -347,7 +373,7 @@ fn main() -> Result<()> {
             let (freed, failed) = resources::clean_all_safe(&sites(&cfg));
             println!("Freed {:.1} MB", freed as f64 / 1_048_576.0);
             for f in failed {
-                println!("  couldn't clean {f}");
+                println!("  {}", red(format!("couldn't clean {f}")));
             }
         }
         Cmd::Clean { site: None, .. } => bail!("Name an app, or use --safe to clean every app"),
@@ -383,7 +409,7 @@ fn main() -> Result<()> {
                 match resources::clean(&s, &t, running) {
                     Ok(b) => freed += b,
                     Err(e) => {
-                        println!("  {t}: {e:#}");
+                        println!("  {t}: {}", red(format!("{e:#}")));
                         failed += 1;
                     }
                 }
@@ -396,9 +422,9 @@ fn main() -> Result<()> {
         Cmd::Php { cmd: PhpCmd::List } => {
             for v in installed_php() {
                 let mark = if cfg.php.as_deref() == Some(&v) {
-                    " (default)"
+                    dim(" (default)")
                 } else {
-                    ""
+                    String::new()
                 };
                 println!("{v}{mark}");
             }
@@ -411,21 +437,27 @@ fn main() -> Result<()> {
             ServiceCmd::List => {
                 let list = services::Services::default().info(&cfg);
                 if list.is_empty() {
-                    println!("No services yet. Add one with `anvil service add mysql`.");
+                    println!(
+                        "{}",
+                        commands("No services yet. Add one with `anvil service add mysql`.")
+                    );
                 }
                 for s in list {
                     let state = match (s.installed, s.enabled) {
-                        (false, _) => "not installed",
-                        (true, true) => "enabled",
-                        (true, false) => "installed",
+                        (false, _) => dim("not installed"),
+                        (true, true) => "enabled".into(),
+                        (true, false) => "installed".into(),
                     };
                     let inbox = s
                         .web_port
                         .map(|p| format!(", inbox on {p}"))
                         .unwrap_or_default();
                     println!(
-                        "{:<12} {:<10} {:<9} port {:<6} {state}{inbox}",
-                        s.id, s.kind, s.version, s.port
+                        "{} {} {:<9} port {:<6} {state}{inbox}",
+                        bold(format!("{:<12}", s.id)),
+                        dim(format!("{:<10}", s.kind)),
+                        s.version,
+                        s.port
                     );
                 }
             }
@@ -446,8 +478,10 @@ fn main() -> Result<()> {
                 }
                 services::set_enabled(&mut cfg, &id, true)?;
                 println!(
-                    "Added {id} on port {}; it starts with `anvil start`.",
-                    services::port(&cfg, &id)
+                    "Added {} on port {}; it starts with {}.",
+                    bold(&id),
+                    services::port(&cfg, &id),
+                    cyan("`anvil start`")
                 );
             }
             ServiceCmd::Remove { id, delete_data } => services::remove(&mut cfg, &id, delete_data)?,
@@ -486,7 +520,7 @@ fn main() -> Result<()> {
                             t
                         })
                         .collect();
-                    println!("{kind:<9} {}", list.join(", "));
+                    println!("{} {}", bold(format!("{kind:<9}")), list.join(", "));
                 }
             }
             ServiceCmd::Uninstall { kind, version } => {
@@ -516,10 +550,10 @@ fn main() -> Result<()> {
                     let info = runtimes::info(id, true);
                     let avail: Vec<_> = info.available.iter().take(6).cloned().collect();
                     println!(
-                        "{:<8} installed: {:<20} available: {}",
-                        id,
+                        "{} installed: {:<20} {}",
+                        bold(format!("{id:<8}")),
                         info.installed.join(", "),
-                        avail.join(", ")
+                        dim(format!("available: {}", avail.join(", ")))
                     );
                 }
             }
@@ -557,7 +591,7 @@ fn main() -> Result<()> {
                 );
             }
             let parent = dir_or_cwd(Some(parent))?;
-            println!("Creating {name} ({})…", apps::label(&kind));
+            println!("Creating {} ({})…", bold(&name), dim(apps::label(&kind)));
             let path = create::create(&kind, &name, &parent, cfg.php.as_deref())?;
             // Outside a parked folder the new app needs a link to get its address.
             if !cfg.paths.contains(&parent) {
@@ -568,35 +602,34 @@ fn main() -> Result<()> {
                 .into_iter()
                 .find(|s| s.path == path)
                 .map_or_else(|| format!("{name}.{}", cfg.tld), |s| s.host);
-            println!("Serving at https://{host}:{}", cfg.https_port);
+            println!(
+                "Serving at {}",
+                cyan(format!("https://{host}:{}", cfg.https_port))
+            );
         }
         Cmd::Usage { site: None } => {
             let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
             let (total, items) = resources::anvil_disk();
-            println!("Anvil: {}", mb(total));
+            println!("{} {}", bold("Anvil:"), mb(total));
             for i in &items {
-                println!(
-                    "  {:<6} {:>10}  {}",
-                    format!("{:?}", i.safety),
-                    mb(i.bytes),
-                    i.label
-                );
+                println!("  {} {:>10}  {}", safety(i.safety, 6), mb(i.bytes), i.label);
             }
             let all = resources::all_apps(&sites(&cfg), |_| {});
             resources::save_app_sizes(&all);
             let sum = |f: fn(&resources::AppSize) -> u64| mb(all.iter().map(f).sum());
             println!(
-                "Applications: {} ({} safe to delete, {} rebuildable)",
+                "{} {} ({} safe to delete, {} rebuildable)",
+                bold("Applications:"),
                 sum(|a| a.total),
                 sum(|a| a.safe),
                 sum(|a| a.rebuild)
             );
             for a in all.iter().take(10) {
                 println!(
-                    "  {:>10}  {:<30} {}",
+                    "  {:>10}  {} {}",
                     mb(a.total),
-                    a.name,
-                    apps::label(&a.kind)
+                    bold(format!("{:<30}", a.name)),
+                    dim(apps::label(&a.kind))
                 );
             }
         }
@@ -609,17 +642,17 @@ fn main() -> Result<()> {
             let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
             println!(
                 "{} ({}): {} on disk",
-                s.name,
-                apps::label(&s.kind),
+                bold(&s.name),
+                dim(apps::label(&s.kind)),
                 mb(total)
             );
             for i in items.iter().filter(|i| i.bytes > 0) {
                 println!(
-                    "  {:<10} {:>10}  {:<28} {}",
-                    format!("{:?}", i.safety),
+                    "  {} {:>10}  {:<28} {}",
+                    safety(i.safety, 10),
                     mb(i.bytes),
                     i.label,
-                    i.path
+                    dim(&i.path)
                 );
             }
             let mut svc = services::Services::default();
@@ -655,11 +688,15 @@ fn main() -> Result<()> {
             if g.behind > 0 {
                 branch += &format!(" ↓{}", g.behind);
             }
-            println!("Branch   {branch}");
+            println!("{}   {}", dim("Branch"), bold(branch));
             match g.changed {
-                0 => println!("Changes  clean"),
-                1 => println!("Changes  1 changed file"),
-                n => println!("Changes  {n} changed files"),
+                0 => println!("{}  clean", dim("Changes")),
+                1 => println!("{}  {}", dim("Changes"), yellow("1 changed file")),
+                n => println!(
+                    "{}  {}",
+                    dim("Changes"),
+                    yellow(format!("{n} changed files"))
+                ),
             }
             if let Some(c) = g.commit {
                 let now = std::time::SystemTime::now()
@@ -672,10 +709,16 @@ fn main() -> Result<()> {
                     s if s < 730 * 86400 => format!("{} months ago", s / (30 * 86400)),
                     s => format!("{} years ago", s / (365 * 86400)),
                 };
-                println!("Commit   {} {} ({}, {ago})", c.hash, c.subject, c.author);
+                println!(
+                    "{}   {} {} {}",
+                    dim("Commit"),
+                    dim(c.hash),
+                    c.subject,
+                    dim(format!("({}, {ago})", c.author))
+                );
             }
             if let Some(r) = g.remote {
-                println!("Remote   {r}");
+                println!("{}   {}", dim("Remote"), cyan(r));
             }
         }
         Cmd::Logs {
@@ -712,10 +755,15 @@ fn main() -> Result<()> {
             entries.truncate(n);
             for e in entries.iter().rev() {
                 let mut lines = e.message.lines();
+                let level = format!("{:<9}", e.level.to_uppercase());
+                let level = match logs::group(&e.level) {
+                    "error" => red(level),
+                    "warning" => yellow(level),
+                    _ => dim(level),
+                };
                 println!(
-                    "{} {:<9} {}",
-                    e.time.as_deref().unwrap_or("-"),
-                    e.level.to_uppercase(),
+                    "{} {level} {}",
+                    dim(e.time.as_deref().unwrap_or("-")),
                     lines.next().unwrap_or("")
                 );
                 for l in lines {
@@ -747,7 +795,7 @@ fn main() -> Result<()> {
                 let dev = e.packages.iter().filter(|p| p.dev).count();
                 println!(
                     "\n{} ({}): {} direct, {} dev, {} in lock",
-                    e.label,
+                    bold(e.label),
                     e.manager
                         .as_deref()
                         .or(e.lock.as_deref())
@@ -764,14 +812,14 @@ fn main() -> Result<()> {
                         .iter()
                         .find(|u| u.ecosystem == e.id && u.name == p.name)
                         .map_or(String::new(), |u| {
-                            format!("  {} available ({})", u.latest, u.level)
+                            yellow(format!("  {} available ({})", u.latest, u.level))
                         });
                     println!(
                         "  {:<44} {:<16} {:<14}{}{latest}",
                         p.name,
                         p.constraint,
                         p.version.as_deref().unwrap_or("-"),
-                        if p.dev { " dev" } else { "" }
+                        if p.dev { dim(" dev") } else { String::new() }
                     );
                 }
             }
@@ -781,16 +829,19 @@ fn main() -> Result<()> {
             ensure_caddy()?;
             save(&cfg)?;
             print_resolver_step(&cfg);
-            println!("Then `anvil trust` for HTTPS.");
+            println!("{}", commands("Then `anvil trust` for HTTPS."));
         }
         Cmd::Tld { tld } => {
             if let Some(t) = tld {
                 set_tld(&mut cfg, &t)?;
-                println!("Applications now answer at https://<name>.{}", cfg.tld);
+                println!(
+                    "Applications now answer at {}",
+                    cyan(format!("https://<name>.{}", cfg.tld))
+                );
                 if !setup_status(&cfg).resolver {
                     print_resolver_step(&cfg);
                 }
-                println!("Restart `anvil start` if it is running.");
+                println!("{}", commands("Restart `anvil start` if it is running."));
             } else {
                 println!("{}", cfg.tld);
             }
@@ -803,4 +854,13 @@ fn main() -> Result<()> {
         Cmd::Uninstall { yes } => anvil::uninstall::uninstall(&cfg, config_ok, yes)?,
     }
     Ok(())
+}
+
+/// A disk item's safety, padded to `width`; what you should keep is yellow.
+fn safety(s: resources::Safety, width: usize) -> String {
+    let text = format!("{:<width$}", format!("{s:?}"));
+    match s {
+        resources::Safety::Keep => yellow(text),
+        _ => text,
+    }
 }

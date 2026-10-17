@@ -12,6 +12,7 @@ pub mod processes;
 pub mod resources;
 pub mod runtimes;
 pub mod services;
+pub mod style;
 pub mod uninstall;
 
 use anyhow::{Context, Result, bail};

@@ -1,6 +1,7 @@
 //! `anvil uninstall`: undo what Anvil did to this Mac. Lists everything first;
 //! only `--yes` removes it. Anything not recognisably Anvil's is left alone.
 
+use crate::style::{bold, commands, error, yellow};
 use crate::{Config, home, run};
 use anyhow::{Result, bail};
 use std::fs;
@@ -231,29 +232,35 @@ pub fn uninstall(cfg: &Config, config_ok: bool, yes: bool) -> Result<()> {
         .filter(|s| !(matches!(s, Step::Home(_)) && problem.is_some()))
         .collect();
     if let Some(why) = &problem {
-        println!("{} is kept: {why}.\n", tilde(&h));
+        println!("{}\n", yellow(format!("{} is kept: {why}.", tilde(&h))));
     }
     if steps.is_empty() {
         println!("Nothing of Anvil's is left on this Mac.");
         return Ok(());
     }
-    println!("Anvil uninstall removes:\n");
+    println!("{}\n", bold("Anvil uninstall removes:"));
     for s in &steps {
         println!("  {}", s.describe());
     }
     if steps.iter().any(|s| matches!(s, Step::Home(_))) {
         println!(
-            "\n{} holds every PHP, runtime and service Anvil installed, and the\n\
-             databases of your services (data/). Back those up first if you need them.",
-            tilde(&h)
+            "\n{}",
+            yellow(format!(
+                "{} holds every PHP, runtime and service Anvil installed, and the\n\
+                 databases of your services (data/). Back those up first if you need them.",
+                tilde(&h)
+            ))
         );
     }
     println!(
-        "\nYour projects are not touched. Anvil.app and the anvil command itself stay:\n\
-         drag Anvil.app to the Trash, and `cargo uninstall anvil` if you installed it with cargo."
+        "\n{}",
+        commands(
+            "Your projects are not touched. Anvil.app and the anvil command itself stay:\n\
+             drag Anvil.app to the Trash, and `cargo uninstall anvil` if you installed it with cargo."
+        )
     );
     if !yes {
-        println!("\nRun `anvil uninstall --yes` to do it.");
+        println!("\n{}", commands("Run `anvil uninstall --yes` to do it."));
         return Ok(());
     }
 
@@ -277,8 +284,11 @@ fn apply(steps: &[Step]) {
     for s in steps {
         if matches!(s, Step::Home(_)) && failed {
             println!(
-                "Kept {}: run `anvil uninstall` again once the rest is gone.",
-                s.describe()
+                "{}",
+                commands(&format!(
+                    "Kept {}: run `anvil uninstall` again once the rest is gone.",
+                    s.describe()
+                ))
             );
             continue;
         }
@@ -303,7 +313,10 @@ fn apply(steps: &[Step]) {
             Ok(()) => println!("Removed {}", s.describe()),
             Err(e) => {
                 failed = true;
-                eprintln!("Couldn't remove {}: {e:#}", s.describe());
+                eprintln!(
+                    "{}",
+                    error(format!("Couldn't remove {}: {e:#}", s.describe()))
+                );
             }
         }
     }
