@@ -1,5 +1,5 @@
 import type { Activity } from "./types";
-import { clean } from "./term";
+import { type Sgr, clean, colorize, sgr } from "./term";
 
 /* The Processes window: everything Anvil runs, with usage, Restart/Stop (right-click)
  * and the selected row's log. Keys come from `activity`; the log is asked for by key. */
@@ -16,9 +16,12 @@ export let replace = true; // the next page replaces the log (new row, error sho
 export const busy = new Set<string>(); // keys with an action on its way
 // Folded application groups, kept across windows like the main list's folds.
 export const folded = new Set(JSON.parse(localStorage.getItem("act-folded") ?? "[]"));
-// Which tab is shown: web, apps or services; the last one comes back.
-export const TABS = ["web", "apps", "services"];
-export let tab = TABS.includes(localStorage.getItem("act-tab")!) ? localStorage.getItem("act-tab")! : "apps";
+// Which tab is shown: apps, services or anvil (Anvil's own: Caddy, PHP-FPM, DNS…); the
+// last one comes back. "web" was anvil's name before.
+export const TABS = ["apps", "services", "anvil"];
+export const storedTab = (v: string | null) => (v === "web" ? "anvil" : TABS.includes(v!) ? v! : "apps");
+export let tab = storedTab(localStorage.getItem("act-tab"));
+export let logStyle: Sgr | undefined; // colors carried from one page of the log to the next
 
 export function showError(msg) {
   $("#error").textContent = msg ?? "";
@@ -125,6 +128,8 @@ export async function act(key, action?) {
     showError(String(e));
   }
   busy.delete(key);
+  // A restart begins a new log (see `Apps::spawn`): read it from the start.
+  if (key === selected && action === "restart") select(key);
   // A poll that began before the action ended would show the old state.
   await loading;
   await load();
@@ -190,7 +195,7 @@ export function row(r, inner?: boolean) {
 }
 
 /** The rows of each tab, for the counts and the table. */
-export const tabRows = (d: Activity) => ({ web: d.web, apps: d.apps.flatMap((a) => a.rows), services: d.services });
+export const tabRows = (d: Activity) => ({ apps: d.apps.flatMap((a) => a.rows), services: d.services, anvil: d.web });
 
 export function render() {
   if (!data) return;
@@ -207,7 +212,7 @@ export function render() {
     $(".act-count", b).textContent = n ? String(n) : "";
   }
   const out: any[] = [];
-  if (tab === "web") out.push(...data.web.map((r) => row(r)));
+  if (tab === "anvil") out.push(...data.web.map((r) => row(r)));
   if (tab === "services") out.push(...data.services.map((r) => row(r)));
   if (tab === "apps") {
     for (const a of data.apps) {
@@ -233,6 +238,7 @@ export function select(key) {
   selected = key;
   logFrom = 0;
   replace = true;
+  logStyle = undefined;
   logToken++;
   $("#log").textContent = "";
   $("#pane").hidden = $("#split").hidden = !key;
@@ -243,8 +249,6 @@ export function select(key) {
 
 export const nameOf = (key) =>
   (data ? [...data.web, ...data.apps.flatMap((a) => a.rows), ...data.services] : []).find((r) => r.key === key)?.name ?? key;
-
-export const line = (e) => [e.time ? `${e.time} ${e.message}` : e.message, e.context, ...e.trace].filter(Boolean).join("\n");
 
 export async function tail() {
   const key = selected;
@@ -272,14 +276,14 @@ export async function tail() {
     return tail();
   }
   const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
-  const text = clean(page.entries.toReversed().map(line).join("\n"));
-  // Containers come back whole (empty when unchanged); files only send new lines.
-  if (replace || (key?.startsWith("container:") && page.entries.length)) {
-    log.textContent = text;
+  // Containers come back whole (empty when unchanged); files only send what is new.
+  if (replace || (key?.startsWith("container:") && page.text)) {
+    log.replaceChildren();
+    logStyle = undefined;
     replace = false;
-  } else if (text) {
-    log.textContent += (log.textContent ? "\n" : "") + text;
   }
+  // ponytail: the log grows while it is open; drop old lines if a chatty process makes it slow.
+  if (page.text) log.append(colorize(clean(page.text, true), (logStyle ??= sgr())));
   logFrom = page.end_offset;
   if (atEnd) log.scrollTop = log.scrollHeight;
 }

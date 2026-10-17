@@ -130,6 +130,24 @@ window.mockOv = {
   },
 };
 const mockLog = "\x1b[1m\x1b[32m✓\x1b[0m built in \x1b[33m1.2s\x1b[39m\n12%\r50%\r100%\n\x1b[2Kplain \x1b[91mbright red\x1b[0m\n";
+// What `php artisan dev`'s processes print in a terminal, colors and all (FORCE_COLOR, --ansi).
+const E = "\x1b[";
+const mockSiteLogs = {
+  shop: {
+    "proc:queue": `\n  ${E}37;44m INFO ${E}39;49m Processing jobs from the [${E}33mdefault${E}39m] queue.\n\n  2026-10-17 10:00:04 App\\Jobs\\SendInvoice ${E}90m.......${E}39m ${E}33mRUNNING${E}39m\n  2026-10-17 10:00:04 App\\Jobs\\SendInvoice ${E}90m.......${E}39m 38.12ms ${E}32;1mDONE${E}39;22m\n  2026-10-17 10:00:09 App\\Jobs\\SyncStock ${E}90m..........${E}39m 1s ${E}31;1mFAIL${E}39;22m\n`,
+    "proc:logs": `\n  ${E}37;44m INFO ${E}39;49m Tailing application logs. ${E}90mPress Ctrl+C to exit${E}39m\n\n  ${E}30;46m 10:00:09 ${E}39;49m ${E}37;41m ERROR ${E}39;49m Stock service timed out ${E}90mapp/Jobs/SyncStock.php:41${E}39m\n  ${E}30;46m 10:00:12 ${E}39;49m ${E}30;43m WARNING ${E}39;49m Cache miss rate above 40% ${E}90mapp/Http/Middleware/Cache.php:22${E}39m\n`,
+    "proc:vite": `\n> dev\n> vite\n\n\n  ${E}32m${E}1mVITE${E}22m v7.1.4${E}39m  ${E}2mready in ${E}0m${E}1m412${E}22m${E}2m${E}0m ms${E}22m\n\n  ${E}32m➜${E}39m  ${E}1mLocal${E}22m:   ${E}36mhttp://localhost:${E}1m5174${E}22m/${E}39m\n  ${E}32m➜${E}39m  ${E}1mNetwork${E}22m: ${E}2muse ${E}22m${E}1m--host${E}22m${E}2m to expose${E}22m\n\n  ${E}1mLARAVEL${E}22m ${E}36mplugin v2.0.1${E}39m\n\n  ${E}32m➜${E}39m  ${E}36mAPP_URL${E}39m: ${E}36mhttps://shop.test${E}39m\n${E}2m10:00:21 AM${E}22m ${E}36m${E}1m[vite]${E}22m${E}39m ${E}32mhmr update ${E}39m${E}2m/resources/js/app.js${E}22m\n`,
+  },
+};
+// The Processes window's log: a process's colored output, or a service's plain timestamped lines.
+const mockActivityLogs = {
+  "shop@queue": mockSiteLogs.shop["proc:queue"],
+  "shop@vite": mockSiteLogs.shop["proc:vite"],
+  "service:mysql":
+    "2026-10-17T10:00:01.112Z 0 [System] [MY-010116] mysqld (mysqld 8.4.2) starting as process 801\n2026-10-17T10:00:01.420Z 0 [Warning] [MY-010068] CA certificate ca.pem is self signed.\n2026-10-17T10:00:01.602Z 0 [System] [MY-010931] mysqld: ready for connections. port: 3306\n",
+  "web:php-8.4":
+    "[17-Oct-2026 10:00:00] NOTICE: fpm is running, pid 412\n[17-Oct-2026 10:00:00] NOTICE: ready to handle connections\n[17-Oct-2026 10:04:12] WARNING: [pool www] server reached pm.max_children setting (5)\n[17-Oct-2026 10:05:40] ERROR: unable to read what child say: Bad file descriptor (9)\n",
+};
 {
   const c = mockOv.vuefinder.commands;
   const t = Math.floor(Date.now() / 1000);
@@ -404,7 +422,11 @@ const actRow = (key, name, state, o = {}) => ({
   ...o,
 });
 window.mockActivity = {
-  web: [actRow("server", "Web server", "running", { pid: 412, port: 443, cpu: 0.3, memory: 18350080, actions: false, detail: "Caddy" })],
+  web: [
+    actRow("web:caddy", "Caddy", "running", { pid: 402, port: 443, cpu: 0.3, memory: 18350080, actions: false, detail: "2.10.2" }),
+    actRow("web:php-8.4", "PHP-FPM", "running", { pid: 412, cpu: 0.1, memory: 31457280, actions: false, detail: "8.4.13" }),
+    actRow("web:dns", "DNS", "running", { pid: 420, port: 53, cpu: 0, memory: 6291456, actions: false, detail: ".test" }),
+  ],
   apps: [
     {
       site: "shop",
@@ -477,7 +499,7 @@ const mockHandle = (cmd, a) => {
       return structuredClone(ov);
     }
     case "log_text": {
-      const text = window.mockLogs?.[a.source] ?? mockLog;
+      const text = window.mockLogs?.[a.source] ?? mockSiteLogs[a.site]?.[a.source] ?? mockLog;
       return { text: a.from ? "" : text, end_offset: text.length };
     }
     case "log_sources":
@@ -493,13 +515,10 @@ const mockHandle = (cmd, a) => {
       return window.mockUpdates;
     case "activity":
       return window.mockActivity;
-    case "activity_log":
-      return {
-        entries: [{ time: null, env: null, level: "info", message: "ready in 412 ms", context: null, trace: [] }],
-        start_offset: 0,
-        end_offset: 10,
-        truncated: false,
-      };
+    case "activity_log": {
+      const text = mockActivityLogs[a.key] ?? "ready in 412 ms\n";
+      return { text: a.from ? "" : text, end_offset: text.length };
+    }
     case "services":
     case "service_run":
       return mockServices;

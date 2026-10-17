@@ -36,6 +36,10 @@
   --sidebar-bg: transparent; /* the native vibrancy shows through */
   --card: var(--steel-hover); /* the sidebar's grouped rows */
 
+  /* A process's name color in Watch (blue, purple, pink, orange, green, cyan), as
+   * Laravel's concurrently gives them; darker in light so they hold on white. */
+  --pc0: #93c5fd; --pc1: #c4b5fd; --pc2: #fb7185; --pc3: #fdba74; --pc4: #86efac; --pc5: #67e8f9;
+
   --radius-s: 6px;
   --radius-m: 10px;
   /* Narrower windows give the detail pane the room; 760px is the window minimum. */
@@ -72,6 +76,8 @@
     --group-text: #a8410f;
     --sidebar-bg: rgba(246, 246, 248, 0.72);
     --card: rgba(255, 255, 255, 0.78);
+
+    --pc0: #1d4ed8; --pc1: #6d28d9; --pc2: #be123c; --pc3: #c2410c; --pc4: #15803d; --pc5: #0e7490;
   }
 }
 
@@ -952,6 +958,21 @@ button.proc-name:hover { text-decoration: underline; }
 .ansi4 { color: #79c0ff; } .ansi5 { color: #d2a8ff; } .ansi6 { color: #76e3ea; } .ansi7 { color: #d7dce1; }
 .ansi8 { color: #8b949e; } .ansi9 { color: #ffa198; } .ansi10 { color: #aff5b4; } .ansi11 { color: #f8e3a1; }
 .ansi12 { color: #a5d6ff; } .ansi13 { color: #e2c5ff; } .ansi14 { color: #b3f0ff; } .ansi15 { color: #ffffff; }
+/* Backgrounds deeper than the text colors, so white on blue (Laravel's INFO) reads;
+ * black on any of them is the surface's near-black, not ansi0's grey. */
+.ansi-bg0 { background: #30363d; } .ansi-bg1 { background: #da3633; } .ansi-bg2 { background: #2ea043; } .ansi-bg3 { background: #d29922; }
+.ansi-bg4 { background: #1f6feb; } .ansi-bg5 { background: #8957e5; } .ansi-bg6 { background: #39c5cf; } .ansi-bg7 { background: #d7dce1; color: #121518; }
+.ansi-bg8 { background: #484f58; } .ansi-bg9 { background: #f85149; } .ansi-bg10 { background: #3fb950; } .ansi-bg11 { background: #e3b341; }
+.ansi-bg12 { background: #388bfd; } .ansi-bg13 { background: #a371f7; } .ansi-bg14 { background: #56d4dd; } .ansi-bg15 { background: #ffffff; color: #121518; }
+[class*="ansi-bg"].ansi0 { color: #121518; }
+.ansi-dim { opacity: 0.6; } .ansi-i { font-style: italic; } .ansi-u { text-decoration: underline; }
+.term-time { color: #8b949e; }
+/* Process names: on the terminal surface always the dark theme's, in lists the theme's. */
+.pc0, .pc1, .pc2, .pc3, .pc4, .pc5 { color: var(--pc); }
+.pc0 { --pc: var(--pc0); } .pc1 { --pc: var(--pc1); } .pc2 { --pc: var(--pc2); }
+.pc3 { --pc: var(--pc3); } .pc4 { --pc: var(--pc4); } .pc5 { --pc: var(--pc5); }
+.watch-out .pc0 { --pc: #93c5fd; } .watch-out .pc1 { --pc: #c4b5fd; } .watch-out .pc2 { --pc: #fb7185; }
+.watch-out .pc3 { --pc: #fdba74; } .watch-out .pc4 { --pc: #86efac; } .watch-out .pc5 { --pc: #67e8f9; }
 
 /* Watch: the app's processes on the left, the chosen one's output on the console's
  * terminal surface; "All" tags each line with its process's name. */
@@ -967,6 +988,9 @@ button.proc-name:hover { text-decoration: underline; }
 .watch-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .watch-out { height: max(260px, calc(100vh - 330px)); }
 .watch-out:empty::before { content: attr(data-empty); }
+.watch-line { display: flex; }
+.watch-tag { flex: none; white-space: pre; }
+.watch-text { min-width: 0; }
 
 .path {
   overflow-wrap: anywhere;
@@ -2394,16 +2418,12 @@ body.activity {
   width: 46%;
   min-width: 260px;
   max-width: calc(100% - 366px); /* the list keeps 360px and the splitter */
-  background: var(--steel-raised);
+  /* The console's and Watch's terminal surface, in both themes. */
+  background: #121518;
+  color: #d7dce1;
 }
 .act-pane[hidden] { display: none; }
-/* Light: the log is the same dark terminal surface as the console and Watch. */
-@media (prefers-color-scheme: light) {
-  .act-pane { background: #121518; color: #d7dce1; }
-  .act-pane-head { border-bottom-color: rgba(255, 255, 255, 0.08); }
-  .act-pane .act-log { color: #d7dce1; }
-  .act-pane .icon-btn { background: rgba(255, 255, 255, 0.08); color: #e8ebee; }
-}
+.act-pane .icon-btn { background: rgba(255, 255, 255, 0.08); color: #e8ebee; }
 
 /* Between the list and the log: drag to resize. */
 .act-split {
@@ -2419,7 +2439,7 @@ body.activity {
   align-items: center;
   gap: 8px;
   padding: 4px 6px 4px 14px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 12px;
   font-weight: 600;
 }
@@ -2430,7 +2450,7 @@ body.activity {
   margin: 0;
   padding: 8px 14px;
   overflow: auto;
-  color: var(--text);
+  color: #d7dce1;
   font: 11px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
