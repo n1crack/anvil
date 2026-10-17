@@ -123,7 +123,7 @@ optional.
 
 | Step | What it does | Without it |
 |---|---|---|
-| Resolver file (`sudo` in the terminal, or a macOS prompt from the app) | Creates `/etc/resolver/test` so `*.test` resolves to Anvil | `*.test` addresses don't open in the browser |
+| Resolver file (`sudo` in the terminal, or a macOS prompt from the app) | Creates `/etc/resolver/test` so `*.test` resolves to Anvil | `*.test` addresses don't open in the browser. Not needed with `.localhost` (`anvil tld localhost`) |
 | `anvil trust` | Adds the local certificate authority to your login keychain | HTTPS works, but the browser warns about the certificate |
 
 See [Getting started](getting-started.md#resolver-setup).

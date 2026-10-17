@@ -58,6 +58,19 @@ The file name is the domain suffix and the port is `dns_port` from
 [configuration.md](configuration.md). If you change either setting, update
 the file to match.
 
+### Without a password: `.localhost`
+
+Names ending in `.localhost` already reach your Mac: macOS and browsers send
+them to 127.0.0.1 without any setup. Use them instead of `.test` and skip the
+step above:
+
+```sh
+anvil tld localhost        # applications answer at https://<folder>.localhost:8443
+```
+
+In the app: **Settings → General → Domain**, or **Use .localhost instead** in
+the setup bar. Anvil then runs no DNS server; `anvil tld test` switches back.
+
 ## Add projects and start
 
 ```sh

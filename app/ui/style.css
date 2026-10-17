@@ -1871,6 +1871,9 @@ kbd {
 
 .setup[hidden] { display: none; }
 .setup span { margin-right: 4px; }
+/* The way around a step, not another step. */
+.setup button.link { border-color: transparent; background: none; color: var(--muted); text-decoration: underline; }
+.setup button.link:hover { color: var(--text); }
 
 .setup button {
   height: 24px;

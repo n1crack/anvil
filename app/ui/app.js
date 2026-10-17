@@ -93,6 +93,21 @@ async function loadSetup(fixing) {
     };
     bar.append(b);
   }
+  // The password step has a way around it: .localhost needs no resolver file.
+  if (missing.some(([id]) => id === "resolver")) {
+    const b = el("button", "link", "Use .localhost instead");
+    b.title = "Addresses like shop.localhost reach this Mac without any setup or password";
+    b.disabled = !!fixing;
+    b.onclick = async () => {
+      try {
+        await invoke("set_tld", { tld: "localhost" });
+      } catch (e) {
+        showError(String(e));
+      }
+      refresh();
+    };
+    bar.append(b);
+  }
 }
 
 function render() {
