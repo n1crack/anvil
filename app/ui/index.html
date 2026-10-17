@@ -49,7 +49,7 @@
       <span id="error-text"></span>
       <button id="error-close" class="icon-btn" aria-label="Dismiss">×</button>
     </div>
-    <section id="site" class="site" aria-live="polite"></section>
+    <section id="site" class="site"></section>
   </main>
 
   <template id="site-tpl">
@@ -63,7 +63,7 @@
         </div>
       </div>
       <div class="run-box" hidden>
-        <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text"></span></span>
+        <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text" aria-live="polite"></span></span>
         <button data-run="start">Start</button>
         <button data-run="restart">Restart</button>
         <button data-run="stop">Stop</button>
