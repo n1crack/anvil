@@ -19,6 +19,10 @@ let followTimer = null;
 
 function logTime(t) {
   if (!t) return null;
+  // PHP-FPM writes 17-Oct-2026 09:05:35; WebKit only parses ISO-like dates.
+  const MONTHS = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  const fpm = t.match(/^(\d{2})-([A-Z][a-z]{2})-(\d{4}) (.*)$/);
+  if (fpm) t = `${fpm[3]}-${String(MONTHS.indexOf(fpm[2]) / 3 + 1).padStart(2, "0")}-${fpm[1]} ${fpm[4]}`;
   const d = new Date(t.replace(" ", "T").replace(/(\.\d{3})\d+/, "$1"));
   return Number.isNaN(d.getTime()) ? null : d;
 }
