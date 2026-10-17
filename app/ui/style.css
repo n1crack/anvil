@@ -649,7 +649,8 @@ button, select, input { font: inherit; color: inherit; }
   align-items: flex-end;
   gap: 8px;
 }
-.open-with { display: flex; gap: 4px; }
+/* The open-with icons sit above the status and Start/Stop. */
+.open-with { display: flex; gap: 4px; order: -1; }
 .open-with button {
   display: grid;
   place-items: center;
