@@ -244,7 +244,7 @@
     </div>
 
     <h3 class="res-sub">Log</h3>
-    <pre class="svc-log"></pre>
+    <pre class="svc-log muted" tabindex="0" aria-label="Newest log lines">Reading…</pre>
 
     <div class="below"><button class="svc-remove">Remove Service…</button></div>
   </template>
@@ -267,7 +267,7 @@
       </label>
       <label class="field">
         <span>Port</span>
-        <input id="svc-port" inputmode="numeric" autocomplete="off" spellcheck="false">
+        <input id="svc-port" inputmode="numeric" autocomplete="off" spellcheck="false" aria-describedby="svc-port-note">
         <small id="svc-port-note"></small>
       </label>
       <label class="field">
