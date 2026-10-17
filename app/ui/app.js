@@ -615,11 +615,12 @@ function renderSite() {
 
 /** Django checks the host name and, behind HTTPS, the scheme: two settings it needs once. */
 function djangoHint(root) {
-  const lines = `ALLOWED_HOSTS = [".${snap.tld}"]\nSECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`;
+  // Only in debug: in production another proxy decides what these headers may say.
+  const lines = `if DEBUG:  # Anvil\n    ALLOWED_HOSTS += [".${snap.tld}"]\n    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`;
   const box = el("div", "django-hint");
   box.append(
     el("h3", "res-sub", "Django settings"),
-    el("p", "muted", "Add to settings.py so Django accepts the address and trusts HTTPS from Anvil; without them it answers 400 Bad Request, and forms fail their CSRF check."),
+    el("p", "muted", "Add to the end of settings.py so Django accepts the address and trusts HTTPS from Anvil; without it Django answers 400 Bad Request, and forms fail their CSRF check."),
   );
   const env = el("div", "env");
   const copyBtn = el("button", null, "Copy");

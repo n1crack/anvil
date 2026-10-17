@@ -17,8 +17,8 @@ is. You can override the type with `anvil app type <site> <kind>` or in the app.
 | Vite | `vite` in `package.json` | `npm run dev` |
 | Node.js | `package.json` | `npm run dev`, or `npm run start` without a `dev` script |
 | Django | `manage.py` that imports Django | `python manage.py runserver` |
-| FastAPI | `fastapi` in `pyproject.toml` or `requirements.txt` | `uvicorn` |
-| Flask | `flask` in `pyproject.toml` or `requirements.txt` | `flask run` |
+| FastAPI | `fastapi` in `pyproject.toml` or `requirements.txt` (with `package.json`, also `main.py`, `app.py` or `wsgi.py`) | `uvicorn` |
+| Flask | `flask` in `pyproject.toml` or `requirements.txt` (same rule) | `flask run` |
 | Static | anything else | the web server |
 
 - **PHP applications** are served through PHP-FPM. The web root is `public/`
@@ -35,21 +35,25 @@ is. You can override the type with `anvil app type <site> <kind>` or in the app.
   with `anvil app runtime`.
 - **Python applications** run through [uv](https://docs.astral.sh/uv/), which
   Anvil installs (checked against a pinned checksum) together with the Python
-  versions in `~/.anvil`. A project with `pyproject.toml` gets uv's environment
-  in its `.venv`; one with only `requirements.txt` gets its packages from uv's
-  cache, so nothing is added to the folder. Python comes from
-  `.python-version` when installed, else the newest.
+  versions in `~/.anvil`. Environments live in `~/.anvil/cache`, so a `.venv`
+  you already have is left alone. A `pyproject.toml` project (one with a
+  `[project]` table) gets a `uv.lock` written next to it, as `uv run` does; a
+  project with only `requirements.txt` gets nothing added. The Python version
+  follows the project's `.python-version` and `requires-python` (uv installs a
+  missing one into `~/.anvil`) unless you pin one in the app.
 - **Django** checks the host name and, behind HTTPS, the scheme. The app's
   Overview shows the two lines to add to `settings.py` once:
 
   ```python
-  ALLOWED_HOSTS = [".test"]
-  SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+  if DEBUG:  # Anvil
+      ALLOWED_HOSTS += [".test"]
+      SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
   ```
 
   Without them Django answers 400 Bad Request for `.test` addresses and forms
   fail their CSRF check. (With `.localhost`, Django's debug mode already
-  accepts the host, but forms still need the second line.)
+  accepts the host, but forms still need the proxy line.) They only apply in
+  debug, so a deployed site keeps its own settings.
 
 ## PHP
 
