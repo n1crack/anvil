@@ -976,6 +976,8 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-list:focus-visible { box-shadow: 0 0 0 2px var(--selected); }
 .dev-list > .dev-divider { height: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); }
 .dev-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; font-size: 12px; }
+/* Everything under "All" is one of its parts: indent it so All reads as the parent. */
+.dev-item:not([data-key="all"]) { padding-left: 26px; }
 .dev-item[aria-selected="true"] { background: var(--selected); }
 /* The status column, one width for a process's dot and a run's spinner, ✓ or ✕. */
 .dev-item .dot { flex: none; margin: 0 2px; }
