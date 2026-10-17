@@ -1538,6 +1538,20 @@ kbd {
 
 .logs-list .empty { margin: 24px 8px; }
 
+/* App output: its own scroll box that opens at the newest line, like a terminal. */
+.logs-list.chrono {
+  max-height: max(240px, calc(100vh - 370px));
+  overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.logs-list.chrono .log:last-child { border-bottom: 0; }
+.logs-more:has(+ .logs-list.chrono) { margin: 0 auto 10px; }
+
+/* No timestamps anywhere: no empty time column, and only lines that stand out get a badge. */
+.logs-list.untimed .log-time { display: none; }
+.logs-list.untimed .lv-info .log-level { visibility: hidden; }
+
 /* ---------- Packages ---------- */
 
 .pkg-chips { margin-bottom: 12px; }
