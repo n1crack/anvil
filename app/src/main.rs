@@ -1378,10 +1378,11 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let app = handle.state::<App>();
     let on = running(&app);
     let cfg = anvil::load().unwrap_or_default();
+    // One scan of the folders serves the whole menu.
+    let all = anvil::sites(&cfg);
 
     let status = if on {
         // Aliases share their app's folder; count each app once.
-        let all = anvil::sites(&cfg);
         let parked: std::collections::HashSet<_> =
             all.iter().filter(|s| !s.linked).map(|s| &s.path).collect();
         let n = all
@@ -1441,13 +1442,9 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     };
     let procs: Vec<(String, bool)> = {
         let mut a = app.apps.lock().unwrap();
-        anvil::sites(&cfg)
-            .into_iter()
+        all.iter()
             .filter(|s| anvil::apps::runs_process(&s.kind) && !s.linked)
-            .map(|s| {
-                let r = a.running(&s.name);
-                (s.name, r)
-            })
+            .map(|s| (s.name.clone(), a.running(&s.name)))
             .collect()
     };
     for (title, prefix, list) in [("Services", "svc", svc), ("Applications", "app", procs)] {

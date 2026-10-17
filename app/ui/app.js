@@ -14,9 +14,12 @@ const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 // The standard HTTPS port needs no ":443".
 const url = (s) => `https://${s.name}.${snap.tld}${snap.https_port === 443 ? "" : `:${snap.https_port}`}`;
 
+let snapAt = 0; // when the last snapshot arrived
+
 async function call(cmd, args) {
   try {
     snap = (await invoke(cmd, args)) ?? snap;
+    snapAt = Date.now();
     render();
   } catch (e) {
     showError(String(e));
@@ -47,7 +50,10 @@ function toast(msg, undo) {
 }
 
 window.refresh = () => {
-  call("state");
+  // A command's own answer already carries the new state; the "changed" signal
+  // that follows it doesn't need a second read.
+  // ponytail: a Settings change landing within 0.5 s of a click here waits for the next refresh.
+  if (Date.now() - snapAt > 500) call("state");
   window.loadServices?.();
   loadSetup();
 };
