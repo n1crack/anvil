@@ -61,12 +61,13 @@ for (const [id, name, note] of LANGS) {
     page.insertAdjacentHTML(
       "beforeend",
       `<h2>Package managers</h2><div id="pms" class="group pms"><div class="row"><span class="muted">Looking…</span></div></div>` +
-        `<p class="hint note">Anvil starts Node apps with npm from the app’s Node version. A script that calls pnpm, yarn or bun gets the first one found on the app’s PATH, shown here.</p>`,
+        `<p class="hint note">Anvil starts a detected Node app with npm install (when node_modules is missing) and npm run, using the npm bundled with the app’s Node.js. ` +
+        `An app’s PATH is that Node.js (shown here for the newest), then pnpm, yarn and bun installed here (~/.anvil/runtimes), then the PATH Anvil started with plus your login shell’s. ` +
+        `Install uses Anvil’s npm for pnpm and yarn, and bun’s official release checked against its published SHA-256. Your terminal is left alone.</p>`,
     );
   }
   $("#storage").before(page);
 }
-
 /** Newest first, numerically: "22" > "9", "1.27.2" > "1.9". */
 const newest = (a: string, b: string) => b.localeCompare(a, undefined, { numeric: true });
 
@@ -161,33 +162,88 @@ export async function uninstallRuntime(rt, v: string) {
   loadRuntimes();
 }
 
-/** npm, pnpm, yarn and bun: found or not, where from and which version. Read-only. */
+export let pms: any[] | null = null;
+export const pmBusy = new Map<string, string>(); // name → "Installing…" / "Uninstalling…"
+export const pmErrors = new Map<string, string>();
+
+/** npm, pnpm, yarn and bun: where apps find them and, when it differs, the terminal. */
 export async function loadPackageManagers() {
-  let pms;
   try {
     pms = await invoke("package_managers");
   } catch (e) {
     return showError(String(e));
   }
-  $("#pms").replaceChildren(
+  renderPackageManagers();
+}
+
+/** "Bundled with Node.js 24 11.6.2", the path in the tooltip. */
+function found(label: string, f) {
+  const line = document.createElement("span");
+  line.append(`${label}: `);
+  const src = Object.assign(document.createElement("span"), { className: "pm-src", textContent: f ? f.source : "Not found" });
+  if (f) src.title = tilde(f.path);
+  line.append(src);
+  if (f)
+    line.append(
+      " ",
+      Object.assign(document.createElement("span"), { className: "pm-version", textContent: f.version ?? "unknown version" }),
+    );
+  return line;
+}
+
+export function renderPackageManagers() {
+  const box = $("#pms");
+  if (!box || !pms) return;
+  box.replaceChildren(
     ...pms.map((pm) => {
       const row = document.createElement("div");
-      row.className = "row pm";
-      row.innerHTML = `<span class="pm-name"></span><span class="pm-from"></span><span class="pm-version"></span>`;
-      $(".pm-name", row).textContent = pm.name;
-      const from = $(".pm-from", row);
-      if (pm.path) {
-        from.textContent = pm.source?.startsWith("Node.js") ? `Bundled with ${pm.source}` : pm.source;
-        from.title = tilde(pm.path);
-        if (pm.source === "System") from.append(Object.assign(document.createElement("small"), { textContent: ` ${tilde(pm.path)}` }));
-      } else {
-        from.textContent = "Not found";
-        row.classList.add("missing");
+      row.className = `row pm${pm.apps ? "" : " missing"}`;
+      const name = Object.assign(document.createElement("span"), { className: "pm-name", textContent: pm.name });
+      const where = Object.assign(document.createElement("span"), { className: "pm-where" });
+      where.append(Object.assign(found("Apps", pm.apps), { className: "pm-from" }));
+      if (!pm.same && (pm.apps || pm.terminal)) where.append(Object.assign(found("Terminal", pm.terminal), { className: "pm-term" }));
+      const error = pmErrors.get(pm.name);
+      if (error) where.append(Object.assign(document.createElement("span"), { className: "pm-error", textContent: error }));
+      const actions = Object.assign(document.createElement("span"), { className: "actions-inline" });
+      const busy = pmBusy.get(pm.name);
+      if (busy) {
+        actions.innerHTML = `<span class="spin-dot"></span><span class="muted"></span>`;
+        $(".muted", actions).textContent = busy;
+      } else if (!pm.apps && pm.name !== "npm") {
+        const b = button("Install", () => pmAction(pm.name, "package_manager_install", "Installing…"));
+        b.disabled = [...pmBusy.values()].includes("Installing…");
+        actions.append(b);
+      } else if (pm.anvil) {
+        actions.classList.add("on-hover");
+        actions.append(button("Uninstall", () => uninstallPm(pm.name)));
       }
-      $(".pm-version", row).textContent = pm.version ?? (pm.path ? "unknown" : "");
+      row.append(name, where, actions);
       return row;
     }),
   );
+}
+
+async function pmAction(name: string, cmd: string, label: string) {
+  pmBusy.set(name, label);
+  pmErrors.delete(name);
+  renderPackageManagers();
+  try {
+    await invoke(cmd, { name });
+  } catch (e) {
+    pmErrors.set(name, String(e));
+  }
+  pmBusy.delete(name);
+  await loadPackageManagers();
+}
+
+async function uninstallPm(name: string) {
+  const ok = await window.__TAURI__.dialog.ask(`Apps that call ${name} find the next one on their PATH, if any.`, {
+    title: `Uninstall ${name}?`,
+    kind: "warning",
+    okLabel: "Uninstall",
+    cancelLabel: "Cancel",
+  });
+  if (ok) pmAction(name, "package_manager_uninstall", "Uninstalling…");
 }
 
 /* ---------- Storage ---------- */

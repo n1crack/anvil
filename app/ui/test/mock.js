@@ -741,12 +741,35 @@ const mockHandle = (cmd, a) => {
         { id: "python", name: "Python", installed: ["3.13"], available: ["3.14", "3.13", "3.12", "3.11"] },
       ];
     case "package_managers":
+      // As runtimes::package_managers: for apps, and for the terminal when it differs.
       return [
-        { name: "npm", version: "11.6.2", path: "/Users/x/.anvil/runtimes/node/24/bin/npm", source: "Node.js 24" },
-        { name: "pnpm", version: "10.12.1", path: "/opt/homebrew/bin/pnpm", source: "Homebrew" },
-        { name: "yarn", version: null, path: null, source: null },
-        { name: "bun", version: "1.2.19", path: "/Users/x/.bun/bin/bun", source: "System" },
+        {
+          name: "npm",
+          apps: { version: "11.6.2", path: "/Users/x/.anvil/runtimes/node/24/bin/npm", source: "Bundled with Node.js 24" },
+          terminal: { version: "11.12.1", path: "/opt/homebrew/bin/npm", source: "Homebrew (Node.js 26)" },
+          same: false,
+          anvil: false,
+        },
+        {
+          name: "pnpm",
+          apps: { version: "12.14.0", path: "/opt/homebrew/bin/pnpm", source: "Homebrew" },
+          terminal: null,
+          same: true,
+          anvil: false,
+        },
+        { name: "yarn", apps: null, terminal: null, same: false, anvil: false },
+        {
+          name: "bun",
+          apps: { version: "1.3.2", path: "/Users/x/.anvil/runtimes/bun/bin/bun", source: "Anvil" },
+          terminal: { version: "1.3.1", path: "/Users/x/.local/share/vite-plus/bin/bun", source: "Vite+" },
+          same: false,
+          anvil: true,
+        },
       ];
+    case "package_manager_install":
+    case "package_manager_uninstall":
+      if (window.mockPmError) throw window.mockPmError;
+      return null;
     case "storage_last":
       return window.mockStorageLast ?? null;
     case "clean_all_safe":

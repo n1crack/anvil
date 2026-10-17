@@ -451,6 +451,8 @@ pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
             root("dotnet")
         }
     };
+    // Node apps also find the package managers installed from Settings.
+    let path = if id == "node" { with_pms(&path) } else { path };
     e.push(("PATH".into(), format!("{}:{path}", bin.display())));
     e
 }
@@ -468,66 +470,108 @@ pub fn info(id: &'static str, with_available: bool) -> RuntimeInfo {
     }
 }
 
-/// A package manager the Node apps Anvil runs would find, and where it comes from.
+/// Where Anvil puts the package managers it installs: pnpm and yarn as npm
+/// globals (`<pm>/bin`), bun as its standalone binary (`<bun>/bin`).
+fn pm_dirs() -> [PathBuf; 2] {
+    [root("pm").join("bin"), root("bun").join("bin")]
+}
+
+/// `path` with Anvil's package managers in front.
+pub fn with_pms(path: &str) -> String {
+    let [pm, bun] = pm_dirs();
+    format!("{}:{}:{path}", pm.display(), bun.display())
+}
+
+/// One package manager as found on a PATH.
+#[derive(Serialize)]
+pub struct Found {
+    pub version: Option<String>,
+    pub path: String,
+    /// "Anvil", "Homebrew", "Vite+", "Corepack", "Bundled with Node.js 24",
+    /// "Homebrew (Node.js 26)" or "System".
+    pub source: String,
+}
+
+/// npm, pnpm, yarn or bun, for the apps Anvil runs and for a terminal.
 #[derive(Serialize)]
 pub struct PackageManager {
     pub name: &'static str,
-    pub version: Option<String>,
-    pub path: Option<String>,
-    /// "Node.js 24" (npm bundled with Anvil's Node), "Corepack", "Anvil", "Homebrew" or "System".
-    pub source: Option<String>,
+    /// On the PATH apps get: the newest Anvil Node.js and Anvil's package
+    /// managers first, then the login shell's.
+    pub apps: Option<Found>,
+    /// On the login shell's PATH alone; `None` when it is the same program.
+    pub terminal: Option<Found>,
+    /// Both find the same program.
+    pub same: bool,
+    /// Installed by Anvil, so Settings can uninstall it.
+    pub anvil: bool,
 }
 
-/// npm, pnpm, yarn and bun as an app sees them: looked up on the PATH an app
-/// gets (the newest Anvil Node first, then the login shell's), each asked for
-/// its version. Read-only: Corepack may not download anything here.
+/// The first `name` on `path`, its resolved file, and its `--version` run
+/// with `envs`. Corepack may not download anything here.
+fn find(name: &str, path: &str, envs: &[(String, String)]) -> Option<(Found, PathBuf)> {
+    let bin = which(name, path)?;
+    let version = crate::output_within(
+        Command::new(&bin)
+            .arg("--version")
+            .envs(envs.iter().cloned())
+            .env("PATH", path)
+            .env("COREPACK_ENABLE_NETWORK", "0")
+            .env("COREPACK_ENABLE_DOWNLOAD_PROMPT", "0")
+            .current_dir(std::env::temp_dir()),
+        std::time::Duration::from_secs(3),
+    )
+    .and_then(|o| {
+        o.lines()
+            .next()
+            .map(|l| l.trim().trim_start_matches('v').to_string())
+    })
+    .filter(|v| !v.is_empty());
+    let real = fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
+    let user = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let source = source_of(&real, &home(), &user);
+    Some((
+        Found {
+            version,
+            path: bin.display().to_string(),
+            source,
+        },
+        real,
+    ))
+}
+
+/// npm, pnpm, yarn and bun as an app sees them (the newest Anvil Node.js) and
+/// as a terminal does (the login shell's PATH, without Anvil's runtimes).
 pub fn package_managers() -> Vec<PackageManager> {
-    let node = installed("node").into_iter().next();
-    let mut envs = node.as_deref().map(|v| env("node", v)).unwrap_or_default();
-    if envs.is_empty() {
-        envs.push(("PATH".into(), std::env::var("PATH").unwrap_or_default()));
-    }
-    envs.push(("COREPACK_ENABLE_NETWORK".into(), "0".into()));
-    envs.push(("COREPACK_ENABLE_DOWNLOAD_PROMPT".into(), "0".into()));
-    let path = envs
+    let base = std::env::var("PATH").unwrap_or_default();
+    let apps_env = match installed("node").first() {
+        Some(v) => env("node", v),
+        None => vec![("PATH".into(), with_pms(&base))],
+    };
+    let apps_path = apps_env
         .iter()
         .find(|(k, _)| k == "PATH")
         .map(|(_, v)| v.clone())
         .unwrap_or_default();
+    let login = crate::login_path().unwrap_or(base);
+    let mine = [root("pm"), root("bun")];
     ["npm", "pnpm", "yarn", "bun"]
         .into_iter()
         .map(|name| {
-            let Some(bin) = which(name, &path) else {
-                return PackageManager {
-                    name,
-                    version: None,
-                    path: None,
-                    source: None,
-                };
-            };
-            let version = crate::output_within(
-                Command::new(&bin)
-                    .arg("--version")
-                    .envs(envs.clone())
-                    .current_dir(std::env::temp_dir()),
-                std::time::Duration::from_secs(3),
-            )
-            .and_then(|o| {
-                o.lines()
-                    .next()
-                    .map(|l| l.trim().trim_start_matches('v').to_string())
-            })
-            .filter(|v| !v.is_empty());
-            let real = fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
-            let source = match (name, &node) {
-                ("npm", Some(v)) if bin.starts_with(root("node").join(v)) => format!("Node.js {v}"),
-                _ => source_of(&real, &home()).into(),
-            };
+            let apps = find(name, &apps_path, &apps_env);
+            let apps_real = apps.as_ref().map(|(_, r)| r.clone());
+            let term_real = which(name, &login).map(|b| fs::canonicalize(&b).unwrap_or(b));
+            let same = term_real.is_some() && term_real == apps_real;
             PackageManager {
                 name,
-                version,
-                path: Some(bin.display().to_string()),
-                source: Some(source),
+                anvil: apps_real.is_some_and(|r| mine.iter().any(|d| r.starts_with(d))),
+                apps: apps.map(|(f, _)| f),
+                terminal: if same {
+                    None
+                } else {
+                    find(name, &login, &[]).map(|(f, _)| f)
+                },
+                same,
             }
         })
         .collect()
@@ -543,11 +587,27 @@ fn which(name: &str, path: &str) -> Option<PathBuf> {
 }
 
 /// Where a program (its resolved path) comes from.
-fn source_of(real: &Path, anvil: &Path) -> &'static str {
+fn source_of(real: &Path, anvil: &Path, user_home: &Path) -> String {
     let s = real.to_string_lossy();
     if s.contains("/corepack/") {
-        "Corepack"
-    } else if real.starts_with(anvil) {
+        return "Corepack".into();
+    }
+    // npm itself, bundled with Anvil's Node.js or Homebrew's (node, node@22).
+    if s.contains("/lib/node_modules/npm/") {
+        if let Ok(rest) = real.strip_prefix(anvil.join("runtimes").join("node"))
+            && let Some(v) = rest.iter().next()
+        {
+            return format!("Bundled with Node.js {}", v.to_string_lossy());
+        }
+        if let Some(v) = s
+            .split_once("/Cellar/node")
+            .and_then(|(_, r)| r.split('/').nth(1))
+            .and_then(|v| v.split('.').next())
+        {
+            return format!("Homebrew (Node.js {v})");
+        }
+    }
+    if real.starts_with(anvil) {
         "Anvil"
     } else if [
         "/opt/homebrew/",
@@ -558,8 +618,120 @@ fn source_of(real: &Path, anvil: &Path) -> &'static str {
     .any(|p| s.starts_with(p))
     {
         "Homebrew"
+    } else if real.starts_with(user_home.join(".local/share/vite-plus")) {
+        "Vite+"
     } else {
         "System"
+    }
+    .into()
+}
+
+type Runner<'a> = &'a mut dyn FnMut(&mut Command) -> Result<()>;
+
+/// Install a package manager apps lack into Anvil's folder.
+pub fn install_pm(name: &str) -> Result<()> {
+    // Errors read in a row of Settings: the tool's last word, not the whole command line.
+    install_pm_in(name, &home(), &mut |c| {
+        let out = c.output()?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let last = err
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty() && !l.contains("A complete log of this run"));
+            bail!("{}", last.unwrap_or("The install failed").trim());
+        }
+        Ok(())
+    })
+}
+
+/// pnpm and yarn with the newest Anvil Node.js's npm into `<anvil>/runtimes/pm`;
+/// bun as its official release, checked against the published SHA-256.
+fn install_pm_in(name: &str, anvil: &Path, runner: Runner) -> Result<()> {
+    let runtimes = anvil.join("runtimes");
+    match name {
+        "pnpm" | "yarn" => {
+            let node = runtimes.join("node");
+            let v = subdirs(&node)
+                .into_iter()
+                .next()
+                .with_context(|| format!("{name} is installed with npm: install Node.js first"))?;
+            runner(
+                Command::new(node.join(&v).join("bin").join("npm"))
+                    .args(["install", "-g", "--prefix"])
+                    .arg(runtimes.join("pm"))
+                    .arg(name)
+                    .envs(env("node", &v)),
+            )
+        }
+        "bun" => {
+            let (_, plat) = platform()?;
+            let asset = bun_asset(plat.starts_with("mac"), plat.ends_with("arm64"));
+            // ponytail: "latest" for both files; a release landing in between fails the checksum, never installs.
+            let base = "https://github.com/oven-sh/bun/releases/latest/download/";
+            let sum = published_sum(&format!("{base}SHASUMS256.txt"), &format!("{asset}.zip"))?;
+            replace_dir(&runtimes.join("bun"), |d| {
+                let zip = download(&format!("{base}{asset}.zip"), Some(&sum))?;
+                let bin = d.join("bin");
+                let ok = fs::create_dir_all(&bin)
+                    .map_err(Into::into)
+                    .and_then(|_| runner(&mut unzip_bun(&zip, asset, &bin)));
+                let _ = fs::remove_file(&zip);
+                ok?;
+                Ok(std::os::unix::fs::symlink("bun", bin.join("bunx"))?)
+            })
+        }
+        _ => bail!("Anvil installs pnpm, yarn and bun, not {name}"),
+    }
+}
+
+/// bun's release asset for a platform.
+fn bun_asset(mac: bool, arm: bool) -> &'static str {
+    match (mac, arm) {
+        (true, true) => "bun-darwin-aarch64",
+        (true, false) => "bun-darwin-x64",
+        (false, true) => "bun-linux-aarch64",
+        (false, false) => "bun-linux-x64",
+    }
+}
+
+/// Only the `bun` binary out of the release zip, straight into `bin`.
+fn unzip_bun(zip: &Path, asset: &str, bin: &Path) -> Command {
+    let mut c = Command::new("unzip");
+    c.args(["-q", "-j"])
+        .arg(zip)
+        .arg(format!("{asset}/bun"))
+        .arg("-d")
+        .arg(bin);
+    c
+}
+
+/// Remove a package manager Anvil installed.
+pub fn uninstall_pm(name: &str) -> Result<()> {
+    uninstall_pm_in(name, &home())
+}
+
+fn uninstall_pm_in(name: &str, anvil: &Path) -> Result<()> {
+    let runtimes = anvil.join("runtimes");
+    let missing = || format!("{name} isn't installed in Anvil");
+    match name {
+        "bun" => fs::remove_dir_all(runtimes.join("bun")).with_context(missing),
+        "pnpm" | "yarn" => {
+            let pm = runtimes.join("pm");
+            let pkg = pm.join("lib").join("node_modules").join(name);
+            if !pkg.is_dir() {
+                bail!(missing());
+            }
+            // npm's links in bin point into the package: ../lib/node_modules/pnpm/…
+            let inside = format!("node_modules/{name}/");
+            for e in fs::read_dir(pm.join("bin")).into_iter().flatten().flatten() {
+                if fs::read_link(e.path()).is_ok_and(|t| t.to_string_lossy().contains(&inside)) {
+                    fs::remove_file(e.path())?;
+                }
+            }
+            Ok(fs::remove_dir_all(pkg)?)
+        }
+        _ => bail!(missing()),
     }
 }
 
@@ -642,7 +814,29 @@ mod tests {
     #[test]
     fn package_manager_sources() {
         let anvil = Path::new("/Users/x/.anvil");
-        let src = |p: &str| source_of(Path::new(p), anvil);
+        let src = |p: &str| source_of(Path::new(p), anvil, Path::new("/Users/x"));
+        assert_eq!(
+            src("/Users/x/.anvil/runtimes/node/24/lib/node_modules/npm/bin/npm-cli.js"),
+            "Bundled with Node.js 24"
+        );
+        assert_eq!(
+            src("/opt/homebrew/Cellar/node/26.12.0/lib/node_modules/npm/bin/npm-cli.js"),
+            "Homebrew (Node.js 26)"
+        );
+        assert_eq!(
+            src("/opt/homebrew/Cellar/node@22/22.20.0/lib/node_modules/npm/bin/npm-cli.js"),
+            "Homebrew (Node.js 22)"
+        );
+        assert_eq!(src("/Users/x/.local/share/vite-plus/0.1.4/bin/vp"), "Vite+");
+        assert_eq!(
+            src("/Users/x/.anvil/runtimes/pm/lib/node_modules/yarn/bin/yarn.js"),
+            "Anvil"
+        );
+        assert_eq!(src("/Users/x/.anvil/runtimes/bun/bin/bun"), "Anvil");
+        assert_eq!(
+            src("/Users/x/.nvm/versions/node/v20.1.0/lib/node_modules/npm/bin/npm-cli.js"),
+            "System"
+        );
         assert_eq!(
             src("/opt/homebrew/Cellar/pnpm/10.12.1/bin/pnpm"),
             "Homebrew"
@@ -673,6 +867,89 @@ mod tests {
             Some(dir.join("pnpm"))
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn package_manager_install_and_uninstall() {
+        let anvil = std::env::temp_dir().join(format!("anvil-pm-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&anvil);
+        let mut ran: Vec<Vec<String>> = vec![];
+        let mut fake = |c: &mut Command| {
+            let mut argv = vec![c.get_program().to_string_lossy().into_owned()];
+            argv.extend(c.get_args().map(|a| a.to_string_lossy().into_owned()));
+            ran.push(argv);
+            Ok(())
+        };
+        // pnpm and yarn need an Anvil Node.js for its npm.
+        let err = install_pm_in("pnpm", &anvil, &mut fake).unwrap_err();
+        assert!(err.to_string().contains("install Node.js first"), "{err}");
+        for v in ["22", "24"] {
+            fs::create_dir_all(anvil.join("runtimes/node").join(v)).unwrap();
+        }
+        for bad in ["npm", "../x", "deno", ""] {
+            assert!(install_pm_in(bad, &anvil, &mut fake).is_err(), "{bad}");
+        }
+        install_pm_in("yarn", &anvil, &mut fake).unwrap();
+        let a = |p: &str| anvil.join(p).display().to_string();
+        // Only the yarn install ran: refusals run nothing.
+        assert_eq!(
+            ran,
+            [vec![
+                a("runtimes/node/24/bin/npm"),
+                "install".into(),
+                "-g".into(),
+                "--prefix".into(),
+                a("runtimes/pm"),
+                "yarn".into(),
+            ]]
+        );
+        assert_eq!(bun_asset(true, true), "bun-darwin-aarch64");
+        let unzip = unzip_bun(
+            Path::new("/b/x.zip"),
+            "bun-darwin-aarch64",
+            Path::new("/d/bin"),
+        );
+        assert_eq!(
+            unzip.get_args().collect::<Vec<_>>(),
+            [
+                "-q",
+                "-j",
+                "/b/x.zip",
+                "bun-darwin-aarch64/bun",
+                "-d",
+                "/d/bin"
+            ]
+        );
+
+        // Uninstall removes the package and only its own links in bin.
+        let pm = anvil.join("runtimes/pm");
+        fs::create_dir_all(pm.join("lib/node_modules/yarn/bin")).unwrap();
+        fs::create_dir_all(pm.join("bin")).unwrap();
+        for (link, to) in [
+            ("yarn", "../lib/node_modules/yarn/bin/yarn.js"),
+            ("yarnpkg", "../lib/node_modules/yarn/bin/yarn.js"),
+            ("pnpm", "../lib/node_modules/pnpm/bin/pnpm.cjs"),
+        ] {
+            std::os::unix::fs::symlink(to, pm.join("bin").join(link)).unwrap();
+        }
+        uninstall_pm_in("yarn", &anvil).unwrap();
+        assert!(!pm.join("lib/node_modules/yarn").exists());
+        assert!(pm.join("bin/pnpm").symlink_metadata().is_ok());
+        assert!(pm.join("bin/yarn").symlink_metadata().is_err());
+        assert!(uninstall_pm_in("yarn", &anvil).is_err());
+        assert!(uninstall_pm_in("bun", &anvil).is_err());
+        assert!(uninstall_pm_in("npm", &anvil).is_err());
+        // Node apps find them, after Node.js itself.
+        let path = env("node", "24")
+            .into_iter()
+            .find(|(k, _)| k == "PATH")
+            .unwrap()
+            .1;
+        let dirs: Vec<&str> = path.split(':').collect();
+        assert!(dirs[0].ends_with("runtimes/node/24/bin"), "{path}");
+        assert!(dirs[1].ends_with("runtimes/pm/bin"), "{path}");
+        assert!(dirs[2].ends_with("runtimes/bun/bin"), "{path}");
+        fs::remove_dir_all(anvil).unwrap();
     }
 
     #[test]

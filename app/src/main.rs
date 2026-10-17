@@ -1461,6 +1461,20 @@ async fn package_managers() -> Res<Vec<anvil::runtimes::PackageManager>> {
         .map_err(|e| e.to_string())
 }
 
+/// Install pnpm, yarn or bun into Anvil's folder for the apps it runs.
+#[tauri::command]
+async fn package_manager_install(name: String) -> Res<()> {
+    tauri::async_runtime::spawn_blocking(move || anvil::runtimes::install_pm(&name))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(err)
+}
+
+#[tauri::command(async)]
+fn package_manager_uninstall(name: String) -> Res<()> {
+    anvil::runtimes::uninstall_pm(&name).map_err(err)
+}
+
 #[tauri::command]
 async fn runtime_install(handle: AppHandle, id: String, version: String) -> Res<()> {
     tauri::async_runtime::spawn_blocking(move || anvil::runtimes::install(&id, &version))
@@ -2905,6 +2919,8 @@ fn main() {
             clean_all_safe,
             runtimes,
             package_managers,
+            package_manager_install,
+            package_manager_uninstall,
             runtime_install,
             runtime_uninstall
         ])
