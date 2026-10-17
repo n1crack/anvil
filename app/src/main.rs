@@ -1223,6 +1223,12 @@ fn set_theme(handle: AppHandle, theme: Option<String>) -> Res<Settings> {
     )
 }
 
+/// Change the domain suffix and serve the new addresses.
+#[tauri::command(async)]
+fn set_tld(handle: AppHandle, tld: String) -> Res<Settings> {
+    apply(&handle, |cfg| anvil::set_tld(cfg, &tld), true)
+}
+
 #[tauri::command(async)]
 fn set_dock_icon(handle: AppHandle, on: bool) -> Res<Settings> {
     let s = apply(
@@ -1625,6 +1631,7 @@ fn main() {
             set_git_client,
             git_info,
             set_theme,
+            set_tld,
             set_dock_icon,
             set_login,
             open_config_dir,

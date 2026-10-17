@@ -26,7 +26,8 @@ optional; a missing field takes its default. After editing it by hand, restart
 | `dock_icon` | `false` | Keep the Dock icon while no window is open |
 
 If you change `tld` or `dns_port`, update `/etc/resolver/<tld>` to match (see
-[getting-started.md](getting-started.md#resolver-setup)).
+[getting-started.md](getting-started.md#resolver-setup)). `tld = "localhost"`
+needs no resolver file and no DNS server; `anvil tld <suffix>` sets it.
 
 ## Per-site settings: `[sites."<name>"]`
 

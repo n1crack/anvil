@@ -874,6 +874,34 @@ pub struct Setup {
     pub php: bool,
 }
 
+/// `.localhost` names already reach this Mac (macOS and browsers resolve them
+/// to 127.0.0.1), so they need no resolver file, no password and no DNS server.
+pub fn needs_resolver(cfg: &Config) -> bool {
+    cfg.tld != "localhost"
+}
+
+/// Use `tld` for every application's address, e.g. `test` or `localhost`.
+pub fn set_tld(cfg: &mut Config, tld: &str) -> Result<()> {
+    cfg.tld = clean_tld(tld)?;
+    save(cfg)
+}
+
+/// `.Test ` becomes `test`; anything but letters, digits and inner dashes is refused.
+fn clean_tld(tld: &str) -> Result<String> {
+    let tld = tld.trim().trim_start_matches('.').to_ascii_lowercase();
+    let ok = !tld.is_empty()
+        && tld.len() <= 63
+        && tld.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && !tld.starts_with('-')
+        && !tld.ends_with('-');
+    if !ok {
+        bail!(
+            "{tld} isn't a valid domain suffix: use letters, digits and dashes, like test or localhost"
+        );
+    }
+    Ok(tld)
+}
+
 /// The `/etc/resolver/<tld>` file Anvil needs.
 pub fn resolver_file(cfg: &Config) -> (PathBuf, String) {
     (
@@ -886,8 +914,9 @@ pub fn setup_status(cfg: &Config) -> Setup {
     let (file, want) = resolver_file(cfg);
     let root = home().join("data/caddy/pki/authorities/local/root.crt");
     Setup {
-        resolver: fs::read_to_string(file)
-            .is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace())),
+        resolver: !needs_resolver(cfg)
+            || fs::read_to_string(file)
+                .is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace())),
         trusted: !root.exists()
             || Command::new("security")
                 .arg("verify-cert")
@@ -1023,6 +1052,10 @@ impl Server {
 
         // ponytail: DNS settings are read once per process; changing tld/dns_port needs a restart of the process.
         let (port, tld) = (cfg.dns_port, cfg.tld.clone());
+        // .localhost needs no DNS; switching to another suffix later starts it then.
+        if !needs_resolver(cfg) {
+            return Ok(server);
+        }
         DNS.call_once(|| {
             std::thread::spawn(move || {
                 if let Err(e) = dns::serve(port, tld) {
@@ -1064,6 +1097,19 @@ impl Drop for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn domain_suffixes() {
+        assert_eq!(clean_tld(" .Test ").unwrap(), "test");
+        assert_eq!(clean_tld("localhost").unwrap(), "localhost");
+        for bad in ["", "a b", "-x", "x-", "x/y", "x.y", "../etc"] {
+            assert!(clean_tld(bad).is_err(), "{bad}");
+        }
+        let mut cfg = Config::default();
+        assert!(needs_resolver(&cfg));
+        cfg.tld = "localhost".into();
+        assert!(!needs_resolver(&cfg));
+    }
 
     #[test]
     fn caddy_checksums_cover_every_platform() {

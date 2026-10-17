@@ -102,6 +102,9 @@ enum Cmd {
     Trust,
     /// Run DNS, PHP-FPM and the web server in the foreground
     Start,
+    /// Show the domain suffix applications answer at, or set it: `anvil tld localhost`
+    /// needs no password or resolver file; `anvil tld test` needs one setup step
+    Tld { tld: Option<String> },
     /// List what Anvil changed on this Mac (resolver files, keychain, login item,
     /// ~/.anvil); with --yes, remove it all
     Uninstall {
@@ -269,6 +272,19 @@ fn start(cfg: &Config) -> Result<()> {
     drop(server);
     drop(services);
     Ok(())
+}
+
+/// The one-time root step for a suffix other than .localhost.
+fn print_resolver_step(cfg: &Config) {
+    if !needs_resolver(cfg) {
+        println!("*.localhost already resolves to this Mac; no resolver file needed.");
+        return;
+    }
+    println!(
+        "Run once so *.{tld} resolves to Anvil (or use `anvil tld localhost`, which needs no password):\n\n  sudo mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport {port}\\n' | sudo tee /etc/resolver/{tld}\n",
+        tld = cfg.tld,
+        port = cfg.dns_port
+    );
 }
 
 fn main() -> Result<()> {
@@ -761,11 +777,20 @@ fn main() -> Result<()> {
         Cmd::Setup => {
             ensure_caddy()?;
             save(&cfg)?;
-            println!(
-                "Run once so *.{tld} resolves to Anvil:\n\n  sudo mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport {port}\\n' | sudo tee /etc/resolver/{tld}\n\nThen `anvil trust` for HTTPS.",
-                tld = cfg.tld,
-                port = cfg.dns_port
-            );
+            print_resolver_step(&cfg);
+            println!("Then `anvil trust` for HTTPS.");
+        }
+        Cmd::Tld { tld } => {
+            if let Some(t) = tld {
+                set_tld(&mut cfg, &t)?;
+                println!("Applications now answer at https://<name>.{}", cfg.tld);
+                if !setup_status(&cfg).resolver {
+                    print_resolver_step(&cfg);
+                }
+                println!("Restart `anvil start` if it is running.");
+            } else {
+                println!("{}", cfg.tld);
+            }
         }
         Cmd::Trust => {
             trust()?;
