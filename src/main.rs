@@ -5,8 +5,29 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
+/// `--help` in the CLI's colors: headings in the brand's orange, commands and
+/// flags in cyan like everything you can type, placeholders dimmed.
+const HELP_STYLES: clap::builder::Styles = {
+    use clap::builder::styling::{Ansi256Color, AnsiColor, Color, Effects, Style};
+    const ORANGE: Style = Style::new()
+        .bold()
+        .fg_color(Some(Color::Ansi256(Ansi256Color(208))));
+    clap::builder::Styles::styled()
+        .header(ORANGE)
+        .usage(ORANGE)
+        .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan))))
+        .placeholder(Style::new().effects(Effects::DIMMED))
+        .error(
+            Style::new()
+                .bold()
+                .fg_color(Some(Color::Ansi(AnsiColor::Red))),
+        )
+        .valid(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
+        .invalid(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow))))
+};
+
 #[derive(Parser)]
-#[command(version, about = "Anvil — your tools, your rules.", styles = clap::builder::Styles::styled())]
+#[command(version, about = "Anvil — your tools, your rules.", styles = HELP_STYLES)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -414,11 +435,24 @@ fn run() -> Result<()> {
             save(&cfg)?;
         }
         Cmd::Sites => {
-            for s in sites(&cfg) {
+            let all = sites(&cfg);
+            // Columns as wide as their longest value, so a long kind ("Docker
+            // Compose") or address doesn't push the rest out of line.
+            let host = all
+                .iter()
+                .map(|s| s.host.chars().count())
+                .max()
+                .unwrap_or(0);
+            let kind = all
+                .iter()
+                .map(|s| apps::label(&s.kind).chars().count())
+                .max()
+                .unwrap_or(0);
+            for s in &all {
                 println!(
                     "{} {} {:<5} {}",
-                    cyan(format!("{:<40}", s.host)),
-                    dim(format!("{:<9}", apps::label(&s.kind))),
+                    cyan(format!("{:<host$}", s.host)),
+                    dim(format!("{:<kind$}", apps::label(&s.kind))),
                     s.php.as_deref().unwrap_or("-"),
                     dim(s.root.display())
                 );
