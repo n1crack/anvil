@@ -11,12 +11,14 @@ window.renderProcesses = (s) => {
 };
 
 async function loadProcs(name, cmd = "processes", args = {}) {
+  const before = JSON.stringify(procCache.get(name));
   try {
     procCache.set(name, await invoke(cmd, { site: name, ...args }));
   } catch (e) {
     showError(String(e));
   }
-  if (selected === name) drawProcs(name);
+  // Redraw only on a change, so focus and tooltips survive the polling.
+  if (selected === name && JSON.stringify(procCache.get(name)) !== before) drawProcs(name);
 }
 
 function drawProcs(name) {
@@ -31,6 +33,7 @@ function drawProcs(name) {
   head.append(el("h3", "res-sub", "Processes"));
   const any = rows.some((r) => r.running);
   const all = el("button", null, any ? "Stop All" : "Start All");
+  all.setAttribute("aria-label", `${any ? "Stop" : "Start"} all processes`);
   all.onclick = () => loadProcs(name, "process_run", { name: null, action: any ? "stop" : "start" });
   head.append(all);
 
@@ -45,6 +48,7 @@ function drawProcs(name) {
     const last = el("span", r.error ? "proc-last error-text" : "proc-last", r.error ?? (r.last || r.command));
     last.title = last.textContent;
     const btn = el("button", null, r.running ? "Stop" : "Start");
+    btn.setAttribute("aria-label", `${r.running ? "Stop" : "Start"} ${r.name}`);
     btn.onclick = () => loadProcs(name, "process_run", { name: r.name, action: r.running ? "stop" : "start" });
     row.append(dot, label, last, btn);
     list.append(row);
