@@ -9,14 +9,14 @@ import { ansi, clean } from "./term";
  * each line tagged with its process's name in its own color. */
 
 export const watchSel = new Map<string, string>(); // site name -> "all", "app" or "proc:<id>"
-const COLORS = [4, 5, 9, 3, 6, 2, 13, 11]; // ansi color classes, one per process in list order
+const COLORS = 6; // name colors pc0…pc5 (blue, purple, pink, orange, green, cyan), as concurrently gives them
 const MAX_LINES = 2000; // merged lines kept in All
 
 /** The app's own server when it is a process, then every other process row. */
 const entries = (name: string) =>
   (procCache.get(name)?.rows ?? [])
     .filter((r) => r.kind !== "site")
-    .map((r, i) => ({ key: r.main ? "app" : `proc:${r.id}`, row: r, color: COLORS[i % COLORS.length] }));
+    .map((r, i) => ({ key: r.main ? "app" : `proc:${r.id}`, row: r, color: `pc${i % COLORS}` }));
 const stateOf = (r) => (r.running ? "on" : r.crashed ? "bad" : "");
 
 const box = el("div", "watch");
@@ -30,8 +30,18 @@ const term = termOut("console-out watch-out");
 pane.append(head, term.out);
 box.append(list, pane);
 
-// The output shown: which app and entry, each source's reader and, for All, its unfinished last line.
-let view: { site: string; key: string; tails: Map<string, Tail>; pending: Map<string, string> } | null = null;
+// The output shown: which app and entry, each source's reader, for All its unfinished last
+// line, and whether each process ran when last drawn.
+type View = { site: string; key: string; tails: Map<string, Tail>; pending: Map<string, string>; ran: Map<string, boolean> };
+let view: View | null = null;
+
+/** A process (re)started: its log began again (`Apps::spawn`), so its output here does too. */
+function forget(v: View, key: string) {
+  v.tails.delete(key);
+  v.pending.delete(key);
+  if (v.key === key) term.out.replaceChildren();
+  else if (v.key === "all") for (const l of term.out.querySelectorAll(`[data-key="${key}"]`)) l.remove();
+}
 
 function pick(name: string, key: string) {
   watchSel.set(name, key);
@@ -47,12 +57,12 @@ list.onkeydown = (e) => {
   if (i >= 0 && i < keys.length) pick(view.site, keys[i]);
 };
 
-function item(name: string, key: string, label: string, dot: string) {
+function item(name: string, key: string, label: string, dot: string, color = "") {
   const it = el("div", "watch-item");
   it.setAttribute("role", "option");
   it.setAttribute("aria-selected", String(key === view?.key));
   it.dataset.key = key;
-  it.append(el("span", `dot ${dot}`), el("span", "watch-name", label));
+  it.append(el("span", `dot ${dot}`), el("span", `watch-name ${color}`.trim(), label));
   it.onclick = () => {
     pick(name, key);
     list.focus();
@@ -74,7 +84,7 @@ export function drawWatch(name: string) {
   let key = watchSel.get(name) ?? "all";
   if (key !== "all" && !all.some((x) => x.key === key)) key = "all";
   if (view?.site !== name || view.key !== key) {
-    view = { site: name, key, tails: new Map(), pending: new Map() };
+    view = { site: name, key, tails: new Map(), pending: new Map(), ran: new Map() };
     term.out.replaceChildren();
     term.atEnd = true;
   }
@@ -83,11 +93,16 @@ export function drawWatch(name: string) {
     term.restore();
   }
 
+  const v = view;
+  for (const x of all) {
+    if (v.ran.get(x.key) === false && x.row.running) forget(v, x.key);
+    v.ran.set(x.key, !!x.row.running);
+  }
   const running = all.filter((x) => x.row.running).length;
   const crashed = all.some((x) => x.row.crashed && !x.row.running);
   list.replaceChildren(
     item(name, "all", "All", crashed ? "bad" : running ? "on" : ""),
-    ...all.map((x) => item(name, x.key, x.row.name, stateOf(x.row))),
+    ...all.map((x) => item(name, x.key, x.row.name, stateOf(x.row), x.color)),
   );
 
   head.replaceChildren();
@@ -102,9 +117,10 @@ export function drawWatch(name: string) {
   } else {
     const r = one.row;
     head.append(el("span", "console-title", r.name), el("span", "watch-cmd", r.command));
-    const run = r.main
-      ? (action) => call("app_run", { site: name, action })
-      : (action) => loadProcs(name, "process_run", { name: r.id, action });
+    const run = (action) =>
+      (r.main ? call("app_run", { site: name, action }) : loadProcs(name, "process_run", { name: r.id, action })).then(
+        () => action === "restart" && view === v && forget(v, key),
+      );
     if (r.running || r.crashed) {
       actions.append(procBtn("Restart", `Restart ${r.name}`, () => run("restart")));
       actions.append(procBtn("■", r.running ? `Stop ${r.name}` : `Dismiss ${r.name}`, () => run("stop")));
@@ -127,7 +143,7 @@ export async function watchTick() {
       if (!v.tails.has(x.key)) v.tails.set(x.key, tail(v.site, x.key));
       const t = v.tails.get(x.key)!;
       const text = await readTail(t);
-      if (!text || v !== view) return;
+      if (!text || v !== view || v.tails.get(x.key) !== t) return;
       if (v.key !== "all") {
         term.out.replaceChildren(ansi(clean(t.raw, true)));
         return term.follow();
@@ -137,7 +153,11 @@ export async function watchTick() {
       v.pending.set(x.key, lines.pop()!);
       for (const l of lines) {
         const line = el("div", "watch-line");
-        line.append(el("span", `watch-tag ansi${x.color}`, `${x.row.name.padEnd(width)} │ `), ansi(clean(l, true)));
+        line.dataset.key = x.key;
+        // The text in its own column, so a wrapped line stays right of the tag.
+        const body = el("span", "watch-text");
+        body.append(ansi(clean(l, true)));
+        line.append(el("span", `watch-tag ${x.color}`, `${x.row.name.padEnd(width)} │ `), body);
         term.out.append(line);
       }
       while (term.out.childElementCount > MAX_LINES) term.out.firstElementChild.remove();

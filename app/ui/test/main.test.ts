@@ -130,7 +130,14 @@ describe("watch", () => {
     const lines = $$(".watch-line").map((l) => l.textContent);
     expect(lines).toContain("dev       │ server up");
     expect(lines.some((l) => l!.startsWith("docs:dev  │ ✓ built in"))).toBe(true);
-    expect($(".watch-line .watch-tag.ansi4")).not.toBeNull();
+    // Each process keeps its color, in the list and on its lines: by its place in the list.
+    const tag = (name: string) => $$(".watch-line .watch-tag").find((t) => t.textContent!.startsWith(`${name} `))!.className;
+    const named = (name: string) => $$(".watch-item .watch-name").find((n) => n.textContent === name)!.className;
+    expect(tag("dev")).toBe("watch-tag pc0");
+    expect(tag("docs:dev")).toBe("watch-tag pc1");
+    expect(named("dev")).toBe("watch-name pc0");
+    expect(named("docs:dev")).toBe("watch-name pc1");
+    expect(named("All")).toBe("watch-name");
   });
 
   test("Watch on a running row opens the tab on that process, with its colored output", async () => {
@@ -164,6 +171,7 @@ describe("watch", () => {
     await wait(80);
     expect(chosen()).toBe("proc:docs-site");
     expect($(".watch-out").dataset.empty).toBe("Not running");
+    expect($(".watch-out").textContent).toBe("");
     expect($('.watch-head [aria-label="Start docs:site"]')).not.toBeNull();
   });
 

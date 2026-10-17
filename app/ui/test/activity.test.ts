@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, test } from "vite-plus/test";
 const w = window as any;
 const wait = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 const $ = (sel: string) => document.querySelector(sel) as HTMLElement;
+const LOG = "2026-10-17 10:00:01 local.ERROR: boom\n\x1b[37;44m INFO \x1b[39;49m Server running\n";
 const row = (key: string, name: string, state: string) => ({
   key,
   name,
@@ -39,7 +40,7 @@ beforeAll(async () => {
     services: [],
   };
   w.__TAURI__ = {
-    core: { invoke: async (cmd: string) => (cmd === "activity" ? structuredClone(activity) : { entries: [], end_offset: 0 }) },
+    core: { invoke: async (cmd: string) => (cmd === "activity" ? structuredClone(activity) : { text: LOG, end_offset: LOG.length }) },
     menu: {
       Menu: { new: async ({ items }) => ({ popup: () => (w.mockMenu = items) }) },
       MenuItem: { new: async (o) => o },
@@ -76,10 +77,32 @@ describe("processes window", () => {
 });
 
 describe("processes tabs", () => {
+  test("Apps by default; a stored tab comes back, the old web one as Anvil", async () => {
+    const { storedTab } = await import("../src/activity");
+    expect(storedTab(null)).toBe("apps");
+    expect(storedTab("nonsense")).toBe("apps");
+    expect(storedTab("services")).toBe("services");
+    expect(storedTab("web")).toBe("anvil");
+  });
+
+  test("the log keeps a process's colors and tints plain lines", async () => {
+    $('tr[data-key="shop@queue"]').click();
+    await wait();
+    expect($("#log").textContent).toBe("2026-10-17 10:00:01 local.ERROR: boom\n INFO  Server running\n");
+    expect($("#log .term-time").textContent).toBe("2026-10-17 10:00:01");
+    expect($("#log .ansi1").textContent).toBe("ERROR");
+    expect($("#log .ansi-bg4.ansi7").textContent).toBe(" INFO ");
+  });
+
   const tabBtn = (t: string) => $(`#tabs [data-tab="${t}"]`);
   test("each tab counts its rows and shows only them; the tab is remembered", async () => {
     expect(tabBtn("apps").textContent).toBe("Apps4");
-    expect(tabBtn("web").textContent).toBe("Web server");
+    expect(tabBtn("anvil").textContent).toBe("Anvil");
+    expect([...document.querySelectorAll("#tabs [role=tab]")].map((b) => (b as HTMLElement).dataset.tab)).toEqual([
+      "apps",
+      "services",
+      "anvil",
+    ]);
     expect(tabBtn("apps").getAttribute("aria-selected")).toBe("true");
     tabBtn("services").click();
     expect(tabBtn("services").getAttribute("aria-selected")).toBe("true");
@@ -95,7 +118,7 @@ describe("processes tabs", () => {
   test("the selected row's log stays open on another tab", async () => {
     $('tr[data-key="shop@queue"]').click();
     await wait();
-    tabBtn("web").click();
+    tabBtn("anvil").click();
     expect($("#pane").hidden).toBe(false);
     tabBtn("apps").click();
   });
