@@ -509,13 +509,18 @@ impl Apps {
         self.spawn(&site.name, &site.path, &command, env)
     }
 
-    /// One of an app's other processes (queue, Vite…), see `processes`.
-    pub fn start_process(&mut self, site: &Site, p: &crate::processes::Process) -> Result<()> {
+    /// One of an app's other processes (queue, Vite…), see `processes`; `tld` as in `start`.
+    pub fn start_process(
+        &mut self,
+        site: &Site,
+        p: &crate::processes::Process,
+        tld: &str,
+    ) -> Result<()> {
         let key = crate::processes::key(&site.name, &p.id);
         if self.running(&key) {
             return Ok(());
         }
-        self.spawn(&key, &site.path, &p.command, process_env(site, p))?;
+        self.spawn(&key, &site.path, &p.command, process_env(site, p, tld))?;
         self.processes.insert(key);
         Ok(())
     }
@@ -592,10 +597,19 @@ impl Drop for Apps {
     }
 }
 
-/// A process's environment: Anvil's PATH, plus `PORT` for a server row (`$PORT` in its command).
-pub(crate) fn process_env(site: &Site, p: &crate::processes::Process) -> Vec<(String, String)> {
+/// A process's environment: Anvil's PATH, plus `PORT` for a server row (`$PORT` in its
+/// command), and Vite's allowed hosts as for the app itself (`start`).
+pub(crate) fn process_env(
+    site: &Site,
+    p: &crate::processes::Process,
+    tld: &str,
+) -> Vec<(String, String)> {
     let mut env = crate::processes::env(site);
     env.extend(p.port.map(|port| ("PORT".to_string(), port.to_string())));
+    env.push((
+        "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),
+        format!(".{tld}"),
+    ));
     env
 }
 
@@ -846,8 +860,8 @@ mod tests {
         let mut apps = Apps::in_home(dir.join("home"));
         let site = site_at(&dir);
         let (boom, idle) = (proc("boom", "sh -c 'exit 3'"), proc("docs:dev", "sleep 30"));
-        apps.start_process(&site, &idle).unwrap();
-        apps.start_process(&site, &boom).unwrap();
+        apps.start_process(&site, &idle, "test").unwrap();
+        apps.start_process(&site, &boom, "test").unwrap();
         std::thread::sleep(Duration::from_millis(300));
 
         let crashed = apps.crashed();
@@ -862,7 +876,7 @@ mod tests {
         assert!(dir.join("home/log/app-shop@docs-dev.log").exists());
 
         // Starting it again clears the record; crashing again leaves exactly one.
-        apps.start_process(&site, &boom).unwrap();
+        apps.start_process(&site, &boom, "test").unwrap();
         assert!(!apps.exits.contains_key("shop@boom"));
         std::thread::sleep(Duration::from_millis(300));
         assert_eq!(apps.crashed().len(), 1);

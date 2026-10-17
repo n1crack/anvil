@@ -650,7 +650,7 @@ fn process_run(
             app.app_errors.lock().unwrap().remove(&key);
         }
         if action != "stop" {
-            let started = app.apps.lock().unwrap().start_process(&s, &p);
+            let started = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld);
             if let Err(e) = started {
                 app.app_errors.lock().unwrap().insert(key, err(e));
             }

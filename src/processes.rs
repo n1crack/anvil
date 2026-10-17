@@ -1043,10 +1043,16 @@ mod tests {
             port: Some(45001),
         };
         let site = site(Path::new("/s"), "vite");
-        assert!(apps::process_env(&site, &p).contains(&("PORT".into(), "45001".into())));
+        let env = apps::process_env(&site, &p, "test");
+        assert!(env.contains(&("PORT".into(), "45001".into())));
+        // Vite answers 403 to a host it doesn't know, e.g. docs.vuefinder.test.
+        assert!(env.contains(&(
+            "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),
+            ".test".into()
+        )));
         p.port = None;
         assert!(
-            !apps::process_env(&site, &p)
+            !apps::process_env(&site, &p, "test")
                 .iter()
                 .any(|(k, _)| k == "PORT")
         );
