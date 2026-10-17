@@ -25,6 +25,8 @@ export interface Site {
 
 export interface Snapshot {
   sites: Site[];
+  /** Parked apps hidden from Anvil. */
+  hidden: { name: string; path: string; kind: string }[];
   tld: string;
   https_port: number;
   http_port: number;

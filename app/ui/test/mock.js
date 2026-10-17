@@ -32,6 +32,7 @@ window.mockSnap = {
     mockSite("vuefinder", "vite", { command: "npm run dev", port: 5173 }),
     mockSite("stack", "compose", { secure: false, runtime_version: null }),
   ],
+  hidden: [{ name: "old-blog", path: "/Users/x/Sites/old-blog", kind: "laravel" }],
   tld: "test",
   https_port: 443,
   http_port: 80,
@@ -733,6 +734,12 @@ const mockHandle = (cmd, a) => {
       return Math.floor(Date.now() / 1000) - 7200;
     case "git_info":
       return { branch: "main", detached: false, ahead: 0, behind: 0, changed: 3, upstream: null, commit: null, remote: null };
+    case "unhide_site": {
+      const h = mockSnap.hidden.find((x) => x.name === a.site);
+      mockSnap.hidden = mockSnap.hidden.filter((x) => x !== h);
+      mockSnap.sites.push(mockSite(h.name, h.kind));
+      return mockSnap;
+    }
     case "set_secure": {
       const s = mockSnap.sites.find((x) => x.name === a.site);
       s.secure = a.on;

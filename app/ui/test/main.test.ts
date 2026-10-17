@@ -1037,3 +1037,45 @@ describe("new application", () => {
     $("#new-cancel").click();
   });
 });
+
+describe("show hidden", () => {
+  const toggle = async () => {
+    $("#filter").click();
+    await wait(60);
+    (w.mockMenu as any[]).find((i) => i.text === "Show Hidden Applications").action();
+    await wait(60);
+  };
+
+  test("off by default: hidden apps are not listed", () => {
+    expect(localStorage.getItem("showHidden")).toBeNull();
+    expect($(`#list [data-name="old-blog"]`)).toBeNull();
+  });
+
+  test("on: a hidden app is listed dimmed, with a hidden label and no lock, and its pane is a notice", async () => {
+    await toggle();
+    expect(localStorage.getItem("showHidden")).toBe("1");
+    const row = $(`#list [data-name="old-blog"]`);
+    expect(row.classList.contains("hidden-app")).toBe(true);
+    expect(row.querySelector(".kind")!.textContent).toBe("hidden");
+    expect(row.querySelector(".lock")).toBeNull();
+    row.click();
+    await wait(80);
+    expect($("#site .site-name").textContent).toBe("old-blog");
+    expect($("#site .hidden-note").textContent).toContain("Hidden from Anvil — not served.");
+    expect($$("#site [role=tab]").length).toBe(0);
+  });
+
+  test("right-click offers only Show in Anvil, which unhides the app and keeps it selected", async () => {
+    $(`#list [data-name="old-blog"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait(80);
+    const menu = w.mockMenu as any[];
+    expect(menu.map((i) => i.text)).toEqual(["Show in Anvil"]);
+    menu[0].action();
+    await wait(80);
+    expect(calls("unhide_site").at(-1)![1]).toEqual({ site: "old-blog" });
+    const row = $(`#list [data-name="old-blog"]`);
+    expect(row.classList.contains("hidden-app")).toBe(false);
+    expect(row.getAttribute("aria-current")).toBe("true");
+    expect($("#site .hidden-note")).toBeNull();
+  });
+});

@@ -181,6 +181,24 @@ export function mark(s) {
 export let sortBy = localStorage.getItem("sortBy") ?? "name";
 // How the list is split after your own groups: by parked folder, by type, or not at all.
 export let groupBy = localStorage.getItem("groupBy") ?? "folder";
+export let showHidden = localStorage.getItem("showHidden") === "1";
+
+/** Apps hidden from Anvil, shaped like sites, while "Show Hidden Applications" is on. They aren't served. */
+export function hiddenSites(): any[] {
+  if (!showHidden) return [];
+  return (snap.hidden ?? []).map((h) => ({
+    ...h,
+    hiddenApp: true,
+    host: `${h.name}.${snap.tld}`,
+    root: h.path,
+    secure: false,
+    linked: false,
+    parked_in: h.path.slice(0, h.path.lastIndexOf("/")),
+    modified: 0,
+    php: null,
+    php_pinned: false,
+  }));
+}
 // Sidebar sections folded from their heading, by "mode:title".
 export const folded = new Set(JSON.parse(localStorage.getItem("sections") ?? "[]"));
 
@@ -240,6 +258,7 @@ export function markBox(m, badge) {
 export function row(s, { child = false, kids = 0, path = true, kind: showKind = true } = {}) {
   const b = document.createElement("button");
   b.className = child ? "item child" : "item";
+  if (s.hiddenApp) b.classList.add("hidden-app");
   b.dataset.name = s.name;
   b.setAttribute("aria-current", String(s.name === selected));
   if (child) {
@@ -257,7 +276,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   // HTTPS shows as a lock after the name; it's turned on and off from the right-click menu.
   // While it changes only a spinner shows: words would be cut off here; the header says them.
   // Folders and Compose projects have no address: a leftover HTTPS flag means nothing there.
-  if (!serves(s)) {
+  if (s.hiddenApp || !serves(s)) {
     /* no lock */
   } else if (securing.has(s.name)) {
     const busy = el("span", "securing");
@@ -289,7 +308,8 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   if (child) end.append(el("span", "alias", "alias"));
   // A plain PHP app shows only its pinned version, not "PHP" twice.
   // Under a type heading the type would only repeat it.
-  if (showKind && !child && s.kind !== "static" && !(s.kind === "php" && s.php_pinned)) {
+  if (s.hiddenApp) end.append(el("span", "kind", "hidden"));
+  else if (showKind && !child && s.kind !== "static" && !(s.kind === "php" && s.php_pinned)) {
     const kind = document.createElement("span");
     kind.className = `kind kind-${s.kind}`;
     kind.textContent = snap.kinds.find(([id]) => id === s.kind)?.[1] ?? s.kind;
@@ -310,7 +330,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   end.append(d);
   if (child) b.append(text, end);
   else {
-    const state = snap.app_states[s.name];
+    const state = s.hiddenApp ? undefined : snap.app_states[s.name];
     // Green while anything of the app runs, amber while its server starts, red after a crash.
     const box = markBox(mark(s), state && { running: "on", starting: "warm", crashed: "bad" }[state]);
     if (state === "crashed") $(".run-badge", box).title = "A process crashed";
@@ -326,7 +346,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   };
   b.onmouseenter = (e) => {
     // The list redraws while the mouse rests on it (a starting app polls): keep that row's card.
-    if (cardFor === s.name) return;
+    if (cardFor === s.name || s.hiddenApp) return;
     hideCard();
     // Not while dragging, nor on a row whose context menu was opened until the mouse leaves it.
     if (e.buttons || cardMuted === s.name) return;
@@ -442,15 +462,16 @@ export function renderList() {
   const list = $("#list");
   list.replaceChildren();
   const note = filterNote("apps", kindLabel);
-  if (note && snap.sites.length) list.append(note);
+  const hiddenApps = hiddenSites();
+  if (note && (snap.sites.length || hiddenApps.length)) list.append(note);
 
-  if (!snap.sites.length) {
+  if (!snap.sites.length && !hiddenApps.length) {
     list.append(el("p", "empty", "No applications yet."));
     return;
   }
 
   // A linked name pointing at a parked project's folder is an extra domain for that project.
-  const parked = snap.sites.filter((s) => !s.linked);
+  const parked = [...snap.sites.filter((s) => !s.linked), ...hiddenApps];
   const byPath = new Map(parked.map((s) => [s.path, []]));
   const linked: any[] = [];
   for (const s of snap.sites.filter((s) => s.linked)) (byPath.get(s.path) ?? linked).push(s);
@@ -562,6 +583,10 @@ export async function siteMenu(s) {
   const groupOf = Object.keys(snap.groups).find((g) => snap.groups[g].includes(s.name));
   const groups = [...new Set(["Favorites", ...Object.keys(snap.groups)])];
 
+  if (s.hiddenApp) {
+    (await M.Menu.new({ items: [await M.MenuItem.new({ text: "Show in Anvil", action: () => unhide(s) })] })).popup();
+    return;
+  }
   const items: any[] = [];
   if (serves(s)) {
     items.push(await M.CheckMenuItem.new({ text: "HTTPS", checked: s.secure, action: () => setSecure(s) }), await sep());
@@ -597,6 +622,15 @@ export function setView(key, value) {
   else groupBy = value;
   localStorage.setItem(key, value);
   renderList();
+}
+
+export const unhide = (s) => call("unhide_site", { site: s.name });
+
+export function setShowHidden(on) {
+  showHidden = on;
+  localStorage.setItem("showHidden", on ? "1" : "0");
+  renderList();
+  renderSite();
 }
 
 /** Inline text prompt under the search field. Resolves to the text, or null when cancelled. */
@@ -823,7 +857,7 @@ export function drawOpenWith(root) {
 
 export function renderSite() {
   const root = $("#site");
-  const s = snap.sites.find((x) => x.name === selected);
+  const s = snap.sites.find((x) => x.name === selected) ?? hiddenSites().find((x) => x.name === selected);
   if (!snap.sites.length) return welcome(root);
   if (!s) {
     root.innerHTML = `<div class="placeholder">Select an application</div>`;
@@ -834,6 +868,16 @@ export function renderSite() {
   root.replaceChildren($("#site-tpl").content.cloneNode(true));
   $(".site-name", root).textContent = s.name;
   $(".site-title .mark", root).replaceWith(Object.assign(mark(s), { className: "mark big" }));
+  if (s.hiddenApp) {
+    // Not served: the header and a notice, no tabs.
+    for (const x of root.querySelectorAll(".site-meta, .head-side, .run-error, .tabs, [role=tabpanel]")) x.remove();
+    const note = el("p", "hidden-note", "Hidden from Anvil — not served.");
+    const show = el("button", "inline-action", "Show in Anvil");
+    show.onclick = () => unhide(s);
+    note.append(show);
+    root.append(note);
+    return;
+  }
   drawMeta();
   drawOpenWith(root);
   for (const b of root.querySelectorAll("[data-open]")) b.onclick = () => open(b.dataset.open);
@@ -1399,6 +1443,7 @@ $("#filter").onclick = async () => {
             ["modified", "Date Modified"],
           ]),
         }),
+        M.CheckMenuItem.new({ text: "Show Hidden Applications", checked: showHidden, action: () => setShowHidden(!showHidden) }),
         sep(),
       ]
     : [];

@@ -27,6 +27,8 @@ struct App {
 #[derive(Serialize)]
 struct Snapshot {
     sites: Vec<Site>,
+    /// Parked folders hidden from Anvil, for the list's "Show Hidden Applications".
+    hidden: Vec<anvil::HiddenSite>,
     tld: String,
     https_port: u16,
     /// Port for addresses of sites without HTTPS.
@@ -161,6 +163,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
             .map(|id| (*id, anvil::runtimes::installed(id)))
             .collect(),
         sites,
+        hidden: anvil::hidden_sites(&cfg),
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
         editor: cfg.editor.clone(),

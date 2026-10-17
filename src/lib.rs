@@ -289,6 +289,41 @@ fn site_php(kind: &str, version: Option<String>, installed: &[String]) -> Option
     version.filter(|v| kind != "static" || installed.contains(v))
 }
 
+/// A parked folder hidden from Anvil: only what the list needs.
+#[derive(Serialize)]
+pub struct HiddenSite {
+    pub name: String,
+    pub path: PathBuf,
+    pub kind: String,
+}
+
+/// The parked folders whose names are in `cfg.hidden`, for the list's "Show Hidden Applications".
+pub fn hidden_sites(cfg: &Config) -> Vec<HiddenSite> {
+    let mut found = BTreeMap::new();
+    for dir in &cfg.paths {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let name = site_name(&e.file_name().to_string_lossy());
+            if e.path().is_dir() && !name.starts_with('.') && cfg.hidden.contains(&name) {
+                found.insert(name, e.path());
+            }
+        }
+    }
+    found
+        .into_iter()
+        .map(|(name, path)| {
+            let kind = cfg
+                .sites
+                .get(&name)
+                .and_then(|s| s.kind.clone())
+                .unwrap_or_else(|| apps::detect(&path).to_string());
+            HiddenSite { name, path, kind }
+        })
+        .collect()
+}
+
 pub fn sites(cfg: &Config) -> Vec<Site> {
     let mut found = BTreeMap::new();
     for dir in &cfg.paths {
@@ -1549,7 +1584,11 @@ mod tests {
         assert!(dir.join("shop").is_dir());
         // Hiding keeps the app's group, so showing it again restores it as it was.
         assert_eq!(cfg.groups["Clients"], ["shop"]);
+        let hidden = hidden_sites(&cfg);
+        assert_eq!(hidden.len(), 1);
+        assert_eq!(hidden[0].name, "shop");
         unhide(&mut cfg, "shop").unwrap();
+        assert!(hidden_sites(&cfg).is_empty());
         assert!(sites(&cfg).iter().any(|s| s.name == "shop"));
         fs::remove_dir_all(dir).unwrap();
     }

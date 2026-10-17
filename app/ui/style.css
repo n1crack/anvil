@@ -1533,6 +1533,11 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   white-space: nowrap;
 }
 
+/* Hidden from Anvil: dimmed, not served. */
+.item.hidden-app .mark,
+.item.hidden-app .name { opacity: 0.5; }
+.hidden-note { margin: 12px 0; color: var(--muted); }
+
 /* Starting: a green ring that is filling in; heat colours stay with the brand. */
 .dot.warm {
   background: color-mix(in srgb, var(--ok) 35%, transparent);
