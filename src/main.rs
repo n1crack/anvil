@@ -273,8 +273,10 @@ fn start(cfg: &Config) -> Result<()> {
 
 fn main() -> Result<()> {
     let cmd = Cli::parse().cmd;
-    // A broken config must not stop an uninstall.
-    let mut cfg = match (&cmd, load()) {
+    // A broken config must not stop an uninstall; it then keeps ~/.anvil.
+    let loaded = load();
+    let config_ok = loaded.is_ok();
+    let mut cfg = match (&cmd, loaded) {
         (Cmd::Uninstall { .. }, Err(_)) => Config::default(),
         (_, cfg) => cfg?,
     };
@@ -770,7 +772,7 @@ fn main() -> Result<()> {
             println!("Anvil's certificate authority is now trusted.");
         }
         Cmd::Start => start(&cfg)?,
-        Cmd::Uninstall { yes } => anvil::uninstall::uninstall(&cfg, yes)?,
+        Cmd::Uninstall { yes } => anvil::uninstall::uninstall(&cfg, config_ok, yes)?,
     }
     Ok(())
 }
