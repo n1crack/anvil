@@ -69,7 +69,7 @@ anvil tld localhost        # applications answer at https://<folder>.localhost:8
 ```
 
 In the app: **Settings → General → Domain**, or **Use .localhost instead** in
-the setup bar. Anvil then runs no DNS server; `anvil tld test` switches back.
+the setup bar. `.localhost` needs no DNS server; `anvil tld test` switches back.
 
 ## Add projects and start
 

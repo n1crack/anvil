@@ -1226,7 +1226,17 @@ fn set_theme(handle: AppHandle, theme: Option<String>) -> Res<Settings> {
 /// Change the domain suffix and serve the new addresses.
 #[tauri::command(async)]
 fn set_tld(handle: AppHandle, tld: String) -> Res<Settings> {
-    apply(&handle, |cfg| anvil::set_tld(cfg, &tld), true)
+    let settings = apply(&handle, |cfg| anvil::set_tld(cfg, &tld), true)?;
+    // Running dev servers were told which hosts to accept; start them again with the new one.
+    let app = handle.state::<App>();
+    let cfg = anvil::load().map_err(err)?;
+    let names = app.apps.lock().unwrap().names();
+    for name in names {
+        app.apps.lock().unwrap().stop(&name);
+        start_app(&app, &cfg, &name);
+    }
+    changed(&handle);
+    Ok(settings)
 }
 
 #[tauri::command(async)]
