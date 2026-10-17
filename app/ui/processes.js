@@ -196,7 +196,7 @@ function procRow({ name, state, detail, error, title, busy, open, run, auto, web
 const CMD_MAX = 6; // commands listed before "Show all"
 
 /** "now", "5m", "2h", "3d" since unix seconds `at`. */
-function ago(at) {
+function agoShort(at) {
   const s = Date.now() / 1000 - at;
   if (s < 60) return "now";
   if (s < 3600) return `${Math.floor(s / 60)}m`;
@@ -259,7 +259,7 @@ function cmdRow(name, c) {
     result.title = "Running";
   } else if (c.exit) {
     const ok = c.exit.code === 0;
-    result.append(el("span", ok ? "cmd-ok" : "cmd-bad", ok ? "✓" : "✗"), ` ${ago(c.exit.at)}`);
+    result.append(el("span", ok ? "cmd-ok" : "cmd-bad", ok ? "✓" : "✗"), ` ${agoShort(c.exit.at)}`);
     result.title = `${ok ? "Succeeded" : "Failed"} ${new Date(c.exit.at * 1000).toLocaleString()}`;
   }
   row.append(actions, result);

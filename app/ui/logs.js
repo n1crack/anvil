@@ -416,6 +416,8 @@ async function clearLog(v) {
     await invoke("log_clear", { site: v.site, source: src.id });
     src.bytes = 0;
     drawFiles(v);
+    // Show the file as it is now: empty, not the entries read before.
+    await loadLogs(v);
     toast(`Cleared ${src.label}`);
   } catch (e) {
     showError(String(e));
