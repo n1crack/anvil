@@ -817,6 +817,37 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   color: var(--muted);
 }
 
+/* Storage: Anvil's files or the applications', then groups with their size. */
+.storage-tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin: 8px 0 16px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--steel-hover);
+}
+
+.storage-tabs button {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+}
+
+.storage-tabs button[aria-selected="true"] { background: var(--selected); color: var(--text); }
+.storage-tabs span { margin-left: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.page h2.storage-group {
+  display: flex;
+  justify-content: space-between;
+  max-width: 600px;
+  margin-top: 20px;
+}
+
+.page h2.storage-group span { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+
 .page .group {
   max-width: 600px;
   margin-top: 8px;

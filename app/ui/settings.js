@@ -136,44 +136,67 @@ async function loadAnvilStorage() {
   } catch (e) {
     return showError(String(e));
   }
-  $("#anvil-total").textContent = `Anvil uses ${bytes(st.total)} for PHP, languages, services, data, caches and logs.`;
-  const list = $("#anvil-items");
-  list.replaceChildren();
-  for (const i of st.items) {
-    const row = document.createElement("div");
-    row.className = "row";
-    const info = document.createElement("span");
-    const name = document.createElement("span");
-    name.textContent = i.label;
-    const note = document.createElement("small");
-    note.textContent = i.note;
-    info.append(name, note);
-    const actions = document.createElement("span");
-    actions.className = "actions-inline";
-    if (i.safety !== "keep") {
-      const tag = document.createElement("span");
-      tag.className = `safety ${i.safety}`;
-      tag.textContent = SAFETY_LABEL[i.safety];
-      actions.append(tag);
-    }
-    const size = document.createElement("span");
-    size.className = "size";
-    size.textContent = bytes(i.bytes);
-    actions.append(size);
-    if (i.safety === "safe") {
-      actions.append(button("Delete", async () => {
-        if (!(await confirmDelete(`Delete ${i.label}?`, `${i.note}. This frees about ${bytes(i.bytes)}.`))) return;
-        try {
-          await invoke("clean_anvil", { path: i.path });
-        } catch (e) {
-          showError(String(e));
-        }
-        loadAnvilStorage();
-      }));
-    }
-    row.append(info, actions);
-    list.append(row);
+  $("#anvil-total").textContent = `PHP, languages, services, their data, caches and logs. Caches and logs can be deleted safely.`;
+  $("#anvil-size").textContent = bytes(st.total);
+  const box = $("#anvil-items");
+  box.replaceChildren();
+  // One group per kind of thing, in this order; sizes add up per group.
+  const groups = [
+    ["PHP", "PHP"], ["Languages", "Languages"], ["Services", "Service programs"], ["Data", "Service data"],
+    ["Anvil", "Web server"], ["Cache", "Caches"], ["Logs", "Logs"],
+  ];
+  for (const [cat, title] of groups) {
+    const items = st.items.filter((i) => i.category === cat);
+    if (!items.length) continue;
+    const head = document.createElement("h2");
+    head.className = "storage-group";
+    head.append(title, Object.assign(document.createElement("span"), { textContent: bytes(items.reduce((a, i) => a + i.bytes, 0)) }));
+    const list = document.createElement("div");
+    list.className = "group";
+    box.append(head);
+    // A note every item shares is said once, under the heading.
+    const shared = items.every((i) => i.note === items[0].note) && items.length > 1 ? items[0].note : null;
+    if (shared) box.append(Object.assign(document.createElement("p"), { className: "hint", textContent: shared }));
+    box.append(list);
+    for (const i of items) drawAnvilItem(list, i, !shared);
   }
+}
+
+function drawAnvilItem(list, i, withNote) {
+  const row = document.createElement("div");
+  row.className = "row";
+  const info = document.createElement("span");
+  const name = document.createElement("span");
+  name.textContent = i.label;
+  const note = document.createElement("small");
+  note.textContent = i.note;
+  info.append(name);
+  if (withNote) info.append(note);
+  const actions = document.createElement("span");
+  actions.className = "actions-inline";
+  if (i.safety !== "keep") {
+    const tag = document.createElement("span");
+    tag.className = `safety ${i.safety}`;
+    tag.textContent = SAFETY_LABEL[i.safety];
+    actions.append(tag);
+  }
+  const size = document.createElement("span");
+  size.className = "size";
+  size.textContent = bytes(i.bytes);
+  actions.append(size);
+  if (i.safety === "safe") {
+    actions.append(button("Delete", async () => {
+      if (!(await confirmDelete(`Delete ${i.label}?`, `${i.note}. This frees about ${bytes(i.bytes)}.`))) return;
+      try {
+        await invoke("clean_anvil", { path: i.path });
+      } catch (e) {
+        showError(String(e));
+      }
+      loadAnvilStorage();
+    }));
+  }
+  row.append(info, actions);
+  list.append(row);
 }
 
 /* Application sizes: the last measurement shows at once, and a new one fills
@@ -228,6 +251,7 @@ function drawSizes() {
   const apps = [...sizes.values()].sort((a, b) => b.total - a.total);
   const sum = (k) => apps.reduce((a, x) => a + x[k], 0);
   const when = measuredAt ? agoText(measuredAt) : "";
+  $("#apps-size").textContent = apps.length ? bytes(sum("total")) : "";
   $("#apps-hint").textContent = !apps.length
     ? "Measuring every application…"
     : `${apps.length} applications use ${bytes(sum("total"))}. ${bytes(sum("safe"))} is logs and caches that can be deleted safely; ` +
@@ -420,6 +444,15 @@ for (const input of document.querySelectorAll("[data-ini]")) {
     }
   };
 }
+
+// Storage: Anvil's own files or the applications', one at a time.
+function showStorage(which) {
+  localStorage.setItem("storageTab", which);
+  for (const b of document.querySelectorAll("[data-storage]")) b.setAttribute("aria-selected", b.dataset.storage === which);
+  for (const p of document.querySelectorAll("[data-storage-panel]")) p.hidden = p.dataset.storagePanel !== which;
+}
+for (const b of document.querySelectorAll("[data-storage]")) b.onclick = () => showStorage(b.dataset.storage);
+showStorage(localStorage.getItem("storageTab") === "apps" ? "apps" : "anvil");
 
 for (const b of document.querySelectorAll("[data-page]")) {
   b.onclick = () => {

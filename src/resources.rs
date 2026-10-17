@@ -950,7 +950,7 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
             h.join("php").join(&v),
             "PHP",
             Safety::Keep,
-            "Remove it in Settings › PHP",
+            "Remove versions in Settings › PHP",
         ));
     }
     for id in crate::runtimes::RUNTIMES {
@@ -965,11 +965,11 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
     }
     for id in services::SERVICES {
         entries.push((
-            format!("{id} program"),
+            services::name(id).to_string(),
             h.join("services").join(id),
             "Services",
             Safety::Keep,
-            "Shared by every service of this kind; `anvil service uninstall` removes it once unused",
+            "The program, shared by every service of this kind",
         ));
     }
     // Every instance's data, including ones removed from Anvil (kept on purpose).
