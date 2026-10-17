@@ -300,6 +300,35 @@ async fn git_info(site: String) -> Res<Option<anvil::git::GitInfo>> {
     .map_err(|e| e.to_string())?
 }
 
+fn site_dir(site: &str) -> Res<std::path::PathBuf> {
+    let cfg = anvil::load().map_err(err)?;
+    anvil::sites(&cfg)
+        .into_iter()
+        .find(|s| s.name == site)
+        .map(|s| s.path)
+        .ok_or_else(|| format!("No app named {site}"))
+}
+
+/// Dependencies from the app's manifests and lock files, cached until they change.
+#[tauri::command]
+async fn packages(site: String) -> Res<anvil::packages::Packages> {
+    tauri::async_runtime::spawn_blocking(move || Ok(anvil::packages::cached(&site_dir(&site)?)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Newer versions of the app's direct dependencies, asked from each registry.
+#[tauri::command]
+async fn package_updates(site: String) -> Res<Vec<anvil::packages::Update>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(anvil::packages::updates(&anvil::packages::cached(
+            &site_dir(&site)?,
+        )))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Delete one cleanable item of an app (see `resources::clean` for the guards).
 #[tauri::command]
 async fn clean(handle: AppHandle, site: String, path: String) -> Res<u64> {
@@ -1500,6 +1529,8 @@ fn main() {
             set_app,
             open_log,
             resources,
+            packages,
+            package_updates,
             clean,
             log_sources,
             log_read,
