@@ -223,7 +223,6 @@ button, select, input { font: inherit; color: inherit; }
   font-variant-numeric: tabular-nums;
 }
 
-
 .empty .empty-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 
 .empty .empty-actions button {
@@ -1107,7 +1106,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .safety.rebuild { background: var(--steel-raised); color: var(--text); }
 .safety.keep { background: var(--steel-raised); color: var(--muted); }
 
-
 .res-cells .del,
 .clean-all {
   height: 24px;
@@ -1126,7 +1124,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 /* Delete stays visible, quiet, so first-time users find it. */
 .res-cells .del { width: 60px; }
 .res-cells .del-space { width: 60px; }
-
 
 .page .size {
   min-width: 64px;
@@ -1457,7 +1454,6 @@ kbd {
 
 /* ---------- Logs ---------- */
 
-
 .logs-bar {
   display: flex;
   align-items: center;
@@ -1514,7 +1510,6 @@ kbd {
 }
 
 .chip-btn:hover { color: var(--text); }
-.chip-btn[aria-checked="true"],
 .chip-btn[aria-selected="true"] { background: var(--selected); color: var(--text); }
 
 /* Packages: which manager, then which list. */
@@ -1526,6 +1521,7 @@ kbd {
 }
 
 .pkg-seg { display: flex; flex-wrap: wrap; gap: 2px; }
+.pkg-manager { align-self: center; font-size: 12px; }
 .pkg-seg + .pkg-seg { padding-left: 16px; border-left: 1px solid var(--line); }
 .pkg-count { margin-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
@@ -1674,7 +1670,6 @@ kbd {
 .pkg-chips .chip { gap: 4px; padding: 2px 9px; color: var(--muted); }
 .pkg-chips .chip b { font-weight: 500; color: var(--text); }
 
-
 .pkg-tools {
   display: flex;
   align-items: center;
@@ -1712,7 +1707,6 @@ kbd {
 .pkg-new.major { background: var(--selected); color: var(--text); }
 .pkg-new.minor,
 .pkg-new.patch { background: var(--steel-raised); color: var(--muted); }
-
 
 .pkg-none { margin: 4px 0; }
 
@@ -1827,10 +1821,6 @@ kbd {
   background: var(--steel-raised);
 }
 
-
-
-
-
 /* First run and empty panes: one message, one primary action. */
 .welcome {
   display: flex;
@@ -1912,6 +1902,8 @@ kbd {
 /* One content column in the app and service pane: header, tabs and panels end together. */
 #site > *,
 #setup { max-width: 720px; }
+/* The sticky header carries the pane's padding on both sides. */
+#site > .site-top { max-width: calc(720px + 72px); }
 #site .group,
 #site .env,
 #site .pkg-tools { max-width: none; }

@@ -49,6 +49,8 @@ function drawPackages(name) {
   if (!body) return;
   const p = pkgCache.get(name);
   const focused = document.activeElement?.classList.contains("pkg-search");
+  // A picked tab is redrawn; focus goes back to the selected tab of its row.
+  const tabRow = document.activeElement?.closest(".pkg-seg")?.getAttribute("aria-label");
   body.replaceChildren();
   if (!p) return body.append(el("p", "muted", "Reading…"));
   if (p.error) return body.append(el("p", "error", p.error));
@@ -81,6 +83,7 @@ function drawPackages(name) {
 
   const updates = Array.isArray(up) ? up : [];
   drawLists(body, name, p.ecosystems, updates);
+  if (tabRow) $(`.pkg-seg[aria-label="${tabRow}"] [aria-selected=true]`, body)?.focus();
   if (focused) {
     const again = $(".pkg-search", body);
     again.focus();
@@ -116,7 +119,10 @@ function drawLists(body, name, ecosystems, updates) {
     ["scripts", "Scripts", e.scripts.filter(([s, cmd]) => !needle || `${s} ${cmd}`.toLowerCase().includes(needle))],
   ];
   const view = pkgView.get(name) ?? {};
-  const e = ecosystems.find((x) => x.id === view.eco) ?? ecosystems[0];
+  const hits = (x) => parts(x).some(([, , rows]) => rows.length);
+  const picked = ecosystems.find((x) => x.id === view.eco) ?? ecosystems[0];
+  // While searching, a manager without matches gives way to one with them.
+  const e = !needle || hits(picked) ? picked : ecosystems.find(hits) ?? picked;
   const shown = parts(e).filter(([, , rows]) => rows.length || !needle);
   const part = shown.find(([id]) => id === view.part) ?? shown.find(([, , rows]) => rows.length) ?? shown[0];
   const set = (change) => {
@@ -140,13 +146,16 @@ function drawLists(body, name, ecosystems, updates) {
     b.onclick = pick;
     return b;
   };
+  const label = (x) => (x.manager && x.id === "npm" ? `${x.label} (${x.manager})` : x.label);
   if (ecosystems.length > 1) {
     tabs("Package manager", ecosystems.map((x) =>
-      tab(x.manager && x.id === "npm" ? `${x.label} (${x.manager})` : x.label,
-        parts(x).reduce((n, [id, , rows]) => n + (id === "scripts" ? 0 : rows.length), 0),
-        x === e, () => set({ eco: x.id, part: null }))));
+      tab(label(x), parts(x).reduce((n, [, , rows]) => n + rows.length, 0), x === e, () => set({ eco: x.id, part: null }))));
+  } else {
+    bar.append(el("span", "pkg-manager muted", label(e)));
   }
-  tabs("Show", shown.map(([id, label, rows]) => tab(label, rows.length, id === part?.[0], () => set({ part: id }))));
+  if (shown.length) {
+    tabs("Show", shown.map(([id, title, rows]) => tab(title, rows.length, id === part?.[0], () => set({ part: id }))));
+  }
   body.append(bar);
 
   const newer = new Map(updates.filter((u) => u.ecosystem === e.id).map((u) => [u.name, u]));

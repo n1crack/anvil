@@ -145,6 +145,9 @@ async function loadAnvilStorage() {
     ["PHP", "PHP"], ["Languages", "Languages"], ["Services", "Service programs"], ["Data", "Service data"],
     ["Anvil", "Web server"], ["Cache", "Caches"], ["Logs", "Logs"],
   ];
+  // Anything in a category not listed above still shows, last.
+  const known = new Set(groups.map(([cat]) => cat));
+  for (const cat of new Set(st.items.map((i) => i.category))) if (!known.has(cat)) groups.push([cat, cat]);
   for (const [cat, title] of groups) {
     const items = st.items.filter((i) => i.category === cat);
     if (!items.length) continue;
