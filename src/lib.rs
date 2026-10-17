@@ -705,6 +705,41 @@ pub fn trust() -> Result<()> {
         .arg(root))
 }
 
+/// What still stands between a fresh Mac and working `https://<app>.<tld>` addresses.
+#[derive(Serialize)]
+pub struct Setup {
+    /// `/etc/resolver/<tld>` sends the domain to Anvil's DNS server.
+    pub resolver: bool,
+    /// The local certificate authority is trusted (true until Caddy has made one).
+    pub trusted: bool,
+    pub php: bool,
+}
+
+/// The `/etc/resolver/<tld>` file Anvil needs.
+pub fn resolver_file(cfg: &Config) -> (PathBuf, String) {
+    (
+        PathBuf::from("/etc/resolver").join(&cfg.tld),
+        format!("nameserver 127.0.0.1\nport {}\n", cfg.dns_port),
+    )
+}
+
+pub fn setup_status(cfg: &Config) -> Setup {
+    let (file, want) = resolver_file(cfg);
+    let root = home().join("data/caddy/pki/authorities/local/root.crt");
+    Setup {
+        resolver: fs::read_to_string(file)
+            .is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace())),
+        trusted: !root.exists()
+            || Command::new("security")
+                .arg("verify-cert")
+                .arg("-c")
+                .arg(&root)
+                .output()
+                .is_ok_and(|o| o.status.success()),
+        php: !installed_php().is_empty(),
+    }
+}
+
 static DNS: Once = Once::new();
 
 fn pid_file() -> PathBuf {

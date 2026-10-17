@@ -1706,3 +1706,63 @@ kbd {
 .pkg-fold summary:hover { color: var(--text); }
 .pkg-fold summary::-webkit-details-marker { display: none; }
 .pkg-fold > .group { margin-top: 4px; }
+
+/* First run and empty panes: one message, one primary action. */
+.welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 420px;
+  margin: 12vh auto 0;
+  text-align: center;
+}
+
+.welcome img { width: 96px; height: 96px; margin-bottom: 12px; }
+.welcome h1 { margin: 0 0 8px; font: 600 22px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif; letter-spacing: -0.01em; }
+.welcome p { margin: 0 0 20px; }
+
+.welcome .primary {
+  height: 32px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: linear-gradient(180deg, var(--heat), var(--heat-deep));
+  color: #2a1204;
+  font-weight: 600;
+}
+
+.welcome .link {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+
+.welcome .link:hover { color: var(--text); text-decoration: underline; }
+
+/* Unfinished setup: one quiet line above the panel, a button per missing step. */
+.setup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 36px 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-m);
+  background: var(--steel-raised);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.setup[hidden] { display: none; }
+.setup span { margin-right: 4px; }
+
+.setup button {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-pane);
+  color: var(--text);
+}
