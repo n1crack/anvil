@@ -2076,3 +2076,93 @@ kbd {
 .svc-contents button.plain:hover,
 .git-btn:hover,
 .pkg-check:hover { border-color: var(--cold); }
+
+/* ---------- Processes window ---------- */
+
+body.activity {
+  display: flex;
+  flex-direction: column;
+  background: var(--steel-pane);
+}
+
+.activity .titlebar {
+  display: flex;
+  align-items: center;
+  padding-left: 80px; /* the window buttons */
+}
+
+.activity h1 { margin: 0; font-size: 13px; font-weight: 600; }
+.activity .error { margin: 0 16px 8px; }
+
+.act-table { flex: 1; min-height: 0; overflow: auto; }
+.act-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+
+.act-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--steel-pane);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.act-table td { padding: 4px 10px; height: 30px; white-space: nowrap; }
+.act-table td:first-child, .act-table thead th:first-child { padding-left: 16px; }
+
+.act-group th {
+  padding: 14px 16px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.act-app th { padding: 6px 16px 2px; font-weight: 600; text-align: left; }
+.act-row.inner td:first-child { padding-left: 32px; }
+
+.act-row { cursor: pointer; }
+.act-row:hover { background: var(--steel-hover); }
+.act-row[aria-selected="true"] { background: var(--selected); }
+.act-row.running .act-status { color: var(--ok-text); }
+.act-row.starting .act-status { color: var(--heat-white); }
+.act-row.crashed td { color: var(--danger); }
+
+.act-name { font-weight: 500; }
+.act-detail { color: var(--muted); font-weight: 400; }
+
+.act-actions { width: 1%; text-align: right; }
+.act-actions button {
+  height: 22px;
+  margin-left: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  font-size: 12px;
+}
+
+.act-empty { margin: 40px 0; color: var(--muted); text-align: center; }
+
+.act-log {
+  flex: none;
+  height: 38%;
+  margin: 0;
+  padding: 8px 16px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+@media (prefers-color-scheme: light) {
+  .act-row.starting .act-status { color: #a15c00; }
+}

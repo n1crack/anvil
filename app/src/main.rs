@@ -541,14 +541,15 @@ fn plain(s: &str, dots: bool) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || (dots && c == '.'))
 }
 
-fn parse_log_key(key: &str) -> Res<LogKey<'_>> {
+/// `services` are the configured service ids; any other `service:` key is refused.
+fn parse_log_key<'a>(key: &'a str, services: &[String]) -> Res<LogKey<'a>> {
     let parsed = if key == "web:caddy" {
         Some(LogKey::Caddy)
     } else if let Some(v) = key.strip_prefix("web:php-") {
         (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.') && !v.contains(".."))
             .then_some(LogKey::Php(v))
     } else if let Some(id) = key.strip_prefix("service:") {
-        plain(id, false).then_some(LogKey::Service(id))
+        (plain(id, false) && services.iter().any(|s| s == id)).then_some(LogKey::Service(id))
     } else if let Some(rest) = key.strip_prefix("container:") {
         rest.split_once('/')
             .filter(|(s, c)| plain(s, true) && plain(c, true))
@@ -567,7 +568,8 @@ fn parse_log_key(key: &str) -> Res<LogKey<'_>> {
 #[tauri::command(async)]
 fn activity_log(key: String, from: u64) -> Res<anvil::logs::Page> {
     let log = anvil::home().join("log");
-    let file = match parse_log_key(&key)? {
+    let services = anvil::services::instances(&anvil::load().map_err(err)?);
+    let file = match parse_log_key(&key, &services)? {
         LogKey::Caddy => log.join("caddy.log"),
         LogKey::Php(v) => log.join(format!("php-{v}-fpm.log")),
         LogKey::Service(id) => anvil::services::log_file(id),
@@ -669,6 +671,18 @@ fn command_run(app: State<App>, site: String, script: String) -> Res<Overview> {
         .run_once(&s, &script)
         .map_err(err)?;
     Ok(overview(&app, &cfg, &s))
+}
+
+/// Stop a package.json command run once (`command_run`), key `<site>#<id>`.
+#[tauri::command(async)]
+fn once_stop(handle: AppHandle, app: State<App>, site: String, id: String) -> Res<()> {
+    find_site(&site)?;
+    app.apps
+        .lock()
+        .unwrap()
+        .stop(&anvil::processes::once_key(&site, &id));
+    changed(&handle);
+    Ok(())
 }
 
 /// `docker compose up -d|stop|restart` one service. It can take minutes (a slow
@@ -1923,6 +1937,35 @@ fn show_settings(handle: AppHandle) {
     open_settings(&handle);
 }
 
+/// The task-manager window: everything Anvil runs, with usage and logs.
+fn open_processes(handle: &AppHandle) {
+    if let Some(w) = handle.get_webview_window("processes") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(
+        handle,
+        "processes",
+        WebviewUrl::App("processes.html".into()),
+    )
+    .title("Processes")
+    .inner_size(820.0, 560.0)
+    .min_inner_size(640.0, 420.0)
+    .title_bar_style(TitleBarStyle::Overlay)
+    .hidden_title(true)
+    .build();
+    if built.is_ok() {
+        apply_theme(handle, anvil::load().ok().and_then(|c| c.theme).as_deref());
+        update_dock(handle);
+    }
+}
+
+#[tauri::command(async)]
+fn show_processes(handle: AppHandle) {
+    open_processes(&handle);
+}
+
 #[tauri::command(async)]
 fn open(site: String, target: String) -> Res<()> {
     let cfg = anvil::load().map_err(err)?;
@@ -2225,6 +2268,7 @@ fn main() {
             icon,
             settings,
             show_settings,
+            show_processes,
             add_path,
             remove_path,
             set_editor,
@@ -2241,6 +2285,7 @@ fn main() {
             process_run,
             command_run,
             container_run,
+            once_stop,
             container_log,
             service_log,
             set_dock_icon,
@@ -2347,16 +2392,14 @@ mod tests {
 
     #[test]
     fn log_keys_are_parsed_and_paths_rejected() {
-        assert_eq!(parse_log_key("web:caddy"), Ok(LogKey::Caddy));
-        assert_eq!(parse_log_key("web:php-8.4"), Ok(LogKey::Php("8.4")));
-        assert_eq!(parse_log_key("my.app"), Ok(LogKey::App("my.app")));
-        assert_eq!(parse_log_key("a@dev"), Ok(LogKey::Process("a", "dev")));
-        assert_eq!(parse_log_key("a#build"), Ok(LogKey::Once("a", "build")));
-        assert_eq!(parse_log_key("service:redis"), Ok(LogKey::Service("redis")));
-        assert_eq!(
-            parse_log_key("container:a/db"),
-            Ok(LogKey::Container("a", "db"))
-        );
+        let parse = |k| parse_log_key(k, &["redis".to_string()]);
+        assert_eq!(parse("web:caddy"), Ok(LogKey::Caddy));
+        assert_eq!(parse("web:php-8.4"), Ok(LogKey::Php("8.4")));
+        assert_eq!(parse("my.app"), Ok(LogKey::App("my.app")));
+        assert_eq!(parse("a@dev"), Ok(LogKey::Process("a", "dev")));
+        assert_eq!(parse("a#build"), Ok(LogKey::Once("a", "build")));
+        assert_eq!(parse("service:redis"), Ok(LogKey::Service("redis")));
+        assert_eq!(parse("container:a/db"), Ok(LogKey::Container("a", "db")));
         for bad in [
             "../etc/passwd",
             "/tmp/x",
@@ -2369,8 +2412,9 @@ mod tests {
             "..",
             "",
             "container:a/b/c",
+            "service:pgsql",
         ] {
-            assert!(parse_log_key(bad).is_err(), "{bad}");
+            assert!(parse(bad).is_err(), "{bad}");
         }
     }
 }

@@ -1,5 +1,5 @@
 {
   "identifier": "default",
-  "windows": ["main", "settings"],
+  "windows": ["main", "settings", "processes"],
   "permissions": ["core:default", "core:menu:default", "core:window:allow-start-dragging", "dialog:allow-open", "dialog:allow-ask", "autostart:allow-enable", "autostart:allow-disable", "autostart:allow-is-enabled"]
 }

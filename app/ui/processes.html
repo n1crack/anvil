@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Processes</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="activity">
+  <header class="titlebar" data-tauri-drag-region>
+    <h1 data-tauri-drag-region>Processes</h1>
+  </header>
+  <p id="error" class="error" role="alert" hidden></p>
+  <div class="act-table">
+    <table>
+      <thead>
+        <tr><th>Name</th><th>PID</th><th>Port</th><th>CPU</th><th>Memory</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="empty" class="act-empty" hidden>Nothing is running</p>
+  </div>
+  <pre id="log" class="act-log" aria-label="Log" hidden></pre>
+  <script src="activity.js"></script>
+</body>
+</html>

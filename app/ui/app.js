@@ -982,6 +982,7 @@ $("#power").onclick = async (e) => {
 };
 
 $("#open-settings").onclick = () => invoke("show_settings");
+$("#open-processes").onclick = () => invoke("show_processes");
 
 /* ---------- New application ---------- */
 
