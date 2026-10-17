@@ -412,7 +412,7 @@ impl Apps {
         if self.running(&key) {
             return Ok(());
         }
-        self.spawn(&key, &site.path, &p.command, crate::processes::env(site))?;
+        self.spawn(&key, &site.path, &p.command, process_env(site, p))?;
         self.processes.insert(key);
         Ok(())
     }
@@ -484,6 +484,13 @@ impl Drop for Apps {
             self.stop(&n);
         }
     }
+}
+
+/// A process's environment: Anvil's PATH, plus `PORT` for a server row (`$PORT` in its command).
+pub(crate) fn process_env(site: &Site, p: &crate::processes::Process) -> Vec<(String, String)> {
+    let mut env = crate::processes::env(site);
+    env.extend(p.port.map(|port| ("PORT".to_string(), port.to_string())));
+    env
 }
 
 /// The runtime's environment for one app. Python leaves the version to the
