@@ -11,6 +11,7 @@
     <h1 data-tauri-drag-region>Processes</h1>
   </header>
   <p id="error" class="error" role="alert" hidden></p>
+  <div class="act-main">
   <div class="act-table">
     <table>
       <thead>
@@ -20,7 +21,14 @@
     </table>
     <p id="empty" class="act-empty" hidden>Nothing is running</p>
   </div>
-  <pre id="log" class="act-log" aria-label="Log" hidden></pre>
+  <aside id="pane" class="act-pane" hidden>
+    <header class="act-pane-head">
+      <span id="log-title"></span>
+      <button id="log-close" class="icon-btn" aria-label="Close log">×</button>
+    </header>
+    <pre id="log" class="act-log" aria-label="Log"></pre>
+  </aside>
+  </div>
   <script src="activity.js"></script>
 </body>
 </html>

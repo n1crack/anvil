@@ -2085,16 +2085,18 @@ body.activity {
   background: var(--steel-pane);
 }
 
+/* Centered, like a native window title. */
 .activity .titlebar {
   display: flex;
   align-items: center;
-  padding-left: 80px; /* the window buttons */
+  justify-content: center;
 }
 
-.activity h1 { margin: 0; font-size: 13px; font-weight: 600; }
+.activity h1 { margin: 0; color: var(--muted); font-size: 13px; font-weight: 600; pointer-events: none; }
 .activity .error { margin: 0 16px 8px; }
 
-.act-table { flex: 1; min-height: 0; overflow: auto; }
+.act-main { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--line); }
+.act-table { flex: 1; min-width: 0; overflow: auto; }
 .act-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 
 .act-table thead th {
@@ -2110,11 +2112,17 @@ body.activity {
   text-align: left;
 }
 
-.act-table td { padding: 4px 10px; height: 30px; white-space: nowrap; }
+.act-table td {
+  padding: 4px 10px;
+  height: 30px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  white-space: nowrap;
+}
 .act-table td:first-child, .act-table thead th:first-child { padding-left: 16px; }
 
 .act-group th {
   padding: 14px 16px 4px;
+  border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
@@ -2123,10 +2131,20 @@ body.activity {
   letter-spacing: 0.04em;
 }
 
-.act-app th { padding: 6px 16px 2px; font-weight: 600; text-align: left; }
+
+.act-app th { padding: 8px 16px 4px; font-weight: 600; text-align: left; }
+.act-app:hover th { background: var(--steel-hover); }
+.act-app .chevron {
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+.act-app[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+.act-count { margin-left: 8px; color: var(--muted); font-weight: 500; }
 .act-row.inner td:first-child { padding-left: 32px; }
 
-.act-row { cursor: pointer; }
+
 .act-row:hover { background: var(--steel-hover); }
 .act-row[aria-selected="true"] { background: var(--selected); }
 .act-row.running .act-status { color: var(--ok-text); }
@@ -2149,16 +2167,37 @@ body.activity {
 
 .act-empty { margin: 40px 0; color: var(--muted); text-align: center; }
 
+/* The selected row's log, a column that closes. */
+.act-pane {
+  display: flex;
+  flex-direction: column;
+  width: 46%;
+  min-width: 280px;
+  border-left: 1px solid var(--line);
+  background: var(--steel-raised);
+}
+.act-pane[hidden] { display: none; }
+
+.act-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 600;
+}
+.act-pane-head span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .act-log {
-  flex: none;
-  height: 38%;
+  flex: 1;
   margin: 0;
-  padding: 8px 16px;
+  padding: 8px 14px;
   overflow: auto;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text);
+  font: 11px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   user-select: text;
   -webkit-user-select: text;
 }

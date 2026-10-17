@@ -11,6 +11,8 @@ let logToken = 0;
 let tailing = null; // token of the log request on its way
 let replace = true; // the next page replaces the log (new row, error shown, file rotated)
 const busy = new Set(); // keys with an action on its way
+// Folded application groups, kept across windows like the main list's folds.
+const folded = new Set(JSON.parse(localStorage.getItem("act-folded") ?? "[]"));
 
 function showError(msg) {
   $("#error").textContent = msg ?? "";
@@ -53,6 +55,23 @@ function head(text, cls) {
   th.colSpan = 7;
   th.textContent = text;
   tr.append(th);
+  return tr;
+}
+
+/** An application's header: click to fold its rows away. */
+function appHead(a) {
+  const tr = head("", "act-app");
+  const open = !folded.has(a.site);
+  tr.setAttribute("aria-expanded", open);
+  tr.firstChild.innerHTML = `<span class="chevron" aria-hidden="true">›</span><span class="act-site"></span><span class="act-count"></span>`;
+  $(".act-site", tr).textContent = a.site;
+  $(".act-count", tr).textContent = open ? "" : a.rows.length;
+  tr.onclick = () => {
+    folded[open ? "add" : "delete"](a.site);
+    localStorage.setItem("act-folded", JSON.stringify([...folded]));
+    drawn = "";
+    render();
+  };
   return tr;
 }
 
@@ -145,7 +164,10 @@ function render() {
   if (data.web.length) out.push(head("Web server", "act-group"), ...data.web.map((r) => row(r)));
   if (data.apps.length) {
     out.push(head("Applications", "act-group"));
-    for (const a of data.apps) out.push(head(a.site, "act-app"), ...a.rows.map((r) => row(r, true)));
+    for (const a of data.apps) {
+      out.push(appHead(a));
+      if (!folded.has(a.site)) out.push(...a.rows.map((r) => row(r, true)));
+    }
   }
   if (data.services.length) out.push(head("Services", "act-group"), ...data.services.map((r) => row(r)));
   body.replaceChildren(...out);
@@ -159,9 +181,27 @@ function select(key) {
   replace = true;
   logToken++;
   $("#log").textContent = "";
-  $("#log").hidden = !key;
+  $("#pane").hidden = !key;
+  $("#log-title").textContent = key ? `${nameOf(key)} · log` : "";
   render();
   if (key) tail();
+}
+
+const nameOf = (key) =>
+  [...data.web, ...data.apps.flatMap((a) => a.rows), ...data.services].find((r) => r.key === key)?.name ?? key;
+
+/** Terminal output as a terminal would leave it: progress bars redraw a line with \r
+ * or \b, colors come as escape codes; neither belongs in plain text. */
+function clean(text) {
+  return text
+    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "")
+    .split("\n")
+    .map((l) => {
+      l = l.slice(l.lastIndexOf("\r", l.length - 2) + 1).replace(/\r$/, "");
+      while (/[^\x08]\x08/.test(l)) l = l.replace(/[^\x08]\x08/, "");
+      return l.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+    })
+    .join("\n");
 }
 
 const line = (e) => [e.time ? `${e.time} ${e.message}` : e.message, e.context, ...e.trace].filter(Boolean).join("\n");
@@ -192,7 +232,7 @@ async function tail() {
     return tail();
   }
   const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
-  const text = page.entries.toReversed().map(line).join("\n");
+  const text = clean(page.entries.toReversed().map(line).join("\n"));
   // Containers come back whole (empty when unchanged); files only send new lines.
   if (replace || (key.startsWith("container:") && page.entries.length)) {
     log.textContent = text;
@@ -211,5 +251,9 @@ setInterval(() => {
   if (selected && tailing !== logToken) tail();
 }, 2000);
 window.addEventListener("focus", load);
+$("#log-close").onclick = () => select(null);
+
+// No browser context menu (Reload, Inspect…), as in the other windows.
+document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 load();
