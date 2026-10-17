@@ -33,7 +33,7 @@ Anvil turns the folders on your Mac into running applications at local domains l
 | Local HTTPS with a trusted certificate authority | ✅ Available |
 | Park a folder: every sub-folder becomes an application | ✅ Available |
 | Link any folder, add extra domains to an application | ✅ Available |
-| Automatic detection: Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt, Vite, Node.js, Rust, Go, .NET | ✅ Available |
+| Automatic detection: Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt, Vite, Node.js, Rust, Go, .NET, Django, FastAPI, Flask | ✅ Available |
 | PHP 8.0 – 8.5, isolated, per-application version | ✅ Available |
 | php.ini settings per application (own PHP-FPM pool) and global defaults | ✅ Available |
 | Node.js, Go, Rust, .NET and Python (Django, FastAPI, Flask) toolchains, isolated in `~/.anvil` | ✅ Available |
