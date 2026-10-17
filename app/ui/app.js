@@ -186,7 +186,18 @@ function renderList() {
   if (note && snap.sites.length) list.append(note);
 
   if (!snap.sites.length) {
-    list.innerHTML = `<p class="empty">No applications yet. Add a folder of projects in Settings, or from Terminal:<code>anvil park ~/Sites</code></p>`;
+    const p = el("div", "empty", "No applications yet. Create one, or add the folder where your projects live and each of them becomes an application.");
+    const actions = el("div", "empty-actions");
+    const create = el("button", null, "New Application…");
+    create.onclick = openNewApp;
+    const park = el("button", null, "Add Folder of Applications…");
+    park.onclick = async () => {
+      const path = await window.__TAURI__.dialog.open({ directory: true, title: "Every project inside this folder becomes an application" });
+      if (path) await call("park_folder", { path });
+    };
+    actions.append(create, park);
+    p.append(actions);
+    list.append(p);
     return;
   }
 

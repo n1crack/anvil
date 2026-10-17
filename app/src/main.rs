@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{
-    AppHandle, Manager, RunEvent, State, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, RunEvent, State, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
     WindowEvent, Wry,
 };
 
@@ -441,15 +441,26 @@ async fn storage_anvil() -> Res<AnvilStorage> {
     .map_err(|e| e.to_string())
 }
 
-/// Every app's size; slow for many apps (one `du` over all of them).
+/// Every app's size. Each one is sent as a `storage-app` event as soon as it is
+/// measured, so the list fills in while the rest are counted.
 #[tauri::command]
-async fn storage_apps() -> Res<Vec<anvil::resources::AppSize>> {
-    tauri::async_runtime::spawn_blocking(|| {
+async fn storage_apps(handle: AppHandle) -> Res<Vec<anvil::resources::AppSize>> {
+    tauri::async_runtime::spawn_blocking(move || {
         let cfg = anvil::load().map_err(err)?;
-        Ok(anvil::resources::all_apps(&anvil::sites(&cfg)))
+        let all = anvil::resources::all_apps(&anvil::sites(&cfg), |a| {
+            let _ = handle.emit("storage-app", a);
+        });
+        anvil::resources::save_app_sizes(&all);
+        Ok(all)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The last measurement, shown at once while a new one runs.
+#[tauri::command]
+fn storage_last() -> Option<(u64, Vec<anvil::resources::AppSize>)> {
+    anvil::resources::last_app_sizes()
 }
 
 #[tauri::command]
@@ -1547,6 +1558,7 @@ fn main() {
             log_open,
             storage_anvil,
             storage_apps,
+            storage_last,
             clean_anvil,
             clean_all_safe,
             runtimes,
