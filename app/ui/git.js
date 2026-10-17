@@ -12,7 +12,7 @@ async function loadGit(name) {
   if (selected === name) drawGit(name);
 }
 
-function ago(secs) {
+function commitAgo(secs) {
   const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
   const d = secs - Date.now() / 1000;
   for (const [unit, n] of [["year", 31536000], ["month", 2592000], ["week", 604800], ["day", 86400], ["hour", 3600], ["minute", 60]]) {
@@ -64,7 +64,7 @@ function drawGit(name) {
   row("Changes", g.changed ? `${g.changed} changed file${g.changed === 1 ? "" : "s"}` : "Clean");
   if (g.commit) {
     const c = g.commit;
-    const when = el("span", "muted", ` ${c.hash}, ${c.author}, ${ago(c.time)}`);
+    const when = el("span", "muted", ` ${c.hash}, ${c.author}, ${commitAgo(c.time)}`);
     when.title = new Date(c.time * 1000).toLocaleString();
     row("Last commit", c.subject, when);
   }
