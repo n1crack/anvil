@@ -17,6 +17,10 @@
   --heat-deep: #e8410c;
   --heat-text: #ffad5c;
 
+  /* Running: green, so it never reads as a warning. */
+  --ok: #34c759;
+  --ok-text: #5fd47e;
+
   --radius-s: 6px;
   --radius-m: 10px;
   --sidebar: 420px;
@@ -37,6 +41,8 @@
     --muted: #68707a;
     --cold: #a3aab3;
     --heat-text: #c2410c;
+    --ok: #28a745;
+    --ok-text: #1f8a3b;
   }
 }
 
@@ -795,8 +801,8 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 }
 
 .dot.on {
-  background: var(--heat);
-  box-shadow: 0 0 6px rgba(255, 138, 31, 0.7);
+  background: var(--ok);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--ok) 70%, transparent);
 }
 
 .page .row small.bad { color: var(--heat-text); }
@@ -1181,8 +1187,8 @@ kbd {
   min-width: 16px;
   padding: 0 5px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--heat) 22%, transparent);
-  color: var(--heat-text);
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  color: var(--ok-text);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
