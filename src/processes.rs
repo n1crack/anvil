@@ -157,7 +157,8 @@ pub fn laravel_dev_commands(dir: &Path, php: &Path) -> Option<Vec<(String, Strin
     }
     let script = r#"require 'vendor/autoload.php'; $app = require 'bootstrap/app.php'; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); echo json_encode(array_map(fn($c) => ['name' => $c['name'], 'command' => $c['command']], \Illuminate\Foundation\DevCommands::commands()));"#;
     let mut child = Command::new(php)
-        .args(["-r", script])
+        // Warnings go to stderr, so they can't spoil the JSON on stdout.
+        .args(["-d", "display_errors=stderr", "-r", script])
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -191,8 +192,11 @@ pub fn laravel_dev_commands(dir: &Path, php: &Path) -> Option<Vec<(String, Strin
     )
 }
 
-/// `laravel_dev_commands`, remembered until composer.lock or app/Providers changes
-/// (booting Laravel costs a few hundred ms).
+/// Seconds a failed `laravel_dev_commands` is remembered.
+const RETRY_FAILED: u64 = 300;
+
+/// `laravel_dev_commands`, remembered until composer.lock, a provider or PHP changes
+/// (booting Laravel costs a few hundred ms); a failure only for `RETRY_FAILED`.
 fn laravel_dev_commands_cached(
     dir: &Path,
     php: &Path,
@@ -209,24 +213,40 @@ fn laravel_dev_commands_cached(
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos() as u64)
     };
+    // Editing a file doesn't touch its folder's mtime: the newest provider file counts.
+    let providers = fs::read_dir(dir.join("app/Providers"))
+        .into_iter()
+        .flatten()
+        .filter_map(|e| Some(mtime(e.ok()?.path())))
+        .chain([mtime(dir.join("bootstrap/providers.php"))])
+        .max()
+        .unwrap_or(0);
     let stamp = [
         mtime(dir.join("composer.lock")),
-        mtime(dir.join("app/Providers")),
+        providers,
+        mtime(php.into()),
     ];
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
     let mut h = std::collections::hash_map::DefaultHasher::new();
     dir.hash(&mut h);
     let file = cache.join(format!("devcommands-{:x}.json", h.finish()));
-    // A failed boot is remembered too (`commands: None`), so it isn't retried every poll.
+    // A failed boot is remembered too (`commands: None`), so it isn't retried every
+    // poll, but only for a while: it may have been a database that wasn't up yet.
     #[derive(Serialize, Deserialize)]
     struct Cached {
-        stamp: [u64; 2],
+        stamp: [u64; 3],
         php: PathBuf,
         commands: Option<Vec<(String, String)>>,
+        /// Unix seconds when PHP was asked.
+        at: u64,
     }
     if let Some(c) = fs::read_to_string(&file)
         .ok()
         .and_then(|t| serde_json::from_str::<Cached>(&t).ok())
         .filter(|c| c.stamp == stamp && c.php == php)
+        .filter(|c| c.commands.is_some() || now.saturating_sub(c.at) < RETRY_FAILED)
     {
         return c.commands;
     }
@@ -236,6 +256,7 @@ fn laravel_dev_commands_cached(
         stamp,
         php: php.into(),
         commands: commands.clone(),
+        at: now,
     }) {
         let _ = fs::write(&file, t);
     }
@@ -833,7 +854,12 @@ mod tests {
             (p[0].source, p[0].server, p[0].id.as_str()),
             ("artisan dev", false, "queue")
         );
+        // A PHP that would now fail (its mtime kept, so it counts as the same PHP).
+        let modified = fs::metadata(&php).unwrap().modified().unwrap();
         fs::write(&php, "#!/bin/sh\nexit 1\n").unwrap();
+        let f = fs::File::options().write(true).open(&php).unwrap();
+        f.set_modified(modified).unwrap();
+        drop(f);
         assert_eq!(laravel_dev_commands_cached(&dir, &php, &cache), Some(want));
         // .anvil.toml still comes first.
         fs::write(dir.join(".anvil.toml"), "[processes]\nw = \"x\"\n").unwrap();
@@ -883,6 +909,81 @@ mod tests {
         fs::copy(&php, &other).unwrap();
         assert_eq!(laravel_dev_commands_cached(&dir, &other, &cache), None);
         assert_eq!(runs(), 2);
+        // A failure older than RETRY_FAILED is asked again.
+        let file = fs::read_dir(&cache)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let mut c: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        c["at"] = (c["at"].as_u64().unwrap() - RETRY_FAILED).into();
+        fs::write(&file, c.to_string()).unwrap();
+        assert_eq!(laravel_dev_commands_cached(&dir, &other, &cache), None);
+        assert_eq!(runs(), 3);
+        assert_eq!(laravel_dev_commands_cached(&dir, &other, &cache), None);
+        assert_eq!(runs(), 3);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn laravel_success_is_cached_until_a_provider_changes() {
+        let (dir, php) = fake_php("prov", "");
+        let root = dir.parent().unwrap().to_path_buf();
+        let log = root.join("runs");
+        fs::write(
+            &php,
+            format!(
+                "#!/bin/sh
+echo x >> {}
+echo '{DEV_JSON}'
+",
+                log.display()
+            ),
+        )
+        .unwrap();
+        let provider = dir.join("app/Providers/AppServiceProvider.php");
+        fs::create_dir_all(provider.parent().unwrap()).unwrap();
+        fs::write(&provider, "<?php").unwrap();
+        let cache = root.join("cache");
+        let runs = || fs::read_to_string(&log).map_or(0, |t| t.lines().count());
+        assert!(laravel_dev_commands_cached(&dir, &php, &cache).is_some());
+        // Even an old success is kept.
+        let file = fs::read_dir(&cache)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let mut c: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        c["at"] = 0.into();
+        fs::write(&file, c.to_string()).unwrap();
+        assert!(laravel_dev_commands_cached(&dir, &php, &cache).is_some());
+        assert_eq!(runs(), 1);
+        // Editing a provider (the folder's own mtime stays) asks again.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(&provider)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert!(laravel_dev_commands_cached(&dir, &php, &cache).is_some());
+        assert_eq!(runs(), 2);
+        // So does bootstrap/providers.php.
+        let bootstrap = dir.join("bootstrap/providers.php");
+        fs::create_dir_all(bootstrap.parent().unwrap()).unwrap();
+        fs::write(&bootstrap, "<?php").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&bootstrap)
+            .unwrap()
+            .set_modified(later + std::time::Duration::from_secs(60))
+            .unwrap();
+        assert!(laravel_dev_commands_cached(&dir, &php, &cache).is_some());
+        assert_eq!(runs(), 3);
         fs::remove_dir_all(root).unwrap();
     }
 
