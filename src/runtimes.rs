@@ -424,6 +424,9 @@ pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
                 e.push((k.into(), d(v)));
             }
             e.push(("UV_MANAGED_PYTHON".into(), "1".into()));
+            // Languages are installed only when asked for (Settings › Languages),
+            // never by uv on its own because a project wants another version.
+            e.push(("UV_PYTHON_DOWNLOADS".into(), "manual".into()));
             e.push(("UV_PYTHON_INSTALL_BIN".into(), "0".into()));
             e.push(("UV_PYTHON".into(), version.into()));
             root("uv")
