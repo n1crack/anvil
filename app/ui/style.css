@@ -2897,3 +2897,8 @@ body.activity {
 
 /* A removed service's data was kept: said once over the list. */
 .svc-kept { margin: 2px 4px 8px; font-size: 12px; }
+
+/* Removing a service is the one destructive action on its page: a calm red, a
+ * little softer than the crash red, full red on hover. */
+.svc-remove { color: color-mix(in srgb, var(--danger) 80%, var(--text)); }
+.svc-remove:hover { color: var(--danger); }
