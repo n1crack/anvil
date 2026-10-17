@@ -1826,10 +1826,27 @@ fn remove_service(
 
 #[tauri::command(async)]
 fn open_url(url: String) -> Res<()> {
-    if !url.starts_with("http://127.0.0.1:") && !url.starts_with("https://") {
+    let tld = anvil::load().map(|c| c.tld).unwrap_or_default();
+    if !url.starts_with("https://") && !local_http(&url, &tld) {
         return Err("Only local and https links can be opened".into());
     }
     anvil::run(Command::new("open").arg(url)).map_err(err)
+}
+
+/// A plain-http link to this Mac: 127.0.0.1, localhost, or an app's `.<tld>` /
+/// `.localhost` address. The host is read up to the port or path; userinfo (`@`) is
+/// refused so `http://x.test@elsewhere` can't pass for a local address.
+fn local_http(url: &str, tld: &str) -> bool {
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') {
+        return false;
+    }
+    let host = authority.split(':').next().unwrap_or("").to_ascii_lowercase();
+    let under = |suffix: &str| !suffix.is_empty() && host.ends_with(&format!(".{suffix}"));
+    host == "127.0.0.1" || host == "localhost" || under("localhost") || under(tld)
 }
 
 /* ---------- Settings ---------- */
@@ -2660,6 +2677,20 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn only_local_http_links_open() {
+        assert!(local_http("http://shop.test", "test"));
+        assert!(local_http("http://docs.vuefinder.test:8080/x?y", "test"));
+        assert!(local_http("http://web.localhost/", "test"));
+        assert!(local_http("http://127.0.0.1:5173", "test"));
+        assert!(!local_http("http://example.com", "test"));
+        assert!(!local_http("http://shop.test@evil.com", "test"));
+        assert!(!local_http("http://evil.com/?a=.test", "test"));
+        assert!(!local_http("http://test", "test"));
+        assert!(!local_http("http://shop.test", ""));
+        assert!(!local_http("file:///etc/passwd", "test"));
+    }
     use super::*;
 
     #[test]
