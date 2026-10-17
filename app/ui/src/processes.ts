@@ -261,7 +261,11 @@ export function cmdRow(name, c) {
   pin.title = "Add to processes";
   pin.className = "cmd-hover cmd-pin";
   actions.append(pin);
-  if (!c.running) {
+  if (c.running) {
+    const stop = procBtn("■ Stop", `Stop ${label}`, () => stopOnce(name, c.id));
+    stop.title = "Stop";
+    actions.append(stop);
+  } else {
     const play = procBtn("▶", `Run ${c.name}`, () => confirmPop(play, `Run ${label}?`, "Run", run));
     play.title = "Run";
     actions.append(play);
@@ -476,6 +480,13 @@ export function openConsole(site, source, label) {
   conTail();
 }
 
+/** Stop a command run once (a watcher such as vitest never ends by itself). */
+export const stopOnce = (site, id) =>
+  invoke("once_stop", { site, id }).then(
+    () => loadProcs(site),
+    (e) => showError(String(e)),
+  );
+
 /** Under the Commands; what it shows, ■ while running, ↻ for a command that ended. */
 export function drawConsole(name) {
   const box = $("#site .procs");
@@ -492,12 +503,7 @@ export function drawConsole(name) {
   const actions = $(".proc-actions", conBox);
   actions.replaceChildren();
   if (chip?.running) {
-    const stop = () =>
-      invoke("once_stop", { site: name, id }).then(
-        () => loadProcs(name),
-        (e) => showError(String(e)),
-      );
-    actions.append(procBtn("■ Stop", `Stop ${con.label}`, stop));
+    actions.append(procBtn("■ Stop", `Stop ${con.label}`, () => stopOnce(name, id)));
   } else if (chip) {
     actions.append(procBtn("↻ Run again", `Run ${con.label} again`, () => loadProcs(name, "command_run", { script: chip.name })));
   }
