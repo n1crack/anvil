@@ -1065,53 +1065,64 @@ $("#list").onkeydown = (e) => {
 $("#error-close").onclick = () => showError(null);
 
 // Keyboard: ⌘1–9 tabs in order, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
-document.addEventListener("keydown", (e) => {
-  if (!e.metaKey || e.shiftKey || e.altKey || e.target.closest("input, textarea, select")) {
-    if (!(e.metaKey && ["f", ",", "r"].includes(e.key))) return;
-  }
+/* ---------- Shortcuts: the menu bar and the keyboard run the same actions ---------- */
+
+const TAB_KEYS = { 1: "overview", 2: "git", 3: "logs", 4: "packages", 5: "resources", 6: "settings" };
+let lastAction = { name: "", at: 0 };
+
+/** Run a menu action. The same key can reach both the page and the menu bar, so
+ * a repeat within 300 ms is ignored. Returns whether it did something. */
+function runAction(name) {
+  if (lastAction.name === name && Date.now() - lastAction.at < 300) return true;
   const root = $("#site");
-  const tabKey = /^[1-9]$/.test(e.key) && root.querySelectorAll(".tabs [role=tab]")[e.key - 1];
-  if (tabKey) {
-    e.preventDefault();
-    showTab(root, tabKey.dataset.tab);
-    return;
-  }
-  const action = { o: "browser", e: "editor", t: "terminal", g: "git" }[e.key];
-  const off = { editor: !snap.editor, git: $(".git-btn", root)?.hidden !== false }[action];
-  if (action && mode === "apps" && selected && !off && (action !== "browser" || snap.running)) {
-    e.preventDefault();
-    open(action);
-    return;
-  }
-  // ⌘L: the Logs tab for an app, the log file for a service.
-  if (e.key === "l") {
-    const logs = $('.tabs [data-tab="logs"]', root);
+  const [kind, arg] = name.split(":");
+  let done = true;
+  if (kind === "tab") {
+    const t = $(`.tabs [data-tab="${arg}"]`, root);
+    if (t && !t.hidden) showTab(root, arg);
+    else done = false;
+  } else if (kind === "open") {
+    const off = { editor: !snap.editor, git: $(".git-btn", root)?.hidden !== false, browser: !snap.running }[arg];
+    if (mode === "apps" && selected && !off) open(arg);
+    else done = false;
+  } else if (kind === "mode") {
+    setMode(arg);
+  } else if (name === "logs") {
     const svcLog = $(".show-log", root);
-    if (logs || svcLog) {
-      e.preventDefault();
-      if (logs) showTab(root, "logs");
-      else svcLog.click();
-      return;
-    }
-  }
-  if (e.key === "n") {
-    e.preventDefault();
+    if ($('.tabs [data-tab="logs"]', root)) showTab(root, "logs");
+    else if (svcLog) svcLog.click();
+    else done = false;
+  } else if (name === "new") {
     if (mode === "services") openAddService();
     else openNewApp();
-    return;
-  }
-  if (e.metaKey && e.key === ",") {
-    e.preventDefault();
-    invoke("show_settings");
-  }
-  if (e.metaKey && e.key === "r") {
-    e.preventDefault();
+  } else if (name === "park") {
+    window.__TAURI__.dialog
+      .open({ directory: true, title: "Every project inside this folder becomes an application" })
+      .then((path) => path && call("park_folder", { path }));
+  } else if (name === "reload") {
     $("#reload").click();
-  }
-  if (e.metaKey && e.key === "f") {
-    e.preventDefault();
+  } else if (name === "find") {
     $("#search").focus();
+  } else if (name === "settings") {
+    invoke("show_settings");
+  } else {
+    done = false;
   }
+  if (done) lastAction = { name, at: Date.now() };
+  return done;
+}
+
+window.__TAURI__.event?.listen("menu", (e) => runAction(e.payload));
+
+document.addEventListener("keydown", (e) => {
+  if (!e.metaKey || e.shiftKey || e.altKey) return;
+  // In text fields only the app-wide keys apply; the rest belong to editing.
+  const typing = e.target.closest("input, textarea, select");
+  const name = TAB_KEYS[e.key]
+    ? `tab:${TAB_KEYS[e.key]}`
+    : { o: "open:browser", e: "open:editor", t: "open:terminal", g: "open:git", l: "logs", n: "new", r: "reload", f: "find", ",": "settings" }[e.key];
+  if (!name || (typing && !["find", "reload", "settings", "new"].includes(name))) return;
+  if (runAction(name)) e.preventDefault();
 });
 
 window.refresh();
