@@ -786,7 +786,7 @@ button, select, input { font: inherit; color: inherit; }
 .proc.cmd { grid-template-columns: auto 1fr auto auto; min-height: 30px; padding: 3px 14px; }
 .cmd-hover { visibility: hidden; }
 .cmd:hover .cmd-hover,
-.cmd-hover:focus-within { visibility: visible; }
+.cmd-hover:focus-visible { visibility: visible; }
 .cmd .proc-actions button { height: 22px; padding: 0 6px; }
 .cmd-result { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 32px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .cmd-ok { color: var(--ok-text); }
@@ -1423,7 +1423,8 @@ kbd {
   background: var(--steel-raised);
 }
 
-.sheet-actions .primary {
+.sheet-actions .primary,
+.pop-confirm .primary {
   border-color: transparent;
   background: linear-gradient(180deg, var(--heat), var(--heat-deep));
   color: #2a1204;
@@ -2259,3 +2260,20 @@ body.activity {
 @media (prefers-color-scheme: light) {
   .act-row.starting .act-status { color: #a15c00; }
 }
+
+/* A small confirm bubble next to the button that asked. */
+.pop-confirm {
+  position: absolute;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+.pop-confirm span { margin-right: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.pop-confirm button { height: 24px; padding: 0 10px; }

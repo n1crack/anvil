@@ -206,21 +206,53 @@ function ago(at) {
 
 /** One package.json command: name, script, then 📌 and ▶ on hover and how the last run went.
  * A click runs it (or, while running, shows it) in the console. */
+/** A small confirm bubble under `anchor`: Enter or Run confirms, Esc or a click elsewhere cancels. */
+function confirmPop(anchor, text, label, onYes) {
+  document.querySelector(".pop-confirm")?.remove();
+  const pop = el("div", "pop-confirm");
+  pop.setAttribute("role", "dialog");
+  const yes = el("button", "primary", label);
+  const no = el("button", null, "Cancel");
+  pop.append(el("span", null, text), no, yes);
+  const close = () => {
+    pop.remove();
+    document.removeEventListener("mousedown", outside, true);
+  };
+  const outside = (e) => !pop.contains(e.target) && close();
+  yes.onclick = (e) => { e.stopPropagation(); close(); onYes(); };
+  no.onclick = (e) => { e.stopPropagation(); close(); };
+  pop.onkeydown = (e) => {
+    if (e.key === "Escape") close();
+  };
+  const r = anchor.getBoundingClientRect();
+  Object.assign(pop.style, { top: `${r.bottom + window.scrollY + 6}px`, right: `${document.documentElement.clientWidth - r.right}px` });
+  document.body.append(pop);
+  document.addEventListener("mousedown", outside, true);
+  yes.focus();
+}
+
 function cmdRow(name, c) {
   const row = el("div", "proc cmd");
+  const label = `npm run ${c.name}`;
+  const show = () => openConsole(name, `once:${c.id}`, label);
   const run = async () => {
-    if (!c.running && !(await loadProcs(name, "command_run", { script: c.name }))) return;
-    openConsole(name, `once:${c.id}`, `npm run ${c.name}`);
+    if (await loadProcs(name, "command_run", { script: c.name })) show();
   };
-  row.onclick = run;
-  row.title = c.running ? `npm run ${c.name} is running. Click to show its output.` : `npm run ${c.name}. Click to run it.`;
+  // A click only shows output that exists; running is ▶'s job, after a confirm.
+  if (c.running || c.exit) row.onclick = show;
+  row.title = c.running ? `${label} is running. Click to show its output.` : c.exit ? `Click to show the last output of ${label}.` : label;
   const script = el("span", "proc-last", c.command);
   row.append(el("span", "proc-name", c.name), script);
-  const actions = el("span", "proc-actions cmd-hover");
+  const actions = el("span", "proc-actions");
   const pin = procBtn("📌", `Add ${c.name} to processes`, () => setProc(name, c.id, { pinned: true }));
   pin.title = "Add to processes";
+  pin.classList.add("cmd-hover");
   actions.append(pin);
-  if (!c.running) actions.append(Object.assign(procBtn("▶", `Run ${c.name}`, run), { title: "Run" }));
+  if (!c.running) {
+    const play = procBtn("▶", `Run ${c.name}`, () => confirmPop(play, `Run ${label}?`, "Run", run));
+    play.title = "Run";
+    actions.append(play);
+  }
   const result = el("span", "cmd-result");
   if (c.running) {
     result.append(el("span", "dot warm"));
