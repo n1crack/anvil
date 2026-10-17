@@ -21,7 +21,15 @@ struct ProjectFile {
     processes: std::collections::BTreeMap<String, String>,
 }
 
-/// An app's processes, in the order they are listed.
+/// `.anvil.toml` that can't be read as TOML, so it isn't silently ignored.
+pub fn project_file_error(site: &Site) -> Option<String> {
+    let text = fs::read_to_string(site.path.join(".anvil.toml")).ok()?;
+    toml::from_str::<ProjectFile>(&text)
+        .err()
+        .map(|e| format!(".anvil.toml: {}", e.message()))
+}
+
+/// An app's processes: `.anvil.toml`'s by name, a dev script's in its order.
 pub fn detect(site: &Site) -> Vec<Process> {
     let own = fs::read_to_string(site.path.join(".anvil.toml"))
         .ok()
@@ -121,12 +129,20 @@ pub fn concurrently(script: &str) -> Option<Vec<(String, String)>> {
     let (mut commands, mut names) = (vec![], vec![]);
     let mut rest = words[at + 1..].iter();
     while let Some(w) = rest.next() {
+        // `concurrently … && echo done`: what follows isn't concurrently's.
+        if matches!(w.as_str(), "&&" | "||" | ";" | "|" | "&") {
+            break;
+        }
         if let Some(flag) = w.strip_prefix('-').map(|_| w.as_str()) {
             let (flag, inline) = match flag.split_once('=') {
                 Some((f, v)) => (f, Some(v.to_string())),
                 None => (flag, None),
             };
-            let value = if VALUE_FLAGS.contains(&flag) {
+            // `-kc red,blue`: grouped short flags take a value if the last one does.
+            let grouped = !flag.starts_with("--") && flag.len() > 2;
+            let takes = VALUE_FLAGS.contains(&flag)
+                || (grouped && VALUE_FLAGS.contains(&&*format!("-{}", &flag[flag.len() - 1..])));
+            let value = if takes {
                 inline.or_else(|| rest.next().cloned())
             } else {
                 None
@@ -158,7 +174,15 @@ pub fn concurrently(script: &str) -> Option<Vec<(String, String)>> {
                 .unwrap_or_else(|| format!("process-{}", i + 1));
             (name, cmd)
         })
-        .filter(|(_, cmd)| !cmd.starts_with("php artisan serve"))
+        // Any form of `php … artisan serve`: Anvil is the server.
+        .filter(|(_, cmd)| {
+            !(cmd.starts_with("php")
+                && cmd
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .windows(2)
+                    .any(|w| w == ["artisan", "serve"]))
+        })
         .collect();
     (!out.is_empty()).then_some(out)
 }
@@ -193,9 +217,10 @@ fn shell_words(s: &str) -> Vec<String> {
     words
 }
 
-/// Key for the process manager, pid and log files: `<site>--<process>`.
+/// Key for the process manager, pid and log files: `<site>@<process>`. Site
+/// names never contain `@`, so a key can't be another app's name.
 pub fn key(site: &str, process: &str) -> String {
-    format!("{site}--{process}")
+    format!("{site}@{process}")
 }
 
 pub fn log_file(site: &str, process: &str) -> PathBuf {
@@ -207,7 +232,8 @@ pub fn log_file(site: &str, process: &str) -> PathBuf {
 pub fn env(site: &Site) -> Vec<(String, String)> {
     let mut env = vec![];
     let mut path = std::env::var("PATH").unwrap_or_default();
-    if let Some(node) = runtimes::installed("node").into_iter().next() {
+    // The project's .nvmrc / .node-version when installed, else the newest.
+    if let Some(node) = apps::runtime_version("node", &site.path) {
         env = runtimes::env("node", &node);
         if let Some(i) = env.iter().position(|(k, _)| k == "PATH") {
             path = env.remove(i).1;
@@ -258,6 +284,9 @@ mod tests {
         assert_eq!(p[0].0, "ok");
         assert_eq!(p[1].0, "process-2");
         assert!(concurrently("@php artisan dev").is_none());
+        // Shell operators end the list; grouped flags take their value; any serve is dropped.
+        let p = concurrently(r#"concurrently -kc red,blue "php -d x=1 artisan serve" "npm run dev" -n a,b && echo done"#).unwrap();
+        assert_eq!(p, [("b".into(), "npm run dev".into())]);
         assert!(concurrently("concurrently \"php artisan serve\"").is_none());
     }
 
