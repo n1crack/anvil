@@ -568,7 +568,12 @@ fn parse_log_key<'a>(key: &'a str, services: &[String]) -> Res<LogKey<'a>> {
 #[tauri::command(async)]
 fn activity_log(key: String, from: u64) -> Res<anvil::logs::Page> {
     let log = anvil::home().join("log");
-    let services = anvil::services::instances(&anvil::load().map_err(err)?);
+    // Only a service key needs the config, so other logs still show when it fails to load.
+    let services = if key.starts_with("service:") {
+        anvil::services::instances(&anvil::load().map_err(err)?)
+    } else {
+        vec![]
+    };
     let file = match parse_log_key(&key, &services)? {
         LogKey::Caddy => log.join("caddy.log"),
         LogKey::Php(v) => log.join(format!("php-{v}-fpm.log")),

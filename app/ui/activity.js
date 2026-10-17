@@ -8,7 +8,8 @@ let drawn = ""; // what the table shows, to redraw only on a change
 let selected = null; // row key
 let logFrom = 0;
 let logToken = 0;
-let tailing = false;
+let tailing = null; // token of the log request on its way
+let replace = true; // the next page replaces the log (new row, error shown, file rotated)
 const busy = new Set(); // keys with an action on its way
 
 function showError(msg) {
@@ -146,6 +147,7 @@ function render() {
 function select(key) {
   selected = key;
   logFrom = 0;
+  replace = true;
   logToken++;
   $("#log").textContent = "";
   $("#log").hidden = !key;
@@ -158,23 +160,33 @@ const line = (e) => [e.time ? `${e.time} ${e.message}` : e.message, e.context, .
 async function tail() {
   const key = selected;
   const token = logToken;
+  const log = $("#log");
   let page;
-  tailing = true;
+  tailing = token;
   try {
     page = await invoke("activity_log", { key, from: logFrom });
   } catch (e) {
-    if (token === logToken) $("#log").textContent = String(e);
+    if (token === logToken) {
+      log.textContent = String(e);
+      replace = true;
+    }
     return;
   } finally {
-    tailing = false;
+    if (tailing === token) tailing = null;
   }
   if (token !== logToken) return;
-  const log = $("#log");
+  // A file that shrank (cleared or rotated): read it again from the start.
+  if (page.end_offset < logFrom) {
+    logFrom = 0;
+    replace = true;
+    return tail();
+  }
   const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
   const text = page.entries.toReversed().map(line).join("\n");
-  // Containers come back whole; a file that shrank starts over; otherwise only new lines.
-  if (key.startsWith("container:") || page.end_offset < logFrom) {
-    if (page.entries.length || page.end_offset < logFrom) log.textContent = text;
+  // Containers come back whole (empty when unchanged); files only send new lines.
+  if (replace || (key.startsWith("container:") && page.entries.length)) {
+    log.textContent = text;
+    replace = false;
   } else if (text) {
     log.textContent += (log.textContent ? "\n" : "") + text;
   }
@@ -182,11 +194,11 @@ async function tail() {
   if (atEnd) log.scrollTop = log.scrollHeight;
 }
 
-// Fresh while the window is shown and focused.
+// Fresh while the window is shown, focused or not.
 setInterval(() => {
-  if (document.hidden || !document.hasFocus()) return;
+  if (document.hidden) return;
   load();
-  if (selected && !tailing) tail();
+  if (selected && tailing !== logToken) tail();
 }, 2000);
 window.addEventListener("focus", load);
 
