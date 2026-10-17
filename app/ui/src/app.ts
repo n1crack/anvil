@@ -256,7 +256,10 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   $(".name", text).textContent = s.name;
   // HTTPS shows as a lock after the name; it's turned on and off from the right-click menu.
   // While it changes only a spinner shows: words would be cut off here; the header says them.
-  if (securing.has(s.name)) {
+  // Folders and Compose projects have no address: a leftover HTTPS flag means nothing there.
+  if (!serves(s)) {
+    /* no lock */
+  } else if (securing.has(s.name)) {
     const busy = el("span", "securing");
     busy.append(el("span", "spin-dot"));
     busy.title = s.secure ? "Turning off HTTPS…" : "Turning on HTTPS…";
@@ -867,8 +870,11 @@ export function renderSite() {
         ? "PHP, none installed"
         : null;
   const kind = s.kind === "static" ? "Static files" : kindLabel(s.kind);
-  const runs = !engine || kind === engine.split(" ")[0] ? (engine ?? kind) : `${kind} on ${engine}`;
+  const runs =
+    s.kind === "compose" ? "Docker Compose" : !engine || kind === engine.split(" ")[0] ? (engine ?? kind) : `${kind} on ${engine}`;
   $('[data-field="runtime"]', root).textContent = s.kind === s.kind_detected ? runs : `${runs} (type set by you)`;
+  // A plain folder runs on nothing; its path row says what it is.
+  if (s.kind === "folder") $('[data-field="runtime"]', root).closest(".row")?.remove();
   if (PHP_KINDS.has(s.kind) && !s.php) {
     const install = el("button", "inline-action", "Install PHP 8.4");
     install.onclick = async () => {
