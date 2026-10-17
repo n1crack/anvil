@@ -362,7 +362,7 @@ button, select, input { font: inherit; color: inherit; }
   padding: 0 18px;
 }
 
-/* Power: a small ingot that is cold grey when stopped and glows when running. */
+/* Power: a small ingot that is cold grey when stopped and glows green when serving. */
 .power {
   display: inline-flex;
   align-items: center;
@@ -383,11 +383,11 @@ button, select, input { font: inherit; color: inherit; }
   transition: background 0.6s ease, box-shadow 0.6s ease;
 }
 
-.power[aria-checked="true"] { color: var(--heat-text); }
+.power[aria-checked="true"] { color: var(--ok-text); }
 
 .power[aria-checked="true"] .ingot {
-  background: linear-gradient(180deg, var(--heat-white), var(--heat) 55%, var(--heat-deep));
-  box-shadow: 0 0 10px 1px rgba(255, 138, 31, 0.6);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ok) 55%, white), var(--ok) 55%, color-mix(in srgb, var(--ok) 70%, black));
+  box-shadow: 0 0 10px 1px color-mix(in srgb, var(--ok) 60%, transparent);
 }
 
 .power:disabled { opacity: 0.6; }
