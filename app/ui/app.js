@@ -609,6 +609,7 @@ function renderSite() {
   // Resources (also feeds the Overview's disk and services rows)
   $(".res-reload", root).onclick = () => loadResources(s.name, true);
   window.renderGit?.(s);
+  window.renderProcesses?.(s);
   window.renderSiteServices?.(s, root);
   window.renderPackages?.(s, root);
 }

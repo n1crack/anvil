@@ -284,6 +284,8 @@ fn terminate_group(child: &mut Child, grace: Duration) {
 #[derive(Default)]
 pub struct Apps {
     children: BTreeMap<String, Child>,
+    /// Keys of `children` that are an app's other processes, not apps.
+    processes: std::collections::BTreeSet<String>,
 }
 
 impl Apps {
@@ -315,37 +317,66 @@ impl Apps {
             .with_context(|| format!("No command to start {}", site.name))?;
         let port = site.port.context("No port assigned")?;
 
-        kill_orphans(&pid_file(&site.name), true);
+        // app_env: Python's version and uv environment rules on top of the runtime's.
+        let mut env = app_env(site, runtime, &version);
+        env.extend([
+            ("PORT".to_string(), port.to_string()),
+            // Best effort: most dev servers honour one of these and stay off the LAN.
+            ("HOST".into(), "127.0.0.1".into()),
+            ("HOSTNAME".into(), "127.0.0.1".into()),
+            ("ASPNETCORE_URLS".into(), format!("http://127.0.0.1:{port}")),
+            // Vite rejects unknown hosts; a leading dot allows every name under the tld.
+            (
+                "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),
+                format!(".{tld}"),
+            ),
+        ]);
+        self.spawn(&site.name, &site.path, &command, env)
+    }
+
+    /// One of an app's other processes (queue, Vite…), see `processes`.
+    pub fn start_process(&mut self, site: &Site, p: &crate::processes::Process) -> Result<()> {
+        let key = crate::processes::key(&site.name, &p.name);
+        if self.running(&key) {
+            return Ok(());
+        }
+        self.spawn(&key, &site.path, &p.command, crate::processes::env(site))?;
+        self.processes.insert(key);
+        Ok(())
+    }
+
+    /// Run `command` in `dir` as its own process group, output to `log_file(key)`.
+    fn spawn(
+        &mut self,
+        key: &str,
+        dir: &Path,
+        command: &str,
+        env: Vec<(String, String)>,
+    ) -> Result<()> {
+        kill_orphans(&pid_file(key), true);
         crate::state_dirs()?;
         let log = fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_file(&site.name))?;
+            .open(log_file(key))?;
         // The trailing argument is $0: it tags the shell with Anvil's home so a
         // crashed Anvil's leftovers can be recognised and cleaned up.
-        let tag = format!("anvil:{}:{}", home().display(), site.name);
+        let tag = format!("anvil:{}:{key}", home().display());
         let child = Command::new("/bin/sh")
-            .args(["-c", &command, &tag])
-            .current_dir(&site.path)
-            .envs(app_env(site, runtime, &version))
-            .env("PORT", port.to_string())
-            // Best effort: most dev servers honour one of these and stay off the LAN.
-            .env("HOST", "127.0.0.1")
-            .env("HOSTNAME", "127.0.0.1")
-            .env("ASPNETCORE_URLS", format!("http://127.0.0.1:{port}"))
-            // Vite rejects unknown hosts; a leading dot allows every name under the tld.
-            .env("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", format!(".{tld}"))
+            .args(["-c", command, &tag])
+            .current_dir(dir)
+            .envs(env)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
             .process_group(0)
             .spawn()
-            .with_context(|| format!("failed to start {}", site.name))?;
+            .with_context(|| format!("failed to start {key}"))?;
         fs::write(
-            pid_file(&site.name),
+            pid_file(key),
             format!("{}\n{}", std::process::id(), child.id()),
         )?;
-        self.children.insert(site.name.clone(), child);
+        self.children.insert(key.to_string(), child);
         Ok(())
     }
 
@@ -355,14 +386,21 @@ impl Apps {
     }
 
     pub fn stop(&mut self, name: &str) {
+        self.processes.remove(name);
         if let Some(mut c) = self.children.remove(name) {
             terminate_group(&mut c, Duration::from_secs(5));
             let _ = fs::remove_file(pid_file(name));
         }
     }
 
+    /// Running apps (not their other processes).
     pub fn names(&mut self) -> Vec<String> {
-        let names: Vec<String> = self.children.keys().cloned().collect();
+        let names: Vec<String> = self
+            .children
+            .keys()
+            .filter(|k| !self.processes.contains(*k))
+            .cloned()
+            .collect();
         names.into_iter().filter(|n| self.running(n)).collect()
     }
 }

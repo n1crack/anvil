@@ -700,6 +700,42 @@ button, select, input { font: inherit; color: inherit; }
 
 .path-open:hover { background: var(--steel-hover); }
 
+/* Processes: dot, name, the newest line, Start/Stop. */
+.procs-head { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
+.procs-head .res-sub { margin: 0; }
+.procs-head button,
+.proc button:last-child {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  font-size: 12px;
+}
+
+.proc {
+  display: grid;
+  grid-template-columns: 8px auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 6px 14px;
+}
+
+.proc + .proc { border-top: 1px solid var(--line); }
+.proc-name { padding: 0; border: 0; background: none; font-weight: 600; text-align: left; }
+.proc-name:hover { text-decoration: underline; }
+
+.proc-last {
+  overflow: hidden;
+  color: var(--muted);
+  font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.proc-last.error-text { color: var(--danger); }
+
 .path {
   overflow-wrap: anywhere;
   user-select: text;
