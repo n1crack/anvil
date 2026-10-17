@@ -4,7 +4,7 @@
 const pkgCache = new Map(); // site name -> packages or { error }
 const pkgUpdates = new Map(); // site name -> updates, "checking" or { error }
 let pkgQuery = ""; // one search over every list
-const pkgView = new Map(); // site name -> { eco, part } shown
+const pkgView = new Map(); // site name -> the list shown: deps, dev, scripts or updates
 const REGISTRY = {
   composer: "https://packagist.org/packages/",
   npm: "https://www.npmjs.com/package/",
@@ -37,12 +37,6 @@ async function checkUpdates(name) {
   if (selected === name) drawPackages(name);
 }
 
-function chip(label, value) {
-  const c = el("span", "chip");
-  c.append(el("b", null, label));
-  if (value) c.append(document.createTextNode(` ${value}`));
-  return c;
-}
 
 function drawPackages(name) {
   const body = $("#site .pkg-body");
@@ -58,11 +52,17 @@ function drawPackages(name) {
     return body.append(el("p", "muted", "No composer.json, package.json, Cargo.toml, go.mod or .csproj in this folder."));
   }
 
-  // What the app is built on, at a glance.
-  const chips = el("div", "chips pkg-chips");
-  for (const [label, v] of p.highlights) chips.append(chip(label, v));
-  for (const e of p.ecosystems) for (const [k, v] of e.facts) chips.append(chip(k, v));
-  if (chips.children.length) body.append(chips);
+  // What the app is built on, as one quiet line: Laravel 13.12 · Vite 8.0 · PHP ^8.3.
+  const facts = [...p.highlights, ...p.ecosystems.flatMap((e) => e.facts)];
+  if (facts.length) {
+    const line = el("p", "pkg-summary");
+    facts.forEach(([label, v], i) => {
+      if (i) line.append(el("span", "pkg-dot", "·"));
+      line.append(el("span", null, label));
+      if (v) line.append(el("b", null, v));
+    });
+    body.append(line);
+  }
 
   // One search for every list, and the update check.
   const tools = el("div", "pkg-tools");
@@ -108,77 +108,61 @@ function updatesButton(name) {
   return b;
 }
 
-/** One list at a time: the ecosystem (when there are several), then
- * dependencies, development packages or scripts. Counts follow the search. */
+/** One list for every package manager, filtered by kind: dependencies,
+ * development packages, scripts, or (after a check) what has updates. */
 function drawLists(body, name, ecosystems, updates) {
   const needle = pkgQuery.trim().toLowerCase();
-  const match = (x) => !needle || x.name.toLowerCase().includes(needle);
-  const parts = (e) => [
-    ["deps", "Dependencies", e.packages.filter((x) => !x.dev && match(x))],
-    ["dev", "Development", e.packages.filter((x) => x.dev && match(x))],
-    ["scripts", "Scripts", e.scripts.filter(([s, cmd]) => !needle || `${s} ${cmd}`.toLowerCase().includes(needle))],
+  const many = ecosystems.length > 1;
+  const newer = new Map(updates.map((u) => [`${u.ecosystem}/${u.name}`, u]));
+  const pkgs = ecosystems.flatMap((e) => e.packages.map((x) => ({ ...x, eco: e })));
+  const hit = (x) => !needle || x.name.toLowerCase().includes(needle);
+  const parts = [
+    ["deps", "Dependencies", pkgs.filter((x) => !x.dev && hit(x))],
+    ["dev", "Development", pkgs.filter((x) => x.dev && hit(x))],
+    ["scripts", "Scripts", ecosystems.flatMap((e) => e.scripts.map(([n, cmd]) => ({ name: n, cmd, eco: e })))
+      .filter((x) => !needle || `${x.name} ${x.cmd}`.toLowerCase().includes(needle))],
   ];
-  const view = pkgView.get(name) ?? {};
-  const hits = (x) => parts(x).some(([, , rows]) => rows.length);
-  const picked = ecosystems.find((x) => x.id === view.eco) ?? ecosystems[0];
-  // While searching, a manager without matches gives way to one with them.
-  const e = !needle || hits(picked) ? picked : ecosystems.find(hits) ?? picked;
-  const shown = parts(e).filter(([, , rows]) => rows.length || !needle);
-  const part = shown.find(([id]) => id === view.part) ?? shown.find(([, , rows]) => rows.length) ?? shown[0];
-  const set = (change) => {
-    pkgView.set(name, { eco: e.id, part: part?.[0], ...change });
-    drawPackages(name);
-  };
+  if (updates.length) parts.push(["updates", "Updates", pkgs.filter((x) => newer.has(`${x.eco.id}/${x.name}`) && hit(x))]);
+  const shown = parts.filter(([id, , rows]) => rows.length || id === "deps");
+  const part = shown.find(([id]) => id === pkgView.get(name)) ?? shown.find(([, , rows]) => rows.length) ?? shown[0];
 
-  const bar = el("div", "pkg-tabs");
-  const tabs = (label, items) => {
-    const row = el("div", "pkg-seg");
-    row.setAttribute("role", "tablist");
-    row.setAttribute("aria-label", label);
-    row.append(...items);
-    bar.append(row);
-  };
-  const tab = (text, count, on, pick) => {
-    const b = el("button", "chip-btn", text);
+  const seg = el("div", "pkg-seg");
+  seg.setAttribute("role", "tablist");
+  seg.setAttribute("aria-label", "Show");
+  for (const [id, label, rows] of shown) {
+    const b = el("button", "chip-btn", label);
     b.setAttribute("role", "tab");
-    b.setAttribute("aria-selected", on);
-    b.append(el("span", "pkg-count", count));
-    b.onclick = pick;
-    return b;
-  };
-  const label = (x) => (x.manager && x.id === "npm" ? `${x.label} (${x.manager})` : x.label);
-  if (ecosystems.length > 1) {
-    tabs("Package manager", ecosystems.map((x) =>
-      tab(label(x), parts(x).reduce((n, [, , rows]) => n + rows.length, 0), x === e, () => set({ eco: x.id, part: null }))));
-  } else {
-    bar.append(el("span", "pkg-manager muted", label(e)));
+    b.setAttribute("aria-selected", id === part[0]);
+    b.append(el("span", "pkg-count", rows.length));
+    b.onclick = () => {
+      pkgView.set(name, id);
+      drawPackages(name);
+    };
+    seg.append(b);
   }
-  if (shown.length) {
-    tabs("Show", shown.map(([id, title, rows]) => tab(title, rows.length, id === part?.[0], () => set({ part: id }))));
-  }
-  body.append(bar);
+  body.append(seg);
 
-  const newer = new Map(updates.filter((u) => u.ecosystem === e.id).map((u) => [u.name, u]));
-  const [id, , rows] = part ?? [];
-  if (!rows?.length) {
-    body.append(el("p", "muted pkg-none", needle ? `Nothing matches “${pkgQuery.trim()}”.` : "None."));
-  } else if (id === "scripts") {
-    const list = el("dl", "group res-list pkg-scripts");
-    for (const [script, cmd] of rows) {
+  const [id, , rows] = part;
+  if (!rows.length) {
+    return body.append(el("p", "muted pkg-none", needle ? `Nothing matches “${pkgQuery.trim()}”.` : "None."));
+  }
+  // The manager is only worth a word when there is more than one.
+  const tag = (e) => (many ? el("span", "pkg-eco", e.manager && e.id === "npm" ? e.manager : e.id) : "");
+  const list = el("dl", `group res-list ${id === "scripts" ? "pkg-scripts" : "pkg-list"}`);
+  for (const x of rows) {
+    if (id === "scripts") {
       const row = el("div", "row");
-      row.append(el("dt", null, script), el("dd", null, cmd));
+      const dt = el("dt", null, x.name);
+      dt.append(tag(x.eco));
+      row.append(dt, el("dd", null, x.cmd));
+      list.append(row);
+    } else {
+      const row = pkgRow(x.eco.id, x, newer.get(`${x.eco.id}/${x.name}`));
+      $("dt", row).append(tag(x.eco));
       list.append(row);
     }
-    body.append(list);
-  } else {
-    body.append(pkgList(e.id, rows, newer));
   }
-}
-
-function pkgList(eco, rows, newer) {
-  const list = el("dl", "group res-list pkg-list");
-  for (const x of rows) list.append(pkgRow(eco, x, newer.get(x.name)));
-  return list;
+  body.append(list);
 }
 
 function pkgRow(eco, x, update) {

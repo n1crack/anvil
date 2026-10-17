@@ -1513,17 +1513,12 @@ kbd {
 .chip-btn:hover { color: var(--text); }
 .chip-btn[aria-selected="true"] { background: var(--selected); color: var(--text); }
 
-/* Packages: which manager, then which list. */
-.pkg-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  margin: 4px 0 10px;
-}
-
-.pkg-seg { display: flex; flex-wrap: wrap; gap: 2px; }
-.pkg-manager { align-self: center; font-size: 12px; }
-.pkg-seg + .pkg-seg { padding-left: 16px; border-left: 1px solid var(--line); }
+/* Packages: what it's built on, one filter, one list. */
+.pkg-summary { margin: 0 0 12px; color: var(--muted); }
+.pkg-summary b { margin-left: 4px; color: var(--text); font-weight: 500; }
+.pkg-dot { margin: 0 8px; opacity: 0.5; }
+.pkg-seg { display: flex; flex-wrap: wrap; gap: 2px; margin: 4px 0 10px; }
+.pkg-eco { margin-left: 8px; color: var(--muted); font-size: 11px; }
 .pkg-count { margin-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .logs-status { margin: 4px 0 8px; font-size: 12px; }
@@ -1667,9 +1662,6 @@ kbd {
 
 /* ---------- Packages ---------- */
 
-.pkg-chips { margin-bottom: 12px; }
-.pkg-chips .chip { gap: 4px; padding: 2px 9px; color: var(--muted); }
-.pkg-chips .chip b { font-weight: 500; color: var(--text); }
 
 .pkg-tools {
   display: flex;
