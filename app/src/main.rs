@@ -607,6 +607,73 @@ async fn install_service(handle: AppHandle, id: String) -> Res<Vec<ServiceRow>> 
     services(app)
 }
 
+/// Start, stop or restart a service. Starting also makes it start with Anvil.
+#[tauri::command]
+fn service_run(
+    handle: AppHandle,
+    app: State<App>,
+    id: String,
+    action: String,
+) -> Res<Vec<ServiceRow>> {
+    let mut cfg = anvil::load().map_err(err)?;
+    if action != "restart" {
+        anvil::services::set_enabled(&mut cfg, &id, action == "start").map_err(err)?;
+    }
+    if action != "start" {
+        app.services.lock().unwrap().stop(&id);
+        app.service_errors.lock().unwrap().remove(&id);
+    }
+    if action != "stop" {
+        start_service(&app, &cfg, &id);
+    }
+    changed(&handle);
+    services(app)
+}
+
+#[tauri::command]
+fn set_service_tags(
+    handle: AppHandle,
+    app: State<App>,
+    id: String,
+    tags: Vec<String>,
+) -> Res<Vec<ServiceRow>> {
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::services::set_tags(&mut cfg, &id, &tags).map_err(err)?;
+    changed(&handle);
+    services(app)
+}
+
+#[tauri::command]
+fn set_service_apps(
+    handle: AppHandle,
+    app: State<App>,
+    id: String,
+    apps: Vec<String>,
+) -> Res<Vec<ServiceRow>> {
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::services::set_apps(&mut cfg, &id, &apps).map_err(err)?;
+    changed(&handle);
+    services(app)
+}
+
+/// `what` is "log" (opens in Console) or "data" (shows the folder in Finder).
+#[tauri::command]
+fn open_service(id: String, what: String) -> Res<()> {
+    let cfg = anvil::load().map_err(err)?;
+    if !cfg.services.contains_key(&id) {
+        return Err(format!("There's no service called {id}"));
+    }
+    let (path, app) = if what == "log" {
+        (anvil::services::log_file(&id), "Console")
+    } else {
+        (anvil::services::data(&id), "Finder")
+    };
+    if !path.exists() {
+        return Err(format!("Nothing there yet — start {id} first"));
+    }
+    anvil::run(Command::new("open").arg("-a").arg(app).arg(path)).map_err(err)
+}
+
 #[tauri::command]
 fn service_kinds() -> Res<Vec<anvil::services::Kind>> {
     Ok(anvil::services::kinds(&anvil::load().map_err(err)?))
@@ -619,9 +686,17 @@ async fn add_service(
     kind: String,
     name: Option<String>,
     port: Option<u16>,
+    tags: Vec<String>,
+    apps: Vec<String>,
 ) -> Res<Vec<ServiceRow>> {
     let mut cfg = anvil::load().map_err(err)?;
     let id = anvil::services::add(&mut cfg, &kind, name.as_deref(), port).map_err(err)?;
+    let meta = anvil::services::set_tags(&mut cfg, &id, &tags)
+        .and_then(|_| anvil::services::set_apps(&mut cfg, &id, &apps));
+    if let Err(e) = meta {
+        let _ = anvil::services::remove(&mut cfg, &id, false);
+        return Err(err(e));
+    }
     if !anvil::services::installed(&kind) {
         let job = kind.clone();
         let installed =
@@ -1149,6 +1224,10 @@ fn main() {
             set_service_port,
             install_service,
             service_kinds,
+            service_run,
+            set_service_tags,
+            set_service_apps,
+            open_service,
             add_service,
             remove_service,
             open_url,
