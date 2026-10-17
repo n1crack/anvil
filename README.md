@@ -13,7 +13,7 @@ Free and open source. Built for developers.
 
 ---
 
-Anvil turns the folders on your Mac into running applications at local domains like `myapp.test`. PHP, Node.js, Go, Rust, .NET, Python, MySQL, PostgreSQL, Redis and Mailpit run natively, isolated in `~/.anvil`: no containers, no virtual machines, no changes to your system packages. The few system changes it makes are ones you approve, and `anvil uninstall` removes them.
+Anvil turns the folders on your Mac into running applications at local domains like `myapp.test`. PHP, Node.js, Go, Rust, .NET, Python, MySQL, PostgreSQL, Redis and Mailpit run natively, isolated in `~/.anvil`: no containers or virtual machines required, and no changes to your system packages. If a project brings its own Docker Compose file, Anvil shows and controls its containers too. The few system changes it makes are ones you approve, and `anvil uninstall` removes them.
 
 - Local domains, per-site HTTPS, standard ports
 - Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt, Vite, Node.js, Rust, Go, .NET, Django, FastAPI and Flask detected automatically
