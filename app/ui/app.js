@@ -432,7 +432,13 @@ function renderSite() {
   $(".site-title .mark", root).replaceWith(Object.assign(mark(s), { className: "mark big" }));
   const link = $(".site-url", root);
   link.textContent = url(s).replace("https://", "");
-  link.onclick = (e) => { e.preventDefault(); open("browser"); };
+  link.onclick = (e) => { e.preventDefault(); if (snap.running) open("browser"); };
+  // A stopped server can't answer: the address and Browser look and act off.
+  link.classList.toggle("off", !snap.running);
+  link.title = snap.running ? "" : "Start Anvil to open this address";
+  const browser = $('[data-open="browser"]', root);
+  browser.disabled = !snap.running;
+  browser.title = snap.running ? "Open in browser (⌘O)" : "Start Anvil to open this address";
 
   const editor = $(".editor-btn", root);
   if (snap.editor) {
@@ -462,7 +468,20 @@ function renderSite() {
     ? `${RUNTIME[s.kind]}${s.runtime_version && s.kind !== "dotnet" && s.kind !== "rust" ? ` ${s.runtime_version}` : ""}${s.runtime_version ? "" : " (not installed)"}`
     : s.php
       ? `PHP ${s.php}${s.php_pinned ? "" : " (default)"}`
-      : "Static files";
+      : PHP_KINDS.has(s.kind)
+        ? "PHP, none installed"
+        : "Static files";
+  if (PHP_KINDS.has(s.kind) && !s.php) {
+    const install = el("button", "inline-action", "Install PHP 8.4");
+    install.onclick = async () => {
+      install.disabled = true;
+      install.textContent = "Installing PHP 8.4…";
+      // Returns the Settings view, not a snapshot: refresh the state afterwards.
+      await invoke("php_install", { version: "8.4" }).catch((e) => showError(String(e)));
+      call("state");
+    };
+    $('[data-field="runtime"]', root).append(" ", install);
+  }
   $('[data-field="path"]', root).textContent = tilde(s.path);
   $('[data-field="root"]', root).textContent = tilde(s.root);
 
@@ -715,6 +734,7 @@ async function cleanItems(name, items) {
   loadResources(name, true);
 }
 
+const PHP_KINDS = new Set(["laravel", "statamic", "symfony", "php"]);
 const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet"]);
 
 function renderRun(s, root) {
@@ -740,6 +760,11 @@ function renderRunState(s, root) {
   const err = $(".run-error", root);
   err.textContent = error ?? "";
   err.hidden = !error;
+  if (error && $('.tabs [data-tab="logs"]', root)) {
+    const logs = el("button", "inline-action", "Show Logs");
+    logs.onclick = () => showTab(root, "logs");
+    err.append(" ", logs);
+  }
 }
 
 function renderRunSettings(s, root) {
@@ -1034,7 +1059,7 @@ document.addEventListener("keydown", (e) => {
   }
   const action = { o: "browser", e: "editor", t: "terminal", g: "git" }[e.key];
   const off = { editor: !snap.editor, git: $(".git-btn", root)?.hidden !== false }[action];
-  if (action && mode === "apps" && selected && !off) {
+  if (action && mode === "apps" && selected && !off && (action !== "browser" || snap.running)) {
     e.preventDefault();
     open(action);
     return;
