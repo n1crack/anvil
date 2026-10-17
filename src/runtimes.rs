@@ -204,6 +204,10 @@ pub fn install(id: &str, version: &str) -> Result<()> {
 
 pub fn uninstall(id: &str, version: &str) -> Result<()> {
     check(id)?;
+    // Only a version that is actually installed: the name becomes a path to delete.
+    if !installed(id).iter().any(|v| v == version) {
+        bail!("{} {version} is not installed", name(id));
+    }
     match id {
         "rust" => fs::remove_dir_all(root("rust")),
         "dotnet" => {
@@ -284,6 +288,9 @@ mod tests {
         assert_eq!(v, ["22", "9", "1.27.2", "1.9"]);
         assert!(install("node", "../x").is_err());
         assert!(install("cobol", "1").is_err());
+        for bad in ["../../..", "", "..", "22/../.."] {
+            assert!(uninstall("node", bad).is_err(), "{bad}");
+        }
         let path = env("go", "1.27.2");
         assert!(path.iter().any(|(k, v)| k == "GOTOOLCHAIN" && v == "local"));
     }
