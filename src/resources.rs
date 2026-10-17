@@ -742,12 +742,7 @@ fn listeners(ports: &[u16]) -> BTreeMap<u16, String> {
 
 /// Container names by published port; empty if Docker isn't there or doesn't answer in 3s.
 fn containers() -> BTreeMap<u16, String> {
-    // GUI apps don't get the shell's PATH.
-    let docker = ["/usr/local/bin/docker", "/opt/homebrew/bin/docker"]
-        .into_iter()
-        .find(|p| Path::new(p).exists())
-        .unwrap_or("docker");
-    let child = Command::new(docker)
+    let child = Command::new(crate::compose::docker_bin())
         .args(["ps", "--format", "{{.Names}}\t{{.Ports}}"])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

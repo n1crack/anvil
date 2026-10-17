@@ -29,6 +29,15 @@ pub fn file(dir: &Path) -> Option<PathBuf> {
     .find(|p| p.exists())
 }
 
+/// The docker binary: GUI apps don't get the shell's PATH.
+pub(crate) fn docker_bin() -> PathBuf {
+    ["/usr/local/bin/docker", "/opt/homebrew/bin/docker"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|p| p.exists())
+        .unwrap_or_else(|| "docker".into())
+}
+
 /// Run `docker compose <args>` in `dir`; stdout on success, a readable error otherwise.
 fn compose(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
     let mut child = match Command::new(docker)
@@ -76,7 +85,15 @@ fn compose(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Resul
     if err.contains("Cannot connect to the Docker daemon") || err.contains("docker.sock") {
         bail!("Docker isn't running");
     }
-    bail!("{}", err.trim())
+    let err = err.trim();
+    bail!(
+        "{}",
+        if err.is_empty() {
+            "docker compose failed"
+        } else {
+            err
+        }
+    )
 }
 
 type Row = (String, String, Option<String>, Vec<u16>);
@@ -145,14 +162,14 @@ fn containers_with(docker: &Path, dir: &Path) -> Result<Vec<Container>> {
 }
 
 pub fn containers(dir: &Path) -> Result<Vec<Container>> {
-    containers_with(Path::new("docker"), dir)
+    containers_with(&docker_bin(), dir)
 }
 
 fn action_with(docker: &Path, dir: &Path, service: &str, action: &str) -> Result<()> {
     let args: &[&str] = match action {
-        "start" => &["up", "-d", service],
-        "stop" => &["stop", service],
-        "restart" => &["restart", service],
+        "start" => &["up", "-d", "--", service],
+        "stop" => &["stop", "--", service],
+        "restart" => &["restart", "--", service],
         _ => bail!("Unknown action: {action}"),
     };
     // Starting may pull an image or wait for a slow shutdown (a game server saving its world).
@@ -160,14 +177,14 @@ fn action_with(docker: &Path, dir: &Path, service: &str, action: &str) -> Result
 }
 
 pub fn action(dir: &Path, service: &str, action: &str) -> Result<()> {
-    action_with(Path::new("docker"), dir, service, action)
+    action_with(&docker_bin(), dir, service, action)
 }
 
 pub fn logs(dir: &Path, service: &str) -> Result<String> {
     compose(
-        Path::new("docker"),
+        &docker_bin(),
         dir,
-        &["logs", "--no-color", "--tail", "200", service],
+        &["logs", "--no-color", "--tail", "200", "--", service],
         Duration::from_secs(10),
     )
 }
@@ -232,8 +249,8 @@ mod tests {
 
     #[test]
     fn explains_a_stopped_daemon_and_a_missing_docker() {
-        let d = tmp("dir");
-        let bin = tmp("bin");
+        let d = tmp("daemon-dir");
+        let bin = tmp("daemon-bin");
         let docker = fake_docker(
             &bin,
             "echo 'Cannot connect to the Docker daemon at unix:///x.sock' >&2; exit 1",
@@ -246,8 +263,8 @@ mod tests {
 
     #[test]
     fn merges_services_with_containers() {
-        let d = tmp("dir");
-        let bin = tmp("bin2");
+        let d = tmp("merge-dir");
+        let bin = tmp("merge-bin");
         let docker = fake_docker(
             &bin,
             r#"case "$2" in
@@ -264,5 +281,29 @@ esac"#,
             (c[1].service.as_str(), c[1].state.as_str()),
             ("db", "stopped")
         );
+    }
+
+    #[test]
+    fn maps_actions_to_compose_commands() {
+        let d = tmp("args-dir");
+        let bin = tmp("args-bin");
+        let log = d.join("args");
+        let docker = fake_docker(&bin, &format!("echo \"$@\" >> {}", log.display()));
+        for a in ["start", "stop", "restart"] {
+            action_with(&docker, &d, "web", a).unwrap();
+        }
+        assert_eq!(
+            fs::read_to_string(log).unwrap(),
+            "compose up -d -- web\ncompose stop -- web\ncompose restart -- web\n"
+        );
+    }
+
+    #[test]
+    fn a_silent_failure_still_has_a_message() {
+        let d = tmp("silent-dir");
+        let bin = tmp("silent-bin");
+        let docker = fake_docker(&bin, "exit 1");
+        let e = action_with(&docker, &d, "web", "stop").unwrap_err();
+        assert_eq!(e.to_string(), "docker compose failed");
     }
 }

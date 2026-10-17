@@ -107,7 +107,7 @@ pub fn detect(dir: &Path) -> &'static str {
             "node"
         };
     }
-    if crate::compose::file(dir).is_some() {
+    if crate::compose::file(dir).is_some() && !has("index.html") && !has("public/index.html") {
         return "compose";
     }
     "static"
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn detects_kinds() {
-        let cases: [(&[(&str, &str)], &str); 18] = [
+        let cases: [(&[(&str, &str)], &str); 21] = [
             (
                 &[("artisan", ""), ("package.json", "{\"vite\":1}")],
                 "laravel",
@@ -674,6 +674,12 @@ mod tests {
             ),
             (&[("index.html", "")], "static"),
             (&[("docker-compose.yml", ""), ("README.md", "")], "compose"),
+            (&[("docker-compose.yml", ""), ("index.html", "")], "static"),
+            (
+                &[("docker-compose.yml", ""), ("public/index.html", "")],
+                "static",
+            ),
+            (&[("docker-compose.yml", ""), ("index.php", "")], "php"),
             (
                 &[
                     ("artisan", ""),
