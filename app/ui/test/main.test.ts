@@ -652,6 +652,45 @@ describe("logs", () => {
     expect(calls("open_in_editor").at(-1)![1]).toEqual({ site: "shop", path: "app/Http/Controllers/CheckoutController.php", line: 42 });
   });
 
+  test("a JSX tree in a message is highlighted, as text only, with React's diff lines marked", async () => {
+    const { messageView } = await import("../src/logs");
+    const msg = [
+      "Hydration failed. This can happen if:",
+      "- A server/client branch",
+      "  <Table>",
+      '    <div className="wrap" style={{...}}>',
+      '+     <td className="cell">',
+      '-     <td className="old">',
+      '>      <span title="%s" data-x="<img src=x onerror=alert(1)>">{"Total"}</span>',
+      "Expected %s.",
+    ].join("\n");
+    const pre = messageView(msg);
+    expect(pre.textContent).toBe(msg.replace(/\n/g, ""));
+    expect(pre.querySelector("img")).toBeNull();
+    expect(pre.innerHTML).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    const lines = [...pre.children] as HTMLElement[];
+    expect(lines.map((l) => l.className)).toEqual([
+      "hl-line",
+      "hl-line", // a bullet of the prose, not a diff line
+      "hl-line",
+      "hl-line",
+      "hl-line hl-add",
+      "hl-line hl-del",
+      "hl-line hl-here",
+      "hl-line",
+    ]);
+    const of = (cls: string) => [...pre.querySelectorAll(`.${cls}`)].map((s) => s.textContent);
+    expect(of("hl-tag")).toEqual(["Table", "div", "td", "td", "span", "span"]);
+    expect(of("hl-attr")).toEqual(["className", "style", "className", "className", "title", "data-x"]);
+    expect(of("hl-str")).toEqual(['"wrap"', '"cell"', '"old"', '"%s"', '"<img src=x onerror=alert(1)>"']);
+    expect(of("hl-mute")).toEqual(["{{...}}", "%s", '{"Total"}', "%s"]);
+    expect(lines[6].querySelector(".hl-mark")!.textContent).toBe(">");
+    // Plain prose: only placeholders.
+    const plain = messageView('Expected "a" to be 3 < 4, got %d times');
+    expect(plain.querySelectorAll("span span").length).toBe(1);
+    expect(plain.querySelector(".hl-mute")!.textContent).toBe("%d");
+  });
+
   test("times summary and exception parsing", async () => {
     const { timesSummary, parseException } = await import("../src/logs");
     expect(timesSummary(["2026-10-05 16:24:11", "2026-10-05 15:00:00", "2026-10-05 13:23:39"])).toBe(

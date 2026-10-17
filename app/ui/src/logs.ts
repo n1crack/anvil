@@ -549,6 +549,47 @@ export function jsonView(text) {
   return pre;
 }
 
+// Message tokens: a tag's name, an attribute's name, a "string" (not 'quotes': prose has "don't"), {…} or ... (elided), %s.
+const TOKENS =
+  /(<\/?)([A-Za-z][\w.:-]*)|(?<=\s)([A-Za-z_:][\w:.-]*)(?==)|("(?:[^"\\\n]|\\.)*")|(\{\{[^{}\n]*\}\}|\{[^{}\n]*\}|\.\.\.|…)|(%[sdifoOc])/g;
+// A diff line of React's hydration error: ">" marks the mismatch, "+" and "-" what differs.
+// React indents after + and -, so a "- bullet" of the prose above the tree isn't one.
+const MARK = /^(\s*)(>(?=\s|$)|[+-](?=\s\s|$))/;
+
+/** A multi-line message, a JSX tree (React's hydration error) as quietly highlighted text:
+ * tags, attributes, strings, elided {…}, %s placeholders and the >/+/- lines. Text is only
+ * ever set as text, never as HTML. Plain messages get placeholders muted, nothing more. */
+export function messageView(text: string) {
+  const pre = el("pre", "log-text log-msgtext");
+  const jsx = /<\/?[A-Za-z][\w.:-]*[\s>/]/.test(text);
+  for (const l of text.split("\n")) {
+    const mark = jsx ? l.match(MARK) : null;
+    const row = el("span", `hl-line${mark ? ` hl-${{ ">": "here", "+": "add", "-": "del" }[mark[2]]}` : ""}`);
+    let at = 0;
+    if (mark) {
+      row.append(mark[1], el("span", "hl-mark", mark[2]));
+      at = mark[0].length;
+    }
+    const rest = l.slice(at);
+    let i = 0;
+    for (const m of rest.matchAll(TOKENS)) {
+      if (!jsx && !m[6]) continue;
+      row.append(rest.slice(i, m.index));
+      if (m[2]) row.append(m[1], el("span", "hl-tag", m[2]));
+      else if (m[4]) {
+        // A placeholder stays muted inside a string too: title="%s".
+        const str = el("span", "hl-str");
+        m[4].split(/(%[sdifoOc])/).forEach((part, j) => str.append(j % 2 ? el("span", "hl-mute", part) : part));
+        row.append(str);
+      } else row.append(el("span", m[3] ? "hl-attr" : "hl-mute", m[0]));
+      i = m.index! + m[0].length;
+    }
+    row.append(rest.slice(i));
+    pre.append(row);
+  }
+  return pre;
+}
+
 /** Laravel's context.exception, "[object] (Class(code: 0): message at /file:line)", in parts. */
 export function parseException(s) {
   const m = typeof s === "string" && s.trim().match(/^\[object\] \(([\w\\]+)\(code: [^)]*\): ([\s\S]*) at (\/.+?):(\d+)\)$/);
@@ -620,7 +661,7 @@ export function toggleEntry(v, li) {
   }
   // The row shows the first line, cut at the edge: the whole message only if it didn't fit.
   const msg = $(".log-msg", li);
-  if (e.message.includes("\n") || msg.scrollWidth > msg.clientWidth) box.append(el("pre", "log-text", e.message));
+  if (e.message.includes("\n") || msg.scrollWidth > msg.clientWidth) box.append(messageView(e.message));
   const json = ctx && jsonView(ctx);
   if (json) box.append(el("h4", null, "Context"), json);
   if (e.trace.length)

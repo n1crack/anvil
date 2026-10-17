@@ -1999,6 +1999,17 @@ button.log-head:hover,
   overflow-wrap: anywhere;
 }
 
+/* An expanded message: a JSX tree's parts in quiet colors, React's diff lines tinted. */
+.log-msgtext .hl-line { display: block; min-height: 1.55em; }
+.hl-tag { color: var(--pc0); }
+.hl-attr { color: var(--pc1); }
+.hl-str { color: color-mix(in srgb, var(--ok-text) 70%, var(--text)); }
+.hl-mute { color: var(--muted); }
+.hl-here, .hl-del { background: color-mix(in srgb, var(--danger) 11%, transparent); }
+.hl-add { background: color-mix(in srgb, var(--ok) 11%, transparent); }
+.hl-here .hl-mark, .hl-del .hl-mark { color: var(--danger); }
+.hl-add .hl-mark { color: var(--ok-text); }
+
 .log-json {
   max-height: 320px;
   overflow: auto;

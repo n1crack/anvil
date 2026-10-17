@@ -341,6 +341,26 @@ window.mockServices = [
     }),
     trace: vendorTrace,
   };
+  // A browser.log entry: React's hydration error with its tree, as the browser reports it.
+  const hydration = [
+    "Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:",
+    "",
+    "- A server/client branch `if (typeof window !== 'undefined')`.",
+    "- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.",
+    "",
+    "https://react.dev/link/hydration-mismatch",
+    "",
+    "  <App>",
+    '    <Layout title="Orders">',
+    "      <Table>",
+    '        <div className="table-wrap" style={{...}}>',
+    "          <table>",
+    "            ...",
+    "              <tr>",
+    '+               <td className="cell">',
+    '-               <td className="cell cell-active">',
+    '>                <span title="%s" data-x="<img src=x onerror=alert(1)>">{"Total"}</span>',
+  ].join("\n");
   const entries = [
     ...Array.from({ length: 24 }, (_, i) => E(1 + i * 8, "ERROR", err, binding)),
     E(200, "INFO", "Horizon started"),
@@ -382,6 +402,7 @@ window.mockServices = [
     E(270, "DEBUG", "Config cached"),
     E(275, "INFO", "Application booted", { context: null }),
     E(280, "DEBUG", "Vite manifest read (3 entries)"),
+    E(290, "ERROR", hydration),
   ];
   const page = { entries, start_offset: 0, end_offset: 2097152, truncated: false };
   const sources = [
