@@ -45,9 +45,9 @@
   - `pub fn is_server_script(name: &str, command: &str) -> bool`
   - `pub fn package_scripts(dir: &Path) -> (Vec<Process>, Vec<String>)` — (server rows in package.json order with `source: "package.json"`, `server: true`, `command: "npm run <name>"`; names of all other scripts, excluding npm lifecycle hooks `pre*`/`post*`/`prepare`/`prepack`/`postinstall`).
 
-- [ ] **Step 1: Write the failing test `package_scripts_split_servers_from_commands`** using vuefinder's real scripts (copy from `~/Sites/vuefinder/package.json` into a temp dir): servers = `["dev", "preview", "docs:dev", "docs:serve", "docs:preview"]`, and `test:e2e`, `test:e2e:dev` are commands (they wrap other servers); commands contain `build`, `test:unit`, `lint`, `format`, `type-check` and not `prepare`, `prepack`. Assert `process_id("docs:dev") == "docs-dev"`, `process_id("test:e2e:dev") == "test-e2e-dev"`, and that ids are unique for the vuefinder set.
+- [ ] **Step 1: Write the failing test `package_scripts_split_servers_from_commands`** using vuefinder's real scripts (copy from `~/Sites/vuefinder/package.json` into a temp dir): servers = `["dev", "docs:dev"]` (exactly the two the user named); commands contain `build`, `test:unit`, `lint`, `format`, `type-check`, `preview`, `docs:serve`, `docs:preview`, `test:e2e`, `test:e2e:dev` and not `prepare`, `prepack`. Assert `process_id("docs:dev") == "docs-dev"`, `process_id("test:e2e:dev") == "test-e2e-dev"`, and that ids are unique for the vuefinder set.
 - [ ] **Step 2: Run** `cargo test --lib package_scripts_split` → FAIL (not defined).
-- [ ] **Step 3: Implement.** Server when the name is `dev`, `serve`, `start`, `preview` or ends in `:dev`/`:serve`/`:preview`, or the command's first word (after `npx`/`pnpm exec`/`yarn`) is one of `vite`, `vitepress dev`, `nuxt dev`, `next dev`, `astro dev`, `storybook dev`; never when the command starts with `start-server-and-test` or `run-s`/`npm-run-all` whose last step is not a server. Keep `is_server_script` a plain match, no regex crate.
+- [ ] **Step 3: Implement.** In this order: a name that is `preview` or ends in `:preview`/`:serve` → command (secondary: needs a build, or is a step of a `:dev` script); a command starting with `start-server-and-test` → command; a name that is `dev`, `start`, `serve` or ends in `:dev` → server; a command whose program (after `npx`/`pnpm exec`/`yarn`) is `vite` (not `vite build`/`vite preview`), `vitepress dev`, `nuxt dev`, `next dev`, `astro dev` or `storybook dev` → server; everything else → command. Keep `is_server_script` a plain match, no regex crate.
 - [ ] **Step 4: Run** `cargo test --lib processes` → PASS (existing tests updated for the new fields).
 - [ ] **Step 5: Commit** `git commit -am "Tell package.json dev servers from one-off scripts"`
 
@@ -81,7 +81,7 @@
 - Consumes: `package_scripts`, `Process.server` (Task 1).
 - Produces:
   - `pub fn hashed_port(key: &str, base: u16, taken: &[u16], cfg: &Config) -> u16` in `src/apps.rs` (the existing djb2 loop, extracted; `assign_ports` uses it with base 41000; server rows use base 45000).
-  - `pub struct ServerRow { pub id: String, pub host: String, pub port: u16 }` and `pub fn server_rows(cfg: &Config, site: &Site) -> Vec<ServerRow>` in `src/processes.rs`: every package.json server row of a non-PHP app except the one that is the app's own dev server (`dev`), host `<script name cut at the first ':'>.<site.host>` (`docs:dev` → `docs.vuefinder.<tld>`).
+  - `pub struct ServerRow { pub id: String, pub host: String, pub port: u16 }` and `pub fn server_rows(cfg: &Config, site: &Site) -> Vec<ServerRow>` in `src/processes.rs`: every package.json server row of a non-PHP app except the one that is the app's own dev server (`dev`), host `<script name cut at the first ':'>.<site.host>` (`docs:dev` → `docs.vuefinder.<tld>`); when two rows of one app cut to the same prefix, the first in package.json order keeps it and the others use their full id (`docs-serve.vuefinder.<tld>`).
   - `Process.port: Option<u16>` filled for those rows; `detect` returns them for non-PHP kinds too.
 
 - [ ] **Step 1: Write failing tests:**
