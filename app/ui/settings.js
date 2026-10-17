@@ -376,7 +376,10 @@ function render() {
   for (const o of git.options) if (o.value.includes("/")) o.text = o.value.split("/").pop().replace(/\.app$/, "");
   git.add(new Option("Other app…", "other"));
 
-  $("#address").textContent = `https://name.${s.tld}${s.https_port === 443 ? "" : `:${s.https_port}`}`;
+  // The address a new application gets.
+  const [scheme, port, std] = s.https_default ? ["https", s.https_port, 443] : ["http", s.http_port, 80];
+  $("#address").textContent = `${scheme}://name.${s.tld}${port === std ? "" : `:${port}`}`;
+  $("#https-default").checked = s.https_default;
   // .localhost works without setup; another suffix needs the resolver step once.
   const tld = $("#tld");
   tld.replaceChildren(new Option(".test", "test"), new Option(".localhost (no password needed)", "localhost"));
@@ -443,6 +446,7 @@ $("#add-path").onclick = async () => {
 };
 $("#login").onchange = (e) => call("set_login", { on: e.target.checked });
 $("#dock").onchange = (e) => call("set_dock_icon", { on: e.target.checked });
+$("#https-default").onchange = (e) => call("set_https_default", { on: e.target.checked });
 $("#theme").onchange = (e) => call("set_theme", { theme: e.target.value || null });
 $("#editor").onchange = (e) => call("set_editor", { editor: e.target.value || null });
 $("#terminal").onchange = (e) => call("set_terminal", { terminal: e.target.value || null });

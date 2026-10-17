@@ -8,8 +8,19 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Addresses work without a port number: a setup step (asks for your password once)
+  forwards ports 80 and 443 on this Mac to Anvil. `anvil uninstall` removes it.
+- HTTPS per application: a lock next to each application turns it on or off
+  (`anvil https <site> [--off]` in the CLI). With HTTPS on, the http:// address
+  redirects to https://.
+- The CLI uses color on a terminal; `NO_COLOR` turns it off.
+
 ### Changed
 
+- New applications are served over plain HTTP; Settings › "HTTPS for new
+  applications" changes that. Applications that existed before keep HTTPS.
 - Next.js apps open at `<name>.localhost` until their `next.config` allows the
   domain suffix: in development Next.js only becomes interactive at addresses it
   trusts. The app's Overview adds `allowedDevOrigins` to `next.config` on request.

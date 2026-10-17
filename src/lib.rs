@@ -76,6 +76,11 @@ pub struct Config {
     pub services: BTreeMap<String, services::ServiceConfig>,
     /// macOS git app, e.g. "Fork"; unset uses the first one installed.
     pub git_client: Option<String>,
+    /// Applications without their own choice get HTTPS. Unset only in a config from
+    /// before HTTP became the default; `load` then keeps its sites on HTTPS.
+    /// The field's own `default` (None) wins over `Config::default()` (Some(false)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub https_default: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -99,11 +104,15 @@ pub struct SiteConfig {
     /// Language version for apps with their own server, e.g. Node "24".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<String>,
+    /// HTTPS on or off; unset follows `Config::https_default`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub https: Option<bool>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        // ponytail: macOS only lets root bind 80/443 on loopback; switch the defaults once a privileged helper exists.
+        // Caddy's own ports: macOS only lets root listen below 1024 on loopback, so
+        // 80 and 443 reach these through pf (see `ports_daemon`).
         Config {
             tld: "test".into(),
             http_port: 8080,
@@ -122,6 +131,7 @@ impl Default for Config {
             dock_icon: false,
             services: BTreeMap::new(),
             git_client: None,
+            https_default: Some(false),
         }
     }
 }
@@ -132,6 +142,8 @@ pub struct Site {
     /// Where it opens: `<name>.<tld>`, or `<name>.localhost` for a Next.js app
     /// whose config doesn't accept the tld (see `apps::next_allows`).
     pub host: String,
+    /// Served over HTTPS (with HTTP redirecting to it); otherwise HTTP only.
+    pub secure: bool,
     /// Project folder.
     pub path: PathBuf,
     /// Web root: `public/` when present, otherwise the project folder.
@@ -183,7 +195,22 @@ pub fn home() -> PathBuf {
 /// reported: treating it as "no config" would let the next save wipe it.
 pub fn load() -> Result<Config> {
     match fs::read_to_string(home().join("config.toml")) {
-        Ok(s) => Ok(toml::from_str(&s).context("config.toml is invalid")?),
+        Ok(s) => {
+            let mut cfg: Config = toml::from_str(&s).context("config.toml is invalid")?;
+            if cfg.https_default.is_none() {
+                // Every site used to be HTTPS: the ones there now keep it, new ones get HTTP.
+                for site in sites(&cfg) {
+                    cfg.sites
+                        .entry(site.name)
+                        .or_default()
+                        .https
+                        .get_or_insert(true);
+                }
+                cfg.https_default = Some(false);
+                save(&cfg)?;
+            }
+            Ok(cfg)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
         Err(e) => Err(e).context("couldn't read config.toml"),
     }
@@ -280,6 +307,9 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             };
             Site {
                 host,
+                secure: own
+                    .and_then(|s| s.https)
+                    .unwrap_or(cfg.https_default == Some(true)),
                 modified,
                 ini,
                 php_pinned: pin_set && php.is_some(),
@@ -741,6 +771,12 @@ pub fn set_global_ini(cfg: &mut Config, key: &str, value: Option<&str>) -> Resul
 }
 
 /// Set (or with `None`, clear) one php.ini override for a site.
+/// Turn HTTPS on or off for one site.
+pub fn set_secure(cfg: &mut Config, site: &str, on: bool) -> Result<()> {
+    cfg.sites.entry(site_name(site)).or_default().https = Some(on);
+    save(cfg)
+}
+
 pub fn set_site_ini(cfg: &mut Config, site: &str, key: &str, value: Option<&str>) -> Result<()> {
     let key = key.trim();
     let entry = cfg.sites.entry(site_name(site)).or_default();
@@ -761,20 +797,48 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         "{{\n\tdefault_bind 127.0.0.1 [::1]\n\thttp_port {}\n\thttps_port {}\n\tadmin off\n\tlocal_certs\n\tskip_install_trust\n\tauto_https disable_redirects\n}}\n",
         cfg.http_port, cfg.https_port
     );
+    // A secure site's HTTP addresses redirect; 302, so turning HTTPS off isn't
+    // undone by a redirect the browser remembers.
+    let https_port = match public_https_port(cfg) {
+        443 => String::new(),
+        p => format!(":{p}"),
+    };
+    let redirect = |names: &[String]| {
+        let http: Vec<_> = names.iter().map(|n| format!("http://{n}")).collect();
+        format!(
+            "\n{} {{\n\tredir https://{{host}}{https_port}{{uri}}\n}}\n",
+            http.join(", ")
+        )
+    };
+    // A site without HTTPS only answers http://, so Caddy makes no certificate for it.
+    let addresses = |site: &Site, names: &[String]| {
+        let list: Vec<_> = names
+            .iter()
+            .map(|n| {
+                if site.secure {
+                    n.clone()
+                } else {
+                    format!("http://{n}")
+                }
+            })
+            .collect();
+        list.join(", ")
+    };
     for site in sites {
+        let mut names = vec![format!("{}.{}", site.name, cfg.tld)];
         if let (true, Some(port)) = (apps::runs_process(&site.kind), site.port) {
             // Dev servers that only trust localhost (Next.js) work at <name>.localhost too.
-            let local = if cfg.tld == "localhost" {
-                String::new()
-            } else {
-                format!(", {0}.localhost, http://{0}.localhost", site.name)
-            };
+            if cfg.tld != "localhost" {
+                names.push(format!("{}.localhost", site.name));
+            }
             s += &format!(
-                "\n{0}.{1}, http://{0}.{1}{local} {{\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{2}` 502\n\t}}\n}}\n",
-                site.name,
-                cfg.tld,
+                "\n{} {{\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
+                addresses(site, &names),
                 not_running_page(&site.name),
             );
+            if site.secure {
+                s += &redirect(&names);
+            }
             continue;
         }
         // A quote, backslash or line break in the folder would end the quoted root and
@@ -787,15 +851,17 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             continue;
         }
         s += &format!(
-            "\n{0}.{1}, http://{0}.{1} {{\n\troot * \"{2}\"\n\tencode\n",
-            site.name,
-            cfg.tld,
+            "\n{} {{\n\troot * \"{}\"\n\tencode\n",
+            addresses(site, &names),
             site.root.display()
         );
         if let Some(sock) = fpm_socket(site) {
             s += &format!("\tphp_fastcgi unix/{}\n", sock.display());
         }
         s += "\tfile_server {\n\t\thide .*\n\t}\n}\n";
+        if site.secure {
+            s += &redirect(&names);
+        }
     }
     s
 }
@@ -889,6 +955,8 @@ pub struct Setup {
     /// The local certificate authority is trusted (true until Caddy has made one).
     pub trusted: bool,
     pub php: bool,
+    /// Ports 80 and 443 reach Caddy, so addresses need no `:8443`.
+    pub ports: bool,
 }
 
 /// `.localhost` names already reach this Mac (macOS and browsers resolve them
@@ -927,6 +995,97 @@ pub fn resolver_file(cfg: &Config) -> (PathBuf, String) {
     )
 }
 
+/// The LaunchDaemon that, at every boot, has pf forward ports 80 and 443 on loopback
+/// to Caddy's. macOS lets only root listen below 1024 on 127.0.0.1, so Caddy stays
+/// unprivileged. The rules live in their own anchor under `com.apple/*`, which
+/// `/etc/pf.conf` already evaluates, so that file is left alone.
+pub fn ports_daemon(cfg: &Config) -> (PathBuf, String) {
+    let mut rules = String::new();
+    for (af, lo) in [("inet", "127.0.0.1"), ("inet6", "::1")] {
+        for (from, port) in [(80, cfg.http_port), (443, cfg.https_port)] {
+            // `\n` for printf: the plist keeps the command on one line.
+            rules += &format!(
+                "rdr pass on lo0 {af} proto tcp from any to {lo} port {from} -> {lo} port {port}\\n"
+            );
+        }
+    }
+    let plist = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{PORTS_LABEL}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>-c</string>
+		<string>printf '{rules}' | /sbin/pfctl -a {PF_ANCHOR} -f - &amp;&amp; /sbin/pfctl -E</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+</dict>
+</plist>
+"#
+    );
+    (
+        PathBuf::from(format!("/Library/LaunchDaemons/{PORTS_LABEL}.plist")),
+        plist,
+    )
+}
+
+/// Write the ports daemon where a root command can copy it from.
+pub fn stage_ports_daemon(cfg: &Config) -> Result<PathBuf> {
+    let tmp = home().join("run").join("ports.plist");
+    fs::create_dir_all(home().join("run"))?;
+    fs::write(&tmp, ports_daemon(cfg).1)?;
+    Ok(tmp)
+}
+
+pub const PORTS_LABEL: &str = "dev.anvil.ports";
+pub const PF_ANCHOR: &str = "com.apple/anvil";
+
+/// Whether the standard ports are forwarded to Caddy's.
+// ponytail: checks the daemon file, not the live pf rules (reading those needs root);
+// rules flushed by other software stay unnoticed until the next boot.
+pub fn ports_forwarded(cfg: &Config) -> bool {
+    let (file, want) = ports_daemon(cfg);
+    fs::read_to_string(file).is_ok_and(|s| s == want)
+}
+
+/// The HTTPS port in addresses: 443 once forwarded, otherwise Caddy's own.
+pub fn public_https_port(cfg: &Config) -> u16 {
+    if ports_forwarded(cfg) {
+        443
+    } else {
+        cfg.https_port
+    }
+}
+
+/// The port addresses use for plain HTTP: 80 once forwarded, otherwise Caddy's own.
+pub fn public_http_port(cfg: &Config) -> u16 {
+    if ports_forwarded(cfg) {
+        80
+    } else {
+        cfg.http_port
+    }
+}
+
+/// Where a site opens: `https://` or `http://`, with the port only when it isn't
+/// the scheme's standard one.
+pub fn site_url(cfg: &Config, site: &Site) -> String {
+    let (scheme, port, standard) = if site.secure {
+        ("https", public_https_port(cfg), 443)
+    } else {
+        ("http", public_http_port(cfg), 80)
+    };
+    if port == standard {
+        format!("{scheme}://{}", site.host)
+    } else {
+        format!("{scheme}://{}:{port}", site.host)
+    }
+}
+
 pub fn setup_status(cfg: &Config) -> Setup {
     let (file, want) = resolver_file(cfg);
     let root = home().join("data/caddy/pki/authorities/local/root.crt");
@@ -942,6 +1101,7 @@ pub fn setup_status(cfg: &Config) -> Setup {
                 .output()
                 .is_ok_and(|o| o.status.success()),
         php: !installed_php().is_empty(),
+        ports: ports_forwarded(cfg),
     }
 }
 
@@ -1143,6 +1303,7 @@ mod tests {
         Site {
             name: name.into(),
             host: format!("{name}.test"),
+            secure: true,
             path: root.into(),
             root: root.into(),
             php: php.map(Into::into),
@@ -1302,6 +1463,43 @@ mod tests {
     }
 
     #[test]
+    fn an_old_config_is_told_apart_from_a_new_one() {
+        let old: Config = toml::from_str("tld = \"test\"\n").unwrap();
+        assert_eq!(old.https_default, None);
+        let new: Config = toml::from_str(&toml::to_string(&Config::default()).unwrap()).unwrap();
+        assert_eq!(new.https_default, Some(false));
+    }
+
+    #[test]
+    fn ports_daemon_forwards_loopback_only() {
+        let (file, plist) = ports_daemon(&Config::default());
+        assert_eq!(
+            file,
+            PathBuf::from("/Library/LaunchDaemons/dev.anvil.ports.plist")
+        );
+        for rule in [
+            "rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 80 -> 127.0.0.1 port 8080\\n",
+            "rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 443 -> 127.0.0.1 port 8443\\n",
+            "rdr pass on lo0 inet6 proto tcp from any to ::1 port 443 -> ::1 port 8443\\n",
+        ] {
+            assert!(plist.contains(rule), "missing {rule} in {plist}");
+        }
+        let tmp = std::env::temp_dir().join(format!("anvil-ports-{}.plist", std::process::id()));
+        fs::write(&tmp, &plist).unwrap();
+        let lint = Command::new("plutil")
+            .arg("-lint")
+            .arg(&tmp)
+            .output()
+            .unwrap();
+        fs::remove_file(&tmp).unwrap();
+        assert!(
+            lint.status.success(),
+            "{}",
+            String::from_utf8_lossy(&lint.stdout)
+        );
+    }
+
+    #[test]
     fn caddyfile_routes_php_sites_to_their_socket() {
         let cfg = Config::default();
         let sites = [
@@ -1312,7 +1510,10 @@ mod tests {
         assert!(out.contains("https_port 8443"));
         assert!(out.contains("default_bind 127.0.0.1 [::1]"));
         assert_eq!(out.matches("hide .*").count(), 2);
-        assert!(out.contains("shop.test, http://shop.test {\n\troot * \"/s/shop/public\""));
+        assert!(out.contains("\nshop.test {\n\troot * \"/s/shop/public\""));
+        // HTTPS sites send their HTTP address on with a redirect the browser doesn't keep.
+        assert!(out.contains("\nhttp://shop.test {\n\tredir https://{host}"));
+        assert!(!out.contains("permanent"));
         assert!(out.contains("php-8.3.sock"));
         assert_eq!(out.matches("php_fastcgi").count(), 1);
         assert_eq!(site_name("My Shop.be"), "my-shop.be");
@@ -1326,12 +1527,18 @@ mod tests {
         app.kind = "next".into();
         app.port = Some(41000);
         let out = caddyfile(&cfg, &[app.clone()]);
-        assert!(out.contains("web.test, http://web.test, web.localhost, http://web.localhost {\n\treverse_proxy 127.0.0.1:41000"));
+        assert!(out.contains("\nweb.test, web.localhost {\n\treverse_proxy 127.0.0.1:41000"));
+        assert!(out.contains("\nhttp://web.test, http://web.localhost {\n\tredir "));
+        // Without HTTPS only the http:// addresses exist: no certificate, no redirect.
+        app.secure = false;
+        let out = caddyfile(&cfg, &[app.clone()]);
+        assert!(out.contains("\nhttp://web.test, http://web.localhost {\n\treverse_proxy"));
+        assert!(!out.contains("\tredir "));
         let local = Config {
             tld: "localhost".into(),
             ..Config::default()
         };
-        assert!(caddyfile(&local, &[app]).contains("web.localhost, http://web.localhost {"));
+        assert!(caddyfile(&local, &[app]).contains("\nhttp://web.localhost {\n\treverse_proxy"));
     }
 
     #[test]

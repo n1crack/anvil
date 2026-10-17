@@ -2,7 +2,7 @@
 //! only `--yes` removes it. Anything not recognisably Anvil's is left alone.
 
 use crate::style::{bold, commands, error, yellow};
-use crate::{Config, home, run};
+use crate::{Config, PF_ANCHOR, PORTS_LABEL, home, run};
 use anyhow::{Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,8 @@ use std::process::Command;
 pub enum Step {
     /// `/etc/resolver/<tld>` pointing at Anvil's DNS server (needs sudo).
     Resolver(PathBuf),
+    /// The LaunchDaemon forwarding ports 80 and 443, and its pf rules (needs sudo).
+    Ports(PathBuf),
     /// Anvil's certificate authority in the login keychain, by SHA-1.
     Authority(String),
     /// A file or folder Anvil or its app made.
@@ -23,7 +25,9 @@ pub enum Step {
 impl Step {
     pub fn describe(&self) -> String {
         match self {
-            Step::Resolver(p) => format!("{} (asks for your password)", p.display()),
+            Step::Resolver(p) | Step::Ports(p) => {
+                format!("{} (asks for your password)", p.display())
+            }
             Step::Authority(_) => {
                 "Anvil's HTTPS certificate authority in your login keychain".into()
             }
@@ -91,6 +95,11 @@ pub fn plan(cfg: &Config) -> Vec<Step> {
         if fs::read_to_string(e.path()).is_ok_and(|t| is_anvil_resolver(&t, cfg.dns_port)) {
             steps.push(Step::Resolver(e.path()));
         }
+    }
+
+    let daemon = PathBuf::from(format!("/Library/LaunchDaemons/{PORTS_LABEL}.plist"));
+    if daemon.exists() {
+        steps.push(Step::Ports(daemon));
     }
 
     let user = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
@@ -297,6 +306,14 @@ fn apply(steps: &[Step]) {
                 .args(["delete-certificate", "-Z", sha1, "-t"])
                 .arg(login_keychain())),
             Step::Resolver(p) => run(Command::new("sudo").arg("rm").arg("-f").arg(p)),
+            Step::Ports(p) => run(Command::new("sudo").args([
+                "sh",
+                "-c",
+                &format!(
+                    "launchctl bootout system/{PORTS_LABEL}; rm -f '{}' && pfctl -a {PF_ANCHOR} -F all",
+                    p.display()
+                ),
+            ])),
             // A link is removed, never what it points to.
             Step::Remove(p) | Step::Home(p) => p
                 .symlink_metadata()

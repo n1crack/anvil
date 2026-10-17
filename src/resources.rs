@@ -1273,6 +1273,7 @@ mod tests {
         let site = Site {
             name: "t".into(),
             host: String::new(),
+            secure: false,
             path: dir.clone(),
             root: dir.clone(),
             php: None,
@@ -1323,6 +1324,7 @@ mod tests {
         std::os::unix::fs::symlink(&outside, project.join("ios")).unwrap();
         let site = Site {
             host: String::new(),
+            secure: false,
             name: "n".into(),
             path: project.clone(),
             root: project.clone(),
@@ -1385,6 +1387,7 @@ mod tests {
         }
         Site {
             host: String::new(),
+            secure: false,
             name: name.into(),
             path: dir.clone(),
             root: dir,

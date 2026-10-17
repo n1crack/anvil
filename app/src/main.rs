@@ -29,6 +29,8 @@ struct Snapshot {
     sites: Vec<Site>,
     tld: String,
     https_port: u16,
+    /// Port for addresses of sites without HTTPS.
+    http_port: u16,
     php_default: Option<String>,
     php_installed: Vec<String>,
     editor: Option<String>,
@@ -61,6 +63,8 @@ fn running(app: &App) -> bool {
 
 fn snapshot(app: &App) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
+    let https_port = anvil::public_https_port(&cfg);
+    let http_port = anvil::public_http_port(&cfg);
     let sites = anvil::sites(&cfg);
     let mut apps = app.apps.lock().unwrap();
     let app_states = sites
@@ -96,7 +100,8 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         running: running(app),
         error: app.error.lock().unwrap().clone(),
         tld: cfg.tld,
-        https_port: cfg.https_port,
+        https_port,
+        http_port,
     })
 }
 
@@ -723,6 +728,18 @@ fn setup_fix(handle: AppHandle, step: String) -> Res<anvil::Setup> {
             );
             anvil::run(Command::new("osascript").args(["-e", &script])).map_err(err)?;
         }
+        "ports" => {
+            let (file, _) = anvil::ports_daemon(&cfg);
+            let tmp = anvil::stage_ports_daemon(&cfg).map_err(err)?;
+            let (tmp, file, label) = (tmp.display(), file.display(), anvil::PORTS_LABEL);
+            // bootout first: a changed port reloads the daemon.
+            let script = format!(
+                "do shell script \"launchctl bootout system/{label} 2>/dev/null; cp '{tmp}' '{file}' && chown root:wheel '{file}' && chmod 644 '{file}' && launchctl bootstrap system '{file}'\" with prompt \"Anvil lets addresses work without a port number.\" with administrator privileges"
+            );
+            let res = anvil::run(Command::new("osascript").args(["-e", &script]));
+            let _ = std::fs::remove_file(anvil::home().join("run").join("ports.plist"));
+            res.map_err(err)?;
+        }
         "trust" => anvil::trust().map_err(err)?,
         "php" => anvil::php_install(&mut cfg, "8.4").map_err(err)?,
         other => return Err(format!("Unknown setup step {other}")),
@@ -784,6 +801,28 @@ fn allow_next_origin(handle: AppHandle, app: State<App>, site: String) -> Res<Sn
     anvil::apps::allow_next_origin(&s.path, &cfg.tld).map_err(err)?;
     changed(&handle);
     snapshot(&app)
+}
+
+/// HTTPS on or off for one site.
+#[tauri::command(async)]
+fn set_secure(handle: AppHandle, app: State<App>, site: String, on: bool) -> Res<Snapshot> {
+    let mut cfg = anvil::load().map_err(err)?;
+    anvil::set_secure(&mut cfg, &site, on).map_err(err)?;
+    sites_changed(&handle, &app, &cfg);
+    snapshot(&app)
+}
+
+/// Whether sites without their own choice get HTTPS.
+#[tauri::command(async)]
+fn set_https_default(handle: AppHandle, on: bool) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.https_default = Some(on);
+            Ok(())
+        },
+        true,
+    )
 }
 
 #[tauri::command(async)]
@@ -1122,6 +1161,7 @@ struct Settings {
     git_clients: Vec<String>,
     theme: Option<String>,
     dock_icon: bool,
+    https_default: bool,
     login: bool,
     config_dir: std::path::PathBuf,
 }
@@ -1225,6 +1265,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
     use tauri_plugin_autostart::ManagerExt;
     let cfg = anvil::load().map_err(err)?;
     let installed = anvil::installed_php();
+    let fwd = anvil::ports_forwarded(&cfg);
     Ok(Settings {
         php: anvil::PHP_VERSIONS
             .iter()
@@ -1243,11 +1284,13 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         terminal: cfg.terminal,
         theme: cfg.theme,
         dock_icon: cfg.dock_icon,
+        https_default: cfg.https_default == Some(true),
         hidden: cfg.hidden.clone(),
         paths: cfg.paths,
         tld: cfg.tld,
-        http_port: cfg.http_port,
-        https_port: cfg.https_port,
+        // The ports addresses use: 80 and 443 once forwarded.
+        http_port: if fwd { 80 } else { cfg.http_port },
+        https_port: if fwd { 443 } else { cfg.https_port },
         dns_port: cfg.dns_port,
         editor: cfg.editor,
         ini: cfg.ini,
@@ -1473,7 +1516,7 @@ fn open(site: String, target: String) -> Res<()> {
         .ok_or_else(|| format!("No site named {site}"))?;
     let mut cmd = Command::new("open");
     match target.as_str() {
-        "browser" => cmd.arg(format!("https://{}:{}", s.host, cfg.https_port)),
+        "browser" => cmd.arg(anvil::site_url(&cfg, &s)),
         "finder" => cmd.arg(&s.path),
         "root" => cmd.arg(&s.root),
         "terminal" => cmd
@@ -1756,6 +1799,8 @@ fn main() {
             setup_fix,
             set_group,
             set_site_ini,
+            set_secure,
+            set_https_default,
             allow_next_origin,
             set_runtime,
             open,

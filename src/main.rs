@@ -103,6 +103,13 @@ enum Cmd {
     Trust,
     /// Run DNS, PHP-FPM and the web server in the foreground
     Start,
+    /// Serve a site over HTTPS, its http:// address redirecting there; with --off,
+    /// HTTP only. New sites get HTTP unless `https_default = true` in config.toml
+    Https {
+        site: String,
+        #[arg(long)]
+        off: bool,
+    },
     /// Show the domain suffix applications answer at, or set it: `anvil tld localhost`
     /// needs no password or resolver file; `anvil tld test` needs one setup step
     Tld { tld: Option<String> },
@@ -245,7 +252,7 @@ fn start(cfg: &Config) -> Result<()> {
     for s in sites(cfg) {
         println!(
             "  {}  {}",
-            cyan(format!("https://{}:{}", s.host, cfg.https_port)),
+            cyan(site_url(cfg, &s)),
             dim(format!("(PHP {})", s.php.as_deref().unwrap_or("-")))
         );
     }
@@ -297,6 +304,25 @@ fn print_resolver_step(cfg: &Config) {
             port = cfg.dns_port
         ))
     );
+}
+
+/// The one-time root step that lets addresses drop `:8443`.
+fn print_ports_step(cfg: &Config) -> Result<()> {
+    if ports_forwarded(cfg) {
+        return Ok(());
+    }
+    let tmp = stage_ports_daemon(cfg)?;
+    let (file, _) = ports_daemon(cfg);
+    println!(
+        "Run once so addresses work without a port number (ports 80 and 443 are forwarded to Anvil):\n\n  {}\n",
+        cyan(format!(
+            "sudo launchctl bootout system/{PORTS_LABEL} 2>/dev/null; sudo cp {} {} && sudo launchctl bootstrap system {}",
+            tmp.display(),
+            file.display(),
+            file.display()
+        ))
+    );
+    Ok(())
 }
 
 fn main() -> ExitCode {
@@ -598,14 +624,9 @@ fn run() -> Result<()> {
                 link(&mut cfg, &name, path.clone())?;
             }
             println!("Created {}", path.display());
-            let host = sites(&cfg)
-                .into_iter()
-                .find(|s| s.path == path)
-                .map_or_else(|| format!("{name}.{}", cfg.tld), |s| s.host);
-            println!(
-                "Serving at {}",
-                cyan(format!("https://{host}:{}", cfg.https_port))
-            );
+            if let Some(s) = sites(&cfg).into_iter().find(|s| s.path == path) {
+                println!("Serving at {}", cyan(site_url(&cfg, &s)));
+            }
         }
         Cmd::Usage { site: None } => {
             let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
@@ -825,10 +846,24 @@ fn run() -> Result<()> {
             }
         }
         Cmd::Ini { site, key, value } => set_site_ini(&mut cfg, &site, &key, value.as_deref())?,
+        Cmd::Https { site, off } => {
+            let s = sites(&cfg)
+                .into_iter()
+                .find(|s| s.name == site_name(&site))
+                .with_context(|| format!("No site named {site}"))?;
+            set_secure(&mut cfg, &s.name, !off)?;
+            let s = sites(&cfg).into_iter().find(|x| x.name == s.name).unwrap();
+            println!(
+                "{} {}",
+                cyan(site_url(&cfg, &s)),
+                commands("(restart `anvil start` to apply)")
+            );
+        }
         Cmd::Setup => {
             ensure_caddy()?;
             save(&cfg)?;
             print_resolver_step(&cfg);
+            print_ports_step(&cfg)?;
             println!("{}", commands("Then `anvil trust` for HTTPS."));
         }
         Cmd::Tld { tld } => {

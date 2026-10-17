@@ -302,6 +302,7 @@ mod tests {
         Site {
             name: "shop".into(),
             host: String::new(),
+            secure: false,
             path: dir.into(),
             root: dir.into(),
             php: Some("8.4".into()),

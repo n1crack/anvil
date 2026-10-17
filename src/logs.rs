@@ -576,6 +576,7 @@ mod tests {
         let site = Site {
             name: "shop".into(),
             host: String::new(),
+            secure: false,
             path: dir.clone(),
             root: dir.clone(),
             php: None,

@@ -11,8 +11,14 @@ const filters = JSON.parse(localStorage.getItem("filters") ?? "{}");
 const filterOf = (m) => (filters[m] ??= { kind: null, running: false });
 
 const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
-// The standard HTTPS port needs no ":443".
-const url = (s) => `https://${s.host}${snap.https_port === 443 ? "" : `:${snap.https_port}`}`;
+// A standard port (443, or 80 without HTTPS) isn't written out.
+const url = (s) => {
+  const [scheme, port, std] = s.secure ? ["https", snap.https_port, 443] : ["http", snap.http_port, 80];
+  return `${scheme}://${s.host}${port === std ? "" : `:${port}`}`;
+};
+
+const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+const UNLOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.9-.7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
 let snapAt = 0; // when the last snapshot arrived
 
@@ -63,6 +69,7 @@ window.refresh = () => {
 // [step, field in setup_status, label, what it does]
 const SETUP_STEPS = [
   ["resolver", "resolver", "Local domains", "Lets local addresses reach Anvil (asks for your password)"],
+  ["ports", "ports", "Standard ports", "Lets addresses work without a port number (asks for your password)"],
   ["trust", "trusted", "HTTPS certificate", "Lets browsers trust Anvil’s local certificates"],
   ["php", "php", "PHP", "Installs PHP 8.4 for PHP applications"],
 ];
@@ -238,6 +245,15 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
     ver.textContent = `PHP ${s.php}`;
     end.append(ver);
   }
+  // HTTPS lock: always shown when on, on hover when off.
+  const lock = el("span", `lock${s.secure ? " on" : ""}`);
+  lock.innerHTML = s.secure ? LOCK : UNLOCK;
+  lock.title = s.secure ? "HTTPS on — click to use HTTP" : "HTTP only — click to turn on HTTPS";
+  lock.onclick = (e) => {
+    e.stopPropagation();
+    call("set_secure", { site: s.name, on: !s.secure });
+  };
+  end.append(lock);
   // The running dot always sits last, as in the services list.
   const state = snap.app_states[s.name];
   if (state) {

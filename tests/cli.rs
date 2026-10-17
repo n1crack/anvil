@@ -465,6 +465,8 @@ fn caddyfile_for_a_few_sites() {
     env.ok(&["use", "8.4"]);
     env.ok(&["ini", "shop", "memory_limit", "1G"]);
     env.ok(&["app", "port", "front", "45123"]);
+    // New sites get HTTP; `plain` is switched to HTTPS.
+    env.ok(&["https", "plain"]);
 
     let i = env.start();
     let fpm = env.pid_of("php/8.4/php-fpm");
@@ -477,12 +479,13 @@ fn caddyfile_for_a_few_sites() {
         "\tdefault_bind 127.0.0.1 [::1]\n".into(),
         "\tadmin off\n".into(),
         format!(
-            "shop.test, http://shop.test {{\n\troot * \"{sites}/shop/public\"\n\tencode\n\tphp_fastcgi unix/{home}/run/site-shop.sock\n\tfile_server {{\n\t\thide .*\n\t}}\n}}\n"
+            "\nhttp://shop.test {{\n\troot * \"{sites}/shop/public\"\n\tencode\n\tphp_fastcgi unix/{home}/run/site-shop.sock\n\tfile_server {{\n\t\thide .*\n\t}}\n}}\n"
         ),
         format!(
-            "plain.test, http://plain.test {{\n\troot * \"{sites}/plain\"\n\tencode\n\tphp_fastcgi unix/{home}/run/php-8.4.sock\n"
+            "\nplain.test {{\n\troot * \"{sites}/plain\"\n\tencode\n\tphp_fastcgi unix/{home}/run/php-8.4.sock\n"
         ),
-        "front.test, http://front.test, front.localhost, http://front.localhost {\n\treverse_proxy 127.0.0.1:45123\n".into(),
+        "\nhttp://plain.test {\n\tredir https://{host}".into(),
+        "\nhttp://front.test, http://front.localhost {\n\treverse_proxy 127.0.0.1:45123\n".into(),
     ] {
         assert!(file.contains(&line), "missing {line:?} in:\n{file}");
     }
