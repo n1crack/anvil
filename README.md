@@ -63,6 +63,7 @@ cargo install --path .
 ```
 
 To build the native app as well, see [Getting started](docs/getting-started.md#the-macos-app-optional).
+What Anvil needs on your Mac (macOS version, tools, disk, network, ports) is in [System requirements](docs/requirements.md).
 
 ## Quick start
 
