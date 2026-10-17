@@ -5,14 +5,18 @@
 use crate::{Site, apps, home, runtimes};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct Process {
+    /// Key and file-name part (`process_id` of the name); `name` is what the UI shows.
+    pub id: String,
     pub name: String,
     pub command: String,
     /// Where it was found: `.anvil.toml`, `composer.json` or `package.json`.
     pub source: &'static str,
+    /// A long-running dev server, as opposed to a one-off command.
+    pub server: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -40,9 +44,11 @@ pub fn detect(site: &Site) -> Vec<Process> {
             .into_iter()
             .filter(|(n, c)| valid_name(n) && !c.trim().is_empty())
             .map(|(name, command)| Process {
+                id: name.clone(),
                 name,
                 command,
                 source: ".anvil.toml",
+                server: false,
             })
             .collect();
     }
@@ -69,9 +75,11 @@ pub fn detect(site: &Site) -> Vec<Process> {
         .unwrap_or_default()
         .into_iter()
         .map(|(name, command)| Process {
+            id: name.clone(),
             name,
             command,
             source: "composer.json",
+            server: false,
         })
         .collect();
     if !split.is_empty() {
@@ -80,12 +88,99 @@ pub fn detect(site: &Site) -> Vec<Process> {
     // No dev script to split: Vite (or whatever `npm run dev` is) on its own.
     if json("package.json")["scripts"]["dev"].is_string() {
         return vec![Process {
+            id: "vite".into(),
             name: "vite".into(),
             command: "npm run dev".into(),
             source: "package.json",
+            server: false,
         }];
     }
     vec![]
+}
+
+/// A script name as an id: every char outside letters, digits, `-` and `_` becomes `-`.
+pub fn process_id(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// Whether a package.json script is a long-running dev server rather than a
+/// one-off command.
+pub fn is_server_script(name: &str, command: &str) -> bool {
+    // Secondary: needs a build first, or is a step of a `:dev` script.
+    if name == "preview" || name.ends_with(":preview") || name.ends_with(":serve") {
+        return false;
+    }
+    if command.trim_start().starts_with("start-server-and-test") {
+        return false;
+    }
+    if matches!(name, "dev" | "start" | "serve") || name.ends_with(":dev") {
+        return true;
+    }
+    let words = shell_words(command);
+    let mut w = words.iter().map(String::as_str).peekable();
+    // Skip the runner in front of the program.
+    match w.next() {
+        Some("npx" | "yarn") => {}
+        Some("pnpm") if w.peek() == Some(&"exec") => {
+            w.next();
+        }
+        Some(p) => return program_serves(p, w.next()),
+        None => return false,
+    }
+    w.next().is_some_and(|p| program_serves(p, w.next()))
+}
+
+fn program_serves(program: &str, arg: Option<&str>) -> bool {
+    match program {
+        "vite" => !matches!(arg, Some("build" | "preview")),
+        "vitepress" | "nuxt" | "next" | "astro" | "storybook" => arg == Some("dev"),
+        _ => false,
+    }
+}
+
+/// An app's package.json scripts: the dev servers as rows (in file order), and
+/// the names of the rest, minus npm's lifecycle hooks.
+pub fn package_scripts(dir: &Path) -> (Vec<Process>, Vec<String>) {
+    let json: serde_json::Value = fs::read_to_string(dir.join("package.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let (mut servers, mut commands) = (vec![], vec![]);
+    let empty = serde_json::Map::new();
+    let scripts = json["scripts"].as_object().unwrap_or(&empty);
+    for (name, command) in scripts {
+        let Some(command) = command.as_str() else {
+            continue;
+        };
+        // `pre<x>`/`post<x>` run around an existing script `<x>`; `preview` isn't one.
+        let hook = ["pre", "post"].iter().any(|p| {
+            name.strip_prefix(p)
+                .is_some_and(|x| scripts.contains_key(x))
+        }) || matches!(name.as_str(), "prepare" | "prepack" | "postinstall");
+        if hook {
+            continue;
+        }
+        if is_server_script(name, command) {
+            servers.push(Process {
+                id: process_id(name),
+                name: name.clone(),
+                command: format!("npm run {name}"),
+                source: "package.json",
+                server: true,
+            });
+        } else {
+            commands.push(name.clone());
+        }
+    }
+    (servers, commands)
 }
 
 /// Names become file names and ids: letters, digits, `-` and `_`.
@@ -296,6 +391,75 @@ mod tests {
             shell_words(r#"a "b c" 'd "e"' f\ g """#),
             ["a", "b c", r#"d "e""#, "f g", ""]
         );
+    }
+
+    #[test]
+    fn package_scripts_split_servers_from_commands() {
+        // vuefinder's real scripts.
+        let pkg = r#"{"scripts": {
+    "dev": "vite",
+    "build": "run-s \"build-only {@}\" type-gen --",
+    "preview": "vite preview",
+    "test:unit": "vitest",
+    "prepare": "cypress install",
+    "prepack": "npm run build",
+    "test:e2e": "start-server-and-test preview http://localhost:4173 'cypress run --e2e'",
+    "test:e2e:dev": "start-server-and-test 'vite dev --port 4173' http://localhost:4173 'cypress open --e2e'",
+    "build-only": "vite build",
+    "type-check": "vue-tsc --noEmit -p tsconfig.app.json",
+    "type-gen": "vue-tsc -p tsconfig.app.json",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "docs:dev": "run-s build-only docs:serve",
+    "docs:serve": "vitepress dev docs",
+    "docs:build": "npm run build && vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  }}"#;
+        let dir = std::env::temp_dir().join(format!("anvil-pkg-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("package.json"), pkg).unwrap();
+        let (servers, commands) = package_scripts(&dir);
+        fs::remove_dir_all(&dir).unwrap();
+        let names: Vec<_> = servers.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["dev", "docs:dev"]);
+        assert_eq!(servers[1].id, "docs-dev");
+        assert_eq!(servers[1].command, "npm run docs:dev");
+        assert!(
+            servers
+                .iter()
+                .all(|p| p.server && p.source == "package.json")
+        );
+        for c in [
+            "build",
+            "test:unit",
+            "lint",
+            "format",
+            "type-check",
+            "preview",
+            "docs:serve",
+            "docs:preview",
+            "test:e2e",
+            "test:e2e:dev",
+        ] {
+            assert!(commands.iter().any(|n| n == c), "{c} should be a command");
+        }
+        assert!(!commands.iter().any(|n| n == "prepare" || n == "prepack"));
+        assert_eq!(process_id("test:e2e:dev"), "test-e2e-dev");
+        let mut ids: Vec<_> = servers
+            .iter()
+            .map(|p| p.name.as_str())
+            .chain(commands.iter().map(String::as_str))
+            .map(process_id)
+            .collect();
+        let n = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), n);
+        assert!(is_server_script("web", "npx vite --port 3000"));
+        assert!(!is_server_script("web", "vite build"));
+        assert!(is_server_script("sb", "pnpm exec storybook dev -p 6006"));
     }
 
     fn site(dir: &std::path::Path, kind: &str) -> Site {
