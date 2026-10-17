@@ -79,17 +79,40 @@ describe("overview", () => {
     $('.tabs [data-tab="overview"]').click();
   });
 
-  test("the header's Start is Dev start: processes left out of it don't keep it shown", async () => {
+  test("the header says what runs and opens Dev; Dev's Start leaves out what Dev start does", async () => {
     await select("vuefinder");
+    expect($("#site [data-all]")).toBeNull();
+    // Something in Dev start is stopped: Start (green), right of Configure.
+    expect($$(".dev-bar button").map((b) => b.className)).toEqual(["dev-run", "dev-configure", "dev-all dev-stop"]);
     const ov = w.mockOv.vuefinder;
     const before = structuredClone(ov.rows);
+    for (const r of ov.rows) r.running = false;
+    await select("shop");
+    await select("vuefinder");
+    expect($(".dev-bar .dev-all").textContent).toBe("Start");
+    expect($(".dev-bar .dev-all").className).toBe("dev-all dev-start");
     for (const r of ov.rows) r.running = r.id !== "docs-site";
     ov.rows.find((r) => r.id === "docs-site").manual = true;
     await select("shop");
     await select("vuefinder");
-    expect($('#site [data-all="start"]').hidden).toBe(true);
+    expect($(".dev-bar .dev-all").textContent).toBe("Stop");
     expect($("#site .state-text").textContent).toBe("2 running");
+    ($("#site .state-link") as HTMLElement).click();
+    await wait(80);
+    expect($('.tabs [data-tab="dev"]').getAttribute("aria-selected")).toBe("true");
+    // Stop: "Stopping…" with a spinner while it works, then Dev stop for everything.
+    const n = calls("process_run").length;
+    w.mockDelay = { process_run: 60 };
+    ($(".dev-bar .dev-all") as HTMLElement).click();
+    await wait(10);
+    expect($(".dev-bar .dev-all").textContent).toBe("Stopping…");
+    expect($(".dev-bar .dev-all .spin-dot")).not.toBeNull();
+    await wait(120);
+    w.mockDelay = {};
+    expect(calls("process_run").slice(n)[0][1]).toEqual({ site: "vuefinder", name: null, action: "stop" });
+    expect($(".dev-bar .dev-all").textContent).toBe("Stop");
     ov.rows = before;
+    $('.tabs [data-tab="overview"]').click();
     await select("shop");
   });
 });
@@ -125,10 +148,13 @@ describe("dev", () => {
       "dev-name pc2",
     ]);
     expect($(".dev-list .dev-divider")).not.toBeNull();
-    expect(item("once:test").querySelector(".dot.on")).not.toBeNull();
-    expect(item("once:preview").querySelector(".dev-exit")!.textContent).toBe("✓");
-    const bad = item("once:format").querySelector(".dev-exit")!;
-    expect([bad.textContent, bad.className]).toEqual(["1", "dev-exit bad"]);
+    // A run's status sits in the dot column: a spinner, then ✓ or ✕ (the code in its tooltip).
+    expect(item("once:test").querySelector(".dev-status .spin-dot")).not.toBeNull();
+    expect(item("once:preview").firstElementChild!.className).toBe("dev-status ok");
+    expect(item("once:preview").firstElementChild!.textContent).toBe("✓");
+    const bad = item("once:format").firstElementChild as HTMLElement;
+    expect([bad.textContent, bad.className, bad.title]).toEqual(["✕", "dev-status bad", "Exited with code 1"]);
+    expect(item("app").firstElementChild!.className).toContain("dot");
   });
 
   test("All merges the processes' lines, each tagged with its name in its color", async () => {
@@ -280,7 +306,10 @@ describe("dev", () => {
 
   test("keys act with the focus in the list or output, never in a field nor with ⌘", async () => {
     const key = (at: HTMLElement, k: string, o = {}) => at.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ...o }));
-    const runs = (from: number) => calls("process_run").slice(from).map(([, a]) => [a.name, a.action]);
+    const runs = (from: number) =>
+      calls("process_run")
+        .slice(from)
+        .map(([, a]) => [a.name, a.action]);
     const list = $(".dev-list");
     const out = $(".dev-out");
     expect($(".dev-keys").textContent).toBe("↑↓ select · s start · x stop · r restart · q stop all · c clear");

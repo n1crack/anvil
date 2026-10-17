@@ -130,7 +130,9 @@ describe("links", () => {
   const links = (div: HTMLElement) => [...div.querySelectorAll<HTMLElement>(".term-link")];
 
   test("URLs are found, also when a color splits one; text stays the same", () => {
-    const div = render("  ➜  Local:   \x1b[36mhttp://localhost:\x1b[1m5174\x1b[22m/\x1b[39m\nsee https://laravel.com/docs, then http://shop.test.");
+    const div = render(
+      "  ➜  Local:   \x1b[36mhttp://localhost:\x1b[1m5174\x1b[22m/\x1b[39m\nsee https://laravel.com/docs, then http://shop.test.",
+    );
     expect(links(div).map((a) => a.dataset.url)).toEqual(["http://localhost:5174/", "https://laravel.com/docs", "http://shop.test"]);
     expect(links(div)[0].textContent).toBe("http://localhost:5174/");
     expect(links(div)[0].querySelector(".ansi-b")?.textContent).toBe("5174");

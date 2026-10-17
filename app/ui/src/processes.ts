@@ -115,8 +115,18 @@ function containerRow({ name, state, detail, busy, open, run }: Record<string, a
 /** The app's own server when it is a process, then every other process: what Dev runs. */
 export const devRows = (o?: Overview | null) => (o?.rows ?? []).filter((r) => r.kind !== "site");
 
-/** The header: how many run, and Dev start/stop: Start starts the app and every process
- * in Dev start, Stop stops them all. A PHP site alone says whether it's served. */
+/** Dev start/stop for the shown app, offered by the Dev toolbar: Start starts the app and
+ * every process in Dev start (and its containers), Stop stops them all. */
+export const devAll = {
+  site: "",
+  start: false,
+  stop: false,
+  busy: "" as "" | "start" | "stop",
+  run: async (_action: "start" | "stop") => {},
+};
+
+/** The header: how many run (a click opens Dev), and what Dev start/stop would do.
+ * A PHP site alone says whether it's served. */
 export function drawRunBox(name, rows, containers) {
   const box = $("#site .run-box");
   if (!box) return;
@@ -127,13 +137,18 @@ export function drawRunBox(name, rows, containers) {
   const crashed = own.filter((r) => r.crashed && !r.running).length;
   box.hidden = !rows.length && !containers.length;
   const text = $(".state-text", box);
-  const [start, stop] = [$('[data-all="start"]', box), $('[data-all="stop"]', box)];
+  // A click on the state opens the Dev tab, when there is one.
+  $(".state", box).onclick = () => {
+    if (!$('#site .tabs [data-tab="dev"]').hidden) showTab($("#site"), "dev");
+  };
+  if (devAll.site !== name) devAll.busy = "";
+  devAll.site = name;
   if (!total) {
     const serving = rows.some((r) => r.running);
     $(".dot", box).className = `dot ${serving ? "on" : ""}`;
     text.textContent = serving ? "Serving" : "Not serving";
     text.classList.remove("error-text");
-    start.hidden = stop.hidden = true;
+    devAll.start = devAll.stop = false;
     $(".state", box).onmouseenter = null;
     return;
   }
@@ -141,15 +156,16 @@ export function drawRunBox(name, rows, containers) {
   text.textContent = [running && `${running} running`, crashed && `${crashed} crashed`].filter(Boolean).join(", ") || "Stopped";
   text.classList.toggle("error-text", !!crashed);
   // Done when everything Dev start would start runs; processes left out don't count.
-  start.hidden = own.every((r) => r.running || r.manual) && containers.every(up);
-  stop.hidden = !running;
-  const all = (action) => {
-    loadProcs(name, "process_run", { name: null, action });
+  devAll.start = !(own.every((r) => r.running || r.manual) && containers.every(up));
+  devAll.stop = !!running;
+  devAll.run = async (action) => {
+    devAll.busy = action;
+    late.drawDev?.(name);
     const change = containers.filter((c) => up(c) !== (action === "start")).map((c) => c.service);
-    if (change.length) containerRun(name, change, action);
+    await Promise.all([loadProcs(name, "process_run", { name: null, action }), change.length && containerRun(name, change, action)]);
+    if (devAll.site === name) devAll.busy = "";
+    late.drawDev?.(name);
   };
-  start.onclick = () => all("start");
-  stop.onclick = () => all("stop");
   // Hover the state: which run (and which crashed), with their address or command.
   const shown = [
     ...own
