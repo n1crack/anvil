@@ -1801,7 +1801,7 @@ kbd {
 .icon-btn[aria-pressed="true"] { background: var(--selected); color: var(--text); }
 
 
-/* Packages: what it's built on, then a list per package manager. */
+/* Packages: what it's built on, then a tab per package manager. */
 .pkg-summary { margin: 0 0 12px; color: var(--muted); line-height: 1.8; }
 .pkg-fact { white-space: nowrap; }
 .pkg-summary b { margin-left: 4px; color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -2012,27 +2012,10 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .pkg-status { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .pkg-status.error { color: var(--danger); }
 
-.pkg-list + .pkg-list { margin-top: 12px; }
-
-/* A section header per package manager: set apart from the rows like the Processes groups. */
-.pkg-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 7px 14px 6px;
-  border-bottom: 1px solid var(--line);
-  border-radius: var(--radius-m) var(--radius-m) 0 0;
-  background: var(--group-bg);
-  color: var(--group-text);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.pkg-head-ver { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
-.pkg-head-count { margin-left: auto; color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+/* A tab per package manager, under the tools. */
+.pkg-ecos { margin-bottom: 12px; }
 
 .pkg-list .row { grid-template-columns: 1fr auto; min-height: 34px; padding: 5px 14px; }
-.pkg-list .pkg-head + .row { border-top: 0; }
 .pkg-list dt { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .pkg-list dt a { color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
 .pkg-list dt a:hover { text-decoration: underline; }
@@ -2048,7 +2031,7 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .pkg-new.major { color: var(--amber-text); }
 .pkg-ver:has(.pkg-new) > :first-child { color: var(--text); }
 
-.pkg-none { margin: 4px 0; }
+.pkg-none { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 
 /* Which log: one line of segments, or a menu when there are many. */
 .logs-files { display: flex; margin-bottom: 10px; }

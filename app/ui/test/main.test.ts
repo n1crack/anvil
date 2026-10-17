@@ -273,25 +273,44 @@ describe("logs", () => {
 });
 
 describe("packages", () => {
-  test("a list per manager; Outdated shows current → newest, checked once an hour", async () => {
+  test("All until a check exists, no check on opening; then Outdated with a tab per manager", async () => {
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
-    expect(calls("package_updates")).toHaveLength(1);
-    expect($$(".pkg-head > span:first-child").map((h) => h.textContent)).toEqual(["Composer", "pnpm"]);
-    expect($(".pkg-status").textContent).toBe("7 updates · 3 major · checked just now");
-    expect($$(".pkg-dev").length).toBe(14);
+    expect(calls("package_updates")).toHaveLength(0);
+    expect($('.pkg-tools .seg [aria-pressed="true"]').dataset.id).toBe("all");
+    expect($$(".pkg-ecos button").map((b) => b.textContent)).toEqual(["Composer 16", "pnpm 8"]);
+    expect($(".pkg-status").textContent).toBe("");
     $('.pkg-tools .seg [data-id="outdated"]').click();
+    expect($(".pkg-none").textContent).toBe("Not checked yet");
+    expect($$(".pkg-check")).toHaveLength(1);
+    expect($$(".pkg-ecos button").map((b) => b.textContent)).toEqual(["Composer 16", "pnpm 8"]);
+    ($(".pkg-none .pkg-check") as HTMLElement).click();
+    await wait(80);
+    expect(calls("package_updates")).toHaveLength(1);
+    expect($(".pkg-status").textContent).toBe("checked just now");
+    expect(JSON.parse(localStorage.getItem("pkgUpdates:shop")!).list).toHaveLength(7);
+    expect($$(".pkg-ecos button").map((b) => b.textContent)).toEqual(["Composer 4", "pnpm 3"]);
+    expect($('.pkg-tools .seg [data-id="outdated"]').textContent).toBe("Outdated 4");
     const rows = $$(".pkg-list .row");
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(4);
     const fw = rows.find((r) => r.querySelector("a")?.textContent === "laravel/framework")!;
     expect(fw.querySelector(".pkg-ver")?.textContent).toBe("11.36.1→12.4.0");
     expect(fw.querySelector(".pkg-new")?.classList.contains("major")).toBe(true);
+    ($('.pkg-ecos [data-id="npm"]') as HTMLElement).click();
+    expect($$(".pkg-list .row")).toHaveLength(3);
     $('.tabs [data-tab="logs"]').click();
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
     expect(calls("package_updates")).toHaveLength(1);
-    $(".pkg-check").click();
-    await wait(80);
-    expect(calls("package_updates")).toHaveLength(2);
+  });
+
+  test("a saved check makes Outdated the default after a restart", async () => {
+    const { pkgUpdates, pkgView, drawPackages } = await import("../src/packages");
+    pkgUpdates.clear();
+    pkgView.clear();
+    drawPackages("shop");
+    expect($('.pkg-tools .seg [aria-pressed="true"]').dataset.id).toBe("outdated");
+    expect($(".pkg-status").textContent).toBe("checked just now");
+    expect(calls("package_updates")).toHaveLength(1);
   });
 });
