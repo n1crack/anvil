@@ -52,13 +52,9 @@ function buildLogs(s) {
     <div class="logs-files" role="tablist" aria-label="Log files"></div>
     <div class="logs-bar">
       <input class="logs-search" type="search" placeholder="Search this log" aria-label="Search this log" spellcheck="false">
+      <select class="logs-level" aria-label="Level"></select>
       <label class="logs-follow" title="Show new entries as they are written"><input type="checkbox" role="switch">Follow</label>
-    </div>
-    <div class="logs-bar">
-      <div class="logs-levels" role="radiogroup" aria-label="Level"></div>
-      <span class="spacer"></span>
-      <button class="logs-console">Open in Console</button>
-      <button class="logs-clear">Clear…</button>
+      <button class="logs-menu icon-btn" title="More" aria-label="More">⋯</button>
     </div>
     <p class="logs-status muted"></p>
     <ol class="logs-list"></ol>
@@ -78,18 +74,12 @@ function buildLogs(s) {
     token: 0,
   };
 
-  const levels = $(".logs-levels", node);
-  for (const [id, label] of LEVELS) {
-    const b = el("button", "chip-btn", label);
-    b.setAttribute("role", "radio");
-    b.setAttribute("aria-checked", id === "all");
-    b.onclick = () => {
-      v.level = id;
-      for (const x of levels.children) x.setAttribute("aria-checked", x === b);
-      loadLogs(v);
-    };
-    levels.append(b);
-  }
+  const levels = $(".logs-level", node);
+  for (const [id, label] of LEVELS) levels.add(new Option(id === "all" ? "All levels" : label, id));
+  levels.onchange = () => {
+    v.level = levels.value;
+    loadLogs(v);
+  };
 
   let debounce;
   const search = $(".logs-search", node);
@@ -109,9 +99,20 @@ function buildLogs(s) {
     follow(v.follow);
   };
 
-  $(".logs-console", node).onclick = () =>
-    invoke("log_open", { site: v.site, source: v.source.id }).catch((e) => showError(String(e)));
-  $(".logs-clear", node).onclick = () => clearLog(v);
+  // Less frequent actions wait behind ⋯.
+  $(".logs-menu", node).onclick = async () => {
+    const menu = await M.Menu.new({
+      items: await Promise.all([
+        M.MenuItem.new({
+          text: "Open in Console",
+          action: () => invoke("log_open", { site: v.site, source: v.source.id }).catch((e) => showError(String(e))),
+        }),
+        M.PredefinedMenuItem.new({ item: "Separator" }),
+        M.MenuItem.new({ text: `Clear ${v.source.label}…`, action: () => clearLog(v) }),
+      ]),
+    });
+    menu.popup();
+  };
   $(".logs-more", node).onclick = () => more(v);
   $(".logs-list", node).onclick = (e) => {
     const head = e.target.closest(".log-head");
@@ -140,7 +141,8 @@ async function loadSources(v, s) {
 function drawFiles(v) {
   const strip = $(".logs-files", v.node);
   strip.replaceChildren();
-  strip.hidden = !v.sources.length;
+  // One file needs no picker.
+  strip.hidden = v.sources.length < 2;
   for (const src of v.sources) {
     const b = el("button", src.bytes >= LARGE_LOG ? "logs-file large" : "logs-file");
     b.setAttribute("role", "tab");
@@ -183,6 +185,8 @@ function showLarge(v) {
   $(".logs-list", v.node).replaceChildren(box);
   $(".logs-status", v.node).textContent = "";
   $(".logs-more", v.node).hidden = true;
+  // The card has its own actions; the toolbar would only repeat them.
+  $(".logs-bar", v.node).hidden = true;
 }
 
 function noSourcesText(s) {
@@ -205,6 +209,7 @@ const filtered = (v) => v.level !== "all" || v.query;
 /** First page for the current source and filters. */
 async function loadLogs(v, keepScroll = false) {
   const token = ++v.token;
+  $(".logs-bar", v.node).hidden = !v.source;
   if (v.source.bytes >= LARGE_LOG && !largeOk.has(`${v.site}/${v.source.id}`)) return showLarge(v);
   if (!keepScroll) $(".logs-status", v.node).textContent = filtered(v) ? "Searching…" : "Reading…";
   let page;
@@ -273,7 +278,7 @@ function status(v) {
   const n = v.shown;
   const text = filtered(v)
     ? `${n} ${n === 1 ? "match" : "matches"} in ${src.label}${v.page.truncated ? `, searched the newest ${bytes(v.page.end_offset - v.page.start_offset)}` : ""}`
-    : `Newest ${n} ${n === 1 ? "entry" : "entries"} of ${src.label} (${bytes(src.bytes)})`;
+    : "";
   $(".logs-status", v.node).textContent = text;
   $(".logs-status", v.node).title = tilde(src.path);
 }
