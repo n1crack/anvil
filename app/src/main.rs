@@ -5,7 +5,7 @@ use anvil::{Config, Server, Site};
 use serde::Serialize;
 use std::process::Command;
 use std::sync::Mutex;
-use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{
     AppHandle, Manager, RunEvent, State, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
@@ -1149,7 +1149,7 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let cfg = anvil::load().unwrap_or_default();
 
     let status = if on {
-        format!("Running {} sites", anvil::sites(&cfg).len())
+        format!("Serving {} applications", anvil::sites(&cfg).len())
     } else if app.error.lock().unwrap().is_some() {
         "Stopped, open Anvil for details".into()
     } else {
@@ -1162,7 +1162,7 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let sep = || PredefinedMenuItem::separator(handle);
 
     let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = vec![
-        Box::new(item("sites", "Sites", true, None)?),
+        Box::new(item("sites", "Open Anvil", true, None)?),
         Box::new(sep()?),
         Box::new(item("status", &status, false, None)?),
         Box::new(item(
@@ -1174,6 +1174,64 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         Box::new(item("restart", "Restart", on, None)?),
         Box::new(sep()?),
     ];
+    // Services and apps with their own server, ticked while running; picking one toggles it.
+    let toggles =
+        |prefix: &str, list: Vec<(String, bool)>| -> tauri::Result<Vec<CheckMenuItem<Wry>>> {
+            list.into_iter()
+                .map(|(name, running)| {
+                    CheckMenuItem::with_id(
+                        handle,
+                        format!("{prefix}:{name}"),
+                        &name,
+                        true,
+                        running,
+                        None::<&str>,
+                    )
+                })
+                .collect()
+        };
+    let svc: Vec<(String, bool)> = {
+        let mut s = app.services.lock().unwrap();
+        anvil::services::instances(&cfg)
+            .into_iter()
+            .map(|id| {
+                let r = s.running(&id);
+                (id, r)
+            })
+            .collect()
+    };
+    let procs: Vec<(String, bool)> = {
+        let mut a = app.apps.lock().unwrap();
+        anvil::sites(&cfg)
+            .into_iter()
+            .filter(|s| anvil::apps::runs_process(&s.kind) && !s.linked)
+            .map(|s| {
+                let r = a.running(&s.name);
+                (s.name, r)
+            })
+            .collect()
+    };
+    for (title, prefix, list) in [
+        ("Services", "svc", svc),
+        ("Apps with a Server", "app", procs),
+    ] {
+        if list.is_empty() {
+            continue;
+        }
+        let running = list.iter().filter(|x| x.1).count();
+        let label = if running > 0 {
+            format!("{title} ({running} running)")
+        } else {
+            title.to_string()
+        };
+        let children = toggles(prefix, list)?;
+        let refs: Vec<&dyn IsMenuItem<Wry>> =
+            children.iter().map(|c| c as &dyn IsMenuItem<Wry>).collect();
+        items.push(Box::new(Submenu::with_items(handle, label, true, &refs)?));
+    }
+    if items.len() > 6 {
+        items.push(Box::new(sep()?));
+    }
     for (i, v) in anvil::installed_php().iter().rev().enumerate() {
         let key = (i < 9).then(|| format!("CmdOrCtrl+{}", i + 1));
         items.push(Box::new(CheckMenuItem::with_id(
@@ -1214,6 +1272,25 @@ fn on_menu(handle: &AppHandle, id: &str) {
         }
         "settings" => open_settings(handle),
         "quit" => handle.exit(0),
+        _ if id.starts_with("svc:") || id.starts_with("app:") => {
+            let (prefix, name) = id.split_once(':').unwrap();
+            let Ok(cfg) = anvil::load() else { return };
+            if prefix == "svc" {
+                let running = app.services.lock().unwrap().running(name);
+                let mut cfg = cfg;
+                let _ = anvil::services::set_enabled(&mut cfg, name, !running);
+                if running {
+                    app.services.lock().unwrap().stop(name);
+                } else {
+                    start_service(&app, &cfg, name);
+                }
+            } else if app.apps.lock().unwrap().running(name) {
+                app.apps.lock().unwrap().stop(name);
+            } else {
+                start_app(&app, &cfg, name);
+            }
+            changed(handle);
+        }
         _ => {
             if let Some(v) = id.strip_prefix("php:")
                 && let Ok(mut cfg) = anvil::load()
