@@ -39,11 +39,29 @@ pub struct Process {
     pub shared: bool,
 }
 
+/// Where a service the app uses comes from.
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    Anvil,
+    Docker,
+    /// Another program on this Mac.
+    Local,
+    Remote,
+    /// Nothing listens on the port, or there is no port (SQLite).
+    None,
+}
+
 #[derive(Serialize)]
 pub struct ServiceUse {
     /// What the app's config asks for, e.g. "MySQL" or "Redis".
     pub label: String,
     pub port: Option<u16>,
+    /// The host from the app's config, when it sets one.
+    pub host: Option<String>,
+    pub source: Source,
+    /// Container, process name, Compose service or remote host.
+    pub detail: Option<String>,
     /// The Anvil service on that port, if any.
     pub anvil: Option<String>,
     pub running: bool,
@@ -519,31 +537,164 @@ fn dotenv(dir: &Path) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// The port in a URL like `postgres://user:pw@127.0.0.1:5433/db`.
+/// The `host:port` in a URL like `postgres://user:pw@127.0.0.1:5433/db`.
+fn authority(url: &str) -> Option<&str> {
+    url.split("://")
+        .nth(1)?
+        .split(['/', '?'])
+        .next()?
+        .rsplit('@')
+        .next()
+}
+
 fn url_port(url: &str) -> Option<u16> {
-    let host = url.split("://").nth(1)?.split('/').next()?;
-    let host = host.rsplit('@').next()?;
-    host.rsplit_once(':')?.1.parse().ok()
+    authority(url)?.rsplit_once(':')?.1.parse().ok()
+}
+
+fn url_host(url: &str) -> Option<String> {
+    let a = authority(url)?;
+    let host = match a.rsplit_once(':') {
+        Some((h, p)) if p.parse::<u16>().is_ok() => h,
+        _ => a,
+    };
+    Some(host.trim_matches(['[', ']']).to_string())
+}
+
+fn is_local(host: Option<&str>) -> bool {
+    matches!(
+        host,
+        None | Some("" | "127.0.0.1" | "localhost" | "::1" | "0.0.0.0")
+    )
+}
+
+/// Port -> name of the process listening on it, from `lsof -Fpcn` output.
+fn parse_lsof(out: &str) -> BTreeMap<u16, String> {
+    let mut map = BTreeMap::new();
+    let mut command = "";
+    for l in out.lines() {
+        if let Some(c) = l.strip_prefix('c') {
+            command = c;
+        } else if let Some(n) = l.strip_prefix('n')
+            && let Some(port) = n.rsplit(':').next().and_then(|p| p.parse().ok())
+        {
+            map.entry(port).or_insert_with(|| command.to_string());
+        }
+    }
+    map
+}
+
+/// Host port -> container name, from `docker ps --format '{{.Names}}\t{{.Ports}}'`.
+fn parse_docker_ps(out: &str) -> BTreeMap<u16, String> {
+    let mut map = BTreeMap::new();
+    for l in out.lines() {
+        let Some((name, ports)) = l.split_once('\t') else {
+            continue;
+        };
+        for p in ports.split(", ") {
+            if let Some(port) = p
+                .split_once("->")
+                .and_then(|(h, _)| h.rsplit(':').next()?.parse().ok())
+            {
+                map.entry(port).or_insert_with(|| name.to_string());
+            }
+        }
+    }
+    map
+}
+
+fn is_docker(process: &str) -> bool {
+    let p = process.to_lowercase();
+    [
+        "com.docke",
+        "docker",
+        "vpnkit",
+        "orbstack",
+        "limactl",
+        "colima",
+    ]
+    .iter()
+    .any(|d| p.starts_with(d))
+}
+
+/// Who listens on these ports, with one `lsof` call.
+fn listeners(ports: &[u16]) -> BTreeMap<u16, String> {
+    if ports.is_empty() {
+        return BTreeMap::new();
+    }
+    let list: Vec<String> = ports.iter().map(u16::to_string).collect();
+    let out = Command::new("lsof")
+        .args(["-nP", "-sTCP:LISTEN", "-Fpcn"])
+        .arg(format!("-iTCP:{}", list.join(",")))
+        .output();
+    out.map(|o| parse_lsof(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default()
+}
+
+/// Container names by published port; empty if Docker isn't there or doesn't answer in 3s.
+fn containers() -> BTreeMap<u16, String> {
+    // GUI apps don't get the shell's PATH.
+    let docker = ["/usr/local/bin/docker", "/opt/homebrew/bin/docker"]
+        .into_iter()
+        .find(|p| Path::new(p).exists())
+        .unwrap_or("docker");
+    let child = Command::new(docker)
+        .args(["ps", "--format", "{{.Names}}\t{{.Ports}}"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return BTreeMap::new();
+    };
+    for _ in 0..60 {
+        if let Ok(Some(_)) = child.try_wait() {
+            use std::io::Read;
+            let mut out = String::new();
+            let _ = child.stdout.take().map(|mut s| s.read_to_string(&mut out));
+            return parse_docker_ps(&out);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    BTreeMap::new()
+}
+
+/// Whether a Compose file in the project defines this service.
+fn compose_service(dir: &Path, name: &str) -> bool {
+    let key = format!("{name}:");
+    [
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yaml",
+        "compose.yml",
+    ]
+    .iter()
+    .filter_map(|f| std::fs::read_to_string(dir.join(f)).ok())
+    .any(|s| s.lines().any(|l| l.trim() == key))
 }
 
 /// Services the app's .env points at, matched to Anvil services by port.
 pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) -> Vec<ServiceUse> {
     let env = dotenv(&site.path);
     let get = |k: &str| env.get(k).map(String::as_str);
-    let mut wanted: Vec<(String, Option<u16>)> = vec![];
+    let host = |k: &str| get(k).map(String::from);
+    let mut wanted: Vec<(String, Option<u16>, Option<String>)> = vec![];
     match get("DB_CONNECTION") {
         Some("mysql" | "mariadb") => wanted.push((
             "MySQL".into(),
             get("DB_PORT").and_then(|p| p.parse().ok()).or(Some(3306)),
+            host("DB_HOST"),
         )),
         Some("pgsql") => wanted.push((
             "PostgreSQL".into(),
             get("DB_PORT").and_then(|p| p.parse().ok()).or(Some(5432)),
+            host("DB_HOST"),
         )),
-        Some("sqlite") => wanted.push(("SQLite (file in the project)".into(), None)),
+        Some("sqlite") => wanted.push(("SQLite (file in the project)".into(), None, None)),
         Some(other) => wanted.push((
             format!("Database ({other})"),
             get("DB_PORT").and_then(|p| p.parse().ok()),
+            host("DB_HOST"),
         )),
         None => {}
     }
@@ -555,7 +706,7 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
         } else {
             "Database"
         };
-        wanted.push((label.into(), url_port(url)));
+        wanted.push((label.into(), url_port(url), url_host(url)));
     }
     let uses_redis = [
         "CACHE_STORE",
@@ -571,15 +722,28 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
             .and_then(|p| p.parse().ok())
             .or_else(|| get("REDIS_URL").and_then(url_port))
             .or(Some(6379));
-        wanted.push(("Redis".into(), port));
+        let h = host("REDIS_HOST").or_else(|| get("REDIS_URL").and_then(url_host));
+        wanted.push(("Redis".into(), port, h));
     }
     if matches!(get("MAIL_MAILER"), Some("smtp")) {
         wanted.push((
             "Mail (SMTP)".into(),
             get("MAIL_PORT").and_then(|p| p.parse().ok()),
+            host("MAIL_HOST"),
         ));
     }
 
+    let local_ports: Vec<u16> = wanted
+        .iter()
+        .filter(|w| is_local(w.2.as_deref()))
+        .filter_map(|w| w.1)
+        .collect();
+    let listening = listeners(&local_ports);
+    let docker = if listening.values().any(|p| is_docker(p)) {
+        containers()
+    } else {
+        BTreeMap::new()
+    };
     let table = ps();
     let ids = services::instances(cfg);
     let data_sizes = du(&ids
@@ -588,7 +752,7 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
         .collect::<Vec<_>>());
     wanted
         .into_iter()
-        .map(|(label, port)| {
+        .map(|(label, port, host)| {
             let anvil = port.and_then(|p| {
                 ids.iter()
                     .find(|id| {
@@ -601,10 +765,35 @@ pub fn services_used(cfg: &Config, site: &Site, svc: &mut services::Services) ->
                 .as_deref()
                 .and_then(|id| svc.pid(id))
                 .and_then(|pid| table.iter().find(|p| p.pid == pid));
+            let running = anvil.as_deref().is_some_and(|id| svc.running(id));
+            let listener = port.and_then(|p| listening.get(&p));
+            let (source, detail) = match (&host, port) {
+                (Some(h), _) if !is_local(Some(h)) => {
+                    if compose_service(&site.path, h) {
+                        (Source::Docker, Some(format!("compose service {h}")))
+                    } else {
+                        let at = port.map_or(h.clone(), |p| format!("{h}:{p}"));
+                        (Source::Remote, Some(at))
+                    }
+                }
+                // A stopped Anvil service whose port another program holds isn't what the app reaches.
+                _ if anvil.is_some() && (running || listener.is_none()) => {
+                    (Source::Anvil, anvil.clone())
+                }
+                (_, Some(p)) => match listener {
+                    Some(l) if is_docker(l) => (Source::Docker, docker.get(&p).cloned()),
+                    Some(l) => (Source::Local, Some(l.clone())),
+                    None => (Source::None, None),
+                },
+                _ => (Source::None, None),
+            };
             ServiceUse {
                 memory: proc.map(|p| p.rss),
                 cpu: proc.map(|p| p.cpu),
-                running: anvil.as_deref().is_some_and(|id| svc.running(id)),
+                running,
+                host,
+                source,
+                detail,
                 data_bytes: anvil
                     .as_deref()
                     .and_then(|id| data_sizes.get(&home().join("data").join(id)).copied()),
@@ -1089,5 +1278,32 @@ mod tests {
         assert!(clean(&site, "build", false).is_err());
         assert!(site.path.join("build/index.html").exists());
         std::fs::remove_dir_all(&site.path).unwrap();
+    }
+
+    #[test]
+    fn service_sources() {
+        assert_eq!(
+            url_host("postgres://u:p@db.example.com:5432/app").as_deref(),
+            Some("db.example.com")
+        );
+        assert_eq!(url_host("redis://127.0.0.1").as_deref(), Some("127.0.0.1"));
+        assert_eq!(url_host("redis://[::1]:6380?x=1").as_deref(), Some("::1"));
+        assert_eq!(url_port("redis://[::1]:6380?x=1"), Some(6380));
+        assert!(is_local(None) && is_local(Some("localhost")) && is_local(Some("::1")));
+        assert!(!is_local(Some("mysql")) && !is_local(Some("db.example.com")));
+
+        let lsof = "p4437\ncmariadbd\nf643\nn*:3306\nf644\nn*:3306\n\
+                    p9919\nccom.docker.backend\nf629\nn127.0.0.1:6379\nf631\nn127.0.0.1:3307\n";
+        let l = parse_lsof(lsof);
+        assert_eq!(l.get(&3306).map(String::as_str), Some("mariadbd"));
+        assert_eq!(l.get(&3307).map(String::as_str), Some("com.docker.backend"));
+        assert!(is_docker("com.docke") && is_docker("OrbStack") && !is_docker("mariadbd"));
+
+        let ps = "shop-db\t0.0.0.0:3307->3306/tcp, [::]:3307->3306/tcp\n\
+                  cache\t127.0.0.1:6379->6379/tcp\nworker\t\nother\t6380/tcp\n";
+        let d = parse_docker_ps(ps);
+        assert_eq!(d.get(&3307).map(String::as_str), Some("shop-db"));
+        assert_eq!(d.get(&6379).map(String::as_str), Some("cache"));
+        assert_eq!(d.len(), 2);
     }
 }
