@@ -18,7 +18,6 @@ const url = (s) => {
 };
 
 const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
-const UNLOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.9-.7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
 let snapAt = 0; // when the last snapshot arrived
 
@@ -223,6 +222,13 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
   text.innerHTML = `<span class="name"></span><span class="sub"></span>`;
   // The folder's name: not every project is a site, so no address in the list.
   $(".name", text).textContent = s.name;
+  // HTTPS shows as a lock after the name; it's turned on and off from the right-click menu.
+  if (s.secure) {
+    const lock = el("span", "lock");
+    lock.innerHTML = LOCK;
+    lock.title = "HTTPS";
+    $(".name", text).append(lock);
+  }
   // In a folder's section the path only repeats the heading; linked apps and groups keep it.
   if (path && !child) $(".sub", text).textContent = tilde(s.path) + "/";
   else $(".sub", text).remove();
@@ -246,15 +252,6 @@ function row(s, { child = false, kids = 0, path = true, kind: showKind = true } 
     ver.textContent = `PHP ${s.php}`;
     end.append(ver);
   }
-  // HTTPS lock: always shown when on, on hover when off.
-  const lock = el("span", `lock${s.secure ? " on" : ""}`);
-  lock.innerHTML = s.secure ? LOCK : UNLOCK;
-  lock.title = s.secure ? "HTTPS on — click to use HTTP" : "HTTP only — click to turn on HTTPS";
-  lock.onclick = (e) => {
-    e.stopPropagation();
-    call("set_secure", { site: s.name, on: !s.secure });
-  };
-  end.append(lock);
   // The running dot always sits last, as in the services list.
   const state = snap.app_states[s.name];
   if (state) {
@@ -424,6 +421,12 @@ async function siteMenu(s) {
   const groups = [...new Set(["Favorites", ...Object.keys(snap.groups)])];
 
   const items = [];
+  if (s.kind !== "compose") {
+    items.push(
+      await M.CheckMenuItem.new({ text: "HTTPS", checked: s.secure, action: () => call("set_secure", { site: s.name, on: !s.secure }) }),
+      await sep(),
+    );
+  }
   if (!s.linked) {
     items.push(await M.MenuItem.new({ text: "Add Alias…", action: () => addAlias(s) }));
     const groupItems = await Promise.all(groups.map((g) =>
