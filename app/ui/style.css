@@ -1784,13 +1784,28 @@ kbd {
 
 .seg button:hover { color: var(--text); }
 
-/* Packages: what it's built on, one filter, one list. */
-.pkg-summary { margin: 0 0 12px; color: var(--muted); }
-.pkg-summary b { margin-left: 4px; color: var(--text); font-weight: 500; }
+.seg button[aria-pressed="true"],
+.seg button[aria-selected="true"] {
+  background: var(--steel-raised);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+@media (prefers-color-scheme: light) {
+  .seg button:is([aria-pressed="true"], [aria-selected="true"]) { background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
+}
+
+/* Icon toggles (Follow): pressed reads as a sunken, brighter icon, never a fill color. */
+.icon-btn[aria-pressed] { background: none; }
+.icon-btn[aria-pressed]:hover { background: var(--steel-hover); }
+.icon-btn[aria-pressed="true"] { background: var(--selected); color: var(--text); }
+
+
+/* Packages: what it's built on, then a list per package manager. */
+.pkg-summary { margin: 0 0 12px; color: var(--muted); line-height: 1.8; }
+.pkg-fact { white-space: nowrap; }
+.pkg-summary b { margin-left: 4px; color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
 .pkg-dot { margin: 0 8px; opacity: 0.5; }
-.pkg-seg { display: flex; flex-wrap: wrap; gap: 2px; margin: 4px 0 10px; }
-.pkg-eco { margin-left: 8px; color: var(--muted); font-size: 11px; }
-.pkg-count { margin-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .logs-status { margin: 4px 0 8px; font-size: 12px; }
 
@@ -1978,13 +1993,14 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .pkg-tools {
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: 640px;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .pkg-tools input {
   flex: 1;
+  min-width: 140px;
+  max-width: 320px;
   height: 26px;
   padding: 0 10px;
   border: 0;
@@ -1993,25 +2009,44 @@ button.log-file:hover { text-decoration-color: currentColor; }
 }
 
 .pkg-tools input::placeholder { color: var(--muted); }
+.pkg-status { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.pkg-status.error { color: var(--danger); }
 
-.pkg-list .row { min-height: 36px; padding: 6px 14px; }
-.pkg-list dt { flex-direction: row; align-items: baseline; gap: 8px; }
-.pkg-list dt a { color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
-.pkg-list dt a:hover { text-decoration: underline; }
-.pkg-list dt small { white-space: nowrap; }
-.pkg-list .size { min-width: 80px; }
+.pkg-list + .pkg-list { margin-top: 12px; }
 
-.pkg-new {
-  padding: 1px 8px;
-  border-radius: 9px;
-  font-size: 11px;
+/* A section header per package manager: set apart from the rows like the Processes groups. */
+.pkg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 14px 6px;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+  background: var(--group-bg);
+  color: var(--group-text);
+  font-size: 12px;
   font-weight: 600;
-  font-variant-numeric: tabular-nums;
 }
 
-.pkg-new.major { background: var(--selected); color: var(--text); }
-.pkg-new.minor,
-.pkg-new.patch { background: var(--steel-raised); color: var(--muted); }
+.pkg-head-ver { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.pkg-head-count { margin-left: auto; color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.pkg-list .row { grid-template-columns: 1fr auto; min-height: 34px; padding: 5px 14px; }
+.pkg-list .pkg-head + .row { border-top: 0; }
+.pkg-list dt { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.pkg-list dt a { color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.pkg-list dt a:hover { text-decoration: underline; }
+.pkg-dev { color: var(--muted); font-size: 11px; }
+
+/* Versions line up on the right; with updates around, the current one, → and the newest
+ * each keep a column, so every row's current version ends at the same place. */
+.pkg-ver { margin: 0; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.pkg-list.updates .pkg-ver { display: grid; grid-template-columns: auto 1.6em 5.5em; align-items: baseline; }
+.pkg-list.updates .pkg-ver > :first-child { grid-column: 1; }
+.pkg-arrow { color: var(--cold); text-align: center; }
+.pkg-new { color: color-mix(in srgb, var(--ok-text) 75%, var(--text)); font-weight: 500; text-align: left; }
+.pkg-new.major { color: var(--amber-text); }
+.pkg-ver:has(.pkg-new) > :first-child { color: var(--text); }
 
 .pkg-none { margin: 4px 0; }
 
@@ -2100,16 +2135,6 @@ button.log-file:hover { text-decoration-color: currentColor; }
 
 .git-btn:hover { border-color: var(--cold); }
 
-/* Packages: folded development dependencies and scripts. */
-.pkg-check {
-  flex: none;
-  height: 26px;
-  padding: 0 12px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-s);
-  background: var(--steel-raised);
-}
-
 /* First run and empty panes: one message, one primary action. */
 .welcome {
   display: flex;
@@ -2188,6 +2213,8 @@ button.log-file:hover { text-decoration-color: currentColor; }
 #site .group,
 #site .env,
 #site .pkg-tools { max-width: none; }
+.pkg-check { flex: none; }
+.pkg-check:disabled { opacity: 1; }
 
 /* Watch and Logs take the whole pane, down to the window's bottom: the header and
  * tabs widen with them, the panel fills the height and only the output scrolls. */
@@ -2247,8 +2274,7 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .logs-large-actions button,
 .res-cells .del,
 .clean-all,
-.git-btn,
-.pkg-check {
+.git-btn {
   height: 26px;
   padding: 0 12px;
   border: 1px solid var(--edge);
@@ -2264,8 +2290,7 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .logs-large-actions button:hover,
 .res-cells .del:hover,
 .clean-all:hover,
-.git-btn:hover,
-.pkg-check:hover { border-color: var(--cold); }
+.git-btn:hover { border-color: var(--cold); }
 
 /* ---------- Processes window ---------- */
 

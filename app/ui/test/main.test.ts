@@ -271,3 +271,27 @@ describe("logs", () => {
     expect(calls("log_search").at(-1)![1]).toMatchObject({ site: "shop", level: "error" });
   });
 });
+
+describe("packages", () => {
+  test("a list per manager; Outdated shows current → newest, checked once an hour", async () => {
+    $('.tabs [data-tab="packages"]').click();
+    await wait(80);
+    expect(calls("package_updates")).toHaveLength(1);
+    expect($$(".pkg-head > span:first-child").map((h) => h.textContent)).toEqual(["Composer", "pnpm"]);
+    expect($(".pkg-status").textContent).toBe("7 updates · 3 major · checked just now");
+    expect($$(".pkg-dev").length).toBe(14);
+    $('.pkg-tools .seg [data-id="outdated"]').click();
+    const rows = $$(".pkg-list .row");
+    expect(rows).toHaveLength(7);
+    const fw = rows.find((r) => r.querySelector("a")?.textContent === "laravel/framework")!;
+    expect(fw.querySelector(".pkg-ver")?.textContent).toBe("11.36.1→12.4.0");
+    expect(fw.querySelector(".pkg-new")?.classList.contains("major")).toBe(true);
+    $('.tabs [data-tab="logs"]').click();
+    $('.tabs [data-tab="packages"]').click();
+    await wait(80);
+    expect(calls("package_updates")).toHaveLength(1);
+    $(".pkg-check").click();
+    await wait(80);
+    expect(calls("package_updates")).toHaveLength(2);
+  });
+});

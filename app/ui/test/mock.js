@@ -230,7 +230,7 @@ window.mockServices = [
     clients: [],
   },
 ];
-// Logs of a Laravel shop, close to a real one.
+// Logs and packages of a Laravel shop, close to a real one.
 {
   const now = Date.now();
   const ts = (minAgo) =>
@@ -310,8 +310,84 @@ window.mockServices = [
       modified: Math.floor(now / 1000) - 7200,
     },
   ];
+  const P = (name, constraint, version, dev, released) => ({ name, constraint, version, dev, released: released ?? null });
+  const composer = {
+    id: "composer",
+    label: "Composer",
+    manager: "composer 2.8.4",
+    lock: "composer.lock",
+    facts: [["PHP", "^8.2"]],
+    packages: [
+      P("laravel/framework", "^11.31", "11.36.1", false, "2024-12-17"),
+      P("laravel/tinker", "^2.9", "2.10.0", false, "2024-09-19"),
+      P("laravel/sanctum", "^4.0", "4.0.7", false, "2024-12-11"),
+      P("livewire/livewire", "^3.5", "3.5.18", false, "2024-12-12"),
+      P("guzzlehttp/guzzle", "^7.9", "7.9.2", false, "2024-07-24"),
+      P("spatie/laravel-permission", "^6.10", "6.10.1", false, "2024-11-07"),
+      P("stripe/stripe-php", "^15.0", "15.12.0", false, "2024-11-27"),
+      P("league/flysystem-aws-s3-v3", "^3.0", "3.29.0", false, "2024-10-08"),
+      P("fakerphp/faker", "^1.23", "1.24.1", true, "2024-11-19"),
+      P("laravel/pint", "^1.13", "1.18.3", true, "2024-12-06"),
+      P("laravel/sail", "^1.26", "1.39.1", true, "2024-12-11"),
+      P("mockery/mockery", "^1.6", "1.6.12", true, "2024-05-21"),
+      P("nunomaduro/collision", "^8.1", "8.5.0", true, "2024-10-15"),
+      P("phpunit/phpunit", "^10.5", "10.5.38", true, "2024-11-08"),
+      P("pestphp/pest", "^2.36", "2.36.0", true, "2024-10-16"),
+      P("larastan/larastan", "^2.9", "2.9.12", true, "2024-12-04"),
+    ],
+    locked: [],
+    scripts: [
+      ["post-update-cmd", "@php artisan vendor:publish --tag=laravel-assets"],
+      ["test", "@php artisan test"],
+    ],
+  };
+  composer.locked = composer.packages.map((p) => [p.name, p.version]);
+  const N = (name, constraint, version, dev) => P(name, constraint, version, dev);
+  const npm = {
+    id: "npm",
+    label: "npm",
+    manager: "pnpm 9.15.0",
+    lock: "pnpm-lock.yaml",
+    facts: [["Node", ">=20"]],
+    packages: [
+      N("axios", "^1.7.4", "1.7.9", false),
+      N("alpinejs", "^3.14.0", "3.14.8", false),
+      N("vite", "^6.0.0", "6.0.6", true),
+      N("laravel-vite-plugin", "^1.0", "1.1.1", true),
+      N("tailwindcss", "^3.4.13", "3.4.17", true),
+      N("postcss", "^8.4.47", "8.4.49", true),
+      N("autoprefixer", "^10.4.20", "10.4.20", true),
+      N("@tailwindcss/forms", "^0.5.9", "0.5.10", true),
+    ],
+    locked: [],
+    scripts: [
+      ["dev", "vite"],
+      ["build", "vite build"],
+    ],
+  };
+  npm.locked = npm.packages.map((p) => [p.name, p.version]);
+  const pk = {
+    highlights: [
+      ["Laravel", "11.36.1"],
+      ["Livewire", "3.5.18"],
+      ["Tailwind", "3.4.17"],
+      ["Vite", "6.0.6"],
+    ],
+    ecosystems: [composer, npm],
+  };
+  const updates = [
+    { ecosystem: "composer", name: "laravel/framework", latest: "12.4.0", level: "major" },
+    { ecosystem: "composer", name: "pestphp/pest", latest: "3.7.4", level: "major" },
+    { ecosystem: "composer", name: "stripe/stripe-php", latest: "15.13.0", level: "minor" },
+    { ecosystem: "composer", name: "phpunit/phpunit", latest: "10.5.40", level: "patch" },
+    { ecosystem: "npm", name: "tailwindcss", latest: "4.0.9", level: "major" },
+    { ecosystem: "npm", name: "vite", latest: "6.2.0", level: "minor" },
+    { ecosystem: "npm", name: "axios", latest: "1.8.1", level: "minor" },
+  ];
   window.mockLogSources = sources;
   window.mockLogPage = page;
+  window.mockPackages = pk;
+  window.mockUpdates = updates;
 }
 const mockHandle = (cmd, a) => {
   const ov = a?.site && mockOv[a.site];
@@ -373,6 +449,10 @@ const mockHandle = (cmd, a) => {
       return window.mockLogPage;
     case "log_tail":
       return { entries: window.mockTail?.splice(0) ?? [], start_offset: 0, end_offset: window.mockLogPage.end_offset, truncated: false };
+    case "packages":
+      return window.mockPackages;
+    case "package_updates":
+      return window.mockUpdates;
     case "services":
     case "service_run":
       return mockServices;
