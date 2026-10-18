@@ -45,7 +45,7 @@ export function drawGit(name) {
   const tabBtn = $('.tabs [data-tab="git"]', root);
   // Hidden until git answers; only a folder known not to be a repository leaves the tab.
   tabBtn.hidden = !repo;
-  if (g && !repo && tab === "git") showTab(root, "overview");
+  if (g && !repo && tab === "git") showTab(root, "overview", true);
   panel.replaceChildren();
   if (!repo) return;
 

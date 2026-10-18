@@ -228,8 +228,8 @@ export function drawContainers(name: string) {
   const kind = snap?.sites.find((s) => s.name === name)?.kind ?? "";
   const noLogs = kind === "compose" || kind === "folder";
   $('.tabs [data-tab="logs"]', root).hidden = noLogs;
-  if (noLogs && tab === "logs") showTab(root, show ? "containers" : "overview");
-  if (o && !show && tab === "containers") showTab(root, "overview");
+  if (noLogs && tab === "logs") showTab(root, show ? "containers" : "overview", true);
+  if (o && !show && tab === "containers") showTab(root, "overview", true);
   if (!show) return panel.replaceChildren();
 
   const all = items(name);

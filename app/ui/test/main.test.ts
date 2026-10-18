@@ -1415,4 +1415,22 @@ describe("show hidden", () => {
     expect(row.getAttribute("aria-current")).toBe("true");
     expect($("#site .hidden-note")).toBeNull();
   });
+
+  test("a tab stays selected: an app without the chosen tab shows its first, and the choice comes back", async () => {
+    await select("vuefinder");
+    ($('#site .tabs [data-tab="git"]') as HTMLElement).click();
+    await wait(80);
+    const selectedTab = () =>
+      $$("#site .tabs [role=tab]")
+        .filter((b) => !b.hidden && b.getAttribute("aria-selected") === "true")
+        .map((b) => b.dataset.tab);
+    expect(selectedTab()).toEqual(["git"]);
+    await select("notes"); // a folder that isn't a repository: no Git tab
+    await wait(120);
+    expect(selectedTab()).toEqual(["overview"]);
+    await select("vuefinder");
+    await wait(120);
+    expect(selectedTab()).toEqual(["git"]);
+    ($('#site .tabs [data-tab="overview"]') as HTMLElement).click();
+  });
 });

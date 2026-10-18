@@ -750,6 +750,7 @@ const mockHandle = (cmd, a) => {
     case "touched":
       return Math.floor(Date.now() / 1000) - 7200;
     case "git_info":
+      if (a.site === "notes") throw "Not a git repository"; // a plain folder
       return { branch: "main", detached: false, ahead: 0, behind: 0, changed: 3, upstream: null, commit: null, remote: null };
     case "unhide_site": {
       const h = mockSnap.hidden.find((x) => x.name === a.site);

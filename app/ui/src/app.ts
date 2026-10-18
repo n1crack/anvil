@@ -702,6 +702,27 @@ export async function newGroup(s) {
 }
 
 export let tab = (localStorage.getItem("tab") ?? "overview").replace(/^watch$/, "dev");
+let wanted = tab; // the tab the user chose
+
+/** A tab is always selected: the chosen one when this app shows it, else the first shown.
+ * Tabs appear and disappear as their data arrives (Git, Dev, Containers, Logs). */
+const watchedTabs = new WeakSet<Element>();
+function keepTabSelected(root) {
+  const bar = $(".tabs", root);
+  const reconcile = () => {
+    const shown = [...bar.querySelectorAll("[role=tab]:not([hidden])")] as HTMLElement[];
+    if (!shown.length) return;
+    const has = (t) => shown.some((b) => b.dataset.tab === t);
+    if (has(wanted)) {
+      if (tab !== wanted) showTab(root, wanted, true);
+    } else if (!has(tab)) showTab(root, shown[0].dataset.tab, true);
+  };
+  if (!watchedTabs.has(bar)) {
+    watchedTabs.add(bar);
+    new MutationObserver(reconcile).observe(bar, { subtree: true, attributes: true, attributeFilter: ["hidden"] });
+  }
+  reconcile();
+}
 export const kindLabel = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
 export const RUNTIME = {
   next: "Node.js",
@@ -716,9 +737,14 @@ export const RUNTIME = {
   flask: "Python",
 };
 
-export function showTab(root, name) {
+/** Show a tab. The user's choice is remembered; a `fallback` (the app lacks the chosen
+ * tab) shows another without forgetting it, so the choice comes back with an app that has it. */
+export function showTab(root, name, fallback = false) {
+  if (!fallback) {
+    wanted = name;
+    localStorage.setItem("tab", name);
+  }
   tab = name;
-  localStorage.setItem("tab", name);
   // One stop in the Tab order; the arrow keys move between tabs.
   for (const b of root.querySelectorAll(".tabs [role=tab]")) {
     b.setAttribute("aria-selected", String(b.dataset.tab === name));
@@ -930,7 +956,8 @@ export function renderSite() {
     showTab(root, next.dataset.tab);
     next.focus();
   };
-  showTab(root, tab);
+  showTab(root, wanted, true);
+  keepTabSelected(root);
 
   // Overview: the type and what runs it in one line, e.g. "Laravel on PHP 8.4".
   const engine = process

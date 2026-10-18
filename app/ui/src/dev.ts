@@ -364,7 +364,7 @@ export function drawDev(name: string) {
   // Apps that run processes, or could; a plain folder has nothing to run.
   const show = !!(procs.length || o?.commands.length || PHP_KINDS.has(kind) || PROCESS_KINDS.has(kind));
   $('.tabs [data-tab="dev"]', root).hidden = !show;
-  if (o && !show && tab === "dev") showTab(root, "overview");
+  if (o && !show && tab === "dev") showTab(root, "overview", true);
   if (!show) return panel.replaceChildren();
 
   if (configuring && configuring !== name) configuring = null;
