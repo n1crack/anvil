@@ -842,7 +842,8 @@ describe("polls and races", () => {
     await logs.followTick();
     expect(calls("log_text").length).toBe(n + 2);
     expect(term.firstElementChild).toBe(first); // not drawn again
-    expect(term.textContent).toMatch(/[^\n]\nnext http:\/\/shop\.test\/a\nand more$/);
+    // A block per tick: the last two are what each tick added.
+    expect([...term.children].slice(-2).map((b) => b.textContent)).toEqual(["next http://shop.test/a", "and more"]);
     expect(term.textContent!.split("✓ built in 3.41s")).toHaveLength(2);
     expect(term.querySelector(".term-link")?.textContent).toBe("http://shop.test/a");
     delete w.mockLogs;

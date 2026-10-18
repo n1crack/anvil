@@ -294,13 +294,14 @@ export const KEYWORDS = {
 // The text drawn is kept to about what `readTail` keeps of the output.
 export const TEXT_MAX = 524288;
 
-/** Lines as one block: colors carried in `v.style`, links found line by line. */
+/** Lines as one block (display: block, so adding one doesn't lay out the others again):
+ * colors carried in `v.style`, links found line by line. */
 function textBlock(v, lines: string[]) {
-  const b = el("span");
-  for (const l of lines) {
-    if (v.lines++) b.append("\n");
+  const b = el("span", "term-block");
+  lines.forEach((l, i) => {
+    if (i) b.append("\n");
     b.append(linkify(ansi(l, v.style)));
-  }
+  });
   b.size = lines.reduce((n, l) => n + l.length + 1, 0);
   return b;
 }
@@ -311,7 +312,6 @@ export function drawText(v, fresh?: string) {
   const out = v.term.out;
   if (fresh != null && !filtered(v) && !v.tail.cleared && v.style) return appendText(v, fresh);
   v.tail.cleared = false;
-  v.lines = 0;
   v.style = sgr();
   v.live = null;
   const q = v.query.toLowerCase();
@@ -341,8 +341,8 @@ function liveLine(v) {
   v.live?.remove();
   v.live = null;
   if (!v.pending) return;
-  v.live = el("span");
-  v.live.append(v.lines ? "\n" : "", linkify(ansi(clean(v.pending, true), { ...v.style })));
+  v.live = el("span", "term-block");
+  v.live.append(linkify(ansi(clean(v.pending, true), { ...v.style })));
   v.term.out.append(v.live);
 }
 
@@ -356,7 +356,7 @@ function appendText(v, fresh: string) {
   v.live?.remove();
   if (end) out.append(textBlock(v, clean(text.slice(0, end - 1), true).split("\n")));
   liveLine(v);
-  const blocks = [...out.children].filter((b) => b !== v.live) as any[];
+  const blocks = [...out.children].filter((b: any) => b.size != null) as any[];
   let size = blocks.reduce((n, b) => n + b.size, 0);
   let k = 0;
   while (k < blocks.length - 1 && size > TEXT_MAX) size -= blocks[k++].size;

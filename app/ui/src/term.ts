@@ -157,6 +157,10 @@ export function colorize(text: string, s: Sgr = sgr()) {
 // http(s) up to a space or quote, without the punctuation that ends a sentence.
 const URL_RE = /\bhttps?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]/g;
 
+// One range for every call: WebKit keeps each live range up to date on every DOM change
+// until it is collected, so a range per call (per line) made all changes slower.
+let linkRange: Range | undefined;
+
 /** Drawn output with its URLs as links, also when colors split one (vite's bold port in
  * http://localhost:5173/). A link opens on ⌘-click (see below); a plain click selects. */
 export function linkify<T extends Node>(root: T): T {
@@ -176,7 +180,7 @@ export function linkify<T extends Node>(root: T): T {
     while (i > 0 && (end ? starts[i] >= pos : starts[i] > pos)) i--;
     return [texts[i], pos - starts[i]];
   };
-  const range = document.createRange(); // one: WebKit updates every live range on each change
+  const range = (linkRange ??= document.createRange());
   for (const m of [...text.matchAll(URL_RE)].reverse()) {
     range.setEnd(...at(m.index + m[0].length, true));
     range.setStart(...at(m.index, false));
