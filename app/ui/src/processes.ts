@@ -122,7 +122,7 @@ export const devAll = {
   start: false,
   stop: false,
   busy: "" as "" | "start" | "stop",
-  run: async (_action: "start" | "stop") => {},
+  run: async (_action: "start" | "stop", _size: { columns?: number; lines?: number } = {}) => {},
 };
 
 /** The header: how many run (a click opens Dev), and what Dev start/stop would do.
@@ -159,11 +159,14 @@ export function drawRunBox(name, rows, containers) {
   // Done when everything Dev start would start runs; processes left out don't count.
   devAll.start = !(own.every((r) => r.running || r.manual) && containers.every(up));
   devAll.stop = !!running;
-  devAll.run = async (action) => {
+  devAll.run = async (action, size = {}) => {
     devAll.busy = action;
     late.drawDev?.(name);
     const change = containers.filter((c) => up(c) !== (action === "start")).map((c) => c.service);
-    await Promise.all([loadProcs(name, "process_run", { name: null, action }), change.length && containerRun(name, change, action)]);
+    await Promise.all([
+      loadProcs(name, "process_run", { name: null, action, ...size }),
+      change.length && containerRun(name, change, action),
+    ]);
     if (devAll.site === name) devAll.busy = "";
     late.drawDev?.(name);
   };

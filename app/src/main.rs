@@ -876,11 +876,14 @@ fn process_run(
     site: String,
     name: Option<String>,
     action: String,
+    columns: Option<u16>,
+    lines: Option<u16>,
 ) -> Res<Overview> {
     if name.as_deref().is_some_and(|n| !plain(n, false)) {
         return Err(format!("Not a process: {name:?}"));
     }
     let (cfg, s) = find_site_cfg(&site)?;
+    set_size(&app, &s.name, columns, lines);
     if name.is_none() && anvil::apps::runs_process(&s.kind) {
         run_app(&app, &cfg, &s.name, &action);
         changed(&handle);
@@ -925,8 +928,15 @@ fn process_run(
 /// Run one of the app's one-off scripts by id (see `one_off_scripts`); its output is
 /// the log source `once:<id>`.
 #[tauri::command(async)]
-fn command_run(app: State<App>, site: String, id: String) -> Res<Overview> {
+fn command_run(
+    app: State<App>,
+    site: String,
+    id: String,
+    columns: Option<u16>,
+    lines: Option<u16>,
+) -> Res<Overview> {
     let (cfg, s) = find_site_cfg(&site)?;
+    set_size(&app, &s.name, columns, lines);
     let script = anvil::processes::one_off_scripts(&s)
         .into_iter()
         .find(|c| c.id == id)
@@ -1053,8 +1063,25 @@ fn run_app(app: &App, cfg: &Config, site: &str, action: &str) {
     }
 }
 
+/// The Dev tab's output pane in characters, given with a start: COLUMNS and LINES of
+/// what the app starts from then on (see `Apps::set_size`).
+fn set_size(app: &App, site: &str, columns: Option<u16>, lines: Option<u16>) {
+    if let Some(c) = columns {
+        let l = lines.unwrap_or(anvil::apps::TERM_SIZE.1);
+        app.apps.lock().unwrap().set_size(site, c, l);
+    }
+}
+
 #[tauri::command(async)]
-fn app_run(handle: AppHandle, app: State<App>, site: String, action: String) -> Res<Snapshot> {
+fn app_run(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    action: String,
+    columns: Option<u16>,
+    lines: Option<u16>,
+) -> Res<Snapshot> {
+    set_size(&app, &site, columns, lines);
     run_app(&app, &anvil::load().map_err(err)?, &site, &action);
     changed(&handle);
     snapshot(&app)

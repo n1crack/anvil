@@ -92,9 +92,29 @@ function pick(name: string, key: string) {
   devTick();
 }
 
+/** The output pane in characters, for COLUMNS and LINES of what starts from here (in
+ * All, less the name tag); nothing when it isn't laid out, so Anvil's default holds. */
+export function termSize(): { columns?: number; lines?: number } {
+  const out = term.out as HTMLElement;
+  if (!out.clientWidth) return {};
+  const probe = el("span", null, "0".repeat(20));
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+  out.append(probe);
+  const { width, height } = probe.getBoundingClientRect();
+  probe.remove();
+  if (!width) return {};
+  const css = getComputedStyle(out);
+  const px = (k: string) => parseFloat(css.getPropertyValue(k)) || 0;
+  const tag = view?.key === "all" ? Math.max(0, ...procItems(view.site).map((x) => x.name.length)) + 3 : 0;
+  return {
+    columns: Math.max(20, Math.floor((out.clientWidth - px("padding-left") - px("padding-right")) / (width / 20)) - tag),
+    lines: Math.max(5, Math.floor((out.clientHeight - px("padding-top") - px("padding-bottom")) / height)),
+  };
+}
+
 /** Dev start or stop (the toolbar's Start/Stop), when it is offered. */
 function headerAll(action: "start" | "stop") {
-  if (devAll.site === view?.site && devAll[action] && !devAll.busy) devAll.run(action);
+  if (devAll.site === view?.site && devAll[action] && !devAll.busy) devAll.run(action, termSize());
 }
 
 /* Keys, like mprocs, while the focus is in the list or the output; never while typing
@@ -135,15 +155,16 @@ main.onkeydown = (e) => {
 /** Start, stop or restart a process; a restart starts its output over. */
 async function runProc(name: string, x: Item, action: string) {
   const r = x.row!;
+  const size = action === "stop" ? {} : termSize();
   if (r.main) {
-    await call("app_run", { site: name, action });
+    await call("app_run", { site: name, action, ...size });
     await loadProcs(name);
-  } else await loadProcs(name, "process_run", { name: r.id, action });
+  } else await loadProcs(name, "process_run", { name: r.id, action, ...size });
   if (action === "restart" && view?.site === name) forget(view, x.key);
 }
 
 async function runScript(name: string, c: CommandChip) {
-  if (await loadProcs(name, "command_run", { id: c.id })) pick(name, `once:${c.id}`);
+  if (await loadProcs(name, "command_run", { id: c.id, ...termSize() })) pick(name, `once:${c.id}`);
 }
 
 const dismiss = (name: string, c: CommandChip) =>
@@ -298,7 +319,7 @@ function devButton(name: string) {
   const b = barBtn(`dev-all dev-${action}`, busy ? el("span", "spin-dot") : icon(action), label);
   b.title = action === "start" ? "Start the app and every process in Dev start" : "Stop the app and all its processes";
   b.disabled = !!busy;
-  b.onclick = () => devAll.run(action);
+  b.onclick = () => devAll.run(action, termSize());
   return b;
 }
 

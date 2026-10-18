@@ -235,6 +235,32 @@ describe("dev", () => {
     expect(calls("process_run").slice(before)[0][1]).toEqual({ site: "vuefinder", name: "docs-site", action: "start" });
   });
 
+  test("a start says how many characters the output pane fits (COLUMNS, LINES)", async () => {
+    const out = $(".dev-out");
+    Object.defineProperty(out, "clientWidth", { value: 660, configurable: true });
+    Object.defineProperty(out, "clientHeight", { value: 480, configurable: true });
+    const rect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      return { ...rect.call(this), width: 132, height: 16 }; // 20 chars of 6.6 px, 16 px lines
+    };
+    try {
+      const before = calls("process_run").length;
+      ($('.dev-empty [aria-label="Start docs:site"]') as HTMLElement).click();
+      await wait();
+      expect(calls("process_run").slice(before)[0][1]).toEqual({
+        site: "vuefinder",
+        name: "docs-site",
+        action: "start",
+        columns: 100,
+        lines: 30,
+      });
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = rect;
+      delete (out as any).clientWidth;
+      delete (out as any).clientHeight;
+    }
+  });
+
   test("Run ▾ lists the one-off scripts only, and runs one after a confirm", async () => {
     $(".dev-bar .dev-run").click();
     const names = $$(".dev-run-menu .dev-run-name").map((n) => n.textContent);
