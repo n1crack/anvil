@@ -658,6 +658,10 @@ button, select, input { font: inherit; color: inherit; }
 .site-meta .addr { display: inline-flex; align-items: center; gap: 5px; }
 .site-meta .lock { display: inline-flex; }
 .site-meta .securing { display: inline-flex; align-items: center; gap: 5px; margin-left: 3px; }
+.https-cell { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 10px; }
+.https-cell .securing { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.https-cell .securing[hidden] { display: none; }
+.https-cell small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
 .alias-chip {
   height: 18px;
   padding: 0 7px;

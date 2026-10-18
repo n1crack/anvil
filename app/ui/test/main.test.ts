@@ -62,6 +62,34 @@ describe("sidebar menu", () => {
 });
 
 describe("https", () => {
+  test("the Settings tab's HTTPS switch turns it on or off with a spinner, the header lock following; none for Compose", async () => {
+    await select("shop");
+    const box = $("#app-https") as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect($(".https-cell small").textContent).toBe("Serve at https:// with a trusted local certificate; http:// redirects there");
+    expect($("#site .site-meta .lock")).not.toBeNull();
+    w.mockDelay = { set_secure: 200 };
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    await wait(40);
+    expect(box.disabled).toBe(true);
+    expect(($(".https-cell .securing") as HTMLElement).hidden).toBe(false);
+    expect($(".https-cell .securing").textContent).toBe("Turning off…");
+    await wait(300);
+    w.mockDelay = {};
+    expect(calls("set_secure").at(-1)![1]).toEqual({ site: "shop", on: false });
+    const now = $("#app-https") as HTMLInputElement;
+    expect([now.checked, now.disabled]).toEqual([false, false]);
+    expect(($(".https-cell .securing") as HTMLElement).hidden).toBe(true);
+    expect($("#site .site-meta .lock")).toBeNull();
+    now.checked = true;
+    now.dispatchEvent(new Event("change"));
+    await wait(80);
+    expect($("#site .site-meta .lock")).not.toBeNull();
+    await select("stack");
+    expect($("#app-https")).toBeNull();
+  });
+
   test("the row shows a spinner while HTTPS is turned on or off", async () => {
     w.mockDelay = { set_secure: 200 };
     $(`#list [data-name="shop"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));

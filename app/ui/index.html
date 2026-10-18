@@ -123,6 +123,14 @@
           <dt><label for="kind">Type</label></dt>
           <dd><select id="kind"></select></dd>
         </div>
+        <div class="row row-top serves-only">
+          <dt><label for="app-https">HTTPS</label></dt>
+          <dd class="https-cell">
+            <input id="app-https" type="checkbox" role="switch">
+            <span class="securing" hidden><span class="spin-dot"></span><span class="securing-text"></span></span>
+            <small>Serve at https:// with a trusted local certificate; http:// redirects there</small>
+          </dd>
+        </div>
         <div class="row php-only">
           <dt><label for="php">PHP version</label></dt>
           <dd><select id="php"></select></dd>

@@ -815,6 +815,24 @@ export function drawMeta() {
   const g = late.gitCache ? late.gitCache.get(s.name) : null;
   if (g && !g.error && g.branch) parts.push(el("span", "branch", g.branch));
   box.replaceChildren(...parts.flatMap((p, i) => (i ? [el("span", "sep", "·"), p] : [p])));
+  drawHttps(s);
+}
+
+/** The Settings tab's HTTPS switch: on or off, and while it changes, where it goes
+ * with a spinner beside it. */
+function drawHttps(s) {
+  const box = $("#app-https");
+  if (!box) return;
+  const busy = securing.has(s.name);
+  box.checked = busy ? !s.secure : s.secure;
+  box.disabled = busy;
+  const note = box.nextElementSibling;
+  note.hidden = !busy;
+  $(".securing-text", note).textContent = s.secure ? "Turning off…" : "Turning on…";
+  box.onchange = () => {
+    const now = snap.sites.find((x) => x.name === s.name);
+    if (now && !securing.has(now.name)) setSecure(now);
+  };
 }
 
 /** Every address of an app, each with its own Open. */
@@ -941,8 +959,11 @@ export function renderSite() {
   }
   $('[data-field="path"]', root).textContent = tilde(s.path);
   $('[data-field="root"]', root).textContent = tilde(s.root);
-  // Nothing is served from a folder or a Compose project: no web root.
-  if (!serves(s)) $('[data-field="root"]', root).closest(".row")?.remove();
+  // Nothing is served from a folder or a Compose project: no web root, no HTTPS.
+  if (!serves(s)) {
+    $('[data-field="root"]', root).closest(".row")?.remove();
+    $(".serves-only", root)?.remove();
+  }
 
   if (process) renderRun(s, root);
   if (s.kind === "django") djangoHint(root);
