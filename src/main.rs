@@ -277,6 +277,9 @@ fn start(cfg: &Config) -> Result<()> {
             dim(format!("(PHP {})", s.php.as_deref().unwrap_or("-")))
         );
     }
+    for c in site_name_clashes(cfg) {
+        eprintln!("  {}", yellow(c));
+    }
     println!(
         "{}, logs in {}. Ctrl-C to stop.",
         green("Anvil running"),
@@ -477,6 +480,9 @@ fn run() -> Result<()> {
                     },
                     dim(s.root.display())
                 );
+            }
+            for c in site_name_clashes(&cfg) {
+                eprintln!("{}", yellow(c));
             }
         }
         Cmd::Php {

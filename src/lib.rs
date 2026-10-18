@@ -309,6 +309,18 @@ pub fn save(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
+/// Six hex digits of a hash that stays the same from run to run and release to
+/// release (std's `DefaultHasher` makes no such promise): djb2.
+pub(crate) fn stable_hash(s: &str) -> u32 {
+    s.bytes()
+        .fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b))
+}
+
+/// `stable_hash` as six hex digits, for a name that must differ from a clashing one.
+pub(crate) fn short_hash(s: &str) -> String {
+    format!("{:06x}", stable_hash(s) & 0xff_ffff)
+}
+
 pub fn site_name(s: &str) -> String {
     s.to_lowercase()
         .chars()
@@ -341,21 +353,11 @@ pub struct HiddenSite {
 
 /// The parked folders whose names are in `cfg.hidden`, for the list's "Show Hidden Applications".
 pub fn hidden_sites(cfg: &Config) -> Vec<HiddenSite> {
-    let mut found = BTreeMap::new();
-    for dir in &cfg.paths {
-        let Ok(entries) = fs::read_dir(dir) else {
-            continue;
-        };
-        for e in entries.flatten() {
-            let name = site_name(&e.file_name().to_string_lossy());
-            if e.path().is_dir() && !name.starts_with('.') && cfg.hidden.contains(&name) {
-                found.insert(name, e.path());
-            }
-        }
-    }
-    found
+    parked(cfg)
+        .0
         .into_iter()
-        .map(|(name, path)| {
+        .filter(|(name, _)| cfg.hidden.contains(name))
+        .map(|(name, (path, _))| {
             let kind = cfg
                 .sites
                 .get(&name)
@@ -366,22 +368,55 @@ pub fn hidden_sites(cfg: &Config) -> Vec<HiddenSite> {
         .collect()
 }
 
-pub fn sites(cfg: &Config) -> Vec<Site> {
-    let mut found = BTreeMap::new();
+/// The parked folders by site name, hidden ones too, and a line for each one whose name another folder
+/// already has (`My App` and `my-app`, or `shop` in two parked folders). The folder
+/// whose name is the site name as it is keeps it, else the one with the first path;
+/// the others get `-<hash of their path>`, so a name doesn't depend on `read_dir` order.
+fn parked(cfg: &Config) -> (BTreeMap<String, (PathBuf, PathBuf)>, Vec<String>) {
+    let mut all: Vec<(String, bool, PathBuf, PathBuf)> = vec![];
     for dir in &cfg.paths {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
         };
         for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if e.path().is_dir()
-                && !name.starts_with('.')
-                && !cfg.hidden.contains(&site_name(&name))
-            {
-                found.insert(site_name(&name), (e.path(), Some(dir.clone())));
+            let folder = e.file_name().to_string_lossy().into_owned();
+            if e.path().is_dir() && !folder.starts_with('.') {
+                let name = site_name(&folder);
+                all.push((name.clone(), folder != name, e.path(), dir.clone()));
             }
         }
     }
+    // Keepers first: the exact name, then by path.
+    all.sort();
+    let (mut found, mut clashes) = (BTreeMap::new(), vec![]);
+    for (name, _, path, dir) in all {
+        let name = if found.contains_key(&name) {
+            let unique = format!("{name}-{}", short_hash(&path.to_string_lossy()));
+            clashes.push(format!(
+                "{} is served as {unique}: {name} is another folder's name. Rename the folder to choose.",
+                path.display()
+            ));
+            unique
+        } else {
+            name
+        };
+        found.insert(name, (path, dir));
+    }
+    (found, clashes)
+}
+
+/// What `sites` does about parked folders that would get the same name (see `parked`).
+pub fn site_name_clashes(cfg: &Config) -> Vec<String> {
+    parked(cfg).1
+}
+
+pub fn sites(cfg: &Config) -> Vec<Site> {
+    let mut found: BTreeMap<String, (PathBuf, Option<PathBuf>)> = parked(cfg)
+        .0
+        .into_iter()
+        .filter(|(name, _)| !cfg.hidden.contains(name))
+        .map(|(name, (path, dir))| (name, (path, Some(dir))))
+        .collect();
     for (name, path) in &cfg.links {
         found.insert(name.clone(), (path.clone(), None));
     }
@@ -1986,6 +2021,37 @@ pub fn merge_path(current: &str, login: &str) -> String {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+
+    #[test]
+    fn folders_with_one_name_each_get_their_own() {
+        let root = std::env::temp_dir().join(format!("anvil-names-{}", std::process::id()));
+        let (a, b) = (root.join("a"), root.join("b"));
+        for d in [
+            a.join("My App"),
+            a.join("my-app"),
+            a.join("shop"),
+            b.join("shop"),
+        ] {
+            fs::create_dir_all(d).unwrap();
+        }
+        let mut cfg = Config {
+            paths: vec![b.clone(), a.clone()],
+            ..Default::default()
+        };
+        let (found, clashes) = parked(&cfg);
+        // The folder named like its site keeps the name; the first path for equal names.
+        assert_eq!(found["my-app"].0, a.join("my-app"));
+        assert_eq!(found["shop"].0, a.join("shop"));
+        let other = format!("my-app-{}", short_hash(&a.join("My App").to_string_lossy()));
+        assert_eq!(found[&other].0, a.join("My App"));
+        assert_eq!(found.len(), 4);
+        assert_eq!(clashes.len(), 2);
+        assert!(clashes.iter().any(|c| c.contains(&other)), "{clashes:?}");
+        // Another order of parked folders changes nothing.
+        cfg.paths.reverse();
+        assert_eq!(parked(&cfg).0, found);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn a_late_stop_keeps_the_new_starts_pid_file() {

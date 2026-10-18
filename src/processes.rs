@@ -4,6 +4,7 @@
 
 use crate::{Site, apps, home, runtimes};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -343,13 +344,14 @@ fn pinned_scripts(dir: &Path, keep: &dyn Fn(&str) -> bool) -> Vec<(Process, bool
     let empty = serde_json::Map::new();
     let scripts = json["scripts"].as_object().unwrap_or(&empty);
     let commands = package_scripts(dir).1;
+    let ids = script_ids(scripts);
     scripts
         .iter()
-        .filter(|(n, _)| commands.contains(n) && keep(&process_id(n)))
         .filter_map(|(n, c)| Some((n, c.as_str()?)))
+        .filter(|(n, _)| commands.contains(n) && keep(&ids[*n]))
         .map(|(name, command)| {
             let p = Process {
-                id: process_id(name),
+                id: ids[name].clone(),
                 name: name.clone(),
                 command: start_command(name, command, scripts),
                 source: "package.json",
@@ -390,10 +392,11 @@ fn detect_base(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config
         });
     }
     if let Some(list) = laravel_dev_commands_cached(&site.path, php, cache) {
+        let ids = unique_ids(list.iter().map(|(n, _)| n));
         return list
             .into_iter()
             .map(|(name, command)| Process {
-                id: process_id(&name),
+                id: ids[&name].clone(),
                 name,
                 command,
                 source: "artisan dev",
@@ -704,7 +707,38 @@ fn start_command(
     }
 }
 
+/// Ids for names, unique among them: `process_id` of each, except where two names
+/// map to one id (`docs:dev` and `docs-dev`). Then the name that already is the id
+/// keeps it, else the first in sort order; the others get `-<hash of the name>`, so a
+/// suffixed id depends on its own name only, never on the order things are listed in.
+pub fn unique_ids<'a>(names: impl IntoIterator<Item = &'a String>) -> BTreeMap<String, String> {
+    let mut names: Vec<&String> = names.into_iter().collect();
+    names.sort_by_key(|n| (process_id(n) != **n, *n));
+    let mut taken = std::collections::BTreeSet::new();
+    let mut out = BTreeMap::new();
+    for n in names {
+        let mut id = process_id(n);
+        if !taken.insert(id.clone()) {
+            id = format!("{id}-{}", crate::short_hash(n));
+            taken.insert(id.clone());
+        }
+        out.insert(n.clone(), id);
+    }
+    out
+}
+
+/// `unique_ids` of package.json's scripts: one id space for the dev servers and commands.
+fn script_ids(scripts: &serde_json::Map<String, serde_json::Value>) -> BTreeMap<String, String> {
+    unique_ids(
+        scripts
+            .iter()
+            .filter(|(_, v)| v.is_string())
+            .map(|(k, _)| k),
+    )
+}
+
 /// A script name as an id: every char outside letters, digits, `-` and `_` becomes `-`.
+/// Two names can give one id; lists of them go through `unique_ids`.
 pub fn process_id(name: &str) -> String {
     name.chars()
         .map(|c| {
@@ -762,6 +796,7 @@ pub fn package_scripts(dir: &Path) -> (Vec<Process>, Vec<String>) {
     let (mut servers, mut commands) = (vec![], vec![]);
     let empty = serde_json::Map::new();
     let scripts = json["scripts"].as_object().unwrap_or(&empty);
+    let ids = script_ids(scripts);
     for (name, command) in scripts {
         let Some(command) = command.as_str() else {
             continue;
@@ -776,7 +811,7 @@ pub fn package_scripts(dir: &Path) -> (Vec<Process>, Vec<String>) {
         }
         if is_server_script(name, command) {
             servers.push(Process {
-                id: process_id(name),
+                id: ids[name].clone(),
                 name: name.clone(),
                 command: start_command(name, command, scripts),
                 source: "package.json",
@@ -816,11 +851,12 @@ fn quoted(s: &str) -> String {
 /// app's composer.json scripts other than `dev` and Composer's event hooks.
 pub fn one_off_scripts(site: &Site) -> Vec<Script> {
     let texts = script_texts(&site.path);
+    let ids = unique_ids(texts.keys());
     let mut out: Vec<Script> = package_scripts(&site.path)
         .1
         .into_iter()
         .map(|name| Script {
-            id: process_id(&name),
+            id: ids[&name].clone(),
             text: texts.get(&name).cloned().unwrap_or_default(),
             run: format!("npm run {}", quoted(&name)),
             source: "package.json",
@@ -842,6 +878,7 @@ pub fn one_off_scripts(site: &Site) -> Vec<Script> {
         .join(site.php.as_deref().unwrap_or_default())
         .join("php");
     let phar = home().join("bin/composer.phar");
+    let ids = unique_ids(scripts.keys());
     for (name, v) in scripts {
         // Composer's events are all `pre-…` and `post-…`; `dev` is what Dev runs.
         if name == "dev" || name.starts_with("pre-") || name.starts_with("post-") {
@@ -856,8 +893,13 @@ pub fn one_off_scripts(site: &Site) -> Vec<Script> {
                 .join(" && "),
             _ => continue,
         };
+        let mut id = format!("composer-{}", ids[name]);
+        // A package.json script of that name has it already.
+        if out.iter().any(|s| s.id == id) {
+            id = format!("{id}-{}", crate::short_hash(&format!("composer:{name}")));
+        }
         out.push(Script {
-            id: format!("composer-{}", process_id(name)),
+            id,
             run: format!(
                 "{} {} run-script {}",
                 quoted(&php.display().to_string()),
@@ -1081,6 +1123,46 @@ pub fn env(site: &Site) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn script_names_that_clash_get_ids_of_their_own() {
+        let names = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let a = unique_ids(&names(&["docs:dev", "docs-dev", "lint"]));
+        let b = unique_ids(&names(&["lint", "docs-dev", "docs:dev"]));
+        assert_eq!(a, b, "the order they're listed in doesn't matter");
+        // No clash: ids as they always were, so saved settings still apply.
+        assert_eq!(a["lint"], "lint");
+        assert_eq!(unique_ids(&names(&["docs:dev"]))["docs:dev"], "docs-dev");
+        // The name that is its id keeps it; the other's suffix comes from its own name.
+        assert_eq!(a["docs-dev"], "docs-dev");
+        assert_eq!(
+            a["docs:dev"],
+            format!("docs-dev-{}", crate::short_hash("docs:dev"))
+        );
+        let c = unique_ids(&names(&["docs:dev", "docs.dev"]));
+        assert_ne!(c["docs:dev"], c["docs.dev"]);
+
+        let dir = std::env::temp_dir().join(format!("anvil-clash-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            r#"{"scripts": {"docs:dev": "vitepress dev docs", "docs-dev": "vitepress dev other",
+                "build:all": "vite build", "build-all": "vite build"}}"#,
+        )
+        .unwrap();
+        let ids: Vec<_> = package_scripts(&dir).0.into_iter().map(|p| p.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(ids[0], ids[1]);
+        let mut scripts: Vec<_> =
+            one_off_scripts(&crate::tests::site("x", dir.to_str().unwrap(), None))
+                .into_iter()
+                .map(|s| s.id)
+                .collect();
+        scripts.sort();
+        scripts.dedup();
+        assert_eq!(scripts.len(), 2);
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     const LARAVEL: &str = r##"npx concurrently -c "#93c5fd,#c4b5fd,#fb7185,#fdba74" "php artisan serve --host=localhost" "php artisan queue:listen --tries=1 --timeout=0" "php artisan pail --timeout=0" "npm run dev" --names=server,queue,logs,vite --kill-others"##;
 
