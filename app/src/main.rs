@@ -12,6 +12,10 @@ use tauri::{
     WindowEvent, Wry,
 };
 
+/// Lock order: never hold two of these at once. Copy what one guards, drop it, then
+/// take the next; `let x = m.lock()…;` drops the guard at the `;`, but an `if let` /
+/// `match` scrutinee keeps it through the whole block. If two ever must nest, take
+/// them in field order (server, error, services, apps, app_errors, service_errors).
 #[derive(Default)]
 struct App {
     server: Mutex<Option<Server>>,
@@ -374,7 +378,21 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
     // Detecting may run PHP: do it before taking the locks.
     let detected = anvil::processes::detect_with(site, Some(cfg));
     let serving = running(app);
-    let errors = app.app_errors.lock().unwrap();
+    // Read each row's last line before the locks too: it touches the disk.
+    let mut last: std::collections::BTreeMap<String, Option<String>> =
+        std::iter::once(site.name.clone())
+            .chain(
+                detected
+                    .iter()
+                    .map(|p| anvil::processes::key(&site.name, &p.id)),
+            )
+            .map(|k| {
+                let line = anvil::logs::last_line(&anvil::apps::log_file(&k));
+                (k, line)
+            })
+            .collect();
+    // One lock at a time (see `App`): copy the errors, then take `apps`.
+    let errors = app.app_errors.lock().unwrap().clone();
     let mut apps = app.apps.lock().unwrap();
     let crashed = apps.crashed();
     let main = main_row(cfg, site, serving, apps.running(&site.name));
@@ -412,10 +430,7 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
             } else {
                 anvil::processes::key(&site.name, &r.process.id)
             };
-            r.last = anvil::logs::read(&anvil::apps::log_file(&key), None, 8 * 1024)
-                .ok()
-                .and_then(|page| page.entries.into_iter().next())
-                .map(|e| e.message.lines().next().unwrap_or("").to_string());
+            r.last = last.remove(&key).flatten();
             r.pid = apps.pid(&key);
             r.crashed = crashed
                 .iter()
@@ -1112,10 +1127,12 @@ fn set_process(
             let p = anvil::processes::detect_with(&s, Some(&cfg))
                 .into_iter()
                 .find(|p| p.id == id);
-            if let Some(p) = p
-                && let Err(e) = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld)
-            {
-                app.app_errors.lock().unwrap().insert(key, err(e));
+            if let Some(p) = p {
+                // Bound first: an `if let` scrutinee's guard would live through the block.
+                let started = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld);
+                if let Err(e) = started {
+                    app.app_errors.lock().unwrap().insert(key, err(e));
+                }
             }
         }
         // Only a server row's route needs the web server reloaded, and that restart
