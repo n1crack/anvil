@@ -57,13 +57,13 @@ export interface Setup {
   shims: boolean;
 }
 
-export interface Exit {
+interface Exit {
   code: number | null;
   /** Unix seconds. */
   at: number;
 }
 
-export interface Process {
+interface Process {
   id: string;
   name: string;
   command: string;
@@ -72,8 +72,6 @@ export interface Process {
   port: number | null;
   autostart: boolean;
   edited: boolean;
-  pinned: boolean;
-  top: boolean;
   /** Left out of Dev start. */
   manual: boolean;
   /** Added in Anvil, not detected. */
@@ -120,7 +118,7 @@ export interface Overview {
   hidden: { id: string; name: string }[];
 }
 
-export interface ActivityRow {
+interface ActivityRow {
   key: string;
   name: string;
   pid: number | null;
@@ -139,7 +137,7 @@ export interface Activity {
   services: ActivityRow[];
 }
 
-export interface ServiceInfo {
+interface ServiceInfo {
   id: string;
   kind: string;
   name: string;
@@ -185,33 +183,4 @@ export interface Settings {
   https_default: boolean;
   login: boolean;
   config_dir: string;
-}
-
-export interface LogSource {
-  id: string;
-  label: string;
-  path: string;
-  bytes: number;
-  modified: number;
-}
-
-export interface LogEntry {
-  time: string | null;
-  env: string | null;
-  level: string;
-  message: string;
-  context: string | null;
-  trace: string[];
-}
-
-export interface LogPage {
-  entries: LogEntry[];
-  start_offset: number;
-  end_offset: number;
-  truncated: boolean;
-}
-
-export interface LogText {
-  text: string;
-  end_offset: number;
 }

@@ -3,20 +3,20 @@ import { $, ago, el, invoke, renderMain, seg, selected, showError, snap } from "
 /* Packages tab: an app's dependencies from its manifests and lock files, a tab per
  * package manager, with newer versions inline. Scripts live in the Overview's Commands. */
 
-export const pkgCache = new Map<string, any>(); // site name -> packages or { error }
+const pkgCache = new Map<string, any>(); // site name -> packages or { error }
 // site name -> { list, at } once checked, "checking" on its way, or { error, at }
 export const pkgUpdates = new Map<string, any>();
-export let pkgQuery = ""; // one search over every list
+let pkgQuery = ""; // one search over every list
 export const pkgView = new Map<string, string>(); // site name -> "all" or "outdated"
-export const pkgEco = new Map<string, string>(); // site name -> ecosystem shown
-export const REGISTRY = {
+const pkgEco = new Map<string, string>(); // site name -> ecosystem shown
+const REGISTRY = {
   composer: "https://packagist.org/packages/",
   npm: "https://www.npmjs.com/package/",
   cargo: "https://crates.io/crates/",
   go: "https://pkg.go.dev/",
   nuget: "https://www.nuget.org/packages/",
 };
-export const REFRESH = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const REFRESH = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 window.renderPackages = async (s) => {
   drawPackages(s.name);
@@ -32,7 +32,7 @@ window.renderPackages = async (s) => {
 };
 
 /** The last check, kept across restarts; the registries are only asked from the refresh button. */
-export function updatesOf(name) {
+function updatesOf(name) {
   if (!pkgUpdates.has(name)) {
     try {
       const saved = JSON.parse(localStorage.getItem(`pkgUpdates:${name}`) ?? "null");
@@ -42,7 +42,7 @@ export function updatesOf(name) {
   return pkgUpdates.get(name);
 }
 
-export async function checkUpdates(name) {
+async function checkUpdates(name) {
   const prev = updatesOf(name);
   pkgUpdates.set(name, "checking");
   drawPackages(name);
@@ -58,7 +58,7 @@ export async function checkUpdates(name) {
 }
 
 /** The manager's name for a section: Composer, or pnpm/npm/yarn/bun for npm packages. */
-export const managerLabel = (e) => (e.id === "npm" && e.manager ? e.manager.split(" ")[0] : e.label);
+const managerLabel = (e) => (e.id === "npm" && e.manager ? e.manager.split(" ")[0] : e.label);
 
 export function drawPackages(name) {
   const body = $("#site .pkg-body");
@@ -176,7 +176,7 @@ export function drawPackages(name) {
 }
 
 /** "checked 5 min ago" next to the refresh button; what it found is in the counts. */
-export function updatesStatus(up) {
+function updatesStatus(up) {
   const s = el("span", "pkg-status muted");
   if (!up) return s;
   if (up === "checking") s.textContent = "Checking…";
@@ -187,7 +187,7 @@ export function updatesStatus(up) {
   return s;
 }
 
-export function pkgRow(eco, x, update) {
+function pkgRow(eco, x, update) {
   const row = el("div", "row");
   const dt = el("dt");
   const a = el("a", null, x.name);

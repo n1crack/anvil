@@ -31,9 +31,7 @@ export async function readTail(t: Tail): Promise<string | null> {
   return page.text;
 }
 
-export const EDGE = 4; // px from the newest edge that still count as at it
-
-export type Follower = ReturnType<typeof follower>;
+const EDGE = 4; // px from the newest edge that still count as at it
 
 /** A growing view that follows its newest edge (the end; the top with `newestFirst`)
  * only while the reader is there. Scrolling away even a little pauses it at once (the

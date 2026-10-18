@@ -12,8 +12,8 @@ export const $ = (sel: string, root: ParentNode = document): any => root.querySe
 export let data: Activity | null = null;
 export let drawn = ""; // what the table shows, to redraw only on a change
 export let selected: string | null = null; // row key
-export let logFrom = 0;
-export let logToken = 0;
+let logFrom = 0;
+let logToken = 0;
 export let tailing: number | null = null; // token of the log request on its way
 export let replace = true; // the next page replaces the log (new row, error shown, file rotated)
 export const busy = new Set<string>(); // keys with an action on its way
@@ -21,11 +21,11 @@ export const busy = new Set<string>(); // keys with an action on its way
 export const folded = new Set(JSON.parse(localStorage.getItem("act-folded") ?? "[]"));
 // Which tab is shown: apps, services or anvil (Anvil's own: Caddy, PHP-FPM, DNS…); the
 // last one comes back. "web" was anvil's name before.
-export const TABS = ["apps", "services", "anvil"];
+const TABS = ["apps", "services", "anvil"];
 export const storedTab = (v: string | null) => (v === "web" ? "anvil" : TABS.includes(v!) ? v! : "apps");
 export let tab = storedTab(localStorage.getItem("act-tab"));
-export let logStyle: Sgr | undefined; // colors carried from one page of the log to the next
-export const logView = follower($("#log")); // follows the end while the reader is there
+let logStyle: Sgr | undefined; // colors carried from one page of the log to the next
+const logView = follower($("#log")); // follows the end while the reader is there
 
 const errors = new Map<string, string>(); // owner -> its error, see ownError
 export function showError(msg, owner = "") {
@@ -54,7 +54,7 @@ export function load() {
 window.refresh = load;
 
 /** 9.4 MB, 136 MB, 1.2 GB: as many digits as help to compare. */
-export const mb = (b) => {
+const mb = (b) => {
   const m = b / 1048576;
   return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${m < 10 ? m.toFixed(1) : Math.round(m)} MB`;
 };
@@ -79,7 +79,7 @@ export function head(text, cls) {
 
 /** An application's header: click anywhere on it to fold its rows away. Folded, it
  * says what it hides on the same line: "2 running · dev, docs:dev". */
-export function appHead(a) {
+function appHead(a) {
   const tr = head("", "act-app");
   const open = !folded.has(a.site);
   tr.setAttribute("aria-expanded", String(open));
@@ -144,7 +144,7 @@ export async function act(key, action?) {
 export const M = window.__TAURI__.menu;
 
 /** Right-click: Restart, Stop (Dismiss once it crashed) and Open in Browser, by row state. */
-export async function rowMenu(r) {
+async function rowMenu(r) {
   const items: any[] = [];
   if (r.actions && !busy.has(r.key)) {
     if (!r.key.includes("#")) items.push(M.MenuItem.new({ text: "Restart", action: () => act(r.key, "restart") }));
@@ -197,7 +197,7 @@ export function row(r, inner?: boolean) {
 }
 
 /** The rows of each tab, for the counts and the table. */
-export const tabRows = (d: Activity) => ({ apps: d.apps.flatMap((a) => a.rows), services: d.services, anvil: d.web });
+const tabRows = (d: Activity) => ({ apps: d.apps.flatMap((a) => a.rows), services: d.services, anvil: d.web });
 
 export function render() {
   if (!data) return;
@@ -265,7 +265,7 @@ export function select(key) {
   if (key) tail();
 }
 
-export const nameOf = (key) =>
+const nameOf = (key) =>
   (data ? [...data.web, ...data.apps.flatMap((a) => a.rows), ...data.services] : []).find((r) => r.key === key)?.name ?? key;
 
 export async function tail() {

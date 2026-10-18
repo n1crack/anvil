@@ -4,9 +4,9 @@ import { late } from "./late";
 // Git: a button for the git app and a Git group in the Overview.
 
 export const gitCache = new Map<string, any>(); // site name -> info, null when not a repository
-export let gitShown: string | null = null;
+let gitShown: string | null = null;
 
-export async function loadGit(name) {
+async function loadGit(name) {
   try {
     gitCache.set(name, await invoke("git_info", { site: name }));
   } catch (e) {
@@ -18,7 +18,7 @@ export async function loadGit(name) {
   }
 }
 
-export function commitAgo(secs) {
+function commitAgo(secs) {
   const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
   const d = secs - Date.now() / 1000;
   const units: [Intl.RelativeTimeFormatUnit, number][] = [
@@ -35,7 +35,7 @@ export function commitAgo(secs) {
   return "just now";
 }
 
-export function drawGit(name) {
+function drawGit(name) {
   const root = $("#site");
   const panel = $('[data-panel="git"]', root);
   if (!panel) return;

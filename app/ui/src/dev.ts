@@ -12,7 +12,7 @@ import { type Sgr, clean, colorize, sgr } from "./term";
  * process's output, each line tagged with its name in its color. Run ▾ runs a one-off
  * script, listed below the processes until dismissed; Configure edits the processes. */
 
-export const devSel = new Map<string, string>(); // site name -> "all", "app", "proc:<id>" or "once:<id>"
+const devSel = new Map<string, string>(); // site name -> "all", "app", "proc:<id>" or "once:<id>"
 export const COLORS = 6; // name colors pc0…pc5 (blue, purple, pink, orange, green, cyan), as concurrently gives them
 const MAX_LINES = 5000; // lines kept on screen
 
@@ -95,7 +95,7 @@ function pick(name: string, key: string) {
 
 /** The output pane in characters, for COLUMNS and LINES of what starts from here (in
  * All, less the name tag); nothing when it isn't laid out, so Anvil's default holds. */
-export function termSize(): { columns?: number; lines?: number } {
+function termSize(): { columns?: number; lines?: number } {
   const out = term.out as HTMLElement;
   if (!out.clientWidth) return {};
   const probe = el("span", null, "0".repeat(20));
@@ -508,7 +508,7 @@ function append(v: View, x: Item, text: string, width: number) {
 }
 
 /** New output for what is shown. */
-export async function devTick() {
+async function devTick() {
   const v = view;
   if (!v || configuring === v.site) return;
   const procs = procItems(v.site);
@@ -809,12 +809,6 @@ function drawConf(name: string, force = false) {
   conf.replaceChildren(table, error, foot);
 }
 
-/** Open the tab, on one entry if given. */
-export function openDev(name: string, key?: string) {
-  if (key) devSel.set(name, key);
-  showTab($("#site"), "dev");
-}
-
 late.drawDev = drawDev;
 late.devTab = () => {
   if (!selected) return;
@@ -824,7 +818,6 @@ late.devTab = () => {
   // WebKit forgets a hidden pane's scroll position: put it back once it is laid out.
   requestAnimationFrame(term.restore);
 };
-late.openDev = openDev;
 
 // Only while the tab is shown: output twice a second, the processes' states every two.
 let ticks = 0;

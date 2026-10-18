@@ -43,7 +43,7 @@ const CHECK = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true
 const CROSS = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
 
 /** id, name, one line about it, group. */
-export const TEMPLATES = [
+const TEMPLATES = [
   ["laravel", "Laravel", "Full-stack PHP framework", "PHP"],
   ["statamic", "Statamic", "Flat-file CMS on Laravel", "PHP"],
   ["symfony", "Symfony", "Modular PHP framework", "PHP"],
@@ -63,7 +63,7 @@ export const TEMPLATES = [
 const GROUPS = ["PHP", "JavaScript", "Python", "Other"];
 
 /** The steps creation goes through, as its log marks them (`==> Download`). */
-export const stepsOf = (kind: string) =>
+const stepsOf = (kind: string) =>
   ["laravel", "statamic", "symfony"].includes(kind)
     ? ["Download", "PHP dependencies", "JS dependencies", "Set up"]
     : ["next", "nuxt", "vite"].includes(kind)
@@ -297,7 +297,7 @@ async function readLog() {
 
 /** The log pane's size in characters, for the tools to fit their lines to (100 × 30
  * where it can't be measured). */
-export function logSize() {
+function logSize() {
   const probe = el("span", null, "0".repeat(10));
   probe.style.cssText = "position:absolute;visibility:hidden";
   term.out.append(probe);

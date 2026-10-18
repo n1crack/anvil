@@ -15,7 +15,7 @@ import { type Sgr, sgr } from "./term";
  * tagged with its service in its color. Stop is `docker compose stop`: Anvil never runs
  * down or rm, so containers and their volumes stay. */
 
-export const containerSel = new Map<string, string>(); // site name -> "all" or a service
+const containerSel = new Map<string, string>(); // site name -> "all" or a service
 const MAX_LINES = 5000;
 
 type Item = { key: string; name: string; color: string; c: Container; state: ReturnType<typeof containerState>; busy?: string };
@@ -292,7 +292,7 @@ export function drawContainers(name: string) {
 }
 
 /** New log lines for what is shown; All merges them by time. */
-export async function containersTick() {
+async function containersTick() {
   const v = view;
   if (!v) return;
   const all = items(v.site);

@@ -27,9 +27,9 @@ export const url = (s) => {
   return `${scheme}://${s.host}${port === std ? "" : `:${port}`}`;
 };
 
-export const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
-export let snapAt = 0; // when the last snapshot arrived
+let snapAt = 0; // when the last snapshot arrived
 let snapAsked = 0; // numbers each request for a snapshot…
 let snapShown = 0; // …and this one's is in `snap`
 
@@ -64,7 +64,7 @@ export function showError(msg, owner = "") {
   $("#error").hidden = !text;
 }
 
-export let toastTimer;
+let toastTimer;
 /** A short confirmation at the bottom of the window. */
 export function toast(msg: string, undo?: () => unknown) {
   const t = $("#toast");
@@ -96,9 +96,9 @@ window.refresh = () => {
 // [step, field in setup_status, label, what it does]
 // What setting up this Mac means, beyond PHP: local domains, ports 80/443, the HTTPS
 // certificate and the terminal commands. One button does them all, one password.
-export const SETUP_FIELDS = ["resolver", "ports", "trusted", "shims"];
+const SETUP_FIELDS = ["resolver", "ports", "trusted", "shims"];
 
-export async function loadSetup(busy?: string) {
+async function loadSetup(busy?: string) {
   let st;
   try {
     st = await invoke("setup_status");
@@ -197,13 +197,13 @@ export function mark(s) {
   return m;
 }
 
-export let sortBy = localStorage.getItem("sortBy") ?? "name";
+let sortBy = localStorage.getItem("sortBy") ?? "name";
 // How the list is split after your own groups: by parked folder, by type, or not at all.
-export let groupBy = localStorage.getItem("groupBy") ?? "folder";
+let groupBy = localStorage.getItem("groupBy") ?? "folder";
 export let showHidden = localStorage.getItem("showHidden") === "1";
 
 /** Apps hidden from Anvil, shaped like sites, while "Show Hidden Applications" is on. They aren't served. */
-export function hiddenSites(): any[] {
+function hiddenSites(): any[] {
   if (!showHidden) return [];
   return (snap.hidden ?? []).map((h) => ({
     ...h,
@@ -246,7 +246,7 @@ export function listSection(key, title, rows, count) {
   h.append(head);
   return [h, fold];
 }
-export const collapsed = new Set(JSON.parse(localStorage.getItem("collapsed") ?? "[]"));
+const collapsed = new Set(JSON.parse(localStorage.getItem("collapsed") ?? "[]"));
 
 // Fold a site's linked domains in place (no re-render), so the slide can animate.
 export function toggle(name, open = collapsed.has(name)) {
@@ -382,19 +382,19 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
 
 /* ---------- Hover card ---------- */
 
-export let hoverTimer: ReturnType<typeof setTimeout> | null = null;
-export let cardMuted: string | null = null; // the row a context menu was opened on
-export let cardFor: string | null = null; // the site whose card is shown or on its way
-export const cardProcs = new Map<string, any>(); // site name -> { at, req: promise of the `processes` overview }
+let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+let cardMuted: string | null = null; // the row a context menu was opened on
+let cardFor: string | null = null; // the site whose card is shown or on its way
+const cardProcs = new Map<string, any>(); // site name -> { at, req: promise of the `processes` overview }
 
-export function hideCard() {
+function hideCard() {
   clearTimeout(hoverTimer ?? undefined);
   hoverTimer = cardFor = null;
   $(".hover-card")?.remove();
 }
 
 /** A short summary next to the list: kind, address, what runs, branch and last edit. */
-export function showCard(s, row) {
+function showCard(s, row) {
   const card = el("div", "hover-card");
   card.setAttribute("role", "tooltip");
   const draw = () => {
@@ -477,7 +477,7 @@ export function welcome(root) {
   root.replaceChildren(box);
 }
 
-export function renderList() {
+function renderList() {
   const list = $("#list");
   list.replaceChildren();
   const note = filterNote("apps", kindLabel);
@@ -584,7 +584,7 @@ export function renderList() {
 export const M = window.__TAURI__.menu;
 
 /** Turn HTTPS on or off, showing it on the row until the web server has reloaded. */
-export async function setSecure(s) {
+async function setSecure(s) {
   securing.add(s.name);
   renderList();
   drawMeta();
@@ -597,7 +597,7 @@ export async function setSecure(s) {
   }
 }
 
-export async function siteMenu(s) {
+async function siteMenu(s) {
   const sep = () => M.PredefinedMenuItem.new({ item: "Separator" });
   const groupOf = Object.keys(snap.groups).find((g) => snap.groups[g].includes(s.name));
   const groups = [...new Set(["Favorites", ...Object.keys(snap.groups)])];
@@ -636,16 +636,16 @@ export async function siteMenu(s) {
   (await M.Menu.new({ items })).popup();
 }
 
-export function setView(key, value) {
+function setView(key, value) {
   if (key === "sortBy") sortBy = value;
   else groupBy = value;
   localStorage.setItem(key, value);
   renderList();
 }
 
-export const unhide = (s) => call("unhide_site", { site: s.name });
+const unhide = (s) => call("unhide_site", { site: s.name });
 
-export function setShowHidden(on) {
+function setShowHidden(on) {
   showHidden = on;
   localStorage.setItem("showHidden", on ? "1" : "0");
   renderList();
@@ -687,7 +687,7 @@ export function ask(label: string, placeholder?: string, preview?: (v: string) =
   });
 }
 
-export async function addAlias(s) {
+async function addAlias(s) {
   const alias = await ask(
     `New domain for ${s.name}.${snap.tld}`,
     `e.g. admin.${s.name}`,
@@ -696,7 +696,7 @@ export async function addAlias(s) {
   if (alias) await call("add_alias", { site: s.name, alias });
 }
 
-export async function newGroup(s) {
+async function newGroup(s) {
   const group = await ask(`Group for ${s.name}.${snap.tld}`, "Group name");
   if (group) await call("set_group", { site: s.name, group });
 }
@@ -723,8 +723,8 @@ function keepTabSelected(root) {
   }
   reconcile();
 }
-export const kindLabel = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
-export const RUNTIME = {
+const kindLabel = (k) => snap.kinds.find(([id]) => id === k)?.[1] ?? k;
+const RUNTIME = {
   next: "Node.js",
   nuxt: "Node.js",
   vite: "Node.js",
@@ -773,10 +773,10 @@ export function ago(d) {
   });
 }
 
-export const touchedCache = new Map<string, { at: number; secs: number | null }>(); // site name -> { at: ms when asked, secs: newest edit }
+const touchedCache = new Map<string, { at: number; secs: number | null }>(); // site name -> { at: ms when asked, secs: newest edit }
 
 /** The newest edit (seconds) as known; asks again after 30 s and calls `done` with the answer. */
-export function touchedOf(s, done) {
+function touchedOf(s, done) {
   const t = touchedCache.get(s.name);
   if (!t || Date.now() - t.at > 30000) {
     touchedCache.set(s.name, { at: Date.now(), secs: t?.secs ?? null });
@@ -862,7 +862,7 @@ function drawHttps(s) {
 }
 
 /** Every address of an app, each with its own Open. */
-export function aliasPop(anchor, sites) {
+function aliasPop(anchor, sites) {
   const pop = el("div", "alias-pop");
   const buttons = sites.map((a) => {
     const row = el("div", "alias-row");
@@ -901,7 +901,7 @@ export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | n
 }
 
 /** Finder, the terminal and the editor as outline icons; which app each opens is in the tooltip. */
-export function drawOpenWith(root) {
+function drawOpenWith(root) {
   const label = (a) =>
     a
       .split("/")
@@ -1053,7 +1053,7 @@ export function renderSite() {
 }
 
 /** Django checks the host name and, behind HTTPS, the scheme: two settings it needs once. */
-export function djangoHint(root) {
+function djangoHint(root) {
   // Only in debug: in production another proxy decides what these headers may say.
   const lines = `if DEBUG:  # Anvil\n    ALLOWED_HOSTS += [".${snap.tld}", "localhost", "127.0.0.1"]\n    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`;
   const box = el("div", "django-hint");
@@ -1074,7 +1074,7 @@ export function djangoHint(root) {
 }
 
 /** Next.js only works at .localhost until its config allows the domain suffix. */
-export function nextHint(s, root) {
+function nextHint(s, root) {
   const box = el("div", "next-hint");
   const use = el("button", null, `Use ${s.name}.${snap.tld}`);
   use.onclick = () => call("allow_next_origin", { site: s.name });
@@ -1093,7 +1093,7 @@ export function nextHint(s, root) {
 /* ---------- Resources ---------- */
 
 export const resCache = new Map<string, any>(); // site name -> resources
-export const SAFETY = {
+const SAFETY = {
   safe: ["Safe to delete", "Nothing is lost"],
   rebuild: ["Rebuildable", "Delete to free space; it can be recreated"],
   keep: ["Keep", "Your code or data"],
@@ -1110,7 +1110,7 @@ export function bytes(n) {
   return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
 }
 
-export async function loadResources(name, force = false) {
+async function loadResources(name, force = false) {
   if (!force && resCache.has(name)) return renderResources(name);
   if (force) resCache.delete(name);
   if (selected === name) renderResources(name);
@@ -1147,7 +1147,7 @@ export function seg(label: string, items: [string, string][], current: string, p
   return box;
 }
 
-export function renderResources(name) {
+function renderResources(name) {
   const body = $("#site .res-body");
   if (!body) return;
   const r = resCache.get(name);
@@ -1269,10 +1269,10 @@ export function renderResources(name) {
   }
 }
 
-export const freedNote = new Map<string, string>(); // site -> what the last clean-up freed
+const freedNote = new Map<string, string>(); // site -> what the last clean-up freed
 
 /** Confirm with a native dialog, then delete the items one by one. */
-export async function cleanItems(name, items) {
+async function cleanItems(name, items) {
   const total = items.reduce((a, i) => a + i.bytes, 0);
   const what =
     items.length === 1
@@ -1303,14 +1303,14 @@ export async function cleanItems(name, items) {
 export const PHP_KINDS = new Set(["laravel", "statamic", "symfony", "php"]);
 export const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet", "django", "fastapi", "flask"]);
 
-export function renderRun(s, root) {
+function renderRun(s, root) {
   renderRunState(s, root);
   renderRunSettings(s, root);
 }
 
 /** The run error: safe to redraw while the user types elsewhere. The run box is
  * the Overview's (processes.js), for every process of the app. */
-export function renderRunState(s, root) {
+function renderRunState(s, root) {
   const error = snap.app_errors[s.name];
   const err = $(".run-error", root);
   err.textContent = error ?? "";
@@ -1322,7 +1322,7 @@ export function renderRunState(s, root) {
   }
 }
 
-export function renderRunSettings(s, root) {
+function renderRunSettings(s, root) {
   // Language version: automatic (project file or newest) or pinned.
   const rtId = {
     next: "node",
@@ -1406,7 +1406,7 @@ export async function open(target, site = selected) {
 }
 
 /** Applications served, each folder once: an alias shares its app's folder. */
-export function servedCount() {
+function servedCount() {
   const parked = new Set(snap.sites.filter((s) => !s.linked).map((s) => s.path));
   return snap.sites.filter((s) => !s.linked || !parked.has(s.path)).length;
 }
@@ -1535,7 +1535,7 @@ $("#filter").onclick = async () => {
 };
 
 /** The filter button lights up while a filter hides something. */
-export function renderFilter() {
+function renderFilter() {
   const f = filterOf(mode);
   const on = !!f.kind || f.running;
   const btn = $("#filter");
@@ -1595,12 +1595,12 @@ $("#error-close").onclick = () => {
 // Keyboard: ⌘1–9 tabs in order, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
 /* ---------- Shortcuts: the menu bar and the keyboard run the same actions ---------- */
 
-export const TAB_KEYS = { 1: "overview", 2: "git", 3: "dev", 4: "logs", 5: "packages", 6: "resources", 7: "settings" };
-export let lastAction = { name: "", at: 0 };
+const TAB_KEYS = { 1: "overview", 2: "git", 3: "dev", 4: "logs", 5: "packages", 6: "resources", 7: "settings" };
+let lastAction = { name: "", at: 0 };
 
 /** Run a menu action. The same key can reach both the page and the menu bar, so
  * a repeat within 300 ms is ignored. Returns whether it did something. */
-export function runAction(name) {
+function runAction(name) {
   if (lastAction.name === name && Date.now() - lastAction.at < 300) return true;
   const root = $("#site");
   const [kind, arg] = name.split(":");

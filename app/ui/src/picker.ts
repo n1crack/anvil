@@ -6,7 +6,7 @@ import { $, el } from "./app";
  * (from the list or the search), Enter submits the form, Esc clears the search before
  * the sheet closes. */
 
-export type Choice = { id: string; name: string; about: string; group: string; icon: string };
+type Choice = { id: string; name: string; about: string; group: string; icon: string };
 
 const CHECK = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 

@@ -127,7 +127,7 @@ export const devAll = {
 
 /** The header: how many run (a click opens Dev), and what Dev start/stop would do.
  * A PHP site alone says whether it's served. */
-export function drawRunBox(name, rows, containers) {
+function drawRunBox(name, rows, containers) {
   const box = $("#site .run-box");
   if (!box) return;
   const up = (c) => c.state === "running";
@@ -198,7 +198,7 @@ export function drawRunBox(name, rows, containers) {
 }
 
 /** "Dev · 3 of 4 running" with a dot per entry (or what went wrong); a click opens `tab`. */
-export function summaryLine(title: string, dots: [string, string][], running: number, tab: string, keys: string, error?: string | null) {
+function summaryLine(title: string, dots: [string, string][], running: number, tab: string, keys: string, error?: string | null) {
   const b = el("button", "dev-summary");
   const box = el("span", "dev-summary-dots");
   for (const [name, cls] of dots) {
@@ -245,7 +245,7 @@ export function drawProcs(name) {
 
 /** What a compose error says in one line: a short one as it is ("Docker isn't running"),
  * else that the file can't be read; the whole message is its tooltip. */
-export const composeBrief = (error: string, file?: string | null) =>
+const composeBrief = (error: string, file?: string | null) =>
   error.includes("\n") || error.length > 40 ? `can’t read ${file ?? "the compose file"}` : error;
 
 /** The compose file can't be read and no container runs: one muted line (no tab to

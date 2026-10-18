@@ -25,12 +25,12 @@ import { picker } from "./picker";
  * the Add Service sheet. Shares $, snap, invoke, el and friends with app.js. */
 
 export let services: ServiceRow[] = [];
-export let svcSelected = localStorage.getItem("service");
+let svcSelected = localStorage.getItem("service");
 // After a removal that kept the data: a muted line over the list says where it is.
-export let keptNote = "";
-export const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
+let keptNote = "";
+const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
 
-export async function serviceCall(cmd: string, args?: Record<string, unknown>) {
+async function serviceCall(cmd: string, args?: Record<string, unknown>) {
   try {
     services = await invoke(cmd, args);
     showError(null, cmd);
@@ -81,13 +81,13 @@ export function renderModes() {
 
 for (const b of document.querySelectorAll<HTMLElement>(".modes [role=tab]")) b.onclick = () => setMode(b.dataset.mode);
 
-export function serviceMark(svc, cls = "mark") {
+function serviceMark(svc, cls = "mark") {
   const m = el("span", `${cls} svc-mark svc-${svc.kind}`, ABBR[svc.kind] ?? "?");
   m.setAttribute("aria-hidden", "true");
   return m;
 }
 
-export function serviceRow(svc) {
+function serviceRow(svc) {
   const b = el("button", "item");
   b.dataset.name = svc.id;
   b.setAttribute("aria-current", String(svc.id === svcSelected));
@@ -315,7 +315,7 @@ export function renderService() {
 
 /** The line under the name, as an app's: kind · version · port · data size (once
  * an app's Resources measured it) · what is notable about its state. */
-export function drawServiceMeta(svc, root) {
+function drawServiceMeta(svc, root) {
   const parts = [svc.name, svc.version, `port ${svc.port}`];
   const use = [...resCache.values()].flatMap((r) => r?.services ?? []).find((u) => u.anvil === svc.id && u.data_bytes != null);
   if (use) parts.push(`data ${bytes(use.data_bytes)}`);
@@ -326,7 +326,7 @@ export function drawServiceMeta(svc, root) {
 }
 
 /** A row of a service's lists, in the Processes look: the name, a muted detail, then buttons. */
-export function svcLine(name, detail, ...buttons) {
+function svcLine(name, detail, ...buttons) {
   const row = el("div", "proc svc-row");
   row.append(el("span", "proc-name", name));
   const last = el("span", "proc-last", detail ?? "");
@@ -358,7 +358,7 @@ export async function copy(text, btn) {
 }
 
 /** Remove a service; a second question decides whether its data goes too. */
-export async function removeService(svc) {
+async function removeService(svc) {
   // One question; the default button (Return) keeps the data, Escape cancels.
   const what = svc.kind === "mailpit" ? "caught mail" : svc.kind === "redis" ? "saved keys" : "databases";
   const answer = await window.__TAURI__.dialog.message(
@@ -377,8 +377,8 @@ export async function removeService(svc) {
 
 /* ---------- Add Service sheet: kind, name, port, app and tags, like creating a container ---------- */
 
-export let svcKinds: any[] = [];
-export let svcKind = localStorage.getItem("serviceKind") ?? "mysql";
+let svcKinds: any[] = [];
+let svcKind = localStorage.getItem("serviceKind") ?? "mysql";
 
 // Monochrome glyphs: a database for MySQL and PostgreSQL, layers for Redis, a letter for Mailpit.
 const SVC_ICONS: Record<string, string> = {
@@ -467,7 +467,7 @@ function syncAdd() {
 }
 $("#svc-license-check").onchange = syncAdd;
 
-export function fillService() {
+function fillService() {
   const k = svcKinds.find((x) => x.kind === svcKind) ?? svcKinds[0];
   svcKind = k.kind;
   $("#svc-name").value = k.suggested_name;
@@ -489,7 +489,7 @@ export function fillService() {
 }
 
 /** One quiet line under the name: what gets downloaded, the port and where data goes. */
-export function noteService() {
+function noteService() {
   const k = svcKinds.find((x) => x.kind === svcKind);
   const v = $("#svc-version").value;
   const name = $("#svc-name").value || "…";
@@ -501,7 +501,7 @@ export function noteService() {
   $("#svc-note").textContent = `${fetch}Data in ~/.anvil/data/${name}`;
 }
 
-export function setServiceBusy(on) {
+function setServiceBusy(on) {
   $("#svc-create").disabled = on;
   if (!on) syncAdd();
   $("#svc-create").textContent = on ? "Adding…" : "Add";
@@ -560,14 +560,14 @@ window.loadServices();
 /* ---------- What's inside: databases, keys, messages ---------- */
 
 export const contents = new Map<string, any>(); // service id -> last contents
-export const chosenDb: Record<string, string> = {}; // service id -> database used in the .env lines
+const chosenDb: Record<string, string> = {}; // service id -> database used in the .env lines
 
-export function openClient(svc, client, database) {
+function openClient(svc, client, database) {
   invoke("open_in_client", { id: svc.id, client, database: database ?? null }).catch((e) => showError(String(e)));
 }
 
 /** The .env lines, pointed at the chosen database. */
-export function envFor(svc) {
+function envFor(svc) {
   const db = chosenDb[svc.id];
   if (!db) return svc.env;
   return svc.env
@@ -577,8 +577,8 @@ export function envFor(svc) {
     .join("\n");
 }
 
-export const SYSTEM_DBS = new Set(["information_schema", "mysql", "performance_schema", "sys", "postgres", "template1"]);
-export const keysOpen = new Set<string>(); // Redis services whose keys are shown
+const SYSTEM_DBS = new Set(["information_schema", "mysql", "performance_schema", "sys", "postgres", "template1"]);
+const keysOpen = new Set<string>(); // Redis services whose keys are shown
 
 /** Redis's used_memory_human ("911.12K", "1.20M", "856B") as "911 KB", "1.2 MB". */
 export function memText(m: string | null) {
@@ -589,7 +589,7 @@ export function memText(m: string | null) {
   return `${n < 10 && x[2] ? String(Math.round(n * 10) / 10) : Math.round(n)} ${unit}`;
 }
 
-export async function renderContents(svc, root, action?) {
+async function renderContents(svc, root, action?) {
   // Only a database list needs its heading; keys and messages say what they are.
   $(".svc-contents-head", root).hidden = !svc.running || !["mysql", "postgres"].includes(svc.kind);
   const box = $(".svc-contents", root);
@@ -611,7 +611,7 @@ export async function renderContents(svc, root, action?) {
   }
 }
 
-export function drawContents(svc, root, c) {
+function drawContents(svc, root, c) {
   const box = $(".svc-contents", root);
   const list = el("div", "group procs-list svc-list");
   const line = (name, value, ...buttons) => {

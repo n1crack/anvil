@@ -37,7 +37,7 @@ const CHECK = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5 6.5
 
 /** The page of each language Anvil installs besides PHP, and which version an
  * app uses when it isn't pinned to one (as apps.rs and runtimes.rs decide). */
-export const LANGS = [
+const LANGS = [
   [
     "node",
     "Node.js",
@@ -76,7 +76,7 @@ const newest = (a: string, b: string) => b.localeCompare(a, undefined, { numeric
 
 /** One row of a Versions list: muted with Install when missing, a check and
  * "Default" on the default, Make default and Uninstall on hover otherwise. */
-export function versionRow(
+function versionRow(
   label: string,
   v: { installed: boolean; default?: boolean },
   busy: boolean,
@@ -109,7 +109,7 @@ export function versionRow(
   return row;
 }
 
-export async function loadRuntimes() {
+async function loadRuntimes() {
   try {
     runtimes = await invoke("runtimes");
     showError(null, "runtimes");
@@ -119,7 +119,7 @@ export async function loadRuntimes() {
   renderLanguages();
 }
 
-export function renderLanguages() {
+function renderLanguages() {
   for (const rt of runtimes ?? []) {
     const list = $(`#${rt.id} .versions`);
     if (!list) continue;
@@ -137,7 +137,7 @@ export function renderLanguages() {
   }
 }
 
-export async function installRuntime(id: string, version: string) {
+async function installRuntime(id: string, version: string) {
   const k = `${id}@${version}`;
   installing.add(k);
   renderLanguages();
@@ -151,7 +151,7 @@ export async function installRuntime(id: string, version: string) {
   loadRuntimes();
 }
 
-export async function uninstallRuntime(rt, v: string) {
+async function uninstallRuntime(rt, v: string) {
   const ok = await window.__TAURI__.dialog.ask(
     `Applications using it switch to another installed version, or stop starting until one is installed.`,
     { title: `Uninstall ${rt.name} ${v}?`, kind: "warning", okLabel: "Uninstall", cancelLabel: "Cancel" },
@@ -166,11 +166,11 @@ export async function uninstallRuntime(rt, v: string) {
 }
 
 export let pms: any[] | null = null;
-export const pmBusy = new Map<string, string>(); // name → "Installing…" / "Uninstalling…"
-export const pmErrors = new Map<string, string>();
+const pmBusy = new Map<string, string>(); // name → "Installing…" / "Uninstalling…"
+const pmErrors = new Map<string, string>();
 
 /** npm, pnpm, yarn and bun: where apps find them and, when it differs, the terminal. */
-export async function loadPackageManagers() {
+async function loadPackageManagers() {
   try {
     pms = await invoke("package_managers");
   } catch (e) {
@@ -194,7 +194,7 @@ function found(label: string, f) {
   return line;
 }
 
-export function renderPackageManagers() {
+function renderPackageManagers() {
   const box = $("#pms");
   if (!box || !pms) return;
   box.replaceChildren(
@@ -263,7 +263,7 @@ export function bytes(n) {
 
 /** Size text runs from the normal text colour to red on a log scale:
  * 10 MB and below plain, 20 GB and above full red. Only the number changes. */
-export function sizeColor(n) {
+function sizeColor(n) {
   const lo = Math.log10(10 * 1024 ** 2);
   const hi = Math.log10(20 * 1024 ** 3);
   const t = Math.min(1, Math.max(0, (Math.log10(Math.max(n, 1)) - lo) / (hi - lo)));
@@ -271,13 +271,13 @@ export function sizeColor(n) {
   return `color-mix(in oklab, var(--danger) ${Math.round(t ** 1.4 * 100)}%, var(--text))`;
 }
 
-export const SAFETY_LABEL = { safe: "Safe to delete", rebuild: "Rebuildable", keep: "Keep" };
+const SAFETY_LABEL = { safe: "Safe to delete", rebuild: "Rebuildable", keep: "Keep" };
 
-export async function confirmDelete(title, message) {
+async function confirmDelete(title, message) {
   return window.__TAURI__.dialog.ask(message, { title, kind: "warning", okLabel: "Delete", cancelLabel: "Cancel" });
 }
 
-export async function loadAnvilStorage() {
+async function loadAnvilStorage() {
   let st;
   try {
     st = await invoke("storage_anvil");
@@ -318,7 +318,7 @@ export async function loadAnvilStorage() {
   }
 }
 
-export function drawAnvilItem(list, i, withNote) {
+function drawAnvilItem(list, i, withNote) {
   const row = document.createElement("div");
   row.className = "row";
   const info = document.createElement("span");
@@ -363,11 +363,11 @@ export function drawAnvilItem(list, i, withNote) {
  * place from the start: while measuring the refresh icon spins, Delete waits
  * disabled, and placeholder rows keep the list's height until numbers arrive. */
 export const sizes = new Map<string, any>(); // app name -> { name, kind, total, safe, rebuild }
-export let measuring = false;
+let measuring = false;
 export let loading = true; // the last measurement not read yet
-export let deleting = false;
-export let measuredAt = 0; // Unix seconds of the shown numbers
-export let drawQueued = false;
+let deleting = false;
+let measuredAt = 0; // Unix seconds of the shown numbers
+let drawQueued = false;
 let fresh: Set<string> | null = null; // apps counted by the running measurement
 const PLACEHOLDERS = 6;
 
@@ -383,7 +383,7 @@ window.__TAURI__.event.listen("storage-app", (e) => {
   }
 });
 
-export async function loadAppSizes() {
+async function loadAppSizes() {
   if (measuring) return;
   drawSizes();
   const last = await invoke("storage_last").catch(() => null);
@@ -397,7 +397,7 @@ export async function loadAppSizes() {
   else drawSizes();
 }
 
-export async function scanApps() {
+async function scanApps() {
   if (measuring) return;
   measuring = true;
   fresh = new Set();
@@ -415,9 +415,9 @@ export async function scanApps() {
   drawSizes();
 }
 
-export const DELETE_ALL = "Delete Logs and Caches in All Apps";
+const DELETE_ALL = "Delete Logs and Caches in All Apps";
 
-export function drawSizes() {
+function drawSizes() {
   const apps = [...sizes.values()].sort((a, b) => b.total - a.total);
   const sum = (k) => apps.reduce((a, x) => a + x[k], 0);
   const busy = measuring || loading;
@@ -471,7 +471,7 @@ export function drawSizes() {
   if (!busy && !shown.length) list.innerHTML = `<div class="row"><span class="muted">No applications take any space.</span></div>`;
 }
 
-export function agoText(secs) {
+function agoText(secs) {
   const s = Date.now() / 1000 - secs;
   if (s < 60) return "just now";
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
@@ -649,7 +649,7 @@ $("#open-config-about").onclick = () => invoke("open_config_dir").catch((e) => s
 /** What Anvil downloads onto the Mac or ships, hand-kept: name, what it's for, license
  * (SPDX where one exists), homepage, how it gets here. Each license was read from the
  * project's own LICENSE file (October 2026); check again when a source or version changes. */
-export const SOFTWARE: [string, string, string, string, string][] = [
+const SOFTWARE: [string, string, string, string, string][] = [
   ["Caddy", "Web server and HTTPS certificates", "Apache-2.0", "https://caddyserver.com", "Downloaded"],
   ["PHP", "PHP apps, in static-php-cli’s builds (MIT); PHP 8.0–8.5", "PHP-3.01", "https://www.php.net", "Downloaded"],
   ["Composer", "PHP packages", "MIT", "https://getcomposer.org", "Downloaded"],
@@ -753,7 +753,7 @@ for (const input of document.querySelectorAll<HTMLInputElement>("[data-ini]")) {
 }
 
 // Storage: Anvil's own files or the applications', one at a time.
-export function showStorage(which) {
+function showStorage(which) {
   localStorage.setItem("storageTab", which);
   for (const b of document.querySelectorAll<HTMLElement>("[data-storage]"))
     b.setAttribute("aria-selected", String(b.dataset.storage === which));

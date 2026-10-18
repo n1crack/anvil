@@ -12,10 +12,10 @@ export const LEVELS: [string, string][] = [
   ["warning", "Warnings"],
 ];
 // More sources than this become a menu instead of a row of segments.
-export const SOURCES_INLINE = 5;
-export const FOLLOW_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v8M4.75 7.25 8 10.5l3.25-3.25M3.5 13.5h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-export const STEP = 500; // rows added to the page at a time
-export const levelGroup = (l) =>
+const SOURCES_INLINE = 5;
+const FOLLOW_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v8M4.75 7.25 8 10.5l3.25-3.25M3.5 13.5h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const STEP = 500; // rows added to the page at a time
+const levelGroup = (l) =>
   ["emergency", "alert", "critical", "error", "fatal"].includes(l)
     ? "error"
     : l === "warning" || l === "warn"
@@ -24,13 +24,13 @@ export const levelGroup = (l) =>
         ? "debug"
         : "info";
 
-export const logSource = new Map<string, string>(); // site name -> chosen source id
+const logSource = new Map<string, string>(); // site name -> chosen source id
 // A process's or a once-run command's output is a terminal's text, not log entries.
 export const plain = (src) => src?.id === "app" || /^(proc|once):/.test(src?.id ?? "");
 export let lv: any = null; // the view: { site, node, ... }
-export let followTimer: ReturnType<typeof setInterval> | null = null;
+let followTimer: ReturnType<typeof setInterval> | null = null;
 
-export function logTime(t) {
+function logTime(t) {
   if (!t) return null;
   // PHP-FPM writes 17-Oct-2026 09:05:35; WebKit only parses ISO-like dates.
   const MONTHS = "JanFebMarAprMayJunJulAugSepOctNovDec";
@@ -53,7 +53,7 @@ window.logsTab = (root, visible) => {
   if (lv.follow) follow(true);
 };
 
-export function buildLogs(s) {
+function buildLogs(s) {
   const node = el("div", "logs");
   node.innerHTML = `
     <div class="logs-files"></div>
@@ -136,7 +136,7 @@ export function buildLogs(s) {
   return v;
 }
 
-export async function loadSources(v, s) {
+async function loadSources(v, s) {
   try {
     v.sources = await invoke("log_sources", { site: v.site });
   } catch (e) {
@@ -152,7 +152,7 @@ export async function loadSources(v, s) {
 
 /** Which log this is, on one line: a segment per file, or a menu when there are many.
  * Size and last change are in the tooltip. */
-export function drawFiles(v) {
+function drawFiles(v) {
   const strip = $(".logs-files", v.node);
   strip.hidden = !v.sources.length;
   const pick = (id) => {
@@ -187,10 +187,10 @@ export function drawFiles(v) {
 }
 
 // Above this a log isn't opened until asked: it's usually a forgotten single-file log.
-export const LARGE_LOG = 100 * 1024 * 1024;
-export const largeOk = new Set<string>(); // "site/source" opened anyway this session
+const LARGE_LOG = 100 * 1024 * 1024;
+const largeOk = new Set<string>(); // "site/source" opened anyway this session
 
-export function showLarge(v) {
+function showLarge(v) {
   textMode(v, false);
   const box = el("li", "logs-large");
   box.append(
@@ -220,7 +220,7 @@ export function showLarge(v) {
   $(".logs-bar", v.node).hidden = true;
 }
 
-export function noSourcesText(s) {
+function noSourcesText(s) {
   if (s.kind === "laravel" || s.kind === "statamic")
     return "No log files in storage/logs yet. They appear here once the app logs something, for example an exception or Log::info().";
   if (s.kind === "symfony") return "No log files in var/log yet. They appear here once the app logs something.";
@@ -230,7 +230,7 @@ export function noSourcesText(s) {
   return "No logs yet. PHP errors show up here once a PHP version serves this app.";
 }
 
-export function showEmpty(v, text) {
+function showEmpty(v, text) {
   textMode(v, false);
   $(".logs-list", v.node).replaceChildren(el("li", "empty", text));
   $(".logs-status", v.node).textContent = "";
@@ -240,7 +240,7 @@ export function showEmpty(v, text) {
 export const filtered = (v) => v.level !== "all" || v.query;
 
 /** First page for the current source and filters. */
-export async function loadLogs(v, keepScroll = false) {
+async function loadLogs(v, keepScroll = false) {
   const token = ++v.token;
   $(".logs-bar", v.node).hidden = !v.source;
   if (v.source.bytes >= LARGE_LOG && !largeOk.has(`${v.site}/${v.source.id}`)) return showLarge(v);
@@ -287,13 +287,13 @@ async function loadText(v, token) {
 }
 
 // Errors and Warnings on plain text: lines with the word, as a terminal user would grep.
-export const KEYWORDS = {
+const KEYWORDS = {
   error: /\b(error|fatal|failed|exception)\b|\berr!|✗|✘/i,
   warning: /\bwarn(ing)?\b|⚠/i,
 };
 
 // The text drawn is kept to about what `readTail` keeps of the output.
-export const TEXT_MAX = 524288;
+const TEXT_MAX = 524288;
 
 /** Lines as one block (display: block, so adding one doesn't lay out the others again):
  * colors carried in `v.style`, links found line by line. */
@@ -309,7 +309,7 @@ function textBlock(v, lines: string[]) {
 
 /** The output with ANSI colors, only the lines that match the filters, matches marked.
  * With `fresh` (what `readTail` just read) and no filter, only that is added. */
-export function drawText(v, fresh?: string) {
+function drawText(v, fresh?: string) {
   const out = v.term.out;
   if (fresh != null && !filtered(v) && !v.tail.cleared && v.style) return appendText(v, fresh);
   v.tail.cleared = false;
@@ -392,7 +392,7 @@ export function mark(root, q) {
   }
 }
 
-export function fetchPage(v, before) {
+function fetchPage(v, before) {
   const base = { site: v.site, source: v.source.id, before };
   return filtered(v)
     ? invoke("log_search", { ...base, query: v.query, level: v.level === "all" ? null : v.level })
@@ -422,7 +422,7 @@ export async function more(v) {
 }
 
 /** Adjacent entries with the same level and message, as one row each: [[newest, …], …]. */
-export const sameEntry = (a, b) => a.level === b.level && a.message === b.message;
+const sameEntry = (a, b) => a.level === b.level && a.message === b.message;
 export function groupEntries(entries) {
   const out: any[][] = [];
   for (const e of entries) {
@@ -449,7 +449,7 @@ function grow(v, li, entries, older) {
   if ($(".log-head", li).getAttribute("aria-expanded") === "true") toggleEntry(v, row);
 }
 
-export function showMore(v) {
+function showMore(v) {
   const list = $(".logs-list", v.node);
   const next = v.entries.slice(v.shown, v.shown + STEP);
   const groups = groupEntries(next);
@@ -485,11 +485,10 @@ export function status(v) {
 const hasContext = (e) => !!e.context && !/^\{\s*\}$/.test(e.context);
 /** A row opens only when there is more than it shows: repeats' times, a trace, context or
  * more lines. A row without any shows its whole message, wrapped, and doesn't open. */
-export const hasDetail = (group) =>
-  group.length > 1 || group[0].trace.length > 0 || hasContext(group[0]) || group[0].message.includes("\n");
+const hasDetail = (group) => group.length > 1 || group[0].trace.length > 0 || hasContext(group[0]) || group[0].message.includes("\n");
 
 /** One row: time of the newest, level as a dot and a word, the first line, ×N for repeats. */
-export function entryRow(v, group) {
+function entryRow(v, group) {
   const e = group[0];
   const opens = hasDetail(group);
   const li = el("li", `log lv-${levelGroup(e.level)}${opens ? "" : " flat"}`);
@@ -513,13 +512,13 @@ export function entryRow(v, group) {
 }
 
 // A frame's file and line: Laravel's "/x/Foo.php(42)", Node's "/x/foo.js:42:7".
-export const FRAME = /(\/[^\s():'"]+\.[A-Za-z0-9]+)(?:\((\d+)\)|:(\d+))/;
-export const VENDOR = /\/(vendor|node_modules)\//;
+const FRAME = /(\/[^\s():'"]+\.[A-Za-z0-9]+)(?:\((\d+)\)|:(\d+))/;
+const VENDOR = /\/(vendor|node_modules)\//;
 
 /** The frame's file relative to the app, or null when it isn't the app's. A path from a
  * container (/var/www/html/app/…) is matched by its first app folder.
  * ponytail: a custom container layout without those folders gets no editor link. */
-export function appFile(root, file) {
+function appFile(root, file) {
   if (VENDOR.test(file)) return null;
   if (file.startsWith(`${root}/`)) return file.slice(root.length + 1);
   return file.match(/\/((?:app|src|routes|config|database|resources|tests|bootstrap|lib)\/.+)$/)?.[1] ?? null;
@@ -527,14 +526,14 @@ export function appFile(root, file) {
 
 /** A file as short as it reads: the app's relative path, a package's path from its name
  * (Laravel's from Illuminate/), else the path without the app's folder. */
-export const shortPath = (root, file) =>
+const shortPath = (root, file) =>
   appFile(root, file) ??
   (VENDOR.test(file)
     ? file.replace(/^.*\/vendor\/laravel\/framework\/src\//, "").replace(/^.*\/(vendor|node_modules)\//, "")
     : file.replace(`${root}/`, ""));
 
 /** file:line, short; an editor link when it is the app's, the full path in the tooltip. */
-export function fileLabel(v, file, lineNo) {
+function fileLabel(v, file, lineNo) {
   const rel = appFile(v.path, file);
   const label = `${shortPath(v.path, file)}:${lineNo}`;
   if (!rel || !snap.editor) {
@@ -551,7 +550,7 @@ export function fileLabel(v, file, lineNo) {
 /** The stack trace, a frame a line: number, file:line, the function muted. The app's own
  * frames show and the rest fold into "+N vendor frames"; with none of the app's, the
  * first three show and the rest fold into "+N more". */
-export function traceList(v, trace) {
+function traceList(v, trace) {
   const ol = el("ol", "log-trace");
   let own = 0;
   for (const line of trace) {
@@ -593,7 +592,7 @@ export function traceList(v, trace) {
 }
 
 /** Context JSON, indented, with quiet colors for keys, strings and literals. */
-export function jsonView(text) {
+function jsonView(text) {
   let src = text;
   try {
     const obj = JSON.parse(text);
@@ -665,7 +664,7 @@ const DAY = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" })
 const HM = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
 const HMS = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 /** "5 Oct 13:23"; without the day, or with seconds. */
-export const stamp = (d, day = true, secs = false) => `${day ? `${DAY.format(d)} ` : ""}${(secs ? HMS : HM).format(d)}`;
+const stamp = (d, day = true, secs = false) => `${day ? `${DAY.format(d)} ` : ""}${(secs ? HMS : HM).format(d)}`;
 
 /** When, for one entry or repeats (newest first): "24 times · first 5 Oct 13:23 · last 16:24". */
 export function timesSummary(times) {
@@ -677,9 +676,9 @@ export function timesSummary(times) {
   return out.join(" · ");
 }
 
-export const entryText = (e) => [`[${e.time ?? ""}] ${e.level}: ${e.message}`, e.context, ...e.trace].filter(Boolean).join("\n");
+const entryText = (e) => [`[${e.time ?? ""}] ${e.level}: ${e.message}`, e.context, ...e.trace].filter(Boolean).join("\n");
 
-export function toggleEntry(v, li) {
+function toggleEntry(v, li) {
   const head = $(".log-head", li);
   const open = head.getAttribute("aria-expanded") !== "true";
   head.setAttribute("aria-expanded", String(open));
@@ -807,7 +806,7 @@ function trimEntries(v) {
   $(".logs-more", v.node).hidden = false;
 }
 
-export async function clearLog(v) {
+async function clearLog(v) {
   const src = v.source;
   const ok = await window.__TAURI__.dialog.ask(`Everything in ${tilde(src.path)} (${bytes(src.bytes)}) is deleted. This can’t be undone.`, {
     title: `Clear ${src.label}?`,
@@ -829,11 +828,11 @@ export async function clearLog(v) {
 }
 
 /** Open the Logs tab on one of the app's sources (e.g. "proc:queue"). */
-window.showLog = (site, source) => {
+export function showLog(site: string, source: string) {
   logSource.set(site, source);
   if (lv?.site === site) lv = null;
   showTab($("#site"), "logs");
-};
+}
 
 // app.js may have drawn the tab before this file loaded.
 if (tab === "logs") window.logsTab($("#site"), true);

@@ -958,7 +958,7 @@ describe("polls and races", () => {
     document.hasFocus = () => true;
     const logs = await import("../src/logs");
     await select("shop");
-    w.showLog("shop", "once:build");
+    logs.showLog("shop", "once:build");
     await wait(80);
     logs.follow(false); // ticks by hand below
     const term = $(".logs-term");
@@ -980,7 +980,7 @@ describe("polls and races", () => {
 
   test("log_tail: one at a time, and an answer for a view changed meanwhile is dropped", async () => {
     const logs = await import("../src/logs");
-    w.showLog("shop", "laravel.log");
+    logs.showLog("shop", "laravel.log");
     await wait(80);
     logs.follow(false);
     const n = calls("log_tail").length;
