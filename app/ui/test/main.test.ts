@@ -47,6 +47,20 @@ describe("setup", () => {
   });
 });
 
+describe("sidebar menu", () => {
+  test("Open Folder comes first, for every kind, and shows that app's folder in Finder", async () => {
+    for (const name of ["shop", "stack"]) {
+      $(`#list [data-name="${name}"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await wait(80);
+      const item = (w.mockMenu as any[])[0];
+      expect(item.text).toBe("Open Folder");
+      item.action();
+      await wait();
+      expect(calls("open").at(-1)![1]).toEqual({ site: name, target: "finder" });
+    }
+  });
+});
+
 describe("https", () => {
   test("the row shows a spinner while HTTPS is turned on or off", async () => {
     w.mockDelay = { set_secure: 200 };

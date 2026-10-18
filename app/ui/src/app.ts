@@ -606,7 +606,7 @@ export async function siteMenu(s) {
     (await M.Menu.new({ items: [await M.MenuItem.new({ text: "Show in Anvil", action: () => unhide(s) })] })).popup();
     return;
   }
-  const items: any[] = [];
+  const items: any[] = [await M.MenuItem.new({ text: "Open Folder", action: () => open("finder", s.name) }), await sep()];
   if (serves(s)) {
     items.push(await M.CheckMenuItem.new({ text: "Use HTTPS", checked: s.secure, action: () => setSecure(s) }), await sep());
   }
@@ -1348,9 +1348,10 @@ export function select(name) {
   $(`.item[data-name="${CSS.escape(name)}"]`)?.focus({ preventScroll: false });
 }
 
-export async function open(target) {
+/** Open the selected app (or `site`) in the browser, Finder, a terminal or the editor. */
+export async function open(target, site = selected) {
   try {
-    await invoke("open", { site: selected, target });
+    await invoke("open", { site, target });
   } catch (e) {
     showError(String(e));
   }
