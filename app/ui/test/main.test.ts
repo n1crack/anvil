@@ -448,13 +448,13 @@ describe("containers", () => {
     expect(l.at(-1)).toBe('web    │ 172.18.0.1 - - [17/Oct/2026:10:00:12 +0000] "GET /favicon.ico HTTP/1.1" 404 153');
     const tag = $$('[data-panel="containers"] .dev-tag').find((t) => t.textContent!.startsWith("db "))!;
     expect(tag.className).toBe("dev-tag pc1");
-    // Then only what came since the last line read.
-    const n = calls("container_log").length;
+    // Then only what came after the last line read.
+    const n = calls("container_log_read").length;
     await wait(1100);
-    const since = calls("container_log")
+    const next = calls("container_log_read")
       .slice(n)
       .find(([, a]) => a.service === "web")![1];
-    expect(since.since).toBe(w.mockContainerLogs.web.at(-1).split(" ")[0]);
+    expect(next.after).toBe(w.mockContainerLogs.web.length);
     expect(lines()).toHaveLength(l.length);
   });
 
@@ -517,6 +517,17 @@ describe("containers", () => {
         .map(([, a]) => a.action),
     ).toEqual(["start", "stop"]);
     expect(JSON.stringify(w.mockCalls)).not.toMatch(/"down"|"rm"/);
+  });
+
+  test("leaving the tab ends Anvil's log streams; back, they read from the start", async () => {
+    const n = calls("container_logs_stop").length;
+    $('.tabs [data-tab="overview"]').click();
+    await wait(1100);
+    expect(calls("container_logs_stop").length).toBe(n + 1);
+    const m = calls("container_log_read").length;
+    tabBtn().click();
+    await wait(50);
+    expect(calls("container_log_read").slice(m)[0][1].after).toBe(0);
   });
 
   test("⌘3 and the header's state open Containers when the app has no Dev", async () => {

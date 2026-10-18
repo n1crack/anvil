@@ -7,7 +7,8 @@ import { DOT, containerRun, containerState, loadProcs, procBtn, procBusy, procCa
 import { type Sgr, sgr } from "./term";
 
 /* Containers tab: a Docker Compose app's services on the left, the chosen one's log live
- * on the right (`docker compose logs`, asked again for what came since), built like the
+ * on the right (one `docker compose logs -f` per service, kept by Anvil while the tab
+ * shows the app and read by line number), built like the
  * Dev tab and drawn with its pieces. "All" merges every container's log by time, each line
  * tagged with its service in its color. Stop is `docker compose stop`: Anvil never runs
  * down or rm, so containers and their volumes stay. */
@@ -75,10 +76,18 @@ pane.append(head, term.out, empty, keysHint);
 main.append(list, pane);
 box.append(bar, main);
 
-// What is shown: which app and entry, the time of the last line read per service,
-// requests on their way, and each service's colors carried from line to line.
-type View = { site: string; key: string; since: Map<string, string | null>; asking: Set<string>; styles: Map<string, Sgr> };
+// What is shown: which app and entry, the time and number of the last line read per
+// service, requests on their way, and each service's colors carried from line to line.
+type View = {
+  site: string;
+  key: string;
+  since: Map<string, string | null>;
+  seq: Map<string, number>;
+  asking: Set<string>;
+  styles: Map<string, Sgr>;
+};
 let view: View | null = null;
+let following = ""; // the app whose log streams Anvil keeps
 let allBusy: "" | "start" | "stop" = "";
 let allSite = "";
 
@@ -224,7 +233,7 @@ export function drawContainers(name: string) {
   let key = containerSel.get(name) ?? "all";
   if (key !== "all" && !all.some((x) => x.key === key)) key = "all";
   if (view?.site !== name || view.key !== key) {
-    view = { site: name, key, since: new Map(), asking: new Set(), styles: new Map() };
+    view = { site: name, key, since: new Map(), seq: new Map(), asking: new Set(), styles: new Map() };
     term.out.replaceChildren();
     term.atEnd = true;
   }
@@ -284,13 +293,16 @@ export async function containersTick() {
   const all = items(v.site);
   const shown = v.key === "all" ? all : all.filter((x) => x.key === v.key);
   const width = v.key === "all" ? Math.max(0, ...shown.map((x) => x.name.length)) : -1;
+  following = v.site;
   const got = await Promise.all(
     shown.map(async (x) => {
       if (v.asking.has(x.key)) return [];
       v.asking.add(x.key);
       let raw = "";
       try {
-        raw = await invoke("container_log", { site: v.site, service: x.name, since: v.since.get(x.key) ?? null });
+        const r = await invoke("container_log_read", { site: v.site, service: x.name, after: v.seq.get(x.key) ?? 0 });
+        raw = r.text;
+        v.seq.set(x.key, r.next);
       } catch {
         return []; // Docker isn't running, or the container never ran: the list says so
       } finally {
@@ -326,9 +338,17 @@ late.containersTab = () => {
 };
 
 // Only while the tab is shown: the logs every second, the containers' states every two.
+// Once it is hidden or shows another app, Anvil's log streams for it end; shown again,
+// they start over and the lines already on screen (by time) are skipped.
 let ticks = 0;
 setInterval(() => {
-  if (document.hidden || mode !== "apps" || !selected || tab !== "containers") return;
+  const shown = !document.hidden && mode === "apps" && !!selected && tab === "containers";
+  if (following && (!shown || following !== selected)) {
+    following = "";
+    view?.seq.clear();
+    invoke("container_logs_stop").catch(() => {});
+  }
+  if (!shown || !selected) return;
   if (view?.site === selected) containersTick();
   if (++ticks % 2 === 0 && !procLoading.has(selected)) loadProcs(selected);
 }, 1000);

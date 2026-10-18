@@ -16,7 +16,7 @@ use tauri::{
 /// take the next; `let x = m.lock()…;` drops the guard at the `;`, but an `if let` /
 /// `match` scrutinee keeps it through the whole block. If two ever must nest, take
 /// them in field order (restarting, server, error, services, apps, app_errors,
-/// service_errors).
+/// service_errors, container_logs).
 #[derive(Default)]
 struct App {
     server: Mutex<Option<Server>>,
@@ -30,6 +30,8 @@ struct App {
     app_errors: Mutex<std::collections::BTreeMap<String, String>>,
     /// Last start failure per service id.
     service_errors: Mutex<std::collections::BTreeMap<String, String>>,
+    /// The Containers tab's log streams.
+    container_logs: Mutex<anvil::compose::Logs>,
 }
 
 #[derive(Serialize)]
@@ -965,12 +967,35 @@ fn containers_run(app: State<App>, site: String, action: String) -> Res<Overview
     Ok(overview(&app, &cfg, &s))
 }
 
-/// The Containers tab's log of one service: timestamped lines, the newest 500 or those
-/// since `since`.
+/// New lines of one service's log for the Containers tab, from the stream kept while
+/// the tab shows the app (`compose::Logs`): `text` after line `after`, `next` to ask
+/// after next time.
+#[derive(Serialize)]
+struct LogLines {
+    text: String,
+    next: u64,
+}
+
 #[tauri::command(async)]
-fn container_log(site: String, service: String, since: Option<String>) -> Res<String> {
-    let s = find_site(&site)?;
-    anvil::compose::logs_since(&s.path, &service, since.as_deref()).map_err(err)
+fn container_log_read(app: State<App>, site: String, service: String, after: u64) -> Res<LogLines> {
+    let (text, next) = app
+        .container_logs
+        .lock()
+        .unwrap()
+        .read(
+            &site,
+            || find_site(&site).map(|s| s.path).map_err(anyhow::Error::msg),
+            &service,
+            after,
+        )
+        .map_err(err)?;
+    Ok(LogLines { text, next })
+}
+
+/// The Containers tab is hidden, or shows another app: its log streams end.
+#[tauri::command(async)]
+fn container_logs_stop(app: State<App>) {
+    app.container_logs.lock().unwrap().stop();
 }
 
 /// Start the processes marked Start with Anvil. Only apps that still exist and rows
@@ -2986,7 +3011,8 @@ fn main() {
             container_run,
             containers_run,
             once_stop,
-            container_log,
+            container_log_read,
+            container_logs_stop,
             set_dock_icon,
             set_trim_app_logs,
             set_login,
@@ -3117,6 +3143,7 @@ fn main() {
             }
             RunEvent::Exit => {
                 let app = handle.state::<App>();
+                app.container_logs.lock().unwrap().stop();
                 *app.apps.lock().unwrap() = Default::default();
                 stop(&app);
                 // Databases shut down cleanly before Anvil exits.

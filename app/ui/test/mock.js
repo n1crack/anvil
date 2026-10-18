@@ -626,8 +626,19 @@ const mockHandle = (cmd, a) => {
           Object.assign(c, a.action === "stop" ? { state: "exited", health: null, exit_code: 0 } : { state: "running", exit_code: null });
       return ov;
     }
-    case "container_log":
-      return a.since ? "" : (window.mockContainerLogs[a.service] ?? []).join("\n") + "\n";
+    case "container_log_read": {
+      // The stream's buffer: lines after number `after`.
+      const all = window.mockContainerLogs[a.service] ?? [];
+      return {
+        text: all
+          .slice(a.after)
+          .map((l) => l + "\n")
+          .join(""),
+        next: all.length,
+      };
+    }
+    case "container_logs_stop":
+      return null;
     case "command_run": {
       const c = ov.commands.find((x) => x.id === a.id);
       Object.assign(c, { running: true, exit: null });
