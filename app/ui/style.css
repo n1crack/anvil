@@ -1901,7 +1901,7 @@ kbd {
 
 /* New application: templates grouped by language, two per row, each a monochrome
  * glyph, its name and a line about it; the chosen one a neutral highlight and a check. */
-.new-sheet { width: min(620px, 92vw); max-height: calc(100vh - 32px); }
+.new-sheet { width: min(720px, 92vw); max-height: calc(100vh - 32px); }
 .new-sheet[open] { display: flex; flex-direction: column; }
 .new-sheet [hidden] { display: none !important; }
 #new-form { display: flex; flex-direction: column; min-height: 0; }

@@ -728,7 +728,7 @@ fn run() -> Result<()> {
             let parent = dir_or_cwd(Some(parent))?;
             println!("Creating {} ({})…", bold(&name), dim(apps::label(&kind)));
             let opts = create::resolve(&kind, &cfg, &Default::default())?;
-            let path = create::create(&kind, &name, &parent, &opts)?;
+            let path = create::create(&kind, &name, &parent, &opts, create::LOG_SIZE)?;
             // Outside a parked folder the new app needs a link to get its address.
             if !cfg.paths.contains(&parent) {
                 edit(&mut cfg, |c| link(c, &name, path.clone()))?;

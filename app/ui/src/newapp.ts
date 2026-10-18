@@ -417,6 +417,24 @@ async function readLog() {
   }
 }
 
+/** The log pane's size in characters, for the tools to fit their lines to (100 × 30
+ * where it can't be measured). */
+export function logSize() {
+  const probe = el("span", null, "0".repeat(10));
+  probe.style.cssText = "position:absolute;visibility:hidden";
+  term.out.append(probe);
+  const ch = probe.getBoundingClientRect().width / 10;
+  const line = probe.getBoundingClientRect().height;
+  probe.remove();
+  const css = getComputedStyle(term.out);
+  const width = term.out.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+  const height = term.out.clientHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom);
+  return {
+    columns: ch > 0 && width > 0 ? Math.floor(width / ch) : 100,
+    lines: line > 0 && height > 0 ? Math.floor(height / line) : 30,
+  };
+}
+
 export async function create(kind: string, name: string, parent: string) {
   job = { kind, name, site: null, from: 0, raw: "", busy: false, end: "" };
   const j = job;
@@ -431,7 +449,7 @@ export async function create(kind: string, name: string, parent: string) {
   const timer = setInterval(readLog, 300);
   let error: string | null = null;
   try {
-    j.site = await invoke("create_app", { kind, name, parent, options: { ...chosen } });
+    j.site = await invoke("create_app", { kind, name, parent, options: { ...chosen }, ...logSize() });
   } catch (e) {
     error = String(e);
   }

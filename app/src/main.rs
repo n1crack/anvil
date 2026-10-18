@@ -1592,12 +1592,16 @@ async fn create_app(
     name: String,
     parent: std::path::PathBuf,
     options: Option<anvil::create::Options>,
+    columns: Option<u16>,
+    lines: Option<u16>,
 ) -> Res<String> {
     let cfg = anvil::load().map_err(err)?;
     let opts = anvil::create::resolve(&kind, &cfg, &options.unwrap_or_default()).map_err(err)?;
     let job = (kind.clone(), name.clone(), parent.clone(), opts.clone());
+    let (c, l) = anvil::create::LOG_SIZE;
+    let size = (columns.unwrap_or(c), lines.unwrap_or(l));
     let dir = tauri::async_runtime::spawn_blocking(move || {
-        anvil::create::create(&job.0, &job.1, &job.2, &job.3)
+        anvil::create::create(&job.0, &job.1, &job.2, &job.3, size)
     })
     .await
     .map_err(|e| e.to_string())?

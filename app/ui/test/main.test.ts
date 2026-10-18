@@ -1066,7 +1066,7 @@ describe("new application", () => {
     fill("my-app");
     await key("Enter");
     await wait(80);
-    expect(calls("create_app").at(-1)![1]).toMatchObject({ kind: "laravel", name: "my-app", parent: "/Users/x/Sites" });
+    expect(calls("create_app").at(-1)![1]).toMatchObject({ kind: "laravel", name: "my-app", parent: "/Users/x/Sites", columns: 100, lines: 30 });
     $("#new-done").click();
   });
 
@@ -1110,6 +1110,7 @@ describe("new application", () => {
     fill("Shop Front");
     expect(($("#new-name") as HTMLInputElement).value).toBe("shop-front");
     expect($("#new-url").textContent).toBe("Its address: shop-front.test");
+    expect($("#new-url .new-addr").textContent).toBe("shop-front.test");
     $("#new-cancel").click();
   });
 

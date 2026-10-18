@@ -354,10 +354,30 @@ fn set_env(text: &str, pairs: &[(String, String)]) -> String {
     lines.join("\n") + "\n"
 }
 
-/// Create `<parent>/<name>` as a `kind` project with `opts` (see `resolve`).
+/// The log's size in characters and lines when nothing measured it.
+pub const LOG_SIZE: (u16, u16) = (100, 30);
+
+/// What every step's process (composer, npm, artisan…) gets: color, and the log
+/// pane's size, so lines like artisan's dotted `… 2.13ms DONE` fit it unwrapped.
+fn step_env((columns, lines): (u16, u16)) -> Vec<(String, String)> {
+    vec![
+        ("FORCE_COLOR".into(), "1".into()),
+        ("COLUMNS".into(), columns.clamp(20, 500).to_string()),
+        ("LINES".into(), lines.clamp(5, 500).to_string()),
+    ]
+}
+
+/// Create `<parent>/<name>` as a `kind` project with `opts` (see `resolve`),
+/// its tools told the log is `size` (columns, lines) big.
 /// Output goes to `log_file(name)`: each step starts with a `==> <step>` line
 /// (Download, PHP dependencies, JS dependencies, Set up), and a failure ends it.
-pub fn create(kind: &str, name: &str, parent: &Path, opts: &Options) -> Result<PathBuf> {
+pub fn create(
+    kind: &str,
+    name: &str,
+    parent: &Path,
+    opts: &Options,
+    size: (u16, u16),
+) -> Result<PathBuf> {
     check_name(name)?;
     // An earlier run's log goes, so a refusal below leaves none to read.
     let _ = fs::remove_file(log_file(name));
@@ -373,7 +393,7 @@ pub fn create(kind: &str, name: &str, parent: &Path, opts: &Options) -> Result<P
     }
     fs::create_dir_all(home().join("log"))?;
     let log = fs::File::create(log_file(name))?;
-    let result = build(kind, name, parent, &dir, opts, &log);
+    let result = build(kind, name, parent, &dir, opts, size, &log);
     if let Err(e) = &result {
         let _ = writeln!(&log, "\n{e:#}");
         // Leave nothing half-made behind.
@@ -388,6 +408,7 @@ fn build(
     parent: &Path,
     dir: &Path,
     opts: &Options,
+    size: (u16, u16),
     log: &fs::File,
 ) -> Result<()> {
     let current = Cell::new("Set up");
@@ -402,7 +423,7 @@ fn build(
         .or_else(|| apps::runtime_version("node", parent))
         .map(|v| runtimes::env("node", &v));
     // Runtime environment for the template's tools.
-    let mut env: Vec<(String, String)> = vec![("FORCE_COLOR".into(), "1".into())];
+    let mut env = step_env(size);
     if let Some(rt) = apps::runtime(kind) {
         let version = match rt {
             "node" => node.clone(),
@@ -450,8 +471,7 @@ fn build(
         sh(
             Command::new("/bin/sh")
                 .args(["-c", &apps::js_install(manager)])
-                .envs(node.clone())
-                .env("FORCE_COLOR", "1"),
+                .envs(node.clone()),
             dir,
         )
     };
@@ -666,15 +686,15 @@ mod tests {
         let _ = fs::remove_dir_all(&parent);
         fs::create_dir_all(&parent).unwrap();
         let none = Options::new();
-        create("static", "site", &parent, &none).unwrap();
+        create("static", "site", &parent, &none, LOG_SIZE).unwrap();
         assert!(parent.join("site/index.html").exists());
         assert!(!parent.join("site/.git").exists());
-        create("php", "api", &parent, &none).unwrap();
+        create("php", "api", &parent, &none, LOG_SIZE).unwrap();
         assert_eq!(apps::detect(&parent.join("api")), "php");
-        assert!(create("php", "api", &parent, &none).is_err()); // exists
-        assert!(create("cobol", "x", &parent, &none).is_err());
+        assert!(create("php", "api", &parent, &none, LOG_SIZE).is_err()); // exists
+        assert!(create("cobol", "x", &parent, &none, LOG_SIZE).is_err());
         let git = Options::from([("git".into(), "on".into())]);
-        create("static", "repo", &parent, &git).unwrap();
+        create("static", "repo", &parent, &git, LOG_SIZE).unwrap();
         assert!(parent.join("repo/.git").is_dir());
         let log = fs::read_to_string(log_file("repo")).unwrap();
         assert!(log.starts_with("==> Set up\n"), "{log}");
@@ -760,6 +780,27 @@ mod tests {
             nuxt.windows(2)
                 .any(|w| w[0] == "--packageManager" && w[1] == "bun")
         );
+    }
+
+    #[test]
+    fn steps_get_the_log_size() {
+        let env = step_env((132, 41));
+        let get = |k: &str| env.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("COLUMNS"), Some("132"));
+        assert_eq!(get("LINES"), Some("41"));
+        assert_eq!(get("FORCE_COLOR"), Some("1"));
+        // Nonsense from a pane not laid out yet stays usable.
+        let env = step_env((0, 0));
+        assert!(env.contains(&("COLUMNS".into(), "20".into())));
+        assert!(env.contains(&("LINES".into(), "5".into())));
+        // A step's process sees them.
+        let out = Command::new("/bin/sh")
+            .args(["-c", "echo $COLUMNS $LINES"])
+            .env_clear()
+            .envs(step_env(LOG_SIZE))
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "100 30\n");
     }
 
     #[test]
