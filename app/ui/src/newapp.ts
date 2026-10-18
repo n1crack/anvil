@@ -260,36 +260,22 @@ function drawOptions() {
   $("#new-opts").replaceChildren(panel);
 }
 
-// Options open and close by height and fade (reduced motion just toggles). The sheet
-// keeps its height: the template list gives Options its room and gets it back.
+// Options open beside the templates: the sheet turns into two columns, the templates a
+// single tall list on the left and the form with its options on the right; closing goes
+// back to the grid. Reduced motion just switches.
 $("#new-options summary").onclick = (e: MouseEvent) => {
+  e.preventDefault();
   const dlg = $("#new-app");
   const details = $("#new-options");
-  const body = $("#new-opts");
-  e.preventDefault();
-  if (!dlg.style.height && dlg.offsetHeight) dlg.style.height = `${dlg.offsetHeight}px`;
-  const done = (open: boolean) => {
-    details.open = open;
-    if (!open) dlg.style.height = "";
-    items()
-      .find((it) => it.dataset.kind === newKind)
-      ?.scrollIntoView?.({ block: open ? "start" : "nearest" }); // the chosen one stays in view
-  };
-  if (!body.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return done(!details.open);
-  if (body.getAnimations().length) return;
   const opening = !details.open;
-  details.open = true;
-  const h = `${body.offsetHeight}px`;
-  body.style.overflow = "hidden";
-  const run = body.animate(
-    { height: opening ? ["0px", h] : [h, "0px"], opacity: opening ? [0, 1] : [1, 0] },
-    { duration: 160, easing: "ease-out", fill: "forwards" },
-  );
-  run.onfinish = () => {
-    done(opening);
-    body.style.overflow = "";
-    run.cancel(); // held at its end until closed, so nothing flashes back
-  };
+  details.open = opening;
+  dlg.classList.toggle("opts-open", opening);
+  items()
+    .find((it) => it.dataset.kind === newKind)
+    ?.scrollIntoView?.({ block: "nearest" }); // the chosen one stays in view
+  const body = $("#new-opts");
+  if (opening && body.animate && !matchMedia("(prefers-reduced-motion: reduce)").matches)
+    body.animate({ opacity: [0, 1], transform: ["translateY(-4px)", "none"] }, { duration: 160, easing: "ease-out" });
 };
 
 /* ---------- The sheet ---------- */
@@ -320,6 +306,7 @@ export function openNewApp() {
   };
   preview();
   $("#new-options").open = false;
+  dlg.classList.remove("opts-open");
   $("#new-error").hidden = true;
   showForm(true);
   dlg.showModal();

@@ -326,6 +326,8 @@ function devButton(name: string) {
 
 function drawBar(name: string) {
   bar.replaceChildren();
+  // Configuring: Table | JSON sits on the toolbar's left, on Configure's line.
+  if (configuring === name) bar.append(modeSeg, el("span", "spacer"));
   const cmds = procCache.get(name)?.commands ?? [];
   if (cmds.length && configuring !== name) {
     const run = barBtn("dev-run", icon("run"), "Run");
@@ -626,7 +628,7 @@ function syncJson(m: Mods[1], name: string) {
 }
 
 async function drawJson(name: string) {
-  if (conf.firstChild !== modeSeg || !conf.contains(js.wrap)) conf.replaceChildren(modeSeg, js.wrap);
+  if (!conf.contains(js.wrap)) conf.replaceChildren(js.wrap);
   const rows = devRows(procCache.get(name));
   if (js.site !== name) {
     js.ed?.view.destroy();
@@ -790,7 +792,7 @@ function drawConf(name: string, force = false) {
     devTick();
   };
   foot.append(plus, reset, el("span", "spacer"), done);
-  conf.replaceChildren(modeSeg, table, error, foot);
+  conf.replaceChildren(table, error, foot);
 }
 
 /** Open the tab, on one entry if given. */

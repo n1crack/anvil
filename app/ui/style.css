@@ -1083,9 +1083,10 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-conf-remove { width: 22px; height: 22px; color: var(--muted); }
 .dev-conf-error { margin: 8px 0 0; font-size: 12px; }
 .dev-conf-foot { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
-.dev-conf-foot .spacer { flex: 1; }
+.dev-conf-foot .spacer,
+.dev-bar .spacer { flex: 1; }
 /* Table | JSON, over what it switches. */
-.dev-conf-mode { width: max-content; margin-bottom: 12px; }
+.dev-conf-mode { width: max-content; }
 /* JSON: one fixed-height editor (CodeMirror, jsoneditor.ts), its first problem in one line under it. */
 .dev-json-editor { height: max(240px, calc(100vh - 420px)); overflow: hidden; border: 1px solid var(--edge); border-radius: var(--radius-m); background: var(--steel-raised); }
 .dev-json-loading { display: block; padding: 10px 12px; color: var(--muted); font-size: 12px; }
@@ -1948,7 +1949,7 @@ kbd {
 
 /* New application: templates grouped by language, two per row, each a monochrome
  * glyph, its name and a line about it; the chosen one a neutral highlight and a check. */
-.new-sheet { width: min(720px, 92vw); max-height: calc(100vh - 32px); }
+.new-sheet { width: min(720px, 92vw); max-height: calc(100vh - 32px); transition: width 0.16s ease-out; }
 .new-sheet[open] { display: flex; flex-direction: column; }
 .new-sheet [hidden] { display: none !important; }
 #new-form { display: flex; flex-direction: column; min-height: 0; }
@@ -3077,3 +3078,32 @@ body.activity {
 .sidebar-split { position: fixed; top: 0; bottom: 0; left: calc(var(--sidebar) - 4px); z-index: 5; width: 8px; }
 /* Between the Dev or Containers list and the output, as tall as they are. */
 .list-split { align-self: stretch; }
+
+/* Options open: two columns. The templates become one tall list on the left (at least
+ * as many rows as the form beside them is high), the form and its options on the right. */
+.new-sheet.opts-open { width: min(860px, 94vw); }
+.new-sheet.opts-open #new-form {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  grid-template-areas:
+    "top top"
+    "kinds name"
+    "kinds loc"
+    "kinds opts"
+    "kinds err"
+    "actions actions";
+  grid-template-rows: auto auto auto 1fr auto auto;
+  column-gap: 20px;
+}
+.new-sheet.opts-open .new-top { grid-area: top; }
+/* As tall as the form beside it, never taller: it must not stretch the sheet. */
+.new-sheet.opts-open #new-kinds { grid-area: kinds; height: 0; min-height: 100%; margin: 0; }
+.new-sheet.opts-open #new-form { min-height: 380px; }
+.new-sheet.opts-open .kind-group { grid-template-columns: 1fr; }
+.new-sheet.opts-open #new-form > .field:nth-of-type(1) { grid-area: name; }
+.new-sheet.opts-open #new-form > .field:nth-of-type(2) { grid-area: loc; }
+.new-sheet.opts-open #new-options { grid-area: opts; }
+.new-sheet.opts-open #new-error { grid-area: err; }
+.new-sheet.opts-open #new-form > .sheet-actions { grid-area: actions; }
+.new-sheet.opts-open #new-form > .field { grid-template-columns: 70px minmax(0, 1fr); }
+@media (prefers-reduced-motion: reduce) { .new-sheet { transition: none; } }
