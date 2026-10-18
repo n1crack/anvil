@@ -1433,4 +1433,39 @@ describe("show hidden", () => {
     expect(selectedTab()).toEqual(["git"]);
     ($('#site .tabs [data-tab="overview"]') as HTMLElement).click();
   });
+
+  test("Add service: two columns, and Add waits for the license unless it was accepted before", async () => {
+    w.mockRedisAccepted = { "8.10.2": "2026-10-01" };
+    const { openAddService } = await import("../src/services");
+    await openAddService();
+    await wait(30);
+    const names = $$("#svc-kinds .kind-item .kind-name").map((n) => n.textContent);
+    expect(names).toEqual(["MySQL", "Redis"]);
+    ($("#svc-kinds-mysql") as HTMLElement).click();
+    expect($("#svc-license-text").textContent).toContain("GPL-2.0 with the Universal FOSS Exception");
+    const add = $("#svc-create") as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+    const check = $("#svc-license-check") as HTMLInputElement;
+    check.checked = true;
+    check.dispatchEvent(new Event("change"));
+    expect(add.disabled).toBe(false);
+    // Redis 8 was accepted before: a note, and Add is ready.
+    ($("#svc-kinds-redis") as HTMLElement).click();
+    expect($("#svc-license-done").hidden).toBe(false);
+    expect(add.disabled).toBe(false);
+    // Redis 7.2 comes under another license: asked again.
+    const ver = $("#svc-version") as HTMLSelectElement;
+    ver.value = "7.2.16";
+    ver.dispatchEvent(new Event("change"));
+    expect($("#svc-license-text").textContent).toContain("BSD-3-Clause");
+    expect(add.disabled).toBe(true);
+    check.checked = true;
+    check.dispatchEvent(new Event("change"));
+    $("#svc-port").setAttribute("value", "6380");
+    ($("#svc-port") as HTMLInputElement).value = "6380";
+    ($("#svc-form") as HTMLFormElement).requestSubmit();
+    await wait(60);
+    expect(calls("add_service").at(-1)![1]).toMatchObject({ kind: "redis", version: "7.2.16", acceptLicense: true });
+    ($("#new-service") as HTMLDialogElement).close();
+  });
 });

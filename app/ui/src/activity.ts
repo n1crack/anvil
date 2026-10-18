@@ -259,6 +259,8 @@ export function select(key) {
   logView.end();
   $("#pane").hidden = $("#split").hidden = !key;
   $("#log-title").textContent = key ? `${nameOf(key)} · log` : "";
+  // A container's log is Docker's: only Anvil's own log files can be emptied.
+  $("#log-clear").hidden = !key || key.startsWith("container:");
   render();
   if (key) tail();
 }
@@ -342,6 +344,17 @@ setInterval(() => {
   if (selected && tailing !== logToken) tail();
 }, 2000);
 window.addEventListener("focus", load);
+$("#log-clear").onclick = async () => {
+  const key = selected;
+  if (!key) return;
+  try {
+    await invoke("activity_log_clear", { key });
+  } catch (e) {
+    $("#log").textContent = String(e);
+    return;
+  }
+  if (selected === key) select(key); // read again from the now empty start
+};
 $("#log-close").onclick = () => select(null);
 
 // The splitter: drag to give the log more or less room; the width is remembered.

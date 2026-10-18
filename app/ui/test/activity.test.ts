@@ -43,7 +43,14 @@ beforeAll(async () => {
   };
   w.__TAURI__ = {
     event: { listen: async (name: string, cb: any) => ((w.listeners ??= {})[name] = cb) },
-    core: { invoke: async (cmd: string) => (cmd === "activity" ? structuredClone(activity) : { text: LOG, end_offset: LOG.length }) },
+    core: {
+      invoke: async (cmd: string, a: any) => {
+        (w.actCalls ??= []).push([cmd, a]);
+        if (cmd === "activity") return structuredClone(activity);
+        if (cmd === "activity_log_clear") return void (w.logCleared = true);
+        return w.logCleared ? { text: "", end_offset: 0 } : { text: LOG, end_offset: LOG.length };
+      },
+    },
     menu: {
       Menu: { new: async ({ items }) => ({ popup: () => (w.mockMenu = items) }) },
       MenuItem: { new: async (o) => o },
@@ -95,6 +102,20 @@ describe("processes tabs", () => {
     expect($("#log .term-time").textContent).toBe("2026-10-17 10:00:01");
     expect($("#log .ansi1").textContent).toBe("ERROR");
     expect($("#log .ansi-bg4.ansi7").textContent).toBe(" INFO ");
+  });
+
+  test("the log's Clear, left of ×, empties the file and the view", async () => {
+    $('tr[data-key="shop@queue"]').click();
+    await wait();
+    expect($("#log").textContent).not.toBe("");
+    const clear = $("#log-clear");
+    expect(clear.hidden).toBe(false);
+    expect(clear.nextElementSibling).toBe($("#log-close"));
+    clear.click();
+    await wait(60);
+    expect(w.actCalls.filter((c: any) => c[0] === "activity_log_clear").at(-1)[1]).toEqual({ key: "shop@queue" });
+    expect($("#log").textContent).toBe("");
+    w.logCleared = false;
   });
 
   const tabBtn = (t: string) => $(`#tabs [data-tab="${t}"]`);

@@ -190,6 +190,7 @@
         </label>
       </div>
       <div id="new-kinds" class="kind-list" role="listbox" tabindex="0" aria-label="Type"></div>
+      <div class="picker-side">
       <label class="field">
         <span>Name</span>
         <input id="new-name" required autocomplete="off" spellcheck="false" placeholder="my-app">
@@ -204,6 +205,7 @@
         <div id="new-opts" class="new-opts"></div>
       </section>
       <p id="new-error" class="error" hidden></p>
+      </div>
       <div class="sheet-actions">
         <button type="button" id="new-existing" class="link" title="Serve a project that is already on this Mac; its type is detected">Use Existing Folder…</button>
         <span class="spacer"></span>
@@ -280,13 +282,18 @@
     <div class="below"><button class="link-quiet svc-remove">Remove Service…</button></div>
   </template>
 
-  <dialog id="new-service" class="sheet" aria-labelledby="svc-title">
+  <dialog id="new-service" class="sheet new-sheet" aria-labelledby="svc-title">
     <form method="dialog" id="svc-form">
-      <h2 id="svc-title">Add service</h2>
-      <fieldset class="kinds">
-        <legend class="visually-hidden">Service</legend>
-        <div id="svc-kinds" class="kind-grid"></div>
-      </fieldset>
+      <div class="new-top">
+        <h2 id="svc-title">Add service</h2>
+        <label class="new-search">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3 3"/></svg>
+          <span class="visually-hidden">Search services</span>
+          <input id="svc-search" placeholder="Search" autocomplete="off" spellcheck="false" aria-controls="svc-kinds">
+        </label>
+      </div>
+      <div id="svc-kinds" class="kind-list" role="listbox" tabindex="0" aria-label="Service"></div>
+      <div class="picker-side">
       <label class="field">
         <span>Name</span>
         <input id="svc-name" required autocomplete="off" spellcheck="false">
@@ -305,7 +312,16 @@
         <span>Application</span>
         <select id="svc-app"></select>
       </label>
+      <section class="svc-license" aria-labelledby="svc-license-title">
+        <h3 id="svc-license-title" class="new-opts-title">License</h3>
+        <div class="opt-panel">
+          <p id="svc-license-text" class="svc-license-text"></p>
+          <label id="svc-license-accept" class="opt-check"><input type="checkbox" id="svc-license-check"> I accept this license</label>
+          <p id="svc-license-done" class="muted small" hidden></p>
+        </div>
+      </section>
       <p id="svc-error" class="error" hidden></p>
+      </div>
       <div class="sheet-actions">
         <span class="spacer"></span>
         <button type="button" id="svc-cancel">Cancel</button>

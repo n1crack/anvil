@@ -31,6 +31,106 @@ pub fn versions(kind: &str) -> &'static [&'static str] {
     }
 }
 
+/// The license a service's program comes under, shown before it is installed.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct License {
+    /// What accepting is recorded under, e.g. "redis:RSALv2-SSPLv1-AGPLv3".
+    pub id: String,
+    /// The license as people know it.
+    pub name: &'static str,
+    /// The official text.
+    pub url: &'static str,
+}
+
+/// Each kind's license; Redis changed licenses between versions, so it goes by version.
+pub fn license(kind: &str, version: &str) -> License {
+    let (key, name, url) = match kind {
+        "mysql" => (
+            "GPL-2.0-only",
+            "GPL-2.0 with the Universal FOSS Exception",
+            "https://github.com/mysql/mysql-server/blob/trunk/LICENSE",
+        ),
+        "postgres" => (
+            "PostgreSQL",
+            "the PostgreSQL License",
+            "https://www.postgresql.org/about/licence/",
+        ),
+        "redis" if version.starts_with("7.2") => (
+            "BSD-3-Clause",
+            "BSD-3-Clause",
+            "https://github.com/redis/redis/blob/7.2/COPYING",
+        ),
+        "redis" if version.starts_with("7.") => (
+            "RSALv2-SSPLv1",
+            "RSALv2 or SSPLv1, your choice",
+            "https://redis.io/legal/licenses/",
+        ),
+        "redis" => (
+            "RSALv2-SSPLv1-AGPLv3",
+            "RSALv2, SSPLv1 or AGPLv3, your choice",
+            "https://redis.io/legal/licenses/",
+        ),
+        _ => (
+            "MIT",
+            "the MIT License",
+            "https://github.com/axllent/mailpit/blob/develop/LICENSE",
+        ),
+    };
+    License {
+        id: format!("{kind}:{key}"),
+        name,
+        url,
+    }
+}
+
+/// When the license of this kind and version was accepted, if it was.
+pub fn license_accepted<'a>(cfg: &'a Config, kind: &str, version: &str) -> Option<&'a str> {
+    cfg.accepted_licenses
+        .get(&license(kind, version).id)
+        .map(String::as_str)
+}
+
+/// Record that the user accepted the license of this kind and version, today.
+pub fn accept_license(cfg: &mut Config, kind: &str, version: &str) {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    cfg.accepted_licenses
+        .entry(license(kind, version).id)
+        .or_insert_with(|| ymd(secs));
+}
+
+/// "2026-10-18" (UTC) for a Unix time: the civil-from-days algorithm (H. Hinnant).
+fn ymd(secs: u64) -> String {
+    let z = (secs / 86_400) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Adding needs the license accepted, now (`accept`) or before.
+pub fn require_license(cfg: &mut Config, kind: &str, version: &str, accept: bool) -> Result<()> {
+    if accept {
+        accept_license(cfg, kind, version);
+    }
+    if license_accepted(cfg, kind, version).is_none() {
+        let l = license(kind, version);
+        bail!(
+            "{} {version} comes under {}; accept its license first ({})",
+            name(kind),
+            l.name,
+            l.url
+        );
+    }
+    Ok(())
+}
+
 /// SHA-256 of each MySQL download, pinned: MySQL only publishes MD5, which
 /// catches a broken download but not a forged one. Taken from files whose MD5
 /// matched the published one. Add a row for every version offered above.
@@ -300,6 +400,8 @@ pub struct Kind {
     pub suggested_port: u16,
     /// The kind's usual port; differs from `suggested_port` when that one is taken.
     pub default_port: u16,
+    /// Each version's license, and when it was accepted (None: not yet).
+    pub licenses: Vec<(String, License, Option<String>)>,
 }
 
 /// What can be added, with a free name and port for each.
@@ -319,6 +421,13 @@ pub fn kinds(cfg: &Config) -> Vec<Kind> {
                 suggested_name: free_name(cfg, kind),
                 suggested_port: free_port(&taken, default_port(kind)),
                 default_port: default_port(kind),
+                licenses: versions(kind)
+                    .iter()
+                    .map(|v| {
+                        let accepted = license_accepted(cfg, kind, v).map(String::from);
+                        (v.to_string(), license(kind, v), accepted)
+                    })
+                    .collect(),
             }
         })
         .collect()
@@ -1017,6 +1126,48 @@ impl Drop for Services {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_kind_and_redis_version_has_its_license() {
+        assert_eq!(license("mysql", "8.4.11").id, "mysql:GPL-2.0-only");
+        assert_eq!(license("postgres", "18.6.0").id, "postgres:PostgreSQL");
+        assert_eq!(license("mailpit", "1.31.6").id, "mailpit:MIT");
+        assert_eq!(license("redis", "8.10.2").id, "redis:RSALv2-SSPLv1-AGPLv3");
+        assert_eq!(license("redis", "7.4.11").id, "redis:RSALv2-SSPLv1");
+        assert_eq!(license("redis", "7.2.16").id, "redis:BSD-3-Clause");
+        // Every offered version has an https link to its text.
+        for kind in SERVICES {
+            for v in versions(kind) {
+                assert!(license(kind, v).url.starts_with("https://"), "{kind} {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn adding_needs_the_license_accepted_once_per_license() {
+        let mut cfg = Config::default();
+        let err = require_license(&mut cfg, "redis", "8.10.2", false).unwrap_err();
+        assert!(format!("{err:#}").contains("accept its license"), "{err:#}");
+        require_license(&mut cfg, "redis", "8.10.2", true).unwrap();
+        // Remembered, with the date it was accepted.
+        require_license(&mut cfg, "redis", "8.10.2", false).unwrap();
+        assert_eq!(
+            license_accepted(&cfg, "redis", "8.10.2").map(str::len),
+            Some(10)
+        );
+        // Another Redis version under another license asks again.
+        assert!(require_license(&mut cfg, "redis", "7.2.16", false).is_err());
+        // An old config without the field still loads.
+        let old: Config = toml::from_str("tld = \"test\"").unwrap();
+        assert!(old.accepted_licenses.is_empty());
+    }
+
+    #[test]
+    fn dates_are_civil_utc() {
+        assert_eq!(ymd(0), "1970-01-01");
+        assert_eq!(ymd(951_782_400), "2000-02-29");
+        assert_eq!(ymd(1_792_281_600), "2026-10-18");
+    }
 
     #[test]
     fn a_program_moves_into_its_version_folder_even_after_an_interrupted_move() {

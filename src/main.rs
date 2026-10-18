@@ -157,6 +157,9 @@ enum ServiceCmd {
         /// e.g. 8.0.46; `anvil service versions` lists them
         #[arg(long)]
         version: Option<String>,
+        /// Accept the program's license without being asked
+        #[arg(long)]
+        accept_license: bool,
     },
     /// Versions each service offers, and which are installed
     Versions,
@@ -332,6 +335,30 @@ fn print_resolver_step(cfg: &Config) {
 
 /// Put the shims on PATH, then print one sudo command for every system step still
 /// missing: resolver file, ports daemon and the certificate authority.
+/// Ask on a terminal whether the service's license is accepted; elsewhere say how to.
+fn ask_license(kind: &str, version: &str) -> Result<bool> {
+    use std::io::{BufRead, IsTerminal, Write};
+    let l = services::license(kind, version);
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "{} {version} comes under {}: read {} and add --accept-license",
+            services::name(kind),
+            l.name,
+            l.url
+        );
+    }
+    print!(
+        "{} {version} comes under {}.\nRead it at {}\nAccept the license? [y/N] ",
+        services::name(kind),
+        l.name,
+        cyan(l.url)
+    );
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().lock().read_line(&mut answer)?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "Yes"))
+}
+
 fn print_setup(cfg: &Config) -> Result<()> {
     let status = setup_status(cfg);
     if !status.shims {
@@ -595,7 +622,17 @@ fn run() -> Result<()> {
                 name,
                 port,
                 version,
+                accept_license,
             } => {
+                let v = version
+                    .clone()
+                    .unwrap_or_else(|| services::default_version(&kind).to_string());
+                let accept = accept_license
+                    || services::license_accepted(&cfg, &kind, &v).is_some()
+                    || ask_license(&kind, &v)?;
+                edit(&mut cfg, |c| {
+                    services::require_license(c, &kind, &v, accept)
+                })?;
                 let id = edit(&mut cfg, |c| {
                     services::add(c, &kind, name.as_deref(), port, version.as_deref())
                 })?;

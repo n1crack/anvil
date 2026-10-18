@@ -19,6 +19,7 @@ import {
   snap,
 } from "./app";
 import { late } from "./late";
+import { picker } from "./picker";
 
 /* Services in the main window: list in the sidebar, details on the right, and
  * the Add Service sheet. Shares $, snap, invoke, el and friends with app.js. */
@@ -379,6 +380,37 @@ export async function removeService(svc) {
 export let svcKinds: any[] = [];
 export let svcKind = localStorage.getItem("serviceKind") ?? "mysql";
 
+// Monochrome glyphs: a database for MySQL and PostgreSQL, layers for Redis, a letter for Mailpit.
+const SVC_ICONS: Record<string, string> = {
+  db: "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3",
+  redis: "M12 3 3 7.5l9 4.5 9-4.5L12 3Zm-9 9 9 4.5 9-4.5M3 16.5 12 21l9-4.5",
+  mail: "M3.5 6.5h17v11h-17zM3.5 7l8.5 6.5L20.5 7",
+};
+const svcIcon = (kind: string) =>
+  `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="${SVC_ICONS[kind === "redis" ? "redis" : kind === "mailpit" ? "mail" : "db"]}"/></svg>`;
+const SVC_ABOUT: Record<string, string> = {
+  mysql: "Relational database",
+  postgres: "Relational database",
+  redis: "Cache, queues and sessions",
+  mailpit: "Catches the mail apps send",
+};
+
+const svcPicker = picker({
+  list: $("#svc-kinds"),
+  search: $("#svc-search"),
+  sheet: $("#new-service"),
+  form: $("#svc-form"),
+  groups: [],
+  choices: () =>
+    svcKinds.map((k) => ({ id: k.kind, name: k.name, about: SVC_ABOUT[k.kind] ?? k.category, group: k.category, icon: svcIcon(k.kind) })),
+  onPick: (kind) => {
+    svcKind = kind;
+    localStorage.setItem("serviceKind", kind);
+    fillService();
+  },
+  none: "No services match",
+});
+
 export async function openAddService() {
   try {
     svcKinds = await invoke("service_kinds");
@@ -386,33 +418,54 @@ export async function openAddService() {
     showError(String(e));
     return;
   }
-  const grid = $("#svc-kinds");
-  grid.replaceChildren();
-  for (const k of svcKinds) {
-    const label = el("label", "kind-card");
-    const radio = el("input");
-    radio.type = "radio";
-    radio.name = "svc-kind";
-    radio.value = k.kind;
-    radio.checked = k.kind === svcKind;
-    radio.onchange = () => {
-      svcKind = k.kind;
-      localStorage.setItem("serviceKind", k.kind);
-      fillService();
-    };
-    label.append(radio, el("strong", null, k.name), el("small", null, k.category));
-    grid.append(label);
-  }
   const app = $("#svc-app");
   app.replaceChildren(new Option("None", ""));
   for (const s of snap.sites.filter((s) => !s.linked)) app.add(new Option(`${s.name}.${snap.tld}`, s.name));
   // Adding from an application's page? Start with that application.
   app.value = mode === "apps" && selected ? selected : "";
-  fillService();
+  svcPicker.groups.splice(0, Infinity, ...new Set(svcKinds.map((k) => k.category)));
+  svcPicker.draw(svcKind);
   setServiceBusy(false);
   $("#new-service").showModal();
-  $("#svc-name").select();
+  $("#svc-search").focus();
 }
+
+/** The chosen version's license: accepted before (a quiet note), or to accept now. */
+function drawLicense() {
+  const k = svcKinds.find((x) => x.kind === svcKind);
+  const v = $("#svc-version").value;
+  const entry = k?.licenses?.find((l) => l[0] === v);
+  const text = $("#svc-license-text");
+  const check = $("#svc-license-check") as HTMLInputElement;
+  if (!entry) {
+    $(".svc-license").hidden = true;
+    return;
+  }
+  $(".svc-license").hidden = false;
+  const [, lic, accepted] = entry;
+  const link = el("a", null, "Read the license");
+  link.href = lic.url;
+  link.onclick = (e) => {
+    e.preventDefault();
+    invoke("open_url", { url: lic.url }).catch((err) => showError(String(err)));
+  };
+  text.replaceChildren(`${k.name} ${v} comes under ${lic.name}. `, link);
+  $("#svc-license-accept").hidden = !!accepted;
+  $("#svc-license-done").hidden = !accepted;
+  if (accepted)
+    $("#svc-license-done").textContent =
+      `✓ Accepted on ${new Date(accepted).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+  check.checked = false;
+  syncAdd();
+}
+
+/** Add waits for the license, unless it was accepted before. */
+function syncAdd() {
+  const k = svcKinds.find((x) => x.kind === svcKind);
+  const accepted = k?.licenses?.find((l) => l[0] === $("#svc-version").value)?.[2];
+  ($("#svc-create") as HTMLButtonElement).disabled = !accepted && !($("#svc-license-check") as HTMLInputElement).checked;
+}
+$("#svc-license-check").onchange = syncAdd;
 
 export function fillService() {
   const k = svcKinds.find((x) => x.kind === svcKind) ?? svcKinds[0];
@@ -431,6 +484,7 @@ export function fillService() {
   // Say why it isn't the usual port, as the next free one was picked.
   $("#svc-port-note").textContent = k.suggested_port === k.default_port ? "" : `Suggested: the usual port ${k.default_port} is in use`;
   noteService();
+  drawLicense();
   $("#svc-error").hidden = true;
 }
 
@@ -449,11 +503,15 @@ export function noteService() {
 
 export function setServiceBusy(on) {
   $("#svc-create").disabled = on;
+  if (!on) syncAdd();
   $("#svc-create").textContent = on ? "Adding…" : "Add";
   for (const i of $("#svc-form").querySelectorAll("input, select")) i.disabled = on;
 }
 
-$("#svc-version").onchange = noteService;
+$("#svc-version").onchange = () => {
+  noteService();
+  drawLicense();
+};
 $("#svc-port").oninput = (e) => (e.target.value = e.target.value.replace(/\D/g, "").slice(0, 5));
 $("#svc-cancel").onclick = () => $("#new-service").close();
 $("#svc-name").oninput = (e) => {
@@ -480,6 +538,7 @@ $("#svc-form").onsubmit = async (e) => {
       version: $("#svc-version").value || null,
       tags: [],
       apps: app ? [app] : [],
+      acceptLicense: ($("#svc-license-check") as HTMLInputElement).checked,
     });
     $("#new-service").close();
     keptNote = "";

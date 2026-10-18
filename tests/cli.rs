@@ -323,7 +323,15 @@ fn services_without_network() {
     let bin = env.fake(REDIS);
     let port = free_ports(1)[0].to_string();
 
-    let out = env.ok(&["service", "add", "redis", "cache", "--port", &port]);
+    let out = env.ok(&[
+        "service",
+        "add",
+        "redis",
+        "cache",
+        "--port",
+        &port,
+        "--accept-license",
+    ]);
     assert!(!out.contains("Downloading"), "{out}");
     assert!(
         out.contains(&format!("Added cache on port {port}")),
@@ -344,9 +352,19 @@ fn services_without_network() {
     );
 
     // Names and ports are checked.
-    env.fails(&["service", "add", "redis", "other", "--port", &port]);
+    env.fails(&[
+        "service",
+        "add",
+        "redis",
+        "other",
+        "--port",
+        &port,
+        "--accept-license",
+    ]);
     env.fails(&["service", "add", "redis", "../x"]);
     env.fails(&["service", "add", "mongodb"]);
+    // Without --accept-license and no terminal to ask on, nothing is added.
+    env.fails(&["service", "add", "postgres", "db"]);
     assert_eq!(env.config().services.len(), 1);
 
     env.ok(&["service", "disable", "cache"]);
@@ -374,7 +392,15 @@ fn services_without_network() {
     env.ok(&["service", "remove", "cache"]);
     assert!(env.config().services.is_empty());
     assert!(data.join("dump.rdb").exists());
-    env.ok(&["service", "add", "redis", "cache", "--port", &port]);
+    env.ok(&[
+        "service",
+        "add",
+        "redis",
+        "cache",
+        "--port",
+        &port,
+        "--accept-license",
+    ]);
     env.ok(&["service", "remove", "cache", "--delete-data"]);
     assert!(!data.exists());
     env.fails(&["service", "remove", "cache"]);
@@ -388,7 +414,15 @@ fn start_stops_children_and_cleans_up_orphans() {
     env.fake("bin/caddy");
     env.fake(REDIS);
     let port = free_ports(1)[0].to_string();
-    env.ok(&["service", "add", "redis", "cache", "--port", &port]);
+    env.ok(&[
+        "service",
+        "add",
+        "redis",
+        "cache",
+        "--port",
+        &port,
+        "--accept-license",
+    ]);
 
     // Ctrl-C stops everything.
     let i = env.start();

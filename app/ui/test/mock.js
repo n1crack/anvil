@@ -749,6 +749,36 @@ const mockHandle = (cmd, a) => {
       return null;
     case "touched":
       return Math.floor(Date.now() / 1000) - 7200;
+    case "service_kinds": {
+      // As services::kinds: each version's license and when it was accepted.
+      const lic = (kind, v) =>
+        kind === "redis"
+          ? v.startsWith("7.2")
+            ? { id: "redis:BSD-3-Clause", name: "BSD-3-Clause", url: "https://github.com/redis/redis/blob/7.2/COPYING" }
+            : { id: "redis:RSALv2-SSPLv1-AGPLv3", name: "RSALv2, SSPLv1 or AGPLv3, your choice", url: "https://redis.io/legal/licenses/" }
+          : {
+              id: "mysql:GPL-2.0-only",
+              name: "GPL-2.0 with the Universal FOSS Exception",
+              url: "https://github.com/mysql/mysql-server/blob/trunk/LICENSE",
+            };
+      const kind = (k, name, category, versions, port, accepted = {}) => ({
+        kind: k,
+        name,
+        category,
+        installed: false,
+        versions,
+        default_version: versions[0],
+        installed_versions: [],
+        suggested_name: k,
+        suggested_port: port,
+        default_port: port,
+        licenses: versions.map((v) => [v, lic(k, v), accepted[v] ?? null]),
+      });
+      return [
+        kind("mysql", "MySQL", "Databases", ["9.7.2", "8.4.11"], 3306),
+        kind("redis", "Redis", "Cache & Queue", ["8.10.2", "7.2.16"], 6379, window.mockRedisAccepted ?? {}),
+      ];
+    }
     case "git_info":
       if (a.site === "notes") throw "Not a git repository"; // a plain folder
       return { branch: "main", detached: false, ahead: 0, behind: 0, changed: 3, upstream: null, commit: null, remote: null };

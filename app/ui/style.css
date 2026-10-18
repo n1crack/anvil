@@ -3053,29 +3053,28 @@ body.activity {
 /* Between the Dev or Containers list and the output, as tall as they are. */
 .list-split { align-self: stretch; }
 
-/* Two columns: the templates one tall list on the left (as tall as the form beside it),
- * the form and its options on the right. */
-.new-sheet #new-form {
+/* Picker sheets (New application, Add service): two columns. On the left the choices,
+ * one tall list as tall as the form beside it; on the right the form. */
+.new-sheet form {
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);
   grid-template-areas:
     "top top"
-    "kinds name"
-    "kinds loc"
-    "kinds opts"
-    "kinds err"
+    "kinds side"
     "actions actions";
-  grid-template-rows: auto auto auto 1fr auto auto;
+  grid-template-rows: auto 1fr auto;
   column-gap: 20px;
+  min-height: 380px;
 }
 .new-sheet .new-top { grid-area: top; }
 /* As tall as the form beside it, never taller: it must not stretch the sheet. */
-.new-sheet #new-kinds { grid-area: kinds; height: 0; min-height: 100%; margin: 0; }
-.new-sheet #new-form { min-height: 380px; }
+.new-sheet .kind-list { grid-area: kinds; height: 0; min-height: 100%; margin: 0; }
 .new-sheet .kind-group { grid-template-columns: 1fr; }
-.new-sheet #new-form > .field:nth-of-type(1) { grid-area: name; }
-.new-sheet #new-form > .field:nth-of-type(2) { grid-area: loc; }
-.new-sheet #new-options { grid-area: opts; }
-.new-sheet #new-error { grid-area: err; }
-.new-sheet #new-form > .sheet-actions { grid-area: actions; }
-.new-sheet #new-form > .field { grid-template-columns: 70px minmax(0, 1fr); }
+.new-sheet .picker-side { grid-area: side; display: flex; flex-direction: column; min-width: 0; }
+.new-sheet form > .sheet-actions { grid-area: actions; }
+.new-sheet .picker-side > .field { grid-template-columns: 80px minmax(0, 1fr); }
+.svc-license-text,
+#svc-license-done { margin: 0; }
+.svc-license-text a { color: inherit; }
+/* A note with nothing to say takes no room. */
+.field small:empty { display: none; }

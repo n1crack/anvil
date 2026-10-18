@@ -1,6 +1,7 @@
 import { $, addAppFolder, call, el, filterOf, filters, invoke, mode, select, setMode, snap, tilde } from "./app";
 import { termOut } from "./console";
 import { late } from "./late";
+import { picker } from "./picker";
 import { ansi, clean } from "./term";
 
 /* The New application sheet: a template list grouped by language, name, location and
@@ -75,119 +76,20 @@ if (!TEMPLATES.some((t) => t[0] === newKind)) newKind = "laravel";
 /* ---------- Template list ---------- */
 
 const list = () => $("#new-kinds");
-/** The templates shown, past the search. */
-const items = (): HTMLElement[] => [...list().querySelectorAll(".kind-item:not([hidden])")] as HTMLElement[];
-
-function pickKind(id: string) {
-  newKind = id;
-  localStorage.setItem("newKind", id);
-  for (const it of list().querySelectorAll(".kind-item")) it.setAttribute("aria-selected", String(it.dataset.kind === id));
-  const cur = items().find((it) => it.dataset.kind === id);
-  if (cur) list().setAttribute("aria-activedescendant", cur.id);
-  cur?.scrollIntoView?.({ block: "nearest" });
-  loadOptions(id);
-}
-
-function drawKinds() {
-  const box = list();
-  box.replaceChildren();
-  for (const g of GROUPS) {
-    const group = el("div", "kind-group");
-    group.setAttribute("role", "group");
-    group.setAttribute("aria-label", g);
-    group.append(el("div", "kind-head", g));
-    for (const [id, name, about, of] of TEMPLATES) {
-      if (of !== g) continue;
-      const it = el("div", "kind-item");
-      it.id = `kind-${id}`;
-      it.dataset.kind = id;
-      it.setAttribute("role", "option");
-      const glyph = el("span", "kind-icon");
-      glyph.innerHTML = icon(id);
-      const text = el("span", "kind-text");
-      text.append(el("span", "kind-name", name), el("span", "kind-about", about));
-      const mark = el("span", "kind-check");
-      mark.innerHTML = CHECK;
-      it.append(glyph, text, mark);
-      it.onclick = () => {
-        pickKind(id);
-        box.focus();
-      };
-      group.append(it);
-    }
-    box.append(group);
-  }
-  box.append(el("p", "kind-none", "No templates match"));
-}
-
-/** Only the templates whose name or line has the search in it; a group with none
- * hides, and a hidden choice moves to the first one shown. */
-function filterKinds() {
-  const q = $("#new-search").value.trim().toLowerCase();
-  for (const it of list().querySelectorAll(".kind-item")) {
-    const t = TEMPLATES.find((x) => x[0] === it.dataset.kind)!;
-    it.hidden = !!q && !`${t[1]} ${t[2]}`.toLowerCase().includes(q);
-  }
-  for (const g of list().querySelectorAll(".kind-group")) g.hidden = !g.querySelector(".kind-item:not([hidden])");
-  const shown = items();
-  $(".kind-none", list()).hidden = shown.length > 0;
-  if (shown.length && !shown.some((it) => it.dataset.kind === newKind)) pickKind(shown[0].dataset.kind!);
-}
-
-$("#new-search").oninput = filterKinds;
-// Up and down from the search walk the templates shown; Enter goes on as in the list.
-$("#new-search").onkeydown = (e: KeyboardEvent) => {
-  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-  e.preventDefault();
-  const all = items();
-  const i = all.findIndex((it) => it.dataset.kind === newKind);
-  const next = all[i + (e.key === "ArrowDown" ? 1 : -1)];
-  if (next) pickKind(next.dataset.kind!);
-};
-// Esc clears the search first, then closes.
-$("#new-app").addEventListener(
-  "keydown",
-  (e: KeyboardEvent) => {
-    const search = $("#new-search");
-    if (e.key !== "Escape" || !search.value || $("#new-form").hidden) return;
-    e.preventDefault();
-    e.stopPropagation();
-    search.value = "";
-    filterKinds();
-    search.focus();
+const kinds = picker({
+  list: $("#new-kinds"),
+  search: $("#new-search"),
+  sheet: $("#new-app"),
+  form: $("#new-form"),
+  groups: GROUPS,
+  choices: () => TEMPLATES.map(([id, name, about, group]) => ({ id, name, about, group, icon: icon(id) })),
+  onPick: (id) => {
+    newKind = id;
+    localStorage.setItem("newKind", id);
+    loadOptions(id);
   },
-  true,
-);
-
-/** The option a key moves to: left/right along the list, up/down to the nearest
- * one in the row above or below (in list order where there is no layout). */
-function neighbour(cur: HTMLElement, key: string) {
-  const all = items();
-  const i = all.indexOf(cur);
-  const r = cur.getBoundingClientRect();
-  const down = key === "ArrowDown" || key === "ArrowRight";
-  if (key === "ArrowLeft" || key === "ArrowRight" || !r.height) return all[i + (down ? 1 : -1)];
-  const rows = all.filter((x) => (down ? x.getBoundingClientRect().top > r.top + 2 : x.getBoundingClientRect().top < r.top - 2));
-  if (!rows.length) return undefined;
-  const tops = rows.map((x) => x.getBoundingClientRect().top);
-  const y = down ? Math.min(...tops) : Math.max(...tops);
-  return rows
-    .filter((x) => x.getBoundingClientRect().top === y)
-    .sort((a, b) => Math.abs(a.getBoundingClientRect().left - r.left) - Math.abs(b.getBoundingClientRect().left - r.left))[0];
-}
-
-$("#new-kinds").onkeydown = (e: KeyboardEvent) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    return void (items().length && $("#new-form").requestSubmit());
-  }
-  if (!e.key.startsWith("Arrow")) return;
-  e.preventDefault();
-  const cur = items().find((it) => it.dataset.kind === newKind) ?? items()[0];
-  if (!cur) return;
-  const next = neighbour(cur, e.key);
-  if (next) pickKind(next.dataset.kind!);
-};
+  none: "No templates match",
+});
 
 /* ---------- Options ---------- */
 
@@ -264,10 +166,7 @@ export function openNewApp() {
   const dlg = $("#new-app");
   // Closed while creating: back to its progress.
   if (job && !job.end) return dlg.showModal();
-  drawKinds();
-  $("#new-search").value = "";
-  filterKinds();
-  pickKind(newKind);
+  kinds.draw(newKind);
   const parent = $("#new-parent");
   parent.replaceChildren();
   for (const p of snap.paths) parent.add(new Option(tilde(p), p));

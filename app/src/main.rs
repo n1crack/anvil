@@ -839,6 +839,40 @@ fn parse_log_key<'a>(key: &'a str, services: &[String]) -> Res<LogKey<'a>> {
 /// raw, so a process's colors survive.
 #[tauri::command(async)]
 fn activity_log(key: String, from: u64) -> Res<anvil::logs::Text> {
+    if let Some(file) = activity_log_file(&key)? {
+        if !file.exists() {
+            return Ok(anvil::logs::Text::default());
+        }
+        return anvil::logs::tail_text(&file, from).map_err(err);
+    }
+    let LogKey::Container(site, service) = parse_log_key(&key, &[])? else {
+        return Ok(anvil::logs::Text::default());
+    };
+    let text = anvil::compose::logs(&find_site(site)?.path, service).map_err(err)?;
+    // ponytail: no incremental tail for containers; the whole text again unless its size is unchanged.
+    let end = text.len() as u64;
+    Ok(anvil::logs::Text {
+        text: if from == end { String::new() } else { text },
+        end_offset: end,
+    })
+}
+
+/// Empty a Processes-window row's log file. Containers' logs are Docker's and stay.
+#[tauri::command(async)]
+fn activity_log_clear(key: String) -> Res<()> {
+    match activity_log_file(&key)? {
+        Some(file) if file.exists() => std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .and_then(|f| f.set_len(0))
+            .map_err(|e| e.to_string()),
+        Some(_) => Ok(()),
+        None => Err("A container's log is kept by Docker and can't be cleared here".into()),
+    }
+}
+
+/// The log file behind a Processes-window row; None for a container (Docker keeps it).
+fn activity_log_file(key: &str) -> Res<Option<std::path::PathBuf>> {
     let log = anvil::home().join("log");
     // The service list is read only for a service key; Caddy and PHP logs need no config.
     let services = if key.starts_with("service:") {
@@ -846,7 +880,7 @@ fn activity_log(key: String, from: u64) -> Res<anvil::logs::Text> {
     } else {
         vec![]
     };
-    let file = match parse_log_key(&key, &services)? {
+    let file = match parse_log_key(key, &services)? {
         LogKey::Caddy => log.join("caddy.log"),
         LogKey::Php(v) => log.join(format!("php-{v}-fpm.log")),
         LogKey::Service(id) => anvil::services::log_file(id),
@@ -862,20 +896,9 @@ fn activity_log(key: String, from: u64) -> Res<anvil::logs::Text> {
             find_site(site)?;
             anvil::apps::log_file(&anvil::processes::once_key(site, id))
         }
-        LogKey::Container(site, service) => {
-            let text = anvil::compose::logs(&find_site(site)?.path, service).map_err(err)?;
-            // ponytail: no incremental tail for containers; the whole text again unless its size is unchanged.
-            let end = text.len() as u64;
-            return Ok(anvil::logs::Text {
-                text: if from == end { String::new() } else { text },
-                end_offset: end,
-            });
-        }
+        LogKey::Container(..) => return Ok(None),
     };
-    if !file.exists() {
-        return Ok(anvil::logs::Text::default());
-    }
-    anvil::logs::tail_text(&file, from).map_err(err)
+    Ok(Some(file))
 }
 
 #[tauri::command(async)]
@@ -2157,6 +2180,7 @@ fn service_kinds() -> Res<Vec<anvil::services::Kind>> {
 
 /// Like creating a container: downloads the program the first time, then starts it.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // one per field of the Add service sheet
 async fn add_service(
     handle: AppHandle,
     kind: String,
@@ -2165,8 +2189,14 @@ async fn add_service(
     version: Option<String>,
     tags: Vec<String>,
     apps: Vec<String>,
+    accept_license: Option<bool>,
 ) -> Res<Vec<ServiceRow>> {
     let (job_cfg, id) = edit(|c| {
+        // Nothing is installed before its license is accepted, here or earlier.
+        let v = version
+            .clone()
+            .unwrap_or_else(|| anvil::services::default_version(&kind).to_string());
+        anvil::services::require_license(c, &kind, &v, accept_license.unwrap_or(false))?;
         let id = anvil::services::add(c, &kind, name.as_deref(), port, version.as_deref())?;
         let meta = anvil::services::set_tags(c, &id, &tags)
             .and_then(|_| anvil::services::set_apps(c, &id, &apps));
@@ -3022,6 +3052,7 @@ fn main() {
             state,
             activity,
             activity_log,
+            activity_log_clear,
             refresh,
             set_running,
             set_php,
