@@ -993,7 +993,7 @@ fn app_run(handle: AppHandle, app: State<App>, site: String, action: String) -> 
 
 /// Change an app's kind, start command, port or autostart. Fields left out stay as they are;
 /// `reset` lists fields to put back to their defaults.
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 fn set_app(
     handle: AppHandle,
@@ -2837,12 +2837,21 @@ fn on_menu(handle: &AppHandle, id: &str) {
     let home = anvil::home();
     match id {
         "sites" => show(handle),
-        "start" | "restart" => {
-            if let Ok(cfg) = anvil::load() {
-                start(&app, &cfg);
-            }
+        // Stopping and starting Caddy and PHP-FPM takes seconds (a download the first
+        // time): off the main thread, so the menu bar doesn't beachball.
+        "start" | "restart" | "stop" => {
+            let (handle, stopping) = (handle.clone(), id == "stop");
+            std::thread::spawn(move || {
+                let app = handle.state::<App>();
+                if stopping {
+                    stop(&app);
+                } else if let Ok(cfg) = anvil::load() {
+                    start(&app, &cfg);
+                }
+                changed(&handle);
+            });
+            return;
         }
-        "stop" => stop(&app),
         "logs" => {
             let _ = std::fs::create_dir_all(home.join("log"));
             let _ = Command::new("open").arg(home.join("log")).status();
@@ -2857,7 +2866,11 @@ fn on_menu(handle: &AppHandle, id: &str) {
                 if let Err(e) = set {
                     *app.error.lock().unwrap() = Some(err(e));
                 } else if running(&app) {
-                    start(&app, &cfg);
+                    let handle = handle.clone();
+                    std::thread::spawn(move || {
+                        start(&handle.state::<App>(), &cfg);
+                        changed(&handle);
+                    });
                 }
             }
         }
