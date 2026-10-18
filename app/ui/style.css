@@ -1138,6 +1138,33 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
   color: var(--muted);
 }
 
+/* ---------- Checkbox ---------- */
+
+/* Neutral like the switch: an outlined rounded box; checked, filled in the text color
+ * with the check cut out in the pane's color, so it reads in dark and light. */
+input[type="checkbox"]:not([role="switch"]) {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 38%, transparent);
+  border-radius: 4px;
+  background: var(--steel-raised);
+}
+input[type="checkbox"]:not([role="switch"]):checked { border-color: var(--text); background: var(--text); }
+input[type="checkbox"]:not([role="switch"]):checked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--steel-pane);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M3.5 7.2l2.3 2.3 4.7-5' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M3.5 7.2l2.3 2.3 4.7-5' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+}
+input[type="checkbox"]:disabled { opacity: 0.45; }
+
 /* ---------- Switch ---------- */
 
 input[type="checkbox"][role="switch"] {
@@ -2028,7 +2055,7 @@ kbd {
 .opt-fields:empty { display: none; }
 .opt-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
 .opt-check { display: inline-flex; align-items: center; gap: 6px; }
-.opt-check input { margin: 0; accent-color: var(--muted); }
+.opt-check input { margin: 0; }
 
 /* Creating: a title with its state, the steps ticking, the live log. */
 .new-progress { display: flex; flex: 1; flex-direction: column; min-height: 0; }
