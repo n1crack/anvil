@@ -1086,6 +1086,7 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-json-editor { height: max(240px, calc(100vh - 420px)); overflow: hidden; border: 1px solid var(--edge); border-radius: var(--radius-m); background: var(--steel-raised); }
 .dev-json-loading { display: block; padding: 10px 12px; color: var(--muted); font-size: 12px; }
 .dev-json-msg { min-height: 1.5em; margin: 8px 0 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.dev-json-msg.error-text { color: var(--danger); }
 
 /* The Overview's one line about Dev. */
 button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--steel-raised); color: var(--text); font-size: 13px; text-align: left; }
@@ -1096,6 +1097,8 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 .dev-summary.is-muted .dev-summary-title { font-weight: 500; color: var(--muted); }
 .dev-summary-detail { margin: 6px 12px 0; color: var(--muted); font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
 .dev-summary-detail[hidden] { display: none; }
+/* The Dev and Containers lines, apart. */
+.procs > * + * { margin-top: 8px; }
 
 .path {
   overflow-wrap: anywhere;
