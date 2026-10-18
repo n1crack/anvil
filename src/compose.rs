@@ -60,13 +60,7 @@ fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<St
         Err(e) => bail!("Couldn't run docker: {e}"),
     };
     // Read on threads so a chatty command can't fill the pipe and stall.
-    let reader = |mut r: Box<dyn Read + Send>| {
-        std::thread::spawn(move || {
-            let mut s = String::new();
-            let _ = r.read_to_string(&mut s);
-            s
-        })
-    };
+    let reader = |r: Box<dyn Read + Send>| std::thread::spawn(move || crate::read_lossy(r));
     let out = reader(Box::new(child.stdout.take().unwrap()));
     let err = reader(Box::new(child.stderr.take().unwrap()));
     let deadline = Instant::now() + timeout;
@@ -266,33 +260,197 @@ pub fn project_action(dir: &Path, action: &str) -> Result<()> {
     project_action_with(&docker_bin(), dir, action)
 }
 
-/// A service's log lines, each after docker's RFC 3339 timestamp: the newest 500, or
-/// those since `since` (a timestamp from an earlier answer). The caller drops the lines
-/// it already has, as `--since` keeps the one at that very time.
-fn logs_since_with(
-    docker: &Path,
-    dir: &Path,
-    service: &str,
-    since: Option<&str>,
-) -> Result<String> {
-    let mut args = vec!["logs", "--no-color", "--no-log-prefix", "--timestamps"];
-    match since {
-        Some(t)
-            if !t.is_empty()
-                && t.chars()
-                    .all(|c| c.is_ascii_digit() || "-:.TZ+".contains(c)) =>
-        {
-            args.extend(["--since", t])
-        }
-        Some(t) => bail!("Not a timestamp: {t}"),
-        None => args.extend(["--tail", "500"]),
-    }
-    args.extend(["--", service]);
-    compose(docker, dir, &args, Duration::from_secs(10))
+/// Lines kept per followed service.
+const KEEP: usize = 2000;
+/// What a first read gets, as many as the stream starts with (`--tail`).
+const FIRST: u64 = 500;
+/// A stream that ended (Docker restarted, the CLI failed) is started again after this.
+const REFOLLOW: Duration = Duration::from_secs(5);
+
+/// docker's fixed-width RFC 3339 time at the start of a `--timestamps` line, which
+/// sorts as text (`2026-10-17T10:00:01.112345678Z`).
+fn stamp(line: &str) -> Option<&str> {
+    let t = line.split(' ').next()?;
+    let b = t.as_bytes();
+    (b.len() >= 20 && b[4] == b'-' && b[10] == b'T' && t.ends_with('Z')).then_some(t)
 }
 
-pub fn logs_since(dir: &Path, service: &str, since: Option<&str>) -> Result<String> {
-    logs_since_with(&docker_bin(), dir, service, since)
+/// One service's newest log lines as `docker compose logs -f` writes them; line `n` is
+/// the `n`th since the buffer began (1-based), so a reader asks for what came after
+/// the last number it saw.
+#[derive(Default)]
+pub struct LogBuffer {
+    lines: std::collections::VecDeque<String>,
+    /// How many lines were ever pushed: the number of the newest.
+    end: u64,
+    /// A new follow repeats the old one's tail: its lines up to this time are skipped.
+    replayed: Option<String>,
+}
+
+impl LogBuffer {
+    fn push(&mut self, line: String) {
+        if let Some(until) = &self.replayed {
+            match stamp(&line) {
+                Some(t) if t > until.as_str() => self.replayed = None,
+                // Seen already, or a line continuing one seen.
+                _ => return,
+            }
+        }
+        if self.lines.len() == KEEP {
+            self.lines.pop_front();
+        }
+        self.lines.push_back(line);
+        self.end += 1;
+    }
+
+    /// The lines after line `after` (0, or a number this buffer never reached: the
+    /// newest `FIRST`), joined, and the number to ask after next time.
+    pub fn after(&self, after: u64) -> (String, u64) {
+        let first = self.end - self.lines.len() as u64;
+        let from = if after == 0 || after > self.end {
+            self.end.saturating_sub(FIRST)
+        } else {
+            after
+        }
+        .max(first);
+        let mut text = String::new();
+        for l in self.lines.range((from - first) as usize..) {
+            text.push_str(l);
+            text.push('\n');
+        }
+        (text, self.end)
+    }
+}
+
+type Shared = std::sync::Arc<std::sync::Mutex<LogBuffer>>;
+
+struct Follow {
+    child: std::process::Child,
+    buf: Shared,
+    at: Instant,
+}
+
+/// `docker compose logs -f` for one service, its lines pushed into `buf` by a thread
+/// that ends with the stream. Its own process group, so the compose plugin under the
+/// CLI stops with it.
+fn follow(docker: &Path, dir: &Path, service: &str, buf: Shared) -> Result<std::process::Child> {
+    use std::io::BufRead;
+    use std::os::unix::process::CommandExt;
+    let mut child = Command::new(docker)
+        .args(["compose", "logs", "-f", "--no-color", "--no-log-prefix"])
+        .args(["--timestamps", "--tail", &FIRST.to_string(), "--", service])
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()?;
+    let mut out = std::io::BufReader::new(child.stdout.take().unwrap());
+    std::thread::spawn(move || {
+        let mut line = Vec::new();
+        while out.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
+            let text = String::from_utf8_lossy(&line);
+            let text = text.strip_suffix('\n').unwrap_or(&text).to_string();
+            buf.lock().unwrap_or_else(|e| e.into_inner()).push(text);
+            line.clear();
+        }
+    });
+    Ok(child)
+}
+
+/// The Containers tab's logs: one `docker compose logs -f` per service of the app it
+/// shows, read from memory, so a poll spawns nothing (`--since` at every ask made the
+/// daemon scan the whole log).
+#[derive(Default)]
+pub struct Logs {
+    /// The app followed and its folder.
+    site: String,
+    dir: PathBuf,
+    follows: std::collections::BTreeMap<String, Follow>,
+}
+
+impl Logs {
+    /// `service`'s lines after line `after` (see `LogBuffer::after`) and the number to
+    /// ask after next. Its stream starts on the first ask; another app's streams stop.
+    /// `dir` finds the app's folder, asked only when the app changes.
+    pub fn read(
+        &mut self,
+        site: &str,
+        dir: impl FnOnce() -> Result<PathBuf>,
+        service: &str,
+        after: u64,
+    ) -> Result<(String, u64)> {
+        self.read_with(&docker_bin(), site, dir, service, after)
+    }
+
+    fn read_with(
+        &mut self,
+        docker: &Path,
+        site: &str,
+        dir: impl FnOnce() -> Result<PathBuf>,
+        service: &str,
+        after: u64,
+    ) -> Result<(String, u64)> {
+        if self.site != site || self.follows.is_empty() {
+            self.stop();
+            self.dir = dir()?;
+            self.site = site.to_string();
+        }
+        let f = match self.follows.entry(service.to_string()) {
+            std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::btree_map::Entry::Vacant(e) => {
+                let buf = Shared::default();
+                let child = follow(docker, &self.dir, service, buf.clone())?;
+                e.insert(Follow {
+                    child,
+                    buf,
+                    at: Instant::now(),
+                })
+            }
+        };
+        if !matches!(f.child.try_wait(), Ok(None)) && f.at.elapsed() >= REFOLLOW {
+            {
+                let mut b = f.buf.lock().unwrap_or_else(|e| e.into_inner());
+                b.replayed = b
+                    .lines
+                    .iter()
+                    .rev()
+                    .find_map(|l| stamp(l))
+                    .map(String::from);
+            }
+            f.child = follow(docker, &self.dir, service, f.buf.clone())?;
+            f.at = Instant::now();
+        }
+        Ok(f.buf.lock().unwrap_or_else(|e| e.into_inner()).after(after))
+    }
+
+    /// End every stream: their process groups are killed and reaped.
+    pub fn stop(&mut self) {
+        if self.follows.is_empty() {
+            return;
+        }
+        let groups: Vec<String> = self
+            .follows
+            .values()
+            .map(|f| format!("-{}", f.child.id()))
+            .collect();
+        let _ = Command::new("kill")
+            .arg("-KILL")
+            .arg("--")
+            .args(&groups)
+            .stderr(Stdio::null())
+            .status();
+        for (_, mut f) in std::mem::take(&mut self.follows) {
+            let _ = f.child.kill();
+            let _ = f.child.wait();
+        }
+    }
+}
+
+impl Drop for Logs {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 pub fn logs(dir: &Path, service: &str) -> Result<String> {
@@ -502,19 +660,80 @@ esac"#,
     }
 
     #[test]
-    fn reads_logs_with_timestamps_and_refuses_other_since_values() {
-        let d = tmp("logs-dir");
-        let bin = tmp("logs-bin");
-        let log = d.join("args");
-        let docker = fake_docker(&bin, &format!("echo \"$@\" >> {}", log.display()));
-        logs_since_with(&docker, &d, "db", None).unwrap();
-        logs_since_with(&docker, &d, "db", Some("2026-10-17T10:00:01.5Z")).unwrap();
-        assert!(logs_since_with(&docker, &d, "db", Some("--follow")).is_err());
+    fn a_log_buffer_numbers_lines_keeps_the_newest_and_skips_a_replay() {
+        let mut b = LogBuffer::default();
+        for i in 0..(KEEP as u64 + 10) {
+            b.push(format!("2026-10-17T10:00:{:02}.{i:09}Z line {i}", i % 60));
+        }
+        let (all, next) = b.after(0);
+        assert_eq!(next, KEEP as u64 + 10);
+        assert_eq!(all.lines().count() as u64, FIRST);
+        assert!(all.ends_with(&format!("line {}\n", KEEP + 9)));
+        assert_eq!(b.after(next - 2).0.lines().count(), 2);
+        assert_eq!(b.after(next), (String::new(), next));
+        // Older than what is kept: from the oldest kept line.
+        assert_eq!(b.after(3).0.lines().count(), KEEP);
+        // A new follow's first lines repeat the tail: skipped up to the last time seen.
+        let mut b = LogBuffer::default();
+        b.push("2026-10-17T10:00:01.000000000Z a".into());
+        b.push("2026-10-17T10:00:02.000000000Z b".into());
+        b.replayed = Some("2026-10-17T10:00:02.000000000Z".into());
+        for l in [
+            "2026-10-17T10:00:01.000000000Z a",
+            "  more of a",
+            "2026-10-17T10:00:02.000000000Z b",
+            "2026-10-17T10:00:03.000000000Z c",
+            "  more of c",
+        ] {
+            b.push(l.into());
+        }
         assert_eq!(
-            fs::read_to_string(log).unwrap(),
-            "compose logs --no-color --no-log-prefix --timestamps --tail 500 -- db\n\
-             compose logs --no-color --no-log-prefix --timestamps --since 2026-10-17T10:00:01.5Z -- db\n"
+            b.after(2),
+            ("2026-10-17T10:00:03.000000000Z c\n  more of c\n".into(), 4)
         );
+    }
+
+    #[test]
+    fn follows_one_stream_per_service_and_stops_it() {
+        let d = tmp("follow-dir");
+        let bin = tmp("follow-bin");
+        let args = d.join("args");
+        let docker = fake_docker(
+            &bin,
+            &format!(
+                "echo \"$@\" >> {}\nprintf '2026-10-17T10:00:01.000000000Z up \\377\\n'\nexec sleep 30",
+                args.display()
+            ),
+        );
+        let mut logs = Logs::default();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let (text, next) = loop {
+            let r = logs
+                .read_with(&docker, "shop", || Ok(d.clone()), "db", 0)
+                .unwrap();
+            if r.1 > 0 || Instant::now() > deadline {
+                break r;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        // A byte that isn't UTF-8 doesn't blank the line.
+        assert_eq!(
+            (text.as_str(), next),
+            ("2026-10-17T10:00:01.000000000Z up \u{fffd}\n", 1)
+        );
+        // Asked again: from memory, no second docker, no folder lookup.
+        logs.read_with(&docker, "shop", || unreachable!(), "db", next)
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(&args).unwrap(),
+            "compose logs -f --no-color --no-log-prefix --timestamps --tail 500 -- db\n"
+        );
+        let pid = logs.follows["db"].child.id().to_string();
+        logs.stop();
+        assert!(logs.follows.is_empty());
+        // Killed and reaped: the pid names no process, not even a zombie.
+        let ps = Command::new("ps").args(["-p", &pid]).output().unwrap();
+        assert!(!ps.status.success(), "{pid} is still there");
     }
 
     #[test]

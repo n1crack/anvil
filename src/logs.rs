@@ -171,6 +171,19 @@ pub fn read(path: &Path, before: Option<u64>, max_bytes: u64) -> Result<Page> {
     })
 }
 
+/// The message of the newest non-empty line, from the file's last 8 KB only: a
+/// process row's "last line" (a dev server's output has no entry headers to look for).
+pub fn last_line(path: &Path) -> Option<String> {
+    let mut f = File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(8 * 1024))).ok()?;
+    let text = crate::read_lossy(f);
+    text.lines()
+        .rev()
+        .map(|l| entry(l).message)
+        .find(|m| !m.is_empty())
+}
+
 /// Entries appended since `from`. A file that shrank (cleared or rotated) starts over.
 pub fn tail(path: &Path, from: u64) -> Result<Page> {
     let len = fs::metadata(path)?.len();
@@ -690,6 +703,17 @@ pub fn retention(home: &Path, apps: bool, sites: &[PathBuf], now: std::time::Sys
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn last_line_reads_only_the_tail() {
+        let f = std::env::temp_dir().join(format!("anvil-last-{}.log", std::process::id()));
+        let mut body = "x".repeat(3 * 1024 * 1024);
+        body.push_str("\n\x1b[32mready\x1b[0m in 80 ms\n\n");
+        std::fs::write(&f, body).unwrap();
+        assert_eq!(super::last_line(&f).as_deref(), Some("ready in 80 ms"));
+        std::fs::remove_file(&f).unwrap();
+        assert_eq!(super::last_line(&f), None);
+    }
+
     use super::*;
     use std::io::Write;
 

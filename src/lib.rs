@@ -1269,10 +1269,24 @@ pub(crate) fn alive(pid: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// When a process started, as `ps` prints it (`Sat Oct 18 10:02:03 2026`). With the pid
+/// it names one process: a reused pid has another start time.
+pub(crate) fn started(pid: u32) -> Option<String> {
+    let o = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
 /// Clean up after an Anvil that died without stopping its children (crash, SIGKILL).
-/// The pid file is `owner pid` followed by child pids; children are only killed when
-/// the owner is gone and the process still runs one of our binaries.
-/// With `group`, child pids are process-group leaders and the whole group is killed.
+/// The pid file is `owner pid` followed by one line per child: `pid` or `pid started`.
+/// Children are only killed when the owner is gone and the process is still the one
+/// Anvil started: the same start time when recorded (a dev server's shell `exec`s its
+/// command, so its command line no longer names Anvil), else a command line that runs
+/// one of our binaries. With `group`, child pids are process-group leaders and the
+/// whole group is killed.
 pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     let Ok(file) = fs::read_to_string(pid_file) else {
         return;
@@ -1283,11 +1297,19 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     }
     let ours = home().display().to_string();
     let mut killed = false;
-    for pid in pids {
-        let cmd = Command::new("ps")
-            .args(["-p", pid, "-o", "command="])
-            .output();
-        if cmd.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&ours)) {
+    for line in pids {
+        let (pid, at) = line
+            .split_once(' ')
+            .map_or((line, None), |(p, at)| (p, Some(at)));
+        let same = match (at, pid.parse()) {
+            (Some(at), Ok(n)) => started(n).as_deref() == Some(at),
+            (Some(_), Err(_)) => false,
+            (None, _) => Command::new("ps")
+                .args(["-p", pid, "-o", "command="])
+                .output()
+                .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&ours)),
+        };
+        if same {
             let target = if group { format!("-{pid}") } else { pid.into() };
             let _ = Command::new("kill").args(["--", &target]).status();
             killed = true;
@@ -1296,6 +1318,20 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     let _ = fs::remove_file(pid_file);
     if killed {
         std::thread::sleep(std::time::Duration::from_millis(500)); // let ports close
+    }
+}
+
+/// Remove a pid file only while it still names `pid`: a stop that finishes after a new
+/// start must not drop the new process's file.
+pub(crate) fn remove_pid_file(file: &Path, pid: u32) {
+    let ours = fs::read_to_string(file).is_ok_and(|f| {
+        f.lines()
+            .nth(1)
+            .and_then(|l| l.split(' ').next())
+            .is_some_and(|p| p == pid.to_string())
+    });
+    if ours {
+        let _ = fs::remove_file(file);
     }
 }
 
@@ -1410,6 +1446,28 @@ impl Server {
             .collect()
     }
 
+    /// Why the server is down when one of its children ended on its own (a crash, a bad
+    /// Caddyfile, a port taken). That child is reaped and dropped from the list, so
+    /// stopping the rest never signals its pid again.
+    pub fn exited(&mut self) -> Option<String> {
+        let i = self
+            .children
+            .iter_mut()
+            .position(|c| !matches!(c.try_wait(), Ok(None)))?;
+        let mut child = self.children.remove(i);
+        let label = self.labels.remove(i);
+        let how = match child.try_wait() {
+            Ok(Some(st)) => format!(" ({st})"),
+            _ => String::new(),
+        };
+        let log = if label == "Caddy" {
+            format!(" — see {}", home().join("log").join("caddy.log").display())
+        } else {
+            String::new()
+        };
+        Some(format!("{label} stopped unexpectedly{how}{log}"))
+    }
+
     /// Blocks until the web server exits.
     pub fn wait(&mut self) -> Result<()> {
         self.children.last_mut().unwrap().wait()?;
@@ -1437,6 +1495,37 @@ impl Drop for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_child_that_ends_is_noticed_and_dropped() {
+        let spawn = |cmd: &str| Command::new("/bin/sh").args(["-c", cmd]).spawn().unwrap();
+        let mut server = Server {
+            children: vec![spawn("sleep 30"), spawn("exit 3")],
+            labels: vec!["PHP 8.4 FPM".into(), "Caddy".into()],
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let why = loop {
+            if let Some(why) = server.exited() {
+                break why;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the exit went unnoticed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert!(
+            why.starts_with("Caddy stopped unexpectedly (exit status: 3)"),
+            "{why}"
+        );
+        assert_eq!(server.labels, ["PHP 8.4 FPM"]);
+        assert_eq!(server.exited(), None);
+        // Stopped here, not through `stop`: that would remove the real run/pids.
+        for mut c in server.children.drain(..) {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
 
     #[test]
     fn domain_suffixes() {
@@ -1820,9 +1909,15 @@ pub fn output_within(cmd: &mut Command, limit: std::time::Duration) -> Option<St
             }
         }
     }
-    let mut out = String::new();
-    std::io::Read::read_to_string(&mut child.stdout?, &mut out).ok()?;
-    Some(out)
+    Some(read_lossy(child.stdout?))
+}
+
+/// All of `r` as text; invalid UTF-8 becomes U+FFFD instead of an empty string
+/// (`read_to_string` returns an error and leaves its buffer empty).
+pub fn read_lossy(mut r: impl std::io::Read) -> String {
+    let mut buf = Vec::new();
+    let _ = r.read_to_end(&mut buf);
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// The PATH printed after the marker; shells may print banners around it.
@@ -1849,6 +1944,21 @@ pub fn merge_path(current: &str, login: &str) -> String {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+
+    #[test]
+    fn a_late_stop_keeps_the_new_starts_pid_file() {
+        let f = std::env::temp_dir().join(format!("anvil-pids-{}", std::process::id()));
+        fs::write(&f, "1\n200 Sat Oct 18 10:02:03 2026").unwrap();
+        remove_pid_file(&f, 100);
+        assert!(f.exists());
+        remove_pid_file(&f, 200);
+        assert!(!f.exists());
+    }
+
+    #[test]
+    fn read_lossy_keeps_text_around_invalid_bytes() {
+        assert_eq!(read_lossy(&b"ok \xff done\n"[..]), "ok \u{fffd} done\n");
+    }
 
     #[test]
     fn reads_the_path_after_banners() {

@@ -12,9 +12,17 @@ use tauri::{
     WindowEvent, Wry,
 };
 
+/// Lock order: never hold two of these at once. Copy what one guards, drop it, then
+/// take the next; `let x = m.lock()…;` drops the guard at the `;`, but an `if let` /
+/// `match` scrutinee keeps it through the whole block. If two ever must nest, take
+/// them in field order (restarting, server, error, services, apps, app_errors,
+/// service_errors, container_logs).
 #[derive(Default)]
 struct App {
     server: Mutex<Option<Server>>,
+    /// Held through a whole `start`/`stop` of the web server, so two can't interleave;
+    /// taken before `server`, which is only locked to swap.
+    restarting: Mutex<()>,
     error: Mutex<Option<String>>,
     services: Mutex<anvil::services::Services>,
     apps: Mutex<anvil::apps::Apps>,
@@ -22,6 +30,8 @@ struct App {
     app_errors: Mutex<std::collections::BTreeMap<String, String>>,
     /// Last start failure per service id.
     service_errors: Mutex<std::collections::BTreeMap<String, String>>,
+    /// The Containers tab's log streams.
+    container_logs: Mutex<anvil::compose::Logs>,
 }
 
 #[derive(Serialize)]
@@ -132,8 +142,21 @@ fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
+/// Whether Caddy and PHP-FPM serve. One of them ending on its own takes the server
+/// down: the rest stops in the background, and why shows as a failed start's error does.
 fn running(app: &App) -> bool {
-    app.server.lock().unwrap().is_some()
+    let mut server = app.server.lock().unwrap();
+    let Some(exited) = server.as_mut().map(Server::exited) else {
+        return false;
+    };
+    let Some(why) = exited else {
+        return true;
+    };
+    let dead = server.take();
+    drop(server);
+    *app.error.lock().unwrap() = Some(why);
+    std::thread::spawn(move || drop(dead));
+    false
 }
 
 fn snapshot(app: &App) -> Res<Snapshot> {
@@ -179,12 +202,17 @@ fn snapshot(app: &App) -> Res<Snapshot> {
     })
 }
 
+/// (Re)start Caddy and PHP-FPM. `server` is only locked to swap: stopping the old
+/// server takes up to 3 s a child and the first Caddy download much longer, and
+/// `running` is asked on every poll. Meanwhile the server counts as stopped.
 fn start(app: &App, cfg: &Config) {
-    let mut server = app.server.lock().unwrap();
-    *server = None; // stop the old one first so ports are free
-    match Server::start(cfg) {
+    let _one = app.restarting.lock().unwrap();
+    let old = app.server.lock().unwrap().take();
+    drop(old); // stop the old one first so ports are free
+    let started = Server::start(cfg);
+    match started {
         Ok(s) => {
-            *server = Some(s);
+            *app.server.lock().unwrap() = Some(s);
             *app.error.lock().unwrap() = None;
         }
         Err(e) => *app.error.lock().unwrap() = Some(err(e)),
@@ -192,7 +220,9 @@ fn start(app: &App, cfg: &Config) {
 }
 
 fn stop(app: &App) {
-    *app.server.lock().unwrap() = None;
+    let _one = app.restarting.lock().unwrap();
+    let old = app.server.lock().unwrap().take();
+    drop(old);
 }
 
 /// Something changed: rebuild the tray menu and re-render an open window.
@@ -377,7 +407,21 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
     // Detecting may run PHP: do it before taking the locks.
     let detected = anvil::processes::detect_with(site, Some(cfg));
     let serving = running(app);
-    let errors = app.app_errors.lock().unwrap();
+    // Read each row's last line before the locks too: it touches the disk.
+    let mut last: std::collections::BTreeMap<String, Option<String>> =
+        std::iter::once(site.name.clone())
+            .chain(
+                detected
+                    .iter()
+                    .map(|p| anvil::processes::key(&site.name, &p.id)),
+            )
+            .map(|k| {
+                let line = anvil::logs::last_line(&anvil::apps::log_file(&k));
+                (k, line)
+            })
+            .collect();
+    // One lock at a time (see `App`): copy the errors, then take `apps`.
+    let errors = app.app_errors.lock().unwrap().clone();
     let mut apps = app.apps.lock().unwrap();
     let crashed = apps.crashed();
     let main = main_row(cfg, site, serving, apps.running(&site.name));
@@ -415,10 +459,7 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
             } else {
                 anvil::processes::key(&site.name, &r.process.id)
             };
-            r.last = anvil::logs::read(&anvil::apps::log_file(&key), None, 8 * 1024)
-                .ok()
-                .and_then(|page| page.entries.into_iter().next())
-                .map(|e| e.message.lines().next().unwrap_or("").to_string());
+            r.last = last.remove(&key).flatten();
             r.pid = apps.pid(&key);
             r.crashed = crashed
                 .iter()
@@ -855,7 +896,7 @@ fn process_run(
                 .collect(),
         };
         for key in keys {
-            app.apps.lock().unwrap().stop(&key);
+            stop_app(&app, &key);
             app.app_errors.lock().unwrap().remove(&key);
         }
     }
@@ -898,10 +939,7 @@ fn command_run(app: State<App>, site: String, id: String) -> Res<Overview> {
 #[tauri::command(async)]
 fn once_stop(handle: AppHandle, app: State<App>, site: String, id: String) -> Res<()> {
     find_site(&site)?;
-    app.apps
-        .lock()
-        .unwrap()
-        .stop(&anvil::processes::once_key(&site, &id));
+    stop_app(&app, &anvil::processes::once_key(&site, &id));
     changed(&handle);
     Ok(())
 }
@@ -932,12 +970,35 @@ fn containers_run(app: State<App>, site: String, action: String) -> Res<Overview
     Ok(overview(&app, &cfg, &s))
 }
 
-/// The Containers tab's log of one service: timestamped lines, the newest 500 or those
-/// since `since`.
+/// New lines of one service's log for the Containers tab, from the stream kept while
+/// the tab shows the app (`compose::Logs`): `text` after line `after`, `next` to ask
+/// after next time.
+#[derive(Serialize)]
+struct LogLines {
+    text: String,
+    next: u64,
+}
+
 #[tauri::command(async)]
-fn container_log(site: String, service: String, since: Option<String>) -> Res<String> {
-    let s = find_site(&site)?;
-    anvil::compose::logs_since(&s.path, &service, since.as_deref()).map_err(err)
+fn container_log_read(app: State<App>, site: String, service: String, after: u64) -> Res<LogLines> {
+    let (text, next) = app
+        .container_logs
+        .lock()
+        .unwrap()
+        .read(
+            &site,
+            || find_site(&site).map(|s| s.path).map_err(anyhow::Error::msg),
+            &service,
+            after,
+        )
+        .map_err(err)?;
+    Ok(LogLines { text, next })
+}
+
+/// The Containers tab is hidden, or shows another app: its log streams end.
+#[tauri::command(async)]
+fn container_logs_stop(app: State<App>) {
+    app.container_logs.lock().unwrap().stop();
 }
 
 /// Start the processes marked Start with Anvil. Only apps that still exist and rows
@@ -962,9 +1023,25 @@ fn autostart_processes(app: &App, cfg: &Config) {
     }
 }
 
+/// Stop an app or process without keeping `apps` locked while it shuts down (up to 5 s).
+fn stop_app(app: &App, key: &str) {
+    let stopping = app.apps.lock().unwrap().take(key);
+    if let Some(s) = stopping {
+        s.wait();
+    }
+}
+
+/// Stop a service without keeping `services` locked while it shuts down (up to 10 s).
+fn stop_service(app: &App, id: &str) {
+    let child = app.services.lock().unwrap().take(id);
+    if let Some(c) = child {
+        anvil::services::halt(id, c);
+    }
+}
+
 fn run_app(app: &App, cfg: &Config, site: &str, action: &str) {
     if action != "start" {
-        app.apps.lock().unwrap().stop(site);
+        stop_app(app, site);
         app.app_errors.lock().unwrap().remove(site);
     }
     if action != "stop" {
@@ -981,7 +1058,7 @@ fn app_run(handle: AppHandle, app: State<App>, site: String, action: String) -> 
 
 /// Change an app's kind, start command, port or autostart. Fields left out stay as they are;
 /// `reset` lists fields to put back to their defaults.
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 fn set_app(
     handle: AppHandle,
@@ -1021,7 +1098,7 @@ fn set_app(
     // A running app picks up a new command or port by restarting.
     let was_running = app.apps.lock().unwrap().running(&site);
     if was_running {
-        app.apps.lock().unwrap().stop(&site);
+        stop_app(&app, &site);
     }
     if reroute {
         sites_changed(&handle, &app, &cfg);
@@ -1078,7 +1155,7 @@ fn set_process(
         }
         anvil::set_site_app(&mut cfg, &s.name, None, command, None, autostart).map_err(err)?;
         if restart && app.apps.lock().unwrap().running(&s.name) {
-            app.apps.lock().unwrap().stop(&s.name);
+            stop_app(&app, &s.name);
             start_app(&app, &cfg, &s.name);
         }
     } else {
@@ -1108,17 +1185,19 @@ fn set_process(
         let was_running = app.apps.lock().unwrap().running(&key);
         // A hidden row is out of sight, so it doesn't keep running unseen.
         if was_running && (restart || hidden == Some(true)) {
-            app.apps.lock().unwrap().stop(&key);
+            stop_app(&app, &key);
             app.app_errors.lock().unwrap().remove(&key);
         }
         if was_running && restart && hidden != Some(true) {
             let p = anvil::processes::detect_with(&s, Some(&cfg))
                 .into_iter()
                 .find(|p| p.id == id);
-            if let Some(p) = p
-                && let Err(e) = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld)
-            {
-                app.app_errors.lock().unwrap().insert(key, err(e));
+            if let Some(p) = p {
+                // Bound first: an `if let` scrutinee's guard would live through the block.
+                let started = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld);
+                if let Err(e) = started {
+                    app.app_errors.lock().unwrap().insert(key, err(e));
+                }
             }
         }
         // Only a server row's route needs the web server reloaded, and that restart
@@ -1178,7 +1257,7 @@ fn processes_reset(handle: AppHandle, app: State<App>, site: String) -> Res<Over
         .filter(|k| k.contains('@') && !listed.contains(k))
         .collect();
     for k in gone {
-        app.apps.lock().unwrap().stop(&k);
+        stop_app(&app, &k);
         app.app_errors.lock().unwrap().remove(&k);
     }
     if routes(&cfg) != before {
@@ -1622,7 +1701,7 @@ fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot
     // Its processes and commands stop with it: afterwards nothing could reach them.
     let keys = app.apps.lock().unwrap().process_keys(&site);
     for key in keys {
-        app.apps.lock().unwrap().stop(&key);
+        stop_app(&app, &key);
     }
     let mut cfg = anvil::load().map_err(err)?;
     anvil::remove(&mut cfg, &site).map_err(err)?;
@@ -1743,7 +1822,7 @@ fn set_runtime(
     anvil::set_site_runtime(&mut cfg, &site, version).map_err(err)?;
     let was_running = app.apps.lock().unwrap().running(&site);
     if was_running {
-        app.apps.lock().unwrap().stop(&site);
+        stop_app(&app, &site);
         start_app(&app, &cfg, &site);
     }
     changed(&handle);
@@ -1836,8 +1915,18 @@ fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
         .collect())
 }
 
+/// Start a service with `services` locked only around the bookkeeping: `launch` takes
+/// at least 300 ms, a first MySQL init much longer.
 fn start_service(app: &App, cfg: &Config, id: &str) {
-    let result = app.services.lock().unwrap().start(cfg, id);
+    let begun = app.services.lock().unwrap().begin(cfg, id);
+    let result = match begun {
+        Ok(true) => {
+            let launched = anvil::services::launch(cfg, id);
+            app.services.lock().unwrap().finish(id, launched)
+        }
+        Ok(false) => Ok(()),
+        Err(e) => Err(e),
+    };
     let mut errors = app.service_errors.lock().unwrap();
     match result {
         Ok(()) => errors.remove(id),
@@ -1853,7 +1942,7 @@ fn set_service(handle: AppHandle, app: State<App>, id: String, on: bool) -> Res<
     if on {
         start_service(&app, &cfg, &id);
     } else {
-        app.services.lock().unwrap().stop(&id);
+        stop_service(&app, &id);
         app.service_errors.lock().unwrap().remove(&id);
     }
     changed(&handle);
@@ -1874,10 +1963,8 @@ fn set_service_port(
     } else {
         anvil::services::set_port(&mut cfg, &id, port).map_err(err)?;
     }
-    let mut svc = app.services.lock().unwrap();
-    let was_running = svc.running(&id);
-    svc.stop(&id);
-    drop(svc);
+    let was_running = app.services.lock().unwrap().running(&id);
+    stop_service(&app, &id);
     if was_running || cfg.services.get(&id).is_some_and(|s| s.enabled) {
         start_service(&app, &cfg, &id);
     }
@@ -1916,7 +2003,7 @@ fn service_run(
         anvil::services::set_enabled(&mut cfg, &id, action == "start").map_err(err)?;
     }
     if action != "start" {
-        app.services.lock().unwrap().stop(&id);
+        stop_service(&app, &id);
         app.service_errors.lock().unwrap().remove(&id);
     }
     if action != "stop" {
@@ -2065,7 +2152,7 @@ fn remove_service(
     delete_data: bool,
 ) -> Res<Vec<ServiceRow>> {
     // Stop first so the data folder isn't in use when it's deleted.
-    app.services.lock().unwrap().stop(&id);
+    stop_service(&app, &id);
     app.service_errors.lock().unwrap().remove(&id);
     let mut cfg = anvil::load().map_err(err)?;
     anvil::services::remove(&mut cfg, &id, delete_data).map_err(err)?;
@@ -2376,7 +2463,7 @@ fn set_tld(handle: AppHandle, tld: String) -> Res<Settings> {
     let cfg = anvil::load().map_err(err)?;
     let names = app.apps.lock().unwrap().names();
     for name in names {
-        app.apps.lock().unwrap().stop(&name);
+        stop_app(&app, &name);
         start_app(&app, &cfg, &name);
     }
     changed(&handle);
@@ -2823,12 +2910,21 @@ fn on_menu(handle: &AppHandle, id: &str) {
     let home = anvil::home();
     match id {
         "sites" => show(handle),
-        "start" | "restart" => {
-            if let Ok(cfg) = anvil::load() {
-                start(&app, &cfg);
-            }
+        // Stopping and starting Caddy and PHP-FPM takes seconds (a download the first
+        // time): off the main thread, so the menu bar doesn't beachball.
+        "start" | "restart" | "stop" => {
+            let (handle, stopping) = (handle.clone(), id == "stop");
+            std::thread::spawn(move || {
+                let app = handle.state::<App>();
+                if stopping {
+                    stop(&app);
+                } else if let Ok(cfg) = anvil::load() {
+                    start(&app, &cfg);
+                }
+                changed(&handle);
+            });
+            return;
         }
-        "stop" => stop(&app),
         "logs" => {
             let _ = std::fs::create_dir_all(home.join("log"));
             let _ = Command::new("open").arg(home.join("log")).status();
@@ -2843,7 +2939,11 @@ fn on_menu(handle: &AppHandle, id: &str) {
                 if let Err(e) = set {
                     *app.error.lock().unwrap() = Some(err(e));
                 } else if running(&app) {
-                    start(&app, &cfg);
+                    let handle = handle.clone();
+                    std::thread::spawn(move || {
+                        start(&handle.state::<App>(), &cfg);
+                        changed(&handle);
+                    });
                 }
             }
         }
@@ -2914,7 +3014,8 @@ fn main() {
             container_run,
             containers_run,
             once_stop,
-            container_log,
+            container_log_read,
+            container_logs_stop,
             set_dock_icon,
             set_trim_app_logs,
             set_login,
@@ -2971,7 +3072,9 @@ fn main() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     let state = handle.state::<App>();
-                    // A fresh Anvil shows only this run's output, as a new terminal would.
+                    // What a crashed Anvil left running stops first; then a fresh Anvil
+                    // shows only this run's output, as a new terminal would.
+                    anvil::apps::kill_all_orphans();
                     anvil::apps::clear_stale_logs();
                     // Log retention now and hourly, off the start's way.
                     std::thread::spawn(|| {
@@ -2981,8 +3084,22 @@ fn main() {
                         }
                     });
                     start(&state, &cfg);
-                    let failed = state.services.lock().unwrap().start_enabled(&cfg);
-                    state.service_errors.lock().unwrap().extend(failed);
+                    // A crashed Caddy or PHP-FPM shows in the menu bar and window within 2 s.
+                    let watch = handle.clone();
+                    std::thread::spawn(move || {
+                        let mut was = true;
+                        loop {
+                            std::thread::sleep(std::time::Duration::from_secs(2));
+                            let now = running(&watch.state::<App>());
+                            if was && !now {
+                                changed(&watch);
+                            }
+                            was = now;
+                        }
+                    });
+                    for id in anvil::services::enabled(&cfg) {
+                        start_service(&state, &cfg, &id);
+                    }
                     for site in anvil::sites(&cfg).iter().filter(|s| s.autostart) {
                         start_app(&state, &cfg, &site.name);
                     }
@@ -3029,6 +3146,7 @@ fn main() {
             }
             RunEvent::Exit => {
                 let app = handle.state::<App>();
+                app.container_logs.lock().unwrap().stop();
                 *app.apps.lock().unwrap() = Default::default();
                 stop(&app);
                 // Databases shut down cleanly before Anvil exits.
