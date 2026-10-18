@@ -9,3 +9,6 @@ import "./packages";
 import "./processes";
 import "./dev";
 import "./containers";
+import { sidebarSplitter } from "./split";
+
+sidebarSplitter();

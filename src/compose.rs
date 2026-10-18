@@ -85,15 +85,76 @@ fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<St
     if err.contains("Cannot connect to the Docker daemon") || err.contains("docker.sock") {
         bail!("Docker isn't running");
     }
-    let err = err.trim();
-    bail!(
-        "{}",
-        if err.is_empty() {
-            "docker compose failed"
-        } else {
-            err
+    bail!("{}", readable(&err, dir))
+}
+
+/// docker's stderr without its warnings (`level=warning` lines: unset variables, the
+/// obsolete `version`), so the error that stopped it shows. When variables were unset,
+/// a hint after it: which ones (3 at most), and the `.env.*.example` to copy when one
+/// defines them and its env file is missing.
+fn readable(err: &str, dir: &Path) -> String {
+    let mut unset: Vec<String> = vec![];
+    let mut kept = vec![];
+    for l in err.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        if !l.contains("level=warning") && !l.contains("level=warn ") {
+            kept.push(l);
+            continue;
         }
-    )
+        let l = l.replace('\\', "");
+        if let Some(name) = l
+            .split_once("The \"")
+            .and_then(|(_, r)| r.split_once("\" variable is not set"))
+            .map(|(n, _)| n.to_string())
+            && !unset.contains(&name)
+        {
+            unset.push(name);
+        }
+    }
+    let mut msg = if kept.is_empty() {
+        "docker compose failed".to_string()
+    } else {
+        kept.join("\n")
+    };
+    if unset.is_empty() {
+        return msg;
+    }
+    let compose = file(dir)
+        .and_then(|f| Some(f.file_name()?.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "The compose file".into());
+    let more = if unset.len() > 3 { "…" } else { "" };
+    msg += &format!(
+        "\n{compose} needs variables that aren't set ({}{more}).",
+        unset[..unset.len().min(3)].join(", ")
+    );
+    // The example whose env file is missing that defines the most of them.
+    let defines = |text: &str| {
+        unset
+            .iter()
+            .filter(|n| {
+                text.lines()
+                    .any(|l| l.trim_start().starts_with(&format!("{n}=")))
+            })
+            .count()
+    };
+    let example = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let target = name.strip_prefix(".env")?.strip_suffix(".example")?;
+            let target = format!(".env{target}");
+            if dir.join(&target).exists() {
+                return None;
+            }
+            let n = defines(&std::fs::read_to_string(e.path()).ok()?);
+            (n > 0).then_some((n, name, target))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    if let Some((_, name, target)) = example {
+        msg += &format!(" Copy {name} to {target}?");
+    }
+    msg
 }
 
 type Row = (String, String, Option<String>, Vec<u16>, Option<i64>);
@@ -143,10 +204,16 @@ fn containers_with(docker: &Path, dir: &Path) -> Result<Vec<Container>> {
     let services = compose(docker, dir, &["config", "--services"], READ)?;
     let ps = compose(docker, dir, &["ps", "--all", "--format", "json"], READ)?;
     let ps = parse_ps(&ps);
-    Ok(services
+    // By name: `config --services` gives dependency order, which changes as services do.
+    let mut services: Vec<&str> = services
         .lines()
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .collect();
+    services.sort_unstable();
+    services.dedup();
+    Ok(services
+        .into_iter()
         .map(|name| match ps.iter().find(|r| r.0 == name) {
             Some((_, state, health, ports, exit_code)) => Container {
                 service: name.into(),
@@ -183,7 +250,7 @@ pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
         status: String,
         ports: String,
     }
-    lines
+    let mut rows = lines
         .lines()
         .filter_map(|l| serde_json::from_str::<Line>(l).ok())
         .filter(|l| !l.dir.is_empty() && !l.service.is_empty())
@@ -210,7 +277,10 @@ pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
             };
             (PathBuf::from(l.dir), c)
         })
-        .collect()
+        .collect::<Vec<_>>();
+    // `docker ps` lists by creation, so a restart moves a container: by folder and name.
+    rows.sort_by(|a, b| (&a.0, &a.1.service).cmp(&(&b.0, &b.1.service)));
+    rows
 }
 
 fn running_with(docker: &Path) -> Result<Vec<(PathBuf, Container)>> {
@@ -527,19 +597,20 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                (
-                    PathBuf::from("/Users/x/elpida"),
-                    s("sphere"),
-                    s("running"),
-                    Some(s("healthy")),
-                    vec![2593]
-                ),
+                // By folder and name, not docker's order.
                 (
                     PathBuf::from("/Users/x/elpida"),
                     s("nobetci"),
                     s("running"),
                     None,
                     vec![]
+                ),
+                (
+                    PathBuf::from("/Users/x/elpida"),
+                    s("sphere"),
+                    s("running"),
+                    Some(s("healthy")),
+                    vec![2593]
                 ),
                 (
                     PathBuf::from("/Users/x/shop"),
@@ -617,13 +688,14 @@ ps) echo '{"Service":"web","State":"running","Health":"","Publishers":[{"Publish
 esac"#,
         );
         let c = containers_with(&docker, &d).unwrap();
+        // By name, not in the order compose gives them.
         assert_eq!(
-            (c[0].service.as_str(), c[0].state.as_str(), &c[0].ports[..]),
-            ("web", "running", &[8080][..])
+            (c[0].service.as_str(), c[0].state.as_str()),
+            ("db", "stopped")
         );
         assert_eq!(
-            (c[1].service.as_str(), c[1].state.as_str()),
-            ("db", "stopped")
+            (c[1].service.as_str(), c[1].state.as_str(), &c[1].ports[..]),
+            ("web", "running", &[8080][..])
         );
     }
 
@@ -743,5 +815,46 @@ esac"#,
         let docker = fake_docker(&bin, "exit 1");
         let e = action_with(&docker, &d, "web", "stop").unwrap_err();
         assert_eq!(e.to_string(), "docker compose failed");
+    }
+
+    // my-store's `docker compose config --services`, its .env.docker not made yet.
+    const UNSET: &str = r#"time="2026-10-18T12:36:05+03:00" level=warning msg="The \"MEILISEARCH_UI_PORT\" variable is not set. Defaulting to a blank string."
+time="2026-10-18T12:36:05+03:00" level=warning msg="The \"DB_PASSWORD\" variable is not set. Defaulting to a blank string."
+time="2026-10-18T12:36:05+03:00" level=warning msg="The \"DB_USERNAME\" variable is not set. Defaulting to a blank string."
+time="2026-10-18T12:36:05+03:00" level=warning msg="The \"DB_PASSWORD\" variable is not set. Defaulting to a blank string."
+time="2026-10-18T12:36:05+03:00" level=warning msg="The \"ADMIN_FIRSTNAME\" variable is not set. Defaulting to a blank string."
+time="2026-10-18T12:36:05+03:00" level=warning msg="The \"MEILISEARCH_PORT\" variable is not set. Defaulting to a blank string."
+time="2026-10-18T12:36:05+03:00" level=warning msg="/Users/x/my-store/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+no port specified: :<empty>
+"#;
+
+    #[test]
+    fn unset_variables_are_a_hint_not_a_wall_of_warnings() {
+        let d = tmp("unset-dir");
+        fs::write(d.join("docker-compose.yml"), "services: {}\n").unwrap();
+        fs::write(d.join(".env"), "APP_NAME=shop\n").unwrap();
+        fs::write(d.join(".env.example"), "APP_NAME=\n").unwrap();
+        fs::write(d.join(".env.lando.example"), "DB_PASSWORD=\n").unwrap();
+        fs::write(
+            d.join(".env.docker.example"),
+            "DB_USERNAME=\nDB_PASSWORD=\nMEILISEARCH_PORT=7700\n",
+        )
+        .unwrap();
+        let bin = tmp("unset-bin");
+        fs::write(bin.join("stderr"), UNSET).unwrap();
+        let docker = fake_docker(
+            &bin,
+            &format!("cat '{}' >&2; exit 1", bin.join("stderr").display()),
+        );
+        let e = containers_with(&docker, &d).err().unwrap().to_string();
+        assert_eq!(
+            e,
+            "no port specified: :<empty>\ndocker-compose.yml needs variables that aren't set \
+             (MEILISEARCH_UI_PORT, DB_PASSWORD, DB_USERNAME…). Copy .env.docker.example to .env.docker?"
+        );
+        // Once .env.docker exists, the next example that defines one of them.
+        fs::write(d.join(".env.docker"), "").unwrap();
+        assert!(readable(UNSET, &d).ends_with(" Copy .env.lando.example to .env.lando?"));
+        assert_eq!(readable("level=warning msg=\"x\"\nboom", &d), "boom");
     }
 }

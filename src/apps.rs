@@ -522,7 +522,13 @@ pub struct Apps {
     once: BTreeMap<String, String>,
     /// How children that ended without `stop` ended, until stopped or started again.
     exits: BTreeMap<String, Exit>,
+    /// Each app's terminal size in characters (its Dev output pane), as the UI last said.
+    sizes: BTreeMap<String, (u16, u16)>,
 }
+
+/// COLUMNS and LINES when the UI hasn't said (autostart): Laravel's and Symfony's
+/// padding fits a terminal this wide.
+pub const TERM_SIZE: (u16, u16) = (100, 30);
 
 /// How a process ended on its own.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -547,7 +553,17 @@ impl Apps {
             processes: Default::default(),
             once: Default::default(),
             exits: BTreeMap::new(),
+            sizes: BTreeMap::new(),
         }
+    }
+
+    /// The size of the pane `site`'s output shows in: processes started from now on are
+    /// told it as COLUMNS and LINES.
+    pub fn set_size(&mut self, site: &str, columns: u16, lines: u16) {
+        self.sizes.insert(
+            site.to_string(),
+            (columns.clamp(20, 1000), lines.clamp(5, 500)),
+        );
     }
 
     pub fn running(&mut self, name: &str) -> bool {
@@ -706,10 +722,15 @@ impl Apps {
         // crashed Anvil's leftovers can be recognised and cleaned up.
         let tag = format!("anvil:{}:{key}", self.home.display());
         let command = with_js_install(dir, &command);
+        // `<site>`, `<site>@<process>` or `<site>#<script>`.
+        let site = key.split(['@', '#']).next().unwrap_or(key);
+        let (columns, lines) = self.sizes.get(site).copied().unwrap_or(TERM_SIZE);
         let child = Command::new("/bin/sh")
             .args(["-c", &command, &tag])
             .current_dir(dir)
             .envs(crate::processes::COLOR_ENV)
+            .env("COLUMNS", columns.to_string())
+            .env("LINES", lines.to_string())
             .envs(env)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
@@ -1271,6 +1292,32 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         assert!(apps.crashed().is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn processes_get_the_pane_size_or_a_default() {
+        let dir = project(&[("size/x", "")]);
+        let mut apps = Apps::in_home(dir.join("home"));
+        let site = site_at(&dir);
+        let size = |apps: &mut Apps, id: &str| {
+            apps.start_process(&site, &proc(id, "echo $COLUMNS $LINES"), "test")
+                .unwrap();
+            let key = crate::processes::key(&site.name, id);
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while apps.running(&key) {
+                assert!(std::time::Instant::now() < deadline, "echo never ended");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            fs::read_to_string(log_in(&apps.home, &key)).unwrap()
+        };
+        // Autostart: nothing said yet.
+        assert_eq!(size(&mut apps, "a"), "100 30\n");
+        apps.set_size(&site.name, 132, 40);
+        assert_eq!(size(&mut apps, "b"), "132 40\n");
+        // Another app keeps the default; nonsense is kept in bounds.
+        apps.set_size("other", 3, 0);
+        assert_eq!(apps.sizes["other"], (20, 5));
         fs::remove_dir_all(dir).unwrap();
     }
 }

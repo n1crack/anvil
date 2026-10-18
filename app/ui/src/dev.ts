@@ -1,9 +1,10 @@
 import type { CommandChip, ProcessRow } from "./types";
-import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, mode, popAt, selected, showError, showTab, snap, tab } from "./app";
+import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, mode, popAt, seg, selected, showError, showTab, snap, tab } from "./app";
 import { type Tail, readTail, tail, termOut } from "./console";
 import { late } from "./late";
 import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
 import { shown } from "./live";
+import { listSplitter } from "./split";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
 /* Dev tab: the app's dev processes on the left, the chosen one's output live on the right,
@@ -50,7 +51,7 @@ term.out.tabIndex = 0;
 // The keys (see main.onkeydown), said once; hidden when the pane is too narrow for it.
 const keysHint = el("p", "dev-keys", "↑↓ select · s start · x stop · r restart · q stop all · c clear");
 pane.append(head, term.out, empty, keysHint);
-main.append(list, pane);
+main.append(list, listSplitter(main, "dev-list-width", 120), pane);
 const conf = el("div", "dev-conf");
 box.append(bar, main, conf);
 
@@ -92,9 +93,29 @@ function pick(name: string, key: string) {
   devTick();
 }
 
+/** The output pane in characters, for COLUMNS and LINES of what starts from here (in
+ * All, less the name tag); nothing when it isn't laid out, so Anvil's default holds. */
+export function termSize(): { columns?: number; lines?: number } {
+  const out = term.out as HTMLElement;
+  if (!out.clientWidth) return {};
+  const probe = el("span", null, "0".repeat(20));
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+  out.append(probe);
+  const { width, height } = probe.getBoundingClientRect();
+  probe.remove();
+  if (!width) return {};
+  const css = getComputedStyle(out);
+  const px = (k: string) => parseFloat(css.getPropertyValue(k)) || 0;
+  const tag = view?.key === "all" ? Math.max(0, ...procItems(view.site).map((x) => x.name.length)) + 3 : 0;
+  return {
+    columns: Math.max(20, Math.floor((out.clientWidth - px("padding-left") - px("padding-right")) / (width / 20)) - tag),
+    lines: Math.max(5, Math.floor((out.clientHeight - px("padding-top") - px("padding-bottom")) / height)),
+  };
+}
+
 /** Dev start or stop (the toolbar's Start/Stop), when it is offered. */
 function headerAll(action: "start" | "stop") {
-  if (devAll.site === view?.site && devAll[action] && !devAll.busy) devAll.run(action);
+  if (devAll.site === view?.site && devAll[action] && !devAll.busy) devAll.run(action, termSize());
 }
 
 /* Keys, like mprocs, while the focus is in the list or the output; never while typing
@@ -135,15 +156,16 @@ main.onkeydown = (e) => {
 /** Start, stop or restart a process; a restart starts its output over. */
 async function runProc(name: string, x: Item, action: string) {
   const r = x.row!;
+  const size = action === "stop" ? {} : termSize();
   if (r.main) {
-    await call("app_run", { site: name, action });
+    await call("app_run", { site: name, action, ...size });
     await loadProcs(name);
-  } else await loadProcs(name, "process_run", { name: r.id, action });
+  } else await loadProcs(name, "process_run", { name: r.id, action, ...size });
   if (action === "restart" && view?.site === name) forget(view, x.key);
 }
 
 async function runScript(name: string, c: CommandChip) {
-  if (await loadProcs(name, "command_run", { id: c.id })) pick(name, `once:${c.id}`);
+  if (await loadProcs(name, "command_run", { id: c.id, ...termSize() })) pick(name, `once:${c.id}`);
 }
 
 const dismiss = (name: string, c: CommandChip) =>
@@ -298,7 +320,7 @@ function devButton(name: string) {
   const b = barBtn(`dev-all dev-${action}`, busy ? el("span", "spin-dot") : icon(action), label);
   b.title = action === "start" ? "Start the app and every process in Dev start" : "Stop the app and all its processes";
   b.disabled = !!busy;
-  b.onclick = () => devAll.run(action);
+  b.onclick = () => devAll.run(action, termSize());
   return b;
 }
 
@@ -542,7 +564,137 @@ function field(value: string, aria: string, placeholder: string, onsave: ((v: st
   return input;
 }
 
+/* ---------- Configure: the processes as JSON ---------- */
+
+let confMode: "table" | "json" = "table";
+const modeSeg = seg(
+  "Edit as",
+  [
+    ["table", "Table"],
+    ["json", "JSON"],
+  ],
+  "table",
+  (m) => {
+    confMode = m as "table" | "json";
+    confError = "";
+    if (selected) drawConf(selected, true);
+  },
+);
+modeSeg.classList.add("dev-conf-mode");
+type Mods = [typeof import("./jsoneditor"), typeof import("./confjson")];
+let mods: Promise<Mods> | null = null; // CodeMirror, loaded on the first JSON
+const js = {
+  site: "",
+  base: "", // the JSON of the processes as they are
+  ed: null as null | ReturnType<Mods[0]["jsonEditor"]>,
+  busy: false,
+  wrap: el("div", "dev-json"),
+  host: el("div", "dev-json-editor"),
+  msg: el("p", "dev-json-msg"),
+  format: el("button", null, "Format"),
+  cancel: el("button", null, "Cancel"),
+  apply: el("button", "primary", "Apply"),
+};
+{
+  const foot = el("div", "dev-conf-foot");
+  foot.append(js.format, el("span", "spacer"), js.cancel, js.apply);
+  js.wrap.append(js.host, js.msg, foot);
+}
+
+/** The line a position is on, 1-based. */
+const lineOf = (text: string, at: number) => text.slice(0, at).split("\n").length;
+
+/** Apply's and Format's state and the line under the editor, after every edit. */
+function syncJson(m: Mods[1], name: string) {
+  if (!js.ed) return;
+  const text = js.ed.text;
+  const main = devRows(procCache.get(name)).find((r) => r.main)?.name;
+  const { problems } = m.check(text, main);
+  const p = problems[0];
+  const more = problems.length > 1 ? ` (${problems.length - 1} more)` : "";
+  js.msg.className = `dev-json-msg${p || confError ? " error-text" : ""}`;
+  js.msg.textContent = confError || (p ? `Line ${lineOf(text, p.from)}: ${p.message}${more}` : text === js.base ? "" : "Ready to apply");
+  js.apply.disabled = js.busy || !!problems.length || text === js.base;
+  js.cancel.disabled = js.busy;
+  let parses = true;
+  try {
+    JSON.parse(text);
+  } catch {
+    parses = false;
+  }
+  js.format.disabled = js.busy || !parses;
+}
+
+async function drawJson(name: string) {
+  if (conf.firstChild !== modeSeg || !conf.contains(js.wrap)) conf.replaceChildren(modeSeg, js.wrap);
+  const rows = devRows(procCache.get(name));
+  if (js.site !== name) {
+    js.ed?.view.destroy();
+    js.ed = null;
+    js.site = name;
+    js.host.replaceChildren(el("span", "dev-json-loading", "Loading the editor…"));
+  }
+  const [ed, m] = await (mods ??= Promise.all([import("./jsoneditor"), import("./confjson")]));
+  if (js.site !== name) return;
+  const text = m.toJson(rows);
+  const main = () => devRows(procCache.get(name)).find((r) => r.main)?.name;
+  if (!js.ed) {
+    js.base = text;
+    js.host.replaceChildren();
+    js.ed = ed.jsonEditor(
+      js.host,
+      text,
+      (t) => m.check(t, main()).problems,
+      () => {
+        confError = "";
+        syncJson(m, name);
+      },
+    );
+  } else if (!js.busy && js.ed.text === js.base && text !== js.base) {
+    // Not edited here: follows changes made elsewhere.
+    js.base = text;
+    js.ed.set(text);
+  } else js.base = text;
+  syncJson(m, name);
+  js.format.onclick = () => {
+    try {
+      js.ed!.set(JSON.stringify(JSON.parse(js.ed!.text), null, 2));
+    } catch {}
+  };
+  js.cancel.onclick = () => {
+    js.ed!.set(js.base);
+    confError = "";
+    confMode = "table";
+    drawConf(name, true);
+  };
+  js.apply.onclick = async () => {
+    const { items } = m.check(js.ed!.text, main());
+    if (!items) return;
+    js.busy = true;
+    syncJson(m, name);
+    try {
+      await m.apply(
+        m.plan(devRows(procCache.get(name)), items),
+        ([cmd, args]) => askProcs(name, cmd, args),
+        () => devRows(procCache.get(name)),
+      );
+      confError = "";
+      js.base = m.toJson(devRows(procCache.get(name)));
+      js.ed!.set(js.base);
+    } catch (e) {
+      confError = String(e);
+      await loadProcs(name);
+    } finally {
+      js.busy = false;
+      if (selected === name) drawProcs(name);
+      syncJson(m, name);
+    }
+  };
+}
+
 function drawConf(name: string, force = false) {
+  for (const b of modeSeg.children) b.setAttribute("aria-pressed", String((b as HTMLElement).dataset.id === confMode));
+  if (confMode === "json") return void drawJson(name);
   // Someone is typing: a poll doesn't wipe it.
   const active = document.activeElement as HTMLInputElement | null;
   if (!force && active && conf.contains(active) && active.value !== active.defaultValue) return;
@@ -638,7 +790,7 @@ function drawConf(name: string, force = false) {
     devTick();
   };
   foot.append(plus, reset, el("span", "spacer"), done);
-  conf.replaceChildren(table, error, foot);
+  conf.replaceChildren(modeSeg, table, error, foot);
 }
 
 /** Open the tab, on one entry if given. */

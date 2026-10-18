@@ -352,7 +352,11 @@ struct Overview {
     commands: Vec<CommandChip>,
     /// The compose file's services; `None` without a compose file.
     containers: Option<Vec<anvil::compose::Container>>,
+    /// Why the compose file couldn't be read (docker's warnings left out, see `compose`);
+    /// `containers` then holds the project's running containers, if any.
     docker_error: Option<String>,
+    /// The compose file's name, as `docker-compose.yml`.
+    compose_file: Option<String>,
     /// Rows hidden in the app's settings, to bring back.
     hidden: Vec<HiddenRow>,
 }
@@ -477,13 +481,28 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
 
 fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
     // Docker is only asked about apps that have a compose file.
-    let (containers, docker_error) = match anvil::compose::file(&site.path) {
+    let compose_file = anvil::compose::file(&site.path);
+    let (containers, docker_error) = match &compose_file {
         None => (None, None),
         Some(_) => match anvil::compose::containers(&site.path) {
             Ok(c) => (Some(c), None),
-            Err(e) => (None, Some(err(e))),
+            // A file that can't be read (unset variables) may still have containers up.
+            Err(e) => {
+                let real = site.path.canonicalize().ok();
+                let up: Vec<_> = anvil::compose::running()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|(dir, _)| {
+                        *dir == site.path || (real.is_some() && dir.canonicalize().ok() == real)
+                    })
+                    .map(|(_, c)| c)
+                    .collect();
+                ((!up.is_empty()).then_some(up), Some(err(e)))
+            }
         },
     };
+    let compose_file =
+        compose_file.and_then(|f| Some(f.file_name()?.to_string_lossy().into_owned()));
     let (servers, scripts) = anvil::processes::package_scripts(&site.path);
     // ponytail: a hidden row's name is found among package.json scripts, else its id
     // (artisan dev's names are their ids); the full detection drops hidden rows.
@@ -527,6 +546,7 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
         commands,
         containers,
         docker_error,
+        compose_file,
         hidden,
     }
 }
@@ -876,11 +896,14 @@ fn process_run(
     site: String,
     name: Option<String>,
     action: String,
+    columns: Option<u16>,
+    lines: Option<u16>,
 ) -> Res<Overview> {
     if name.as_deref().is_some_and(|n| !plain(n, false)) {
         return Err(format!("Not a process: {name:?}"));
     }
     let (cfg, s) = find_site_cfg(&site)?;
+    set_size(&app, &s.name, columns, lines);
     if name.is_none() && anvil::apps::runs_process(&s.kind) {
         run_app(&app, &cfg, &s.name, &action);
         changed(&handle);
@@ -925,8 +948,15 @@ fn process_run(
 /// Run one of the app's one-off scripts by id (see `one_off_scripts`); its output is
 /// the log source `once:<id>`.
 #[tauri::command(async)]
-fn command_run(app: State<App>, site: String, id: String) -> Res<Overview> {
+fn command_run(
+    app: State<App>,
+    site: String,
+    id: String,
+    columns: Option<u16>,
+    lines: Option<u16>,
+) -> Res<Overview> {
     let (cfg, s) = find_site_cfg(&site)?;
+    set_size(&app, &s.name, columns, lines);
     let script = anvil::processes::one_off_scripts(&s)
         .into_iter()
         .find(|c| c.id == id)
@@ -1053,8 +1083,25 @@ fn run_app(app: &App, cfg: &Config, site: &str, action: &str) {
     }
 }
 
+/// The Dev tab's output pane in characters, given with a start: COLUMNS and LINES of
+/// what the app starts from then on (see `Apps::set_size`).
+fn set_size(app: &App, site: &str, columns: Option<u16>, lines: Option<u16>) {
+    if let Some(c) = columns {
+        let l = lines.unwrap_or(anvil::apps::TERM_SIZE.1);
+        app.apps.lock().unwrap().set_size(site, c, l);
+    }
+}
+
 #[tauri::command(async)]
-fn app_run(handle: AppHandle, app: State<App>, site: String, action: String) -> Res<Snapshot> {
+fn app_run(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    action: String,
+    columns: Option<u16>,
+    lines: Option<u16>,
+) -> Res<Snapshot> {
+    set_size(&app, &site, columns, lines);
     run_app(&app, &anvil::load().map_err(err)?, &site, &action);
     changed(&handle);
     snapshot(&app)

@@ -122,7 +122,7 @@ export const devAll = {
   start: false,
   stop: false,
   busy: "" as "" | "start" | "stop",
-  run: async (_action: "start" | "stop") => {},
+  run: async (_action: "start" | "stop", _size: { columns?: number; lines?: number } = {}) => {},
 };
 
 /** The header: how many run (a click opens Dev), and what Dev start/stop would do.
@@ -159,11 +159,14 @@ export function drawRunBox(name, rows, containers) {
   // Done when everything Dev start would start runs; processes left out don't count.
   devAll.start = !(own.every((r) => r.running || r.manual) && containers.every(up));
   devAll.stop = !!running;
-  devAll.run = async (action) => {
+  devAll.run = async (action, size = {}) => {
     devAll.busy = action;
     late.drawDev?.(name);
     const change = containers.filter((c) => up(c) !== (action === "start")).map((c) => c.service);
-    await Promise.all([loadProcs(name, "process_run", { name: null, action }), change.length && containerRun(name, change, action)]);
+    await Promise.all([
+      loadProcs(name, "process_run", { name: null, action, ...size }),
+      change.length && containerRun(name, change, action),
+    ]);
     if (devAll.site === name) devAll.busy = "";
     late.drawDev?.(name);
   };
@@ -229,11 +232,38 @@ export function drawProcs(name) {
     const dots: [string, string][] = dev.map((r) => [r.name, r.running ? "on" : r.crashed ? "bad" : ""]);
     box.append(summaryLine("Dev", dots, dev.filter((r) => r.running).length, "dev", "⌘3"));
   }
-  if (compose) {
+  const error = o?.docker_error;
+  if (error && !containers.length) box.append(composeError(error, o!.compose_file));
+  else if (compose) {
     const dots: [string, string][] = containers.map((c) => [c.service, DOT[containerState(c)]]);
     const up = containers.filter((c) => c.state === "running").length;
-    box.append(summaryLine("Containers", dots, up, "containers", devTab ? "" : "⌘3", o!.docker_error));
+    const line = summaryLine("Containers", dots, up, "containers", devTab ? "" : "⌘3", error && composeBrief(error, o!.compose_file));
+    if (error) line.title = error;
+    box.append(line);
   }
+}
+
+/** What a compose error says in one line: a short one as it is ("Docker isn't running"),
+ * else that the file can't be read; the whole message is its tooltip. */
+export const composeBrief = (error: string, file?: string | null) =>
+  error.includes("\n") || error.length > 40 ? `can’t read ${file ?? "the compose file"}` : error;
+
+/** The compose file can't be read and no container runs: one muted line (no tab to
+ * open); a click shows the message and its hint below it. */
+function composeError(error: string, file?: string | null) {
+  const wrap = el("div", "dev-summary-wrap");
+  const b = el("button", "dev-summary is-muted");
+  b.append(el("span", "dev-summary-title", "Containers"), el("span", "dev-summary-state", composeBrief(error, file)));
+  b.title = error;
+  b.setAttribute("aria-expanded", "false");
+  const detail = el("p", "dev-summary-detail", error);
+  detail.hidden = true;
+  b.onclick = () => {
+    detail.hidden = !detail.hidden;
+    b.setAttribute("aria-expanded", String(!detail.hidden));
+  };
+  wrap.append(b, detail);
+  return wrap;
 }
 
 // While the Overview is shown, keep the Dev and Containers lines fresh.

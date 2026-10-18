@@ -278,6 +278,32 @@ describe("dev", () => {
     expect(calls("process_run").slice(before)[0][1]).toEqual({ site: "vuefinder", name: "docs-site", action: "start" });
   });
 
+  test("a start says how many characters the output pane fits (COLUMNS, LINES)", async () => {
+    const out = $(".dev-out");
+    Object.defineProperty(out, "clientWidth", { value: 660, configurable: true });
+    Object.defineProperty(out, "clientHeight", { value: 480, configurable: true });
+    const rect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      return { ...rect.call(this), width: 132, height: 16 }; // 20 chars of 6.6 px, 16 px lines
+    };
+    try {
+      const before = calls("process_run").length;
+      ($('.dev-empty [aria-label="Start docs:site"]') as HTMLElement).click();
+      await wait();
+      expect(calls("process_run").slice(before)[0][1]).toEqual({
+        site: "vuefinder",
+        name: "docs-site",
+        action: "start",
+        columns: 100,
+        lines: 30,
+      });
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = rect;
+      delete (out as any).clientWidth;
+      delete (out as any).clientHeight;
+    }
+  });
+
   test("Run ▾ lists the one-off scripts only, and runs one after a confirm", async () => {
     $(".dev-bar .dev-run").click();
     const names = $$(".dev-run-menu .dev-run-name").map((n) => n.textContent);
@@ -356,6 +382,19 @@ describe("dev", () => {
     expect(calls("processes_reset")).toHaveLength(1);
     expect(names()).toEqual(["dev", "docs:dev", "docs:site"]);
     expect(box("docs:site in Dev start").checked).toBe(true);
+
+    // JSON: the same processes in an editor; Apply waits for a change without errors.
+    ($('.dev-conf-mode [data-id="json"]') as HTMLElement).click();
+    await wait(400);
+    expect($(".dev-conf-table")).toBeNull();
+    const editor = $(".dev-json-editor .cm-content");
+    expect(editor).toBeTruthy();
+    expect(JSON.parse(editor.textContent!.replace(/\s+/g, " ")).map((x) => x.name)).toEqual(["dev", "docs:dev", "docs:site"]);
+    const jsonBtn = (t: string) => $$(".dev-json button").find((b) => b.textContent === t)! as HTMLButtonElement;
+    expect(jsonBtn("Apply").disabled).toBe(true);
+    jsonBtn("Cancel").click();
+    await wait();
+    expect($(".dev-conf-table")).toBeTruthy();
 
     $$(".dev-conf-foot button")
       .find((b) => b.textContent === "Done")!
@@ -586,6 +625,38 @@ describe("containers", () => {
     $('.tabs [data-tab="overview"]').click();
     await select("shop");
     expect(tabBtn().hidden).toBe(true);
+  });
+
+  test("a compose file that can't be read: one muted Overview line, no tab, the message on a click", async () => {
+    const error =
+      "no port specified: :<empty>\ndocker-compose.yml needs variables that aren't set (DB_PASSWORD, DB_USERNAME, MEILISEARCH_PORT…). Copy .env.docker.example to .env.docker?";
+    const shop = structuredClone(w.mockOv.shop);
+    Object.assign(w.mockOv.shop, { containers: null, docker_error: error, compose_file: "docker-compose.yml" });
+    try {
+      await select("stack");
+      await select("shop");
+      const line = $$(".procs .dev-summary").find((b) => b.textContent!.startsWith("Containers"))!;
+      expect(line.textContent).toBe("Containers" + "can’t read docker-compose.yml");
+      expect(line.querySelector(".error-text")).toBeNull();
+      expect(line.title).toBe(error);
+      expect(tabBtn().hidden).toBe(true);
+      const detail = $(".procs .dev-summary-detail");
+      expect(detail.hidden).toBe(true);
+      line.click();
+      await wait();
+      expect(tabBtn().getAttribute("aria-selected")).not.toBe("true");
+      expect(detail.hidden).toBe(false);
+      expect(detail.textContent).toBe(error);
+      // Readable again: the tab is back.
+      Object.assign(w.mockOv.shop, { containers: [], docker_error: null });
+      await select("stack");
+      await select("shop");
+      expect(tabBtn().hidden).toBe(false);
+    } finally {
+      w.mockOv.shop = shop;
+      await select("stack");
+      await select("shop");
+    }
   });
 
   test("stamped: docker's times sort as text; only lines after `since`", async () => {

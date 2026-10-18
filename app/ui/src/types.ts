@@ -116,6 +116,7 @@ export interface Overview {
   commands: CommandChip[];
   containers: Container[] | null;
   docker_error: string | null;
+  compose_file?: string | null;
   hidden: { id: string; name: string }[];
 }
 
