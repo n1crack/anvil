@@ -2,17 +2,39 @@
 
 use std::net::UdpSocket;
 
-/// `tld` is read for every query, so a changed suffix applies without a new server.
-pub fn serve(port: u16, tld: &std::sync::RwLock<String>) -> std::io::Result<()> {
-    let sock = UdpSocket::bind(("127.0.0.1", port))?;
+/// Answers on `sock` until it keeps failing, then returns that error. `tld` is read for
+/// every query, so a changed suffix applies without a new server. A failed receive (an
+/// ICMP "port unreachable" from a client that left, an interrupted call) is dropped:
+/// one bad packet must not end resolution for every app.
+pub fn serve(sock: &UdpSocket, tld: &std::sync::RwLock<String>) -> std::io::Error {
     let mut buf = [0u8; 512];
+    let mut failures = 0;
     loop {
-        let (n, peer) = sock.recv_from(&mut buf)?;
+        let (n, peer) = match sock.recv_from(&mut buf) {
+            Ok(r) => {
+                failures = 0;
+                r
+            }
+            Err(e) if is_transient(&e) => continue,
+            Err(e) => {
+                failures += 1;
+                if failures >= 100 {
+                    return e;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            }
+        };
         let resp = answer(&buf[..n], &tld.read().unwrap_or_else(|e| e.into_inner()));
         if let Some(resp) = resp {
             let _ = sock.send_to(&resp, peer);
         }
     }
+}
+
+fn is_transient(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind::*;
+    matches!(e.kind(), Interrupted | WouldBlock | TimedOut)
 }
 
 /// Builds a response for a single-question query. `None` = malformed, drop it.
@@ -55,6 +77,7 @@ pub fn answer(q: &[u8], tld: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::{answer, serve};
+    use std::net::UdpSocket;
 
     fn query(name: &str, qtype: u16) -> Vec<u8> {
         let mut q = vec![0xAB, 0xCD, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
@@ -86,6 +109,31 @@ mod tests {
         assert!(answer(&[0; 5], "anvil").is_none());
     }
 
+    /// Asks `server` for `name` and returns the rcode. Each query has its own id and a
+    /// reply with another id (a late answer to an earlier, retried query) is skipped, so
+    /// a slow server can't hand one question's answer to the next.
+    fn rcode(client: &UdpSocket, server: std::net::SocketAddr, name: &str, id: u16) -> u8 {
+        let mut q = query(name, 1);
+        q[0..2].copy_from_slice(&id.to_be_bytes());
+        let mut buf = [0u8; 512];
+        for _ in 0..20 {
+            client.send_to(&q, server).unwrap();
+            while let Ok(n) = client.recv(&mut buf) {
+                if n > 3 && buf[0..2] == id.to_be_bytes() {
+                    return buf[3] & 0x0f;
+                }
+            }
+        }
+        panic!("no answer from the DNS server");
+    }
+
+    fn client() -> UdpSocket {
+        let c = UdpSocket::bind("127.0.0.1:0").unwrap();
+        c.set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        c
+    }
+
     #[test]
     fn a_changed_suffix_applies_to_the_running_server() {
         static TLD: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
@@ -96,7 +144,7 @@ mod tests {
             .local_addr()
             .unwrap()
             .port();
-        std::thread::spawn(move || serve(port, &TLD));
+        std::thread::spawn(move || serve(&UdpSocket::bind(("127.0.0.1", port)).unwrap(), &TLD));
         let client = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         client
             .set_read_timeout(Some(std::time::Duration::from_secs(2)))
@@ -117,5 +165,27 @@ mod tests {
         *TLD.write().unwrap() = "test".into();
         assert_eq!(rcode("shop.test"), 0);
         assert_eq!(rcode("shop.dev"), 5);
+    }
+
+    #[test]
+    fn a_bad_packet_or_a_vanished_client_does_not_stop_the_server() {
+        static TLD: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+        *TLD.write().unwrap() = "test".into();
+        // A read timeout makes every idle receive fail; each failure is survived.
+        let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        sock.set_read_timeout(Some(std::time::Duration::from_millis(2)))
+            .unwrap();
+        let server = sock.local_addr().unwrap();
+        std::thread::spawn(move || serve(&sock, &TLD));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // A client that asks and leaves: the answer bounces as "port unreachable", which
+        // the server's next receive may report as an error.
+        let gone = UdpSocket::bind("127.0.0.1:0").unwrap();
+        gone.send_to(&query("shop.test", 1), server).unwrap();
+        drop(gone);
+        let client = client();
+        client.send_to(&[1, 2, 3], server).unwrap();
+        assert_eq!(rcode(&client, server, "shop.test", 7), 0);
+        assert_eq!(rcode(&client, server, "shop.test", 8), 0);
     }
 }

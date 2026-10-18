@@ -1347,6 +1347,18 @@ pub fn setup_script(
 static DNS: Once = Once::new();
 /// The suffix the DNS server answers for; every start sets it.
 static DNS_TLD: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+/// Why the DNS server isn't answering: its port was taken, or its thread ended.
+static DNS_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn dns_failed(why: String) {
+    eprintln!("{why}");
+    *DNS_ERROR.lock().unwrap_or_else(|e| e.into_inner()) = Some(why);
+}
+
+/// Set once the DNS server can't answer; it isn't restarted within this process.
+pub fn dns_error() -> Option<String> {
+    DNS_ERROR.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
 
 fn pid_file() -> PathBuf {
     home().join("run").join("pids")
@@ -1519,10 +1531,17 @@ impl Server {
         }
         let port = cfg.dns_port;
         DNS.call_once(|| {
+            // Bound here, so a taken port is reported at once rather than lost in a thread.
+            let sock = match std::net::UdpSocket::bind(("127.0.0.1", port)) {
+                Ok(sock) => sock,
+                Err(e) => return dns_failed(format!("The DNS server can't use port {port}: {e}")),
+            };
             std::thread::spawn(move || {
-                if let Err(e) = dns::serve(port, &DNS_TLD) {
-                    eprintln!("DNS server stopped: {e}");
-                }
+                let run = std::panic::catch_unwind(|| dns::serve(&sock, &DNS_TLD));
+                dns_failed(match run {
+                    Ok(e) => format!("The DNS server stopped: {e}"),
+                    Err(_) => "The DNS server stopped unexpectedly.".into(),
+                });
             });
         });
         Ok(server)

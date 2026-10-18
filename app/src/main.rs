@@ -200,7 +200,13 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         groups: cfg.groups.clone(),
         ini: cfg.ini.clone(),
         running: running(app),
-        error: app.error.lock().unwrap().clone(),
+        // The web server's own failure first; else a DNS server that can't answer.
+        error: app
+            .error
+            .lock()
+            .unwrap()
+            .clone()
+            .or_else(|| anvil::needs_resolver(&cfg).then(anvil::dns_error).flatten()),
         tld: cfg.tld,
         https_port,
         http_port,
