@@ -772,7 +772,8 @@ fn fetch(url: &str) -> Option<Value> {
         ])
         .arg(url)
         .output()
-        .ok()?;
+        .ok()
+        .filter(|o| o.status.success())?;
     serde_json::from_slice(&out.stdout).ok()
 }
 

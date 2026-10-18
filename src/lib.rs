@@ -572,11 +572,25 @@ pub fn run(cmd: &mut Command) -> Result<()> {
 }
 
 pub(crate) fn fetch_text(url: &str) -> Result<String> {
-    let out = Command::new("curl").args(["-fsSL", url]).output()?;
+    let out = Command::new("curl")
+        .args(["-fsSL", url])
+        .output()
+        .context("couldn't run curl")?;
     if !out.status.success() {
-        bail!("couldn't fetch {url}");
+        let why = String::from_utf8_lossy(&out.stderr);
+        let why = why.trim().trim_start_matches("curl: ");
+        bail!(
+            "couldn't fetch {url}: {}",
+            if why.is_empty() { "no answer" } else { why }
+        );
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// `fetch_text` of a JSON document.
+pub(crate) fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T> {
+    serde_json::from_str(&fetch_text(url)?)
+        .with_context(|| format!("{url} sent something unreadable"))
 }
 
 /// The digest for `file` in a checksums listing: the hex word on the line naming
@@ -739,11 +753,7 @@ pub fn installed_php() -> Vec<String> {
 
 pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     let (plat, _) = platform()?;
-    let out = Command::new("curl")
-        .args(["-fsSL", &format!("{PHP_INDEX}?format=json")])
-        .output()?;
-    let list: Vec<serde_json::Value> =
-        serde_json::from_slice(&out.stdout).context("bad PHP index")?;
+    let list: Vec<serde_json::Value> = fetch_json(&format!("{PHP_INDEX}?format=json"))?;
     let prefix = format!("php-{minor}.");
     let suffix = format!("-fpm-{plat}.tar.gz");
     let patch = list
@@ -2021,6 +2031,20 @@ pub fn merge_path(current: &str, login: &str) -> String {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+
+    #[test]
+    fn a_failed_download_says_where_and_why() {
+        // Port 1 on loopback: nothing listens, so curl fails without the network.
+        let e = format!(
+            "{:#}",
+            fetch_json::<serde_json::Value>("http://127.0.0.1:1/index.json").unwrap_err()
+        );
+        assert!(
+            e.starts_with("couldn't fetch http://127.0.0.1:1/index.json: "),
+            "{e}"
+        );
+        assert!(!e.contains("EOF"), "{e}");
+    }
 
     #[test]
     fn folders_with_one_name_each_get_their_own() {

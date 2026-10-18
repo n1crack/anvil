@@ -195,25 +195,44 @@ pub fn program_dir(cfg: &Config, id: &str) -> Result<PathBuf> {
 
 /// Programs live in `services/<kind>/<version>/`.
 fn dir(kind: &str, version: &str) -> PathBuf {
-    let root = home().join("services").join(kind);
-    migrate(&root);
+    let root = kind_root(kind);
+    // Best effort for a path; `migrate_kind` before a start or an install says why it failed.
+    let _ = migrate(&root);
     root.join(version)
 }
 
-/// Before versions, a kind's program sat directly in `services/<kind>/`;
-/// move it into its version folder.
-fn migrate(root: &std::path::Path) {
-    let Ok(v) = fs::read_to_string(root.join("VERSION")) else {
-        return;
-    };
-    let v = v.trim();
-    if v.is_empty() || v.contains('/') || v.starts_with('.') {
-        return;
-    }
+fn kind_root(kind: &str) -> PathBuf {
+    home().join("services").join(kind)
+}
+
+/// `migrate` for one kind, with what went wrong.
+fn migrate_kind(kind: &str) -> Result<()> {
+    migrate(&kind_root(kind))
+        .with_context(|| format!("couldn't move {kind} into its version folder"))
+}
+
+/// Before versions, a kind's program sat directly in `services/<kind>/`; move it
+/// into its version folder. Done in steps through `<kind>.migrating`, so a move
+/// that stopped halfway is finished on the next call instead of leaving it there.
+fn migrate(root: &Path) -> Result<()> {
     let tmp = root.with_extension("migrating");
-    let _ = fs::rename(root, &tmp)
-        .and_then(|_| fs::create_dir_all(root))
-        .and_then(|_| fs::rename(&tmp, root.join(v)));
+    let version = |dir: &Path| -> Option<String> {
+        let v = fs::read_to_string(dir.join("VERSION")).ok()?;
+        let v = v.trim();
+        (!v.is_empty() && !v.contains('/') && !v.starts_with('.')).then(|| v.to_string())
+    };
+    if !tmp.exists() {
+        if version(root).is_none() {
+            return Ok(());
+        }
+        fs::rename(root, &tmp)
+            .with_context(|| format!("couldn't rename {} to {}", root.display(), tmp.display()))?;
+    }
+    let v = version(&tmp).with_context(|| format!("{} has no VERSION", tmp.display()))?;
+    fs::create_dir_all(root).with_context(|| format!("couldn't create {}", root.display()))?;
+    let to = root.join(v);
+    fs::rename(&tmp, &to)
+        .with_context(|| format!("couldn't move {} to {}", tmp.display(), to.display()))
 }
 
 /// Installed versions of a kind, newest first.
@@ -569,6 +588,7 @@ fn build_redis(prefix: &std::path::Path, version: &str) -> Result<()> {
 /// Download a service's program version if it isn't there yet.
 pub fn ensure_installed(cfg: &Config, id: &str) -> Result<()> {
     let (kind, v) = (kind_of(cfg, id)?, version(cfg, id));
+    migrate_kind(kind)?;
     if installed(kind, &v) {
         return Ok(());
     }
@@ -942,6 +962,7 @@ pub fn halt(id: &str, mut c: Child) {
 pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
     let kind = kind_of(cfg, id)?;
     let v = version(cfg, id);
+    migrate_kind(kind)?;
     if !installed(kind, &v) {
         bail!("{} {v} is not installed", name(kind));
     }
@@ -996,6 +1017,35 @@ impl Drop for Services {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_program_moves_into_its_version_folder_even_after_an_interrupted_move() {
+        let base = std::env::temp_dir().join(format!("anvil-migrate-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("redis");
+        fs::create_dir_all(root.join("bin")).unwrap();
+        fs::write(root.join("VERSION"), "7.2.16\n").unwrap();
+        migrate(&root).unwrap();
+        assert!(root.join("7.2.16/bin").is_dir() && !base.join("redis.migrating").exists());
+        migrate(&root).unwrap(); // done: nothing to do
+
+        // Stopped after the first step: the program waits in `redis.migrating`.
+        let pg = base.join("postgres");
+        let tmp = base.join("postgres.migrating");
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(tmp.join("VERSION"), "17.2").unwrap();
+        migrate(&pg).unwrap();
+        assert!(pg.join("17.2/VERSION").is_file() && !tmp.exists());
+
+        // A move that can't finish says so, and what's there stays.
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(tmp.join("VERSION"), "17.2").unwrap();
+        fs::write(pg.join("17.2/keep"), "x").unwrap();
+        let e = format!("{:#}", migrate(&pg).unwrap_err());
+        assert!(e.contains("postgres.migrating"), "{e}");
+        assert!(tmp.join("VERSION").is_file() && pg.join("17.2/keep").is_file());
+        fs::remove_dir_all(base).unwrap();
+    }
 
     #[test]
     fn service_files_move_to_svc_names_and_never_take_anothers() {
