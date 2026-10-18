@@ -608,7 +608,7 @@ export async function siteMenu(s) {
   }
   const items: any[] = [];
   if (serves(s)) {
-    items.push(await M.CheckMenuItem.new({ text: "HTTPS", checked: s.secure, action: () => setSecure(s) }), await sep());
+    items.push(await M.CheckMenuItem.new({ text: "Use HTTPS", checked: s.secure, action: () => setSecure(s) }), await sep());
   }
   if (!s.linked) {
     items.push(await M.MenuItem.new({ text: "Add Alias…", action: () => addAlias(s) }));

@@ -52,7 +52,8 @@ describe("https", () => {
     w.mockDelay = { set_secure: 200 };
     $(`#list [data-name="shop"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     await wait(80);
-    const item = (w.mockMenu as any[]).find((i) => i.text === "HTTPS");
+    const item = (w.mockMenu as any[]).find((i) => i.text === "Use HTTPS");
+    expect(item.checked).toBe(true);
     item.action();
     await wait(40);
     expect($(`#list [data-name="shop"] .spin-dot`)).toBeTruthy();
