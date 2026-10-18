@@ -352,7 +352,11 @@ struct Overview {
     commands: Vec<CommandChip>,
     /// The compose file's services; `None` without a compose file.
     containers: Option<Vec<anvil::compose::Container>>,
+    /// Why the compose file couldn't be read (docker's warnings left out, see `compose`);
+    /// `containers` then holds the project's running containers, if any.
     docker_error: Option<String>,
+    /// The compose file's name, as `docker-compose.yml`.
+    compose_file: Option<String>,
     /// Rows hidden in the app's settings, to bring back.
     hidden: Vec<HiddenRow>,
 }
@@ -477,13 +481,28 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
 
 fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
     // Docker is only asked about apps that have a compose file.
-    let (containers, docker_error) = match anvil::compose::file(&site.path) {
+    let compose_file = anvil::compose::file(&site.path);
+    let (containers, docker_error) = match &compose_file {
         None => (None, None),
         Some(_) => match anvil::compose::containers(&site.path) {
             Ok(c) => (Some(c), None),
-            Err(e) => (None, Some(err(e))),
+            // A file that can't be read (unset variables) may still have containers up.
+            Err(e) => {
+                let real = site.path.canonicalize().ok();
+                let up: Vec<_> = anvil::compose::running()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|(dir, _)| {
+                        *dir == site.path || (real.is_some() && dir.canonicalize().ok() == real)
+                    })
+                    .map(|(_, c)| c)
+                    .collect();
+                ((!up.is_empty()).then_some(up), Some(err(e)))
+            }
         },
     };
+    let compose_file =
+        compose_file.and_then(|f| Some(f.file_name()?.to_string_lossy().into_owned()));
     let (servers, scripts) = anvil::processes::package_scripts(&site.path);
     // ponytail: a hidden row's name is found among package.json scripts, else its id
     // (artisan dev's names are their ids); the full detection drops hidden rows.
@@ -527,6 +546,7 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
         commands,
         containers,
         docker_error,
+        compose_file,
         hidden,
     }
 }

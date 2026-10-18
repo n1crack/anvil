@@ -1043,6 +1043,8 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-out:empty::before { content: none; }
 .dev-empty { position: absolute; top: 44px; left: 14px; display: flex; align-items: center; gap: 8px; color: #8d959f; font: 11px ui-monospace, "SF Mono", Menlo, monospace; }
 .dev-empty[hidden] { display: none; }
+/* The compose file can't be read: its error and hint, wrapped in the pane. */
+.dev-empty.is-error { right: 14px; display: block; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
 .dev-empty button { height: 20px; padding: 0 7px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: rgba(255, 255, 255, 0.08); color: #e8ebee; font-size: 10px; }
 .dev-line { display: flex; }
 .dev-tag { flex: none; white-space: pre; }
@@ -1085,6 +1087,9 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 .dev-summary-state { color: var(--muted); }
 .dev-summary-state::before { content: "·"; margin-right: 8px; }
 .dev-summary-dots { display: flex; gap: 4px; margin-left: auto; }
+.dev-summary.is-muted .dev-summary-title { font-weight: 500; color: var(--muted); }
+.dev-summary-detail { margin: 6px 12px 0; color: var(--muted); font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+.dev-summary-detail[hidden] { display: none; }
 
 .path {
   overflow-wrap: anywhere;

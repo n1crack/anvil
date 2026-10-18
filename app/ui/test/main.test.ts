@@ -571,6 +571,38 @@ describe("containers", () => {
     expect(tabBtn().hidden).toBe(true);
   });
 
+  test("a compose file that can't be read: one muted Overview line, no tab, the message on a click", async () => {
+    const error =
+      "no port specified: :<empty>\ndocker-compose.yml needs variables that aren't set (DB_PASSWORD, DB_USERNAME, MEILISEARCH_PORT…). Copy .env.docker.example to .env.docker?";
+    const shop = structuredClone(w.mockOv.shop);
+    Object.assign(w.mockOv.shop, { containers: null, docker_error: error, compose_file: "docker-compose.yml" });
+    try {
+      await select("stack");
+      await select("shop");
+      const line = $$(".procs .dev-summary").find((b) => b.textContent!.startsWith("Containers"))!;
+      expect(line.textContent).toBe("Containers" + "can’t read docker-compose.yml");
+      expect(line.querySelector(".error-text")).toBeNull();
+      expect(line.title).toBe(error);
+      expect(tabBtn().hidden).toBe(true);
+      const detail = $(".procs .dev-summary-detail");
+      expect(detail.hidden).toBe(true);
+      line.click();
+      await wait();
+      expect(tabBtn().getAttribute("aria-selected")).not.toBe("true");
+      expect(detail.hidden).toBe(false);
+      expect(detail.textContent).toBe(error);
+      // Readable again: the tab is back.
+      Object.assign(w.mockOv.shop, { containers: [], docker_error: null });
+      await select("stack");
+      await select("shop");
+      expect(tabBtn().hidden).toBe(false);
+    } finally {
+      w.mockOv.shop = shop;
+      await select("stack");
+      await select("shop");
+    }
+  });
+
   test("stamped: docker's times sort as text; only lines after `since`", async () => {
     const { stamped } = await import("../src/containers");
     const raw = "2026-10-17T10:00:01.5Z a\n2026-10-17T10:00:01.123456789Z b\ncontinued\n2026-10-17T10:00:02Z c\n";

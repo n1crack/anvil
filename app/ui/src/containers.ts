@@ -220,7 +220,8 @@ export function drawContainers(name: string) {
   const panel = $('[data-panel="containers"]', root);
   if (!panel) return;
   const o = procCache.get(name);
-  const show = !!(o?.containers || o?.docker_error);
+  // A compose file that can't be read, with no container up, isn't the app's (see the Overview).
+  const show = !!o?.containers;
   $('.tabs [data-tab="containers"]', root).hidden = !show;
   // A compose project's logs are its containers'; a plain folder writes none.
   const kind = snap?.sites.find((s) => s.name === name)?.kind ?? "";
@@ -254,7 +255,7 @@ export function drawContainers(name: string) {
     ),
     ...all.map((x) => entry(name, x)),
   );
-  if (o?.docker_error) list.append(el("p", "dev-none error-text", o.docker_error));
+  if (o?.docker_error) list.append(el("p", "dev-none", `Can’t read ${o.compose_file ?? "the compose file"}`));
   else if (!all.length) list.append(el("p", "dev-none", "The compose file has no services."));
 
   head.replaceChildren();
@@ -275,7 +276,9 @@ export function drawContainers(name: string) {
   head.append(actions);
 
   empty.replaceChildren();
-  if (one ? up(one) : running) empty.append(el("span", null, "No output yet"));
+  empty.classList.toggle("is-error", !!o?.docker_error && !one);
+  if (o?.docker_error && !one) empty.append(el("span", null, o.docker_error));
+  else if (one ? up(one) : running) empty.append(el("span", null, "No output yet"));
   else {
     empty.append(el("span", null, one?.busy ?? "Not running"));
     if (one && !one.busy) {
