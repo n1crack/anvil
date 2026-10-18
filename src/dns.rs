@@ -138,33 +138,16 @@ mod tests {
     fn a_changed_suffix_applies_to_the_running_server() {
         static TLD: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
         *TLD.write().unwrap() = "dev".into();
-        // A free port: bind, read it, release, then serve on it.
-        let port = std::net::UdpSocket::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        std::thread::spawn(move || serve(&UdpSocket::bind(("127.0.0.1", port)).unwrap(), &TLD));
-        let client = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        client
-            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
-            .unwrap();
-        let rcode = |name: &str| {
-            let mut buf = [0u8; 512];
-            for _ in 0..20 {
-                client
-                    .send_to(&query(name, 1), ("127.0.0.1", port))
-                    .unwrap();
-                if let Ok(n) = client.recv(&mut buf) {
-                    return buf[..n][3] & 0x0f;
-                }
-            }
-            panic!("no answer from the DNS server");
-        };
-        assert_eq!(rcode("shop.dev"), 0);
+        // The server's socket stays bound from choosing the port to serving on it, so
+        // nothing else (another test's client) can take the port in between.
+        let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let server = sock.local_addr().unwrap();
+        std::thread::spawn(move || serve(&sock, &TLD));
+        let client = client();
+        assert_eq!(rcode(&client, server, "shop.dev", 1), 0);
         *TLD.write().unwrap() = "test".into();
-        assert_eq!(rcode("shop.test"), 0);
-        assert_eq!(rcode("shop.dev"), 5);
+        assert_eq!(rcode(&client, server, "shop.test", 2), 0);
+        assert_eq!(rcode(&client, server, "shop.dev", 3), 5);
     }
 
     #[test]
