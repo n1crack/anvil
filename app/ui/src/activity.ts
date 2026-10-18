@@ -1,4 +1,5 @@
 import type { Activity } from "./types";
+import { ownError, shown } from "./live";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
 /* The Processes window: everything Anvil runs, with usage, Restart/Stop (right-click)
@@ -23,9 +24,11 @@ export const storedTab = (v: string | null) => (v === "web" ? "anvil" : TABS.inc
 export let tab = storedTab(localStorage.getItem("act-tab"));
 export let logStyle: Sgr | undefined; // colors carried from one page of the log to the next
 
-export function showError(msg) {
-  $("#error").textContent = msg ?? "";
-  $("#error").hidden = !msg;
+const errors = new Map<string, string>(); // owner -> its error, see ownError
+export function showError(msg, owner = "") {
+  const text = ownError(errors, msg, owner);
+  $("#error").textContent = text;
+  $("#error").hidden = !text;
 }
 
 export let loading: Promise<void> | null = null; // the `activity` request on its way: a slow Docker must not stack them
@@ -34,9 +37,9 @@ export function load() {
   loading ??= (async () => {
     try {
       data = await invoke("activity");
-      showError(null);
+      showError(null, "activity");
     } catch (e) {
-      return showError(String(e));
+      return showError(String(e), "activity");
     } finally {
       loading = null;
     }
@@ -123,9 +126,9 @@ export async function act(key, action?) {
   render();
   try {
     await run(key, action);
-    showError(null);
+    showError(null, "act");
   } catch (e) {
-    showError(String(e));
+    showError(String(e), "act");
   }
   busy.delete(key);
   // A restart begins a new log (see `Apps::spawn`): read it from the start.
@@ -301,7 +304,7 @@ if (window.activitySelect) reveal(window.activitySelect);
 
 // Fresh while the window is shown, focused or not.
 setInterval(() => {
-  if (document.hidden) return;
+  if (!shown()) return;
   load();
   if (selected && tailing !== logToken) tail();
 }, 2000);

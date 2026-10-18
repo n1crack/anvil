@@ -2,7 +2,8 @@ import type { CommandChip, ProcessRow } from "./types";
 import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, mode, popAt, selected, showError, showTab, snap, tab } from "./app";
 import { type Tail, readTail, tail, termOut } from "./console";
 import { late } from "./late";
-import { confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
+import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
+import { shown } from "./live";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
 /* Dev tab: the app's dev processes on the left, the chosen one's output live on the right,
@@ -486,7 +487,7 @@ export async function devTick() {
 /** Save one change to a process; a failure shows below the table. */
 async function save(name: string, args: Record<string, unknown>, cmd = "set_process") {
   try {
-    procCache.set(name, await invoke(cmd, { site: name, ...args }));
+    await askProcs(name, cmd, args);
     confError = "";
     return true;
   } catch (e) {
@@ -650,7 +651,7 @@ late.openDev = openDev;
 // Only while the tab is shown: output twice a second, the processes' states every two.
 let ticks = 0;
 setInterval(() => {
-  if (document.hidden || mode !== "apps" || !selected || tab !== "dev") return;
+  if (!shown() || mode !== "apps" || !selected || tab !== "dev") return;
   if (view?.site === selected) devTick();
   if (++ticks % 4 === 0 && !procLoading.has(selected)) loadProcs(selected);
 }, 500);
