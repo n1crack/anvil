@@ -499,6 +499,20 @@ fn terminate_group(child: &mut Child, grace: Duration) {
     let _ = child.wait();
 }
 
+/// A process taken out of `Apps` (`take`), still to be stopped.
+pub struct Stopping {
+    child: Child,
+    pid_file: PathBuf,
+}
+
+impl Stopping {
+    /// Stop its whole group: SIGTERM, then SIGKILL after 5 s.
+    pub fn wait(mut self) {
+        terminate_group(&mut self.child, Duration::from_secs(5));
+        crate::remove_pid_file(&self.pid_file, self.child.id());
+    }
+}
+
 /// Apps started from Anvil, by site name.
 pub struct Apps {
     /// Where pid and log files go (Anvil's home; a temp folder in tests).
@@ -721,13 +735,22 @@ impl Apps {
     }
 
     pub fn stop(&mut self, name: &str) {
+        if let Some(s) = self.take(name) {
+            s.wait();
+        }
+    }
+
+    /// Forget `name` and hand back its process to stop with `Stopping::wait` once the
+    /// lock on `Apps` is released: a shutdown can take 5 s.
+    pub fn take(&mut self, name: &str) -> Option<Stopping> {
         self.processes.remove(name);
         self.once.remove(name);
         self.exits.remove(name);
-        if let Some(mut c) = self.children.remove(name) {
-            terminate_group(&mut c, Duration::from_secs(5));
-            let _ = fs::remove_file(pid_in(&self.home, name));
-        }
+        let child = self.children.remove(name)?;
+        Some(Stopping {
+            child,
+            pid_file: pid_in(&self.home, name),
+        })
     }
 
     /// Running apps (not their other processes).

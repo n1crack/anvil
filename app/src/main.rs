@@ -15,10 +15,14 @@ use tauri::{
 /// Lock order: never hold two of these at once. Copy what one guards, drop it, then
 /// take the next; `let x = m.lock()…;` drops the guard at the `;`, but an `if let` /
 /// `match` scrutinee keeps it through the whole block. If two ever must nest, take
-/// them in field order (server, error, services, apps, app_errors, service_errors).
+/// them in field order (restarting, server, error, services, apps, app_errors,
+/// service_errors).
 #[derive(Default)]
 struct App {
     server: Mutex<Option<Server>>,
+    /// Held through a whole `start`/`stop` of the web server, so two can't interleave;
+    /// taken before `server`, which is only locked to swap.
+    restarting: Mutex<()>,
     error: Mutex<Option<String>>,
     services: Mutex<anvil::services::Services>,
     apps: Mutex<anvil::apps::Apps>,
@@ -180,12 +184,17 @@ fn snapshot(app: &App) -> Res<Snapshot> {
     })
 }
 
+/// (Re)start Caddy and PHP-FPM. `server` is only locked to swap: stopping the old
+/// server takes up to 3 s a child and the first Caddy download much longer, and
+/// `running` is asked on every poll. Meanwhile the server counts as stopped.
 fn start(app: &App, cfg: &Config) {
-    let mut server = app.server.lock().unwrap();
-    *server = None; // stop the old one first so ports are free
-    match Server::start(cfg) {
+    let _one = app.restarting.lock().unwrap();
+    let old = app.server.lock().unwrap().take();
+    drop(old); // stop the old one first so ports are free
+    let started = Server::start(cfg);
+    match started {
         Ok(s) => {
-            *server = Some(s);
+            *app.server.lock().unwrap() = Some(s);
             *app.error.lock().unwrap() = None;
         }
         Err(e) => *app.error.lock().unwrap() = Some(err(e)),
@@ -193,7 +202,9 @@ fn start(app: &App, cfg: &Config) {
 }
 
 fn stop(app: &App) {
-    *app.server.lock().unwrap() = None;
+    let _one = app.restarting.lock().unwrap();
+    let old = app.server.lock().unwrap().take();
+    drop(old);
 }
 
 /// Something changed: rebuild the tray menu and re-render an open window.
@@ -867,7 +878,7 @@ fn process_run(
                 .collect(),
         };
         for key in keys {
-            app.apps.lock().unwrap().stop(&key);
+            stop_app(&app, &key);
             app.app_errors.lock().unwrap().remove(&key);
         }
     }
@@ -910,10 +921,7 @@ fn command_run(app: State<App>, site: String, id: String) -> Res<Overview> {
 #[tauri::command(async)]
 fn once_stop(handle: AppHandle, app: State<App>, site: String, id: String) -> Res<()> {
     find_site(&site)?;
-    app.apps
-        .lock()
-        .unwrap()
-        .stop(&anvil::processes::once_key(&site, &id));
+    stop_app(&app, &anvil::processes::once_key(&site, &id));
     changed(&handle);
     Ok(())
 }
@@ -974,9 +982,25 @@ fn autostart_processes(app: &App, cfg: &Config) {
     }
 }
 
+/// Stop an app or process without keeping `apps` locked while it shuts down (up to 5 s).
+fn stop_app(app: &App, key: &str) {
+    let stopping = app.apps.lock().unwrap().take(key);
+    if let Some(s) = stopping {
+        s.wait();
+    }
+}
+
+/// Stop a service without keeping `services` locked while it shuts down (up to 10 s).
+fn stop_service(app: &App, id: &str) {
+    let child = app.services.lock().unwrap().take(id);
+    if let Some(c) = child {
+        anvil::services::halt(id, c);
+    }
+}
+
 fn run_app(app: &App, cfg: &Config, site: &str, action: &str) {
     if action != "start" {
-        app.apps.lock().unwrap().stop(site);
+        stop_app(app, site);
         app.app_errors.lock().unwrap().remove(site);
     }
     if action != "stop" {
@@ -1033,7 +1057,7 @@ fn set_app(
     // A running app picks up a new command or port by restarting.
     let was_running = app.apps.lock().unwrap().running(&site);
     if was_running {
-        app.apps.lock().unwrap().stop(&site);
+        stop_app(&app, &site);
     }
     if reroute {
         sites_changed(&handle, &app, &cfg);
@@ -1090,7 +1114,7 @@ fn set_process(
         }
         anvil::set_site_app(&mut cfg, &s.name, None, command, None, autostart).map_err(err)?;
         if restart && app.apps.lock().unwrap().running(&s.name) {
-            app.apps.lock().unwrap().stop(&s.name);
+            stop_app(&app, &s.name);
             start_app(&app, &cfg, &s.name);
         }
     } else {
@@ -1120,7 +1144,7 @@ fn set_process(
         let was_running = app.apps.lock().unwrap().running(&key);
         // A hidden row is out of sight, so it doesn't keep running unseen.
         if was_running && (restart || hidden == Some(true)) {
-            app.apps.lock().unwrap().stop(&key);
+            stop_app(&app, &key);
             app.app_errors.lock().unwrap().remove(&key);
         }
         if was_running && restart && hidden != Some(true) {
@@ -1192,7 +1216,7 @@ fn processes_reset(handle: AppHandle, app: State<App>, site: String) -> Res<Over
         .filter(|k| k.contains('@') && !listed.contains(k))
         .collect();
     for k in gone {
-        app.apps.lock().unwrap().stop(&k);
+        stop_app(&app, &k);
         app.app_errors.lock().unwrap().remove(&k);
     }
     if routes(&cfg) != before {
@@ -1636,7 +1660,7 @@ fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot
     // Its processes and commands stop with it: afterwards nothing could reach them.
     let keys = app.apps.lock().unwrap().process_keys(&site);
     for key in keys {
-        app.apps.lock().unwrap().stop(&key);
+        stop_app(&app, &key);
     }
     let mut cfg = anvil::load().map_err(err)?;
     anvil::remove(&mut cfg, &site).map_err(err)?;
@@ -1757,7 +1781,7 @@ fn set_runtime(
     anvil::set_site_runtime(&mut cfg, &site, version).map_err(err)?;
     let was_running = app.apps.lock().unwrap().running(&site);
     if was_running {
-        app.apps.lock().unwrap().stop(&site);
+        stop_app(&app, &site);
         start_app(&app, &cfg, &site);
     }
     changed(&handle);
@@ -1850,8 +1874,18 @@ fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
         .collect())
 }
 
+/// Start a service with `services` locked only around the bookkeeping: `launch` takes
+/// at least 300 ms, a first MySQL init much longer.
 fn start_service(app: &App, cfg: &Config, id: &str) {
-    let result = app.services.lock().unwrap().start(cfg, id);
+    let begun = app.services.lock().unwrap().begin(cfg, id);
+    let result = match begun {
+        Ok(true) => {
+            let launched = anvil::services::launch(cfg, id);
+            app.services.lock().unwrap().finish(id, launched)
+        }
+        Ok(false) => Ok(()),
+        Err(e) => Err(e),
+    };
     let mut errors = app.service_errors.lock().unwrap();
     match result {
         Ok(()) => errors.remove(id),
@@ -1867,7 +1901,7 @@ fn set_service(handle: AppHandle, app: State<App>, id: String, on: bool) -> Res<
     if on {
         start_service(&app, &cfg, &id);
     } else {
-        app.services.lock().unwrap().stop(&id);
+        stop_service(&app, &id);
         app.service_errors.lock().unwrap().remove(&id);
     }
     changed(&handle);
@@ -1888,10 +1922,8 @@ fn set_service_port(
     } else {
         anvil::services::set_port(&mut cfg, &id, port).map_err(err)?;
     }
-    let mut svc = app.services.lock().unwrap();
-    let was_running = svc.running(&id);
-    svc.stop(&id);
-    drop(svc);
+    let was_running = app.services.lock().unwrap().running(&id);
+    stop_service(&app, &id);
     if was_running || cfg.services.get(&id).is_some_and(|s| s.enabled) {
         start_service(&app, &cfg, &id);
     }
@@ -1930,7 +1962,7 @@ fn service_run(
         anvil::services::set_enabled(&mut cfg, &id, action == "start").map_err(err)?;
     }
     if action != "start" {
-        app.services.lock().unwrap().stop(&id);
+        stop_service(&app, &id);
         app.service_errors.lock().unwrap().remove(&id);
     }
     if action != "stop" {
@@ -2079,7 +2111,7 @@ fn remove_service(
     delete_data: bool,
 ) -> Res<Vec<ServiceRow>> {
     // Stop first so the data folder isn't in use when it's deleted.
-    app.services.lock().unwrap().stop(&id);
+    stop_service(&app, &id);
     app.service_errors.lock().unwrap().remove(&id);
     let mut cfg = anvil::load().map_err(err)?;
     anvil::services::remove(&mut cfg, &id, delete_data).map_err(err)?;
@@ -2390,7 +2422,7 @@ fn set_tld(handle: AppHandle, tld: String) -> Res<Settings> {
     let cfg = anvil::load().map_err(err)?;
     let names = app.apps.lock().unwrap().names();
     for name in names {
-        app.apps.lock().unwrap().stop(&name);
+        stop_app(&app, &name);
         start_app(&app, &cfg, &name);
     }
     changed(&handle);
@@ -3010,8 +3042,9 @@ fn main() {
                         }
                     });
                     start(&state, &cfg);
-                    let failed = state.services.lock().unwrap().start_enabled(&cfg);
-                    state.service_errors.lock().unwrap().extend(failed);
+                    for id in anvil::services::enabled(&cfg) {
+                        start_service(&state, &cfg, &id);
+                    }
                     for site in anvil::sites(&cfg).iter().filter(|s| s.autostart) {
                         start_app(&state, &cfg, &site.name);
                     }

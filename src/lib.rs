@@ -1286,6 +1286,20 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     }
 }
 
+/// Remove a pid file only while it still names `pid`: a stop that finishes after a new
+/// start must not drop the new process's file.
+pub(crate) fn remove_pid_file(file: &Path, pid: u32) {
+    let ours = fs::read_to_string(file).is_ok_and(|f| {
+        f.lines()
+            .nth(1)
+            .and_then(|l| l.split(' ').next())
+            .is_some_and(|p| p == pid.to_string())
+    });
+    if ours {
+        let _ = fs::remove_file(file);
+    }
+}
+
 /// Ask a process to shut down cleanly (SIGTERM); force it after `grace`.
 pub(crate) fn terminate(child: &mut Child, grace: std::time::Duration) {
     let _ = Command::new("kill")
@@ -1838,6 +1852,16 @@ pub fn merge_path(current: &str, login: &str) -> String {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+
+    #[test]
+    fn a_late_stop_keeps_the_new_starts_pid_file() {
+        let f = std::env::temp_dir().join(format!("anvil-pids-{}", std::process::id()));
+        fs::write(&f, "1\n200 Sat Oct 18 10:02:03 2026").unwrap();
+        remove_pid_file(&f, 100);
+        assert!(f.exists());
+        remove_pid_file(&f, 200);
+        assert!(!f.exists());
+    }
 
     #[test]
     fn read_lossy_keeps_text_around_invalid_bytes() {

@@ -758,6 +758,8 @@ pub fn log_file(id: &str) -> PathBuf {
 #[derive(Default)]
 pub struct Services {
     children: BTreeMap<String, Child>,
+    /// Ids between `begin` and `finish`: a second start of one leaves it alone.
+    starting: std::collections::BTreeSet<String>,
 }
 
 impl Services {
@@ -772,47 +774,24 @@ impl Services {
     }
 
     pub fn start(&mut self, cfg: &Config, id: &str) -> Result<()> {
-        let kind = kind_of(cfg, id)?;
-        if self.running(id) {
+        if !self.begin(cfg, id)? {
             return Ok(());
         }
-        let v = version(cfg, id);
-        if !installed(kind, &v) {
-            bail!("{} {v} is not installed", name(kind));
-        }
-        kill_orphans(&pid_file(id), false);
-        let port = port(cfg, id);
-        for p in [Some(port), web_port(cfg, id)].into_iter().flatten() {
-            if in_use(p) {
-                bail!("{id}: port {p} is already in use by another program — pick another port");
-            }
-        }
-        crate::state_dirs()?;
-        let log = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_file(id))?;
-        init(cfg, kind, id, &log)?;
-        let mut child = command(cfg, id)
-            .stdin(Stdio::null())
-            .stdout(log.try_clone()?)
-            .stderr(log)
-            .spawn()
-            .with_context(|| format!("failed to start {id}"))?;
+        let launched = launch(cfg, id);
+        self.finish(id, launched)
+    }
 
-        // A server that dies right away (bad data dir, port race) should say so now.
-        std::thread::sleep(Duration::from_millis(300));
-        if let Ok(Some(status)) = child.try_wait() {
-            bail!(
-                "{id} stopped right after starting ({status}) — see {}",
-                log_file(id).display()
-            );
-        }
-        fs::write(
-            pid_file(id),
-            format!("{}\n{}", std::process::id(), child.id()),
-        )?;
-        self.children.insert(id.into(), child);
+    /// A start in three steps, so `Services` needn't stay locked through `launch` (an
+    /// init and a 300 ms check): false when it already runs or another start is on it.
+    pub fn begin(&mut self, cfg: &Config, id: &str) -> Result<bool> {
+        kind_of(cfg, id)?;
+        Ok(!self.running(id) && self.starting.insert(id.into()))
+    }
+
+    /// Record what `launch` did after `begin`.
+    pub fn finish(&mut self, id: &str, launched: Result<Child>) -> Result<()> {
+        self.starting.remove(id);
+        self.children.insert(id.into(), launched?);
         Ok(())
     }
 
@@ -829,18 +808,21 @@ impl Services {
     }
 
     pub fn stop(&mut self, id: &str) {
-        if let Some(mut c) = self.children.remove(id) {
-            // Databases get time to flush and shut down cleanly.
-            terminate(&mut c, Duration::from_secs(10));
-            let _ = fs::remove_file(pid_file(id));
+        if let Some(c) = self.take(id) {
+            halt(id, c);
         }
+    }
+
+    /// Forget a running service and hand back its process, to `halt` once the lock on
+    /// `Services` is released.
+    pub fn take(&mut self, id: &str) -> Option<Child> {
+        self.children.remove(id)
     }
 
     /// Start every enabled service; returns the ones that failed with why.
     pub fn start_enabled(&mut self, cfg: &Config) -> Vec<(String, String)> {
-        instances(cfg)
+        enabled(cfg)
             .iter()
-            .filter(|id| cfg.services.get(*id).is_some_and(|s| s.enabled))
             .filter_map(|id| {
                 self.start(cfg, id)
                     .err()
@@ -888,6 +870,63 @@ impl Services {
             })
             .collect()
     }
+}
+
+/// Services that start with Anvil.
+pub fn enabled(cfg: &Config) -> Vec<String> {
+    instances(cfg)
+        .into_iter()
+        .filter(|id| cfg.services.get(id).is_some_and(|s| s.enabled))
+        .collect()
+}
+
+/// Stop a service taken out of `Services`. Databases get 10 s to flush and shut down cleanly.
+pub fn halt(id: &str, mut c: Child) {
+    terminate(&mut c, Duration::from_secs(10));
+    crate::remove_pid_file(&pid_file(id), c.id());
+}
+
+/// Everything of a start but the bookkeeping (`Services::begin`/`finish`): check, init,
+/// spawn and see that it stays up.
+pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
+    let kind = kind_of(cfg, id)?;
+    let v = version(cfg, id);
+    if !installed(kind, &v) {
+        bail!("{} {v} is not installed", name(kind));
+    }
+    kill_orphans(&pid_file(id), false);
+    let port = port(cfg, id);
+    for p in [Some(port), web_port(cfg, id)].into_iter().flatten() {
+        if in_use(p) {
+            bail!("{id}: port {p} is already in use by another program — pick another port");
+        }
+    }
+    crate::state_dirs()?;
+    let log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file(id))?;
+    init(cfg, kind, id, &log)?;
+    let mut child = command(cfg, id)
+        .stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .spawn()
+        .with_context(|| format!("failed to start {id}"))?;
+
+    // A server that dies right away (bad data dir, port race) should say so now.
+    std::thread::sleep(Duration::from_millis(300));
+    if let Ok(Some(status)) = child.try_wait() {
+        bail!(
+            "{id} stopped right after starting ({status}) — see {}",
+            log_file(id).display()
+        );
+    }
+    fs::write(
+        pid_file(id),
+        format!("{}\n{}", std::process::id(), child.id()),
+    )?;
+    Ok(child)
 }
 
 impl Drop for Services {
