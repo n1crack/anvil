@@ -3,6 +3,7 @@ import { $, M, el, invoke, mode, selected, showError, showTab, snap, tab } from 
 import { termOut } from "./console";
 import { COLORS, barBtn, icon, line, trimLines } from "./dev";
 import { shown } from "./live";
+import { listSplitter } from "./split";
 import { late } from "./late";
 import { DOT, containerRun, containerState, loadProcs, procBtn, procBusy, procCache, procLoading } from "./processes";
 import { type Sgr, sgr } from "./term";
@@ -74,7 +75,7 @@ const empty = el("div", "dev-empty");
 term.out.tabIndex = 0;
 const keysHint = el("p", "dev-keys", "↑↓ select · s start · x stop · r restart · q stop all · c clear");
 pane.append(head, term.out, empty, keysHint);
-main.append(list, pane);
+main.append(list, listSplitter(main, "containers-list-width", 160), pane);
 box.append(bar, main);
 
 // What is shown: which app and entry, the time and number of the last line read per

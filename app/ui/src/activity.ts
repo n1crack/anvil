@@ -1,5 +1,6 @@
 import type { Activity } from "./types";
 import { follower } from "./console";
+import { splitter } from "./split";
 import { ownError, shown } from "./live";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
@@ -344,21 +345,15 @@ window.addEventListener("focus", load);
 $("#log-close").onclick = () => select(null);
 
 // The splitter: drag to give the log more or less room; the width is remembered.
-export const pane = $("#pane");
-export const split = $("#split");
-export const fit = (w) => Math.round(Math.max(260, Math.min(w, $(".act-main").clientWidth - 360 - split.offsetWidth)));
-export const savedWidth = Number(localStorage.getItem("act-log-width"));
-if (savedWidth) pane.style.width = `${savedWidth}px`;
-split.onpointerdown = (e) => {
-  e.preventDefault();
-  split.setPointerCapture(e.pointerId);
-  const right = $(".act-main").getBoundingClientRect().right;
-  split.onpointermove = (m) => (pane.style.width = `${fit(right - m.clientX - split.offsetWidth / 2)}px`);
-  split.onpointerup = split.onlostpointercapture = () => {
-    split.onpointermove = split.onpointerup = split.onlostpointercapture = null;
-    localStorage.setItem("act-log-width", String(parseInt(pane.style.width)));
-  };
-};
+const pane = $("#pane");
+const split = $("#split");
+splitter(split, {
+  key: "act-log-width",
+  min: 260,
+  max: () => $(".act-main").clientWidth - 360 - split.offsetWidth,
+  at: (m) => $(".act-main").getBoundingClientRect().right - m.clientX - split.offsetWidth / 2,
+  apply: (w) => (pane.style.width = w ? `${w}px` : ""),
+});
 
 // No browser context menu (Reload, Inspect…), as in the other windows.
 document.addEventListener("contextmenu", (e) => e.preventDefault());

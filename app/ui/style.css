@@ -992,7 +992,7 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-stop { color: var(--danger); }
 .dev-stop:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
 .dev-all:disabled { color: var(--muted); opacity: 1; }
-.dev-main { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 12px; align-items: start; }
+.dev-main { display: grid; grid-template-columns: var(--list-w, 168px) 12px minmax(0, 1fr); align-items: start; }
 .dev-main[hidden], .dev-conf[hidden] { display: none; }
 .dev-list { max-width: none; overflow: hidden; outline: none; }
 .dev-list:focus-visible { box-shadow: 0 0 0 2px var(--selected); }
@@ -1051,7 +1051,7 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-text { min-width: 0; }
 .dev-text:empty::before { content: "\200b"; }
 /* Containers: the list has room for each one's port and health. */
-.containers .dev-main { grid-template-columns: 220px minmax(0, 1fr); }
+.containers .dev-main { grid-template-columns: var(--list-w, 220px) 12px minmax(0, 1fr); }
 /* A container's name never gives way to its port and health. */
 .containers .dev-item > .dev-name { flex: none; }
 .containers .dev-exit { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
@@ -2972,3 +2972,25 @@ body.activity {
  * little softer than the crash red, full red on hover. */
 .svc-remove { color: color-mix(in srgb, var(--danger) 80%, var(--text)); }
 .svc-remove:hover { color: var(--danger); }
+
+/* ---------- Dividers (split.ts): drag to resize, double-click to reset ---------- */
+
+.split-handle { position: relative; cursor: col-resize; touch-action: none; }
+/* A hairline on hover and while dragging; otherwise the handle is invisible. */
+.split-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  transition: background 0.12s;
+}
+.split-handle:hover::after, .col-resizing .split-handle::after { background: color-mix(in srgb, var(--text) 22%, transparent); }
+.col-resizing, .col-resizing * { cursor: col-resize !important; -webkit-user-select: none !important; user-select: none !important; }
+/* Over the sidebar's border, the window's full height. */
+.sidebar-split { position: fixed; top: 0; bottom: 0; left: calc(var(--sidebar) - 4px); z-index: 5; width: 8px; }
+/* Between the Dev or Containers list and the output, as tall as they are. */
+.list-split { align-self: stretch; }

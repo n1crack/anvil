@@ -4,6 +4,7 @@ import { type Tail, readTail, tail, termOut } from "./console";
 import { late } from "./late";
 import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
 import { shown } from "./live";
+import { listSplitter } from "./split";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
 /* Dev tab: the app's dev processes on the left, the chosen one's output live on the right,
@@ -50,7 +51,7 @@ term.out.tabIndex = 0;
 // The keys (see main.onkeydown), said once; hidden when the pane is too narrow for it.
 const keysHint = el("p", "dev-keys", "↑↓ select · s start · x stop · r restart · q stop all · c clear");
 pane.append(head, term.out, empty, keysHint);
-main.append(list, pane);
+main.append(list, listSplitter(main, "dev-list-width", 120), pane);
 const conf = el("div", "dev-conf");
 box.append(bar, main, conf);
 
