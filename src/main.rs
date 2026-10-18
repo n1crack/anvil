@@ -252,6 +252,7 @@ fn start(cfg: &Config) -> Result<()> {
     ctrlc::set_handler(move || {
         let _ = tx.send(());
     })?;
+    services::migrate_files(cfg);
     let mut services = services::Services::default();
     for (id, e) in services.start_enabled(cfg) {
         eprintln!("  {id}: {}", style::error(e));
@@ -275,6 +276,9 @@ fn start(cfg: &Config) -> Result<()> {
             cyan(site_url(cfg, &s)),
             dim(format!("(PHP {})", s.php.as_deref().unwrap_or("-")))
         );
+    }
+    for c in site_name_clashes(cfg) {
+        eprintln!("  {}", yellow(c));
     }
     println!(
         "{}, logs in {}. Ctrl-C to stop.",
@@ -388,6 +392,14 @@ fn shim(tool: &std::ffi::OsStr, args: impl Iterator<Item = std::ffi::OsString>) 
     Err(e).with_context(|| format!("couldn't run {}", program.display()))
 }
 
+/// A config change through `anvil::update` (under the config lock, on top of what's
+/// on disk now); `cfg` becomes the saved config.
+fn edit<T>(cfg: &mut Config, f: impl FnOnce(&mut Config) -> Result<T>) -> Result<T> {
+    let (saved, out) = update(f)?;
+    *cfg = saved;
+    Ok(out)
+}
+
 fn run() -> Result<()> {
     let mut args = std::env::args_os().skip(1);
     if args.next().is_some_and(|a| a == "shim") {
@@ -412,21 +424,25 @@ fn run() -> Result<()> {
     match cmd {
         Cmd::Park { path } => {
             let p = dir_or_cwd(path)?;
-            if !cfg.paths.contains(&p) {
-                cfg.paths.push(p.clone());
-            }
-            save(&cfg)?;
+            edit(&mut cfg, |c| {
+                if !c.paths.contains(&p) {
+                    c.paths.push(p.clone());
+                }
+                Ok(())
+            })?;
             println!("Parked {}", p.display());
         }
         Cmd::Forget { path } => {
             let p = dir_or_cwd(path)?;
-            cfg.paths.retain(|x| x != &p);
-            save(&cfg)?;
+            edit(&mut cfg, |c| {
+                c.paths.retain(|x| x != &p);
+                Ok(())
+            })?;
         }
         Cmd::Link { name } => {
             let p = dir_or_cwd(None)?;
             let name = name.unwrap_or_else(|| p.file_name().unwrap().to_string_lossy().into());
-            let name = link(&mut cfg, &name, p.clone())?;
+            let name = edit(&mut cfg, |c| link(c, &name, p.clone()))?;
             println!(
                 "Linked {} -> {}",
                 cyan(format!("{name}.{}", cfg.tld)),
@@ -434,8 +450,10 @@ fn run() -> Result<()> {
             );
         }
         Cmd::Unlink { name } => {
-            cfg.links.remove(&name);
-            save(&cfg)?;
+            edit(&mut cfg, |c| {
+                c.links.remove(&name);
+                Ok(())
+            })?;
         }
         Cmd::Sites => {
             let all = sites(&cfg);
@@ -463,6 +481,9 @@ fn run() -> Result<()> {
                     dim(s.root.display())
                 );
             }
+            for c in site_name_clashes(&cfg) {
+                eprintln!("{}", yellow(c));
+            }
         }
         Cmd::Php {
             cmd: PhpCmd::Install { version },
@@ -472,7 +493,7 @@ fn run() -> Result<()> {
         } => php_uninstall(&cfg, &version)?,
         Cmd::Php {
             cmd: PhpCmd::Ini { key, value },
-        } => set_global_ini(&mut cfg, &key, value.as_deref())?,
+        } => edit(&mut cfg, |c| set_global_ini(c, &key, value.as_deref()))?,
         Cmd::Clean {
             site: None,
             safe: true,
@@ -538,8 +559,8 @@ fn run() -> Result<()> {
             }
         }
         Cmd::Use { version, site } => match site {
-            Some(name) => set_site_php(&mut cfg, &name, Some(version))?,
-            None => set_default_php(&mut cfg, &version)?,
+            Some(name) => edit(&mut cfg, |c| set_site_php(c, &name, Some(version)))?,
+            None => edit(&mut cfg, |c| set_default_php(c, &version))?,
         },
         Cmd::Service { cmd } => match cmd {
             ServiceCmd::List => {
@@ -575,16 +596,18 @@ fn run() -> Result<()> {
                 port,
                 version,
             } => {
-                let id = services::add(&mut cfg, &kind, name.as_deref(), port, version.as_deref())?;
+                let id = edit(&mut cfg, |c| {
+                    services::add(c, &kind, name.as_deref(), port, version.as_deref())
+                })?;
                 let v = services::version(&cfg, &id);
                 if !services::installed(&kind, &v) {
                     println!("Downloading {kind} {v}…");
                 }
                 if let Err(e) = services::ensure_installed(&cfg, &id) {
-                    services::remove(&mut cfg, &id, false)?;
+                    edit(&mut cfg, |c| services::remove(c, &id, false))?;
                     return Err(e);
                 }
-                services::set_enabled(&mut cfg, &id, true)?;
+                edit(&mut cfg, |c| services::set_enabled(c, &id, true))?;
                 println!(
                     "Added {} on port {}; it starts with {}.",
                     bold(&id),
@@ -592,9 +615,11 @@ fn run() -> Result<()> {
                     cyan("`anvil start`")
                 );
             }
-            ServiceCmd::Remove { id, delete_data } => services::remove(&mut cfg, &id, delete_data)?,
-            ServiceCmd::Tag { id, tags } => services::set_tags(&mut cfg, &id, &tags)?,
-            ServiceCmd::Link { id, apps } => services::set_apps(&mut cfg, &id, &apps)?,
+            ServiceCmd::Remove { id, delete_data } => {
+                edit(&mut cfg, |c| services::remove(c, &id, delete_data))?
+            }
+            ServiceCmd::Tag { id, tags } => edit(&mut cfg, |c| services::set_tags(c, &id, &tags))?,
+            ServiceCmd::Link { id, apps } => edit(&mut cfg, |c| services::set_apps(c, &id, &apps))?,
             ServiceCmd::Databases { id } => {
                 let c = anvil::databases::contents(&cfg, &id)?;
                 for (n, b) in c.databases {
@@ -640,15 +665,15 @@ fn run() -> Result<()> {
                 }
                 services::uninstall(&kind, &version)?
             }
-            ServiceCmd::Enable { id } => services::set_enabled(&mut cfg, &id, true)?,
-            ServiceCmd::Disable { id } => services::set_enabled(&mut cfg, &id, false)?,
+            ServiceCmd::Enable { id } => edit(&mut cfg, |c| services::set_enabled(c, &id, true))?,
+            ServiceCmd::Disable { id } => edit(&mut cfg, |c| services::set_enabled(c, &id, false))?,
             ServiceCmd::Port { id, port, web } => {
                 // With --web, the SMTP port only changes when it's given too.
                 if let Some(web) = web {
-                    services::set_web_port(&mut cfg, &id, web)?;
+                    edit(&mut cfg, |c| services::set_web_port(c, &id, web))?;
                 }
                 if web.is_none() || port.is_some() {
-                    services::set_port(&mut cfg, &id, port)?;
+                    edit(&mut cfg, |c| services::set_port(c, &id, port))?;
                 }
             }
         },
@@ -669,19 +694,21 @@ fn run() -> Result<()> {
             RuntimeCmd::Uninstall { id, version } => runtimes::uninstall(&id, &version)?,
         },
         Cmd::App { cmd } => match cmd {
-            AppCmd::Command { site, command } => {
-                set_site_app(&mut cfg, &site, None, Some(command), None, None)?
+            AppCmd::Command { site, command } => edit(&mut cfg, |c| {
+                set_site_app(c, &site, None, Some(command), None, None)
+            })?,
+            AppCmd::Runtime { site, version } => {
+                edit(&mut cfg, |c| set_site_runtime(c, &site, version))?
             }
-            AppCmd::Runtime { site, version } => set_site_runtime(&mut cfg, &site, version)?,
-            AppCmd::Autostart { site, on } => {
-                set_site_app(&mut cfg, &site, None, None, None, Some(on))?
-            }
-            AppCmd::Type { site, kind } => {
-                set_site_app(&mut cfg, &site, Some(kind), None, None, None)?
-            }
-            AppCmd::Port { site, port } => {
-                set_site_app(&mut cfg, &site, None, None, Some(port), None)?
-            }
+            AppCmd::Autostart { site, on } => edit(&mut cfg, |c| {
+                set_site_app(c, &site, None, None, None, Some(on))
+            })?,
+            AppCmd::Type { site, kind } => edit(&mut cfg, |c| {
+                set_site_app(c, &site, Some(kind), None, None, None)
+            })?,
+            AppCmd::Port { site, port } => edit(&mut cfg, |c| {
+                set_site_app(c, &site, None, None, Some(port), None)
+            })?,
         },
         Cmd::New { kind, name, dir } => {
             let parent = match dir {
@@ -704,7 +731,7 @@ fn run() -> Result<()> {
             let path = create::create(&kind, &name, &parent, &opts)?;
             // Outside a parked folder the new app needs a link to get its address.
             if !cfg.paths.contains(&parent) {
-                link(&mut cfg, &name, path.clone())?;
+                edit(&mut cfg, |c| link(c, &name, path.clone()))?;
             }
             println!("Created {}", path.display());
             if let Some(s) = sites(&cfg).into_iter().find(|s| s.path == path) {
@@ -928,13 +955,15 @@ fn run() -> Result<()> {
                 }
             }
         }
-        Cmd::Ini { site, key, value } => set_site_ini(&mut cfg, &site, &key, value.as_deref())?,
+        Cmd::Ini { site, key, value } => {
+            edit(&mut cfg, |c| set_site_ini(c, &site, &key, value.as_deref()))?
+        }
         Cmd::Https { site, off } => {
             let s = sites(&cfg)
                 .into_iter()
                 .find(|s| s.name == site_name(&site))
                 .with_context(|| format!("No site named {site}"))?;
-            set_secure(&mut cfg, &s.name, !off)?;
+            edit(&mut cfg, |c| set_secure(c, &s.name, !off))?;
             let s = sites(&cfg).into_iter().find(|x| x.name == s.name).unwrap();
             println!(
                 "{} {}",
@@ -944,7 +973,7 @@ fn run() -> Result<()> {
         }
         Cmd::Setup => {
             ensure_caddy()?;
-            save(&cfg)?;
+            edit(&mut cfg, |_| Ok(()))?;
             print_setup(&cfg)?;
         }
         Cmd::Which { tool } => {
@@ -956,7 +985,7 @@ fn run() -> Result<()> {
         }
         Cmd::Tld { tld } => {
             if let Some(t) = tld {
-                set_tld(&mut cfg, &t)?;
+                edit(&mut cfg, |c| set_tld(c, &t))?;
                 println!(
                     "Applications now answer at {}",
                     cyan(format!("https://<name>.{}", cfg.tld))

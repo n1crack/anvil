@@ -1763,6 +1763,43 @@ kbd {
 .page.about .hint { max-width: 420px; margin: 16px 0; }
 .page.about .small { font-size: 11px; margin-top: 24px; }
 
+/* Credits: grouped lists like the other pages, left-aligned under the centred header. */
+.page.about .credits { width: 100%; max-width: 640px; margin-top: 16px; text-align: left; }
+.page.about .credits .hint { max-width: none; margin: 0 0 8px; }
+.page .row.credit { grid-template-columns: minmax(0, 1fr) auto; }
+.page .row.credit a { color: var(--text); text-decoration: none; }
+.page .row.credit a:hover { text-decoration: underline; }
+.credit-meta { display: flex; flex-direction: column; align-items: flex-end; font-size: 12px; text-align: right; white-space: nowrap; }
+.credits details + details { margin-top: 8px; }
+.credits summary { grid-template-columns: minmax(0, 1fr) auto; list-style: none; }
+.credits summary::-webkit-details-marker { display: none; }
+.page .credits summary > span:first-child { flex-direction: row; align-items: center; }
+.credits summary > span:first-child::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 0 2px 8px;
+  border: solid var(--muted);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.credits details[open] summary > span:first-child::after { transform: rotate(45deg); }
+.credits details[open] summary { border-bottom: 1px solid var(--line); }
+#credits-list { max-height: 320px; overflow: auto; padding: 4px 0; }
+.credit-lib {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.7fr) minmax(0, 1.6fr) 44px;
+  gap: 12px;
+  padding: 3px 14px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.credit-lib span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#credits-text { max-height: 320px; margin: 0; padding: 10px 14px; overflow: auto; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+.credit-missing { margin: 0; padding: 10px 14px; font: 12px -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+
 /* ---------- New application sheet ---------- */
 
 .sheet {

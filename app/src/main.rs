@@ -142,6 +142,11 @@ fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
+/// `anvil::update` (load, change and save under the config lock), with the UI's errors.
+fn edit<T>(f: impl FnOnce(&mut Config) -> anyhow::Result<T>) -> Res<(Config, T)> {
+    anvil::update(f).map_err(err)
+}
+
 /// Whether Caddy and PHP-FPM serve. One of them ending on its own takes the server
 /// down: the rest stops in the background, and why shows as a failed start's error does.
 fn running(app: &App) -> bool {
@@ -270,8 +275,7 @@ fn set_php(
     site: String,
     version: Option<String>,
 ) -> Res<Snapshot> {
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::set_site_php(&mut cfg, &site, version).map_err(err)?;
+    let (cfg, ()) = edit(|c| anvil::set_site_php(c, &site, version))?;
     if running(&app) {
         start(&app, &cfg);
     }
@@ -1083,18 +1087,18 @@ fn set_app(
     } else {
         port.map(Some)
     };
-    let mut cfg = anvil::load().map_err(err)?;
     let reroute =
         kind.is_some() || port.is_some() || reset.iter().any(|r| r == "kind" || r == "port");
-    anvil::set_site_app(
-        &mut cfg,
-        &site,
-        pick("kind", kind),
-        pick("command", command),
-        port,
-        autostart,
-    )
-    .map_err(err)?;
+    let (cfg, ()) = edit(|c| {
+        anvil::set_site_app(
+            c,
+            &site,
+            pick("kind", kind),
+            pick("command", command),
+            port,
+            autostart,
+        )
+    })?;
     // A running app picks up a new command or port by restarting.
     let was_running = app.apps.lock().unwrap().running(&site);
     if was_running {
@@ -1133,7 +1137,7 @@ fn set_process(
     if !id.is_empty() && !plain(&id, false) {
         return Err(format!("Not a process: {id}"));
     }
-    let (mut cfg, s) = find_site_cfg(&site)?;
+    let s = find_site(&site)?;
     let command = if reset == Some(true) {
         Some(None)
     } else {
@@ -1153,7 +1157,7 @@ fn set_process(
         if !anvil::apps::runs_process(&s.kind) {
             return Err(format!("Anvil serves {site}; it has no command of its own"));
         }
-        anvil::set_site_app(&mut cfg, &s.name, None, command, None, autostart).map_err(err)?;
+        let (cfg, ()) = edit(|c| anvil::set_site_app(c, &s.name, None, command, None, autostart))?;
         if restart && app.apps.lock().unwrap().running(&s.name) {
             stop_app(&app, &s.name);
             start_app(&app, &cfg, &s.name);
@@ -1178,9 +1182,11 @@ fn set_process(
                 .map(|r| (r.id, r.host, r.port))
                 .collect::<Vec<_>>()
         };
-        let before = routes(&cfg);
-        anvil::processes::set_process(&mut cfg, &s, &id, change).map_err(err)?;
-        let reroute = routes(&cfg) != before;
+        let (cfg, reroute) = edit(|c| {
+            let before = routes(c);
+            anvil::processes::set_process(c, &s, &id, change)?;
+            Ok(routes(c) != before)
+        })?;
         let key = anvil::processes::key(&s.name, &id);
         let was_running = app.apps.lock().unwrap().running(&key);
         // A hidden row is out of sight, so it doesn't keep running unseen.
@@ -1225,8 +1231,8 @@ fn process_add(
     name: String,
     command: String,
 ) -> Res<Overview> {
-    let (mut cfg, s) = find_site_cfg(&site)?;
-    anvil::processes::add_process(&mut cfg, &s, &name, &command).map_err(err)?;
+    let s = find_site(&site)?;
+    let (cfg, ()) = edit(|c| anvil::processes::add_process(c, &s, &name, &command))?;
     changed(&handle);
     Ok(overview(&app, &cfg, &s))
 }
@@ -1235,15 +1241,18 @@ fn process_add(
 /// longer listed stops; a changed route reloads the web server in the background.
 #[tauri::command(async)]
 fn processes_reset(handle: AppHandle, app: State<App>, site: String) -> Res<Overview> {
-    let (mut cfg, s) = find_site_cfg(&site)?;
+    let s = find_site(&site)?;
     let routes = |c: &Config| {
         anvil::processes::server_rows(c, &s)
             .into_iter()
             .map(|r| (r.id, r.host, r.port))
             .collect::<Vec<_>>()
     };
-    let before = routes(&cfg);
-    anvil::processes::reset_processes(&mut cfg, &s).map_err(err)?;
+    let (cfg, before) = edit(|c| {
+        let before = routes(c);
+        anvil::processes::reset_processes(c, &s)?;
+        Ok(before)
+    })?;
     let listed: Vec<String> = anvil::processes::detect_with(&s, Some(&cfg))
         .into_iter()
         .map(|p| anvil::processes::key(&s.name, &p.id))
@@ -1584,7 +1593,7 @@ async fn create_app(
     parent: std::path::PathBuf,
     options: Option<anvil::create::Options>,
 ) -> Res<String> {
-    let mut cfg = anvil::load().map_err(err)?;
+    let cfg = anvil::load().map_err(err)?;
     let opts = anvil::create::resolve(&kind, &cfg, &options.unwrap_or_default()).map_err(err)?;
     let job = (kind.clone(), name.clone(), parent.clone(), opts.clone());
     let dir = tauri::async_runtime::spawn_blocking(move || {
@@ -1595,29 +1604,31 @@ async fn create_app(
     .map_err(err)?;
 
     let app = handle.state::<App>();
-    cfg = anvil::load().map_err(err)?;
-    let parked = cfg
-        .paths
-        .iter()
-        .any(|p| p.canonicalize().ok() == parent.canonicalize().ok());
-    let site = if parked {
-        anvil::site_name(&name)
-    } else {
-        anvil::link(&mut cfg, &name, dir).map_err(err)?
-    };
-    // The versions chosen in the sheet, when they aren't the defaults anyway.
-    let defaults = anvil::create::resolve(&kind, &cfg, &Default::default()).map_err(err)?;
-    if let Some(v) = opts.get("php").filter(|v| defaults.get("php") != Some(v)) {
-        anvil::set_site_php(&mut cfg, &site, Some(v.clone())).map_err(err)?;
-    }
-    if let Some(v) = opts.get("node").filter(|v| defaults.get("node") != Some(v)) {
-        anvil::set_site_runtime(&mut cfg, &site, Some(v.clone())).map_err(err)?;
-    }
-    if let Some(id) = opts.get("db").and_then(|d| d.strip_prefix("service:")) {
-        let mut list = cfg.services[id].apps.clone();
-        list.push(site.clone());
-        anvil::services::set_apps(&mut cfg, id, &list).map_err(err)?;
-    }
+    let (cfg, site) = edit(|cfg| {
+        let parked = cfg
+            .paths
+            .iter()
+            .any(|p| p.canonicalize().ok() == parent.canonicalize().ok());
+        let site = if parked {
+            anvil::site_name(&name)
+        } else {
+            anvil::link(cfg, &name, dir)?
+        };
+        // The versions chosen in the sheet, when they aren't the defaults anyway.
+        let defaults = anvil::create::resolve(&kind, cfg, &Default::default())?;
+        if let Some(v) = opts.get("php").filter(|v| defaults.get("php") != Some(v)) {
+            anvil::set_site_php(cfg, &site, Some(v.clone()))?;
+        }
+        if let Some(v) = opts.get("node").filter(|v| defaults.get("node") != Some(v)) {
+            anvil::set_site_runtime(cfg, &site, Some(v.clone()))?;
+        }
+        if let Some(id) = opts.get("db").and_then(|d| d.strip_prefix("service:")) {
+            let mut list = cfg.services[id].apps.clone();
+            list.push(site.clone());
+            anvil::services::set_apps(cfg, id, &list)?;
+        }
+        Ok(site)
+    })?;
     sites_changed(&handle, &app, &cfg);
     if anvil::apps::runs_process(&kind) {
         start_app(&app, &cfg, &site);
@@ -1663,8 +1674,7 @@ fn link_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or("Pick a folder")?;
-    let mut cfg = anvil::load().map_err(err)?;
-    let name = anvil::link(&mut cfg, &name, path).map_err(err)?;
+    let (cfg, name) = edit(|c| anvil::link(c, &name, path))?;
     sites_changed(&handle, &app, &cfg);
     Ok(name)
 }
@@ -1673,24 +1683,20 @@ fn link_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
 #[tauri::command(async)]
 fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<()> {
     let path = path.canonicalize().map_err(|e| e.to_string())?;
-    let mut cfg = anvil::load().map_err(err)?;
-    if !cfg.paths.contains(&path) {
-        cfg.paths.push(path);
-    }
-    anvil::save(&cfg).map_err(err)?;
+    let (cfg, ()) = edit(|c| {
+        if !c.paths.contains(&path) {
+            c.paths.push(path);
+        }
+        Ok(())
+    })?;
     sites_changed(&handle, &app, &cfg);
     Ok(())
 }
 
 #[tauri::command(async)]
 fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) -> Res<Snapshot> {
-    let mut cfg = anvil::load().map_err(err)?;
-    let path = anvil::sites(&cfg)
-        .into_iter()
-        .find(|s| s.name == site)
-        .ok_or_else(|| format!("No site named {site}"))?
-        .path;
-    anvil::link(&mut cfg, &alias, path).map_err(err)?;
+    let path = find_site(&site)?.path;
+    let (cfg, _) = edit(|c| anvil::link(c, &alias, path))?;
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
 }
@@ -1703,8 +1709,7 @@ fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot
     for key in keys {
         stop_app(&app, &key);
     }
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::remove(&mut cfg, &site).map_err(err)?;
+    let (cfg, ()) = edit(|c| anvil::remove(c, &site))?;
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
 }
@@ -1764,6 +1769,7 @@ fn setup_all(app: &App, cfg: &Config) -> Res<()> {
 #[tauri::command(async)]
 fn setup_fix(handle: AppHandle, app: State<App>, step: String) -> Res<anvil::Setup> {
     let mut cfg = anvil::load().map_err(err)?;
+    // `php_install` saves through `anvil::update` itself, after the download.
     match step.as_str() {
         "all" => setup_all(&app, &cfg)?,
         "resolver" => {
@@ -1804,8 +1810,7 @@ fn setup_fix(handle: AppHandle, app: State<App>, step: String) -> Res<anvil::Set
 
 #[tauri::command(async)]
 fn unhide_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::unhide(&mut cfg, &site).map_err(err)?;
+    let (cfg, ()) = edit(|c| anvil::unhide(c, &site))?;
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
 }
@@ -1818,8 +1823,7 @@ fn set_runtime(
     site: String,
     version: Option<String>,
 ) -> Res<Snapshot> {
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::set_site_runtime(&mut cfg, &site, version).map_err(err)?;
+    let (cfg, ()) = edit(|c| anvil::set_site_runtime(c, &site, version))?;
     let was_running = app.apps.lock().unwrap().running(&site);
     if was_running {
         stop_app(&app, &site);
@@ -1837,8 +1841,7 @@ fn set_site_ini(
     key: String,
     value: Option<String>,
 ) -> Res<Snapshot> {
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::set_site_ini(&mut cfg, &site, &key, value.as_deref()).map_err(err)?;
+    let (cfg, ()) = edit(|c| anvil::set_site_ini(c, &site, &key, value.as_deref()))?;
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
 }
@@ -1860,8 +1863,7 @@ fn allow_next_origin(handle: AppHandle, app: State<App>, site: String) -> Res<Sn
 /// HTTPS on or off for one site.
 #[tauri::command(async)]
 fn set_secure(handle: AppHandle, app: State<App>, site: String, on: bool) -> Res<Snapshot> {
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::set_secure(&mut cfg, &site, on).map_err(err)?;
+    let (cfg, ()) = edit(|c| anvil::set_secure(c, &site, on))?;
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
 }
@@ -1881,8 +1883,7 @@ fn set_https_default(handle: AppHandle, on: bool) -> Res<Settings> {
 
 #[tauri::command(async)]
 fn set_group(app: State<App>, site: String, group: Option<String>) -> Res<Snapshot> {
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::set_group(&mut cfg, &site, group.as_deref()).map_err(err)?;
+    edit(|c| anvil::set_group(c, &site, group.as_deref()))?;
     snapshot(&app)
 }
 
@@ -1937,8 +1938,7 @@ fn start_service(app: &App, cfg: &Config, id: &str) {
 /// Turning a service on also makes it start with Anvil, and vice versa.
 #[tauri::command(async)]
 fn set_service(handle: AppHandle, app: State<App>, id: String, on: bool) -> Res<Vec<ServiceRow>> {
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::services::set_enabled(&mut cfg, &id, on).map_err(err)?;
+    let (cfg, ()) = edit(|c| anvil::services::set_enabled(c, &id, on))?;
     if on {
         start_service(&app, &cfg, &id);
     } else {
@@ -1957,12 +1957,13 @@ fn set_service_port(
     port: Option<u16>,
     web: Option<bool>,
 ) -> Res<Vec<ServiceRow>> {
-    let mut cfg = anvil::load().map_err(err)?;
-    if web == Some(true) {
-        anvil::services::set_web_port(&mut cfg, &id, port).map_err(err)?;
-    } else {
-        anvil::services::set_port(&mut cfg, &id, port).map_err(err)?;
-    }
+    let (cfg, ()) = edit(|c| {
+        if web == Some(true) {
+            anvil::services::set_web_port(c, &id, port)
+        } else {
+            anvil::services::set_port(c, &id, port)
+        }
+    })?;
     let was_running = app.services.lock().unwrap().running(&id);
     stop_service(&app, &id);
     if was_running || cfg.services.get(&id).is_some_and(|s| s.enabled) {
@@ -1983,8 +1984,7 @@ async fn install_service(handle: AppHandle, id: String) -> Res<Vec<ServiceRow>> 
     .map_err(|e| e.to_string())?
     .map_err(err)?;
     let app = handle.state::<App>();
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::services::set_enabled(&mut cfg, &id, true).map_err(err)?;
+    let (cfg, ()) = edit(|c| anvil::services::set_enabled(c, &id, true))?;
     start_service(&app, &cfg, &id);
     changed(&handle);
     services(app)
@@ -1998,10 +1998,11 @@ fn service_run(
     id: String,
     action: String,
 ) -> Res<Vec<ServiceRow>> {
-    let mut cfg = anvil::load().map_err(err)?;
-    if action != "restart" {
-        anvil::services::set_enabled(&mut cfg, &id, action == "start").map_err(err)?;
-    }
+    let (cfg, ()) = if action == "restart" {
+        (anvil::load().map_err(err)?, ())
+    } else {
+        edit(|c| anvil::services::set_enabled(c, &id, action == "start"))?
+    };
     if action != "start" {
         stop_service(&app, &id);
         app.service_errors.lock().unwrap().remove(&id);
@@ -2020,8 +2021,7 @@ fn set_service_tags(
     id: String,
     tags: Vec<String>,
 ) -> Res<Vec<ServiceRow>> {
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::services::set_tags(&mut cfg, &id, &tags).map_err(err)?;
+    edit(|c| anvil::services::set_tags(c, &id, &tags))?;
     changed(&handle);
     services(app)
 }
@@ -2033,8 +2033,7 @@ fn set_service_apps(
     id: String,
     apps: Vec<String>,
 ) -> Res<Vec<ServiceRow>> {
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::services::set_apps(&mut cfg, &id, &apps).map_err(err)?;
+    edit(|c| anvil::services::set_apps(c, &id, &apps))?;
     changed(&handle);
     services(app)
 }
@@ -2116,28 +2115,34 @@ async fn add_service(
     tags: Vec<String>,
     apps: Vec<String>,
 ) -> Res<Vec<ServiceRow>> {
-    let mut cfg = anvil::load().map_err(err)?;
-    let id = anvil::services::add(&mut cfg, &kind, name.as_deref(), port, version.as_deref())
-        .map_err(err)?;
-    let meta = anvil::services::set_tags(&mut cfg, &id, &tags)
-        .and_then(|_| anvil::services::set_apps(&mut cfg, &id, &apps));
-    if let Err(e) = meta {
-        let _ = anvil::services::remove(&mut cfg, &id, false);
-        return Err(err(e));
-    }
-    let (job_cfg, job_id) = (anvil::load().map_err(err)?, id.clone());
+    let (job_cfg, id) = edit(|c| {
+        let id = anvil::services::add(c, &kind, name.as_deref(), port, version.as_deref())?;
+        let meta = anvil::services::set_tags(c, &id, &tags)
+            .and_then(|_| anvil::services::set_apps(c, &id, &apps));
+        if let Err(e) = meta {
+            anvil::services::remove(c, &id, false)
+                .map_err(|undo| undo.context(format!("{e:#}; and it couldn't be removed again")))?;
+            return Err(e);
+        }
+        Ok(id)
+    })?;
+    let job_id = id.clone();
     let installed = tauri::async_runtime::spawn_blocking(move || {
         anvil::services::ensure_installed(&job_cfg, &job_id)
     })
     .await
     .map_err(|e| e.to_string())?;
-    // The install can take minutes; pick up changes made meanwhile before saving.
-    let mut cfg = anvil::load().map_err(err)?;
+    // The install can take minutes; the change goes on top of the config as it is now.
     if let Err(e) = installed {
-        let _ = anvil::services::remove(&mut cfg, &id, false);
+        if let Err(undo) = edit(|c| anvil::services::remove(c, &id, false)) {
+            return Err(format!(
+                "{}; and the service couldn't be removed again: {undo}",
+                err(e)
+            ));
+        }
         return Err(err(e));
     }
-    anvil::services::set_enabled(&mut cfg, &id, true).map_err(err)?;
+    let (cfg, ()) = edit(|c| anvil::services::set_enabled(c, &id, true))?;
     let app = handle.state::<App>();
     start_service(&app, &cfg, &id);
     changed(&handle);
@@ -2154,8 +2159,7 @@ fn remove_service(
     // Stop first so the data folder isn't in use when it's deleted.
     stop_service(&app, &id);
     app.service_errors.lock().unwrap().remove(&id);
-    let mut cfg = anvil::load().map_err(err)?;
-    anvil::services::remove(&mut cfg, &id, delete_data).map_err(err)?;
+    edit(|c| anvil::services::remove(c, &id, delete_data))?;
     changed(&handle);
     services(app)
 }
@@ -2360,9 +2364,7 @@ fn apply(
     f: impl FnOnce(&mut Config) -> anyhow::Result<()>,
     reserve: bool,
 ) -> Res<Settings> {
-    let mut cfg = anvil::load().map_err(err)?;
-    f(&mut cfg).map_err(err)?;
-    anvil::save(&cfg).map_err(err)?;
+    let (cfg, ()) = edit(f)?;
     let app = handle.state::<App>();
     if reserve && running(&app) {
         start(&app, &cfg);
@@ -2932,18 +2934,17 @@ fn on_menu(handle: &AppHandle, id: &str) {
         "settings" => open_settings(handle),
         "quit" => handle.exit(0),
         _ => {
-            if let Some(v) = id.strip_prefix("php:")
-                && let Ok(mut cfg) = anvil::load()
-            {
-                let set = anvil::set_default_php(&mut cfg, v);
-                if let Err(e) = set {
-                    *app.error.lock().unwrap() = Some(err(e));
-                } else if running(&app) {
-                    let handle = handle.clone();
-                    std::thread::spawn(move || {
-                        start(&handle.state::<App>(), &cfg);
-                        changed(&handle);
-                    });
+            if let Some(v) = id.strip_prefix("php:") {
+                match anvil::update(|c| anvil::set_default_php(c, v)) {
+                    Err(e) => *app.error.lock().unwrap() = Some(err(e)),
+                    Ok((cfg, ())) if running(&app) => {
+                        let handle = handle.clone();
+                        std::thread::spawn(move || {
+                            start(&handle.state::<App>(), &cfg);
+                            changed(&handle);
+                        });
+                    }
+                    Ok(_) => {}
                 }
             }
         }
@@ -3074,6 +3075,7 @@ fn main() {
                     let state = handle.state::<App>();
                     // What a crashed Anvil left running stops first; then a fresh Anvil
                     // shows only this run's output, as a new terminal would.
+                    anvil::services::migrate_files(&cfg);
                     anvil::apps::kill_all_orphans();
                     anvil::apps::clear_stale_logs();
                     // Log retention now and hourly, off the start's way.

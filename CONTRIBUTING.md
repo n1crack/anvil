@@ -26,6 +26,14 @@ cd app && cargo tauri build      # target/release/bundle/macos/Anvil.app
 build` of the app crate needs `app/ui/dist`, so run `pnpm --dir app/ui build`
 once first.
 
+Settings › About › Credits lists the software Anvil downloads (a hand-kept table,
+`SOFTWARE` in `app/ui/src/settings.ts`: check the license at the source when you
+add or change one) and the libraries compiled into Anvil. `pnpm build` generates
+the second part first (`pnpm credits`, `app/ui/scripts/credits.mjs`): crates from
+`cargo metadata` and npm packages from `pnpm licenses list --prod`, written to
+`app/ui/public/credits.json` and `THIRD_PARTY_NOTICES.txt`, which ship in the app.
+Both files are generated, not committed.
+
 Use `ANVIL_HOME=/tmp/anvil-dev` to keep a development run away from your real
 `~/.anvil`.
 

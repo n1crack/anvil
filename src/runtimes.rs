@@ -124,10 +124,8 @@ pub fn installed(id: &str) -> Vec<String> {
 pub fn available(id: &str) -> Result<Vec<String>> {
     Ok(match id {
         "node" => {
-            let out = Command::new("curl")
-                .args(["-fsSL", "https://nodejs.org/dist/index.json"])
-                .output()?;
-            let list: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)?;
+            let list: Vec<serde_json::Value> =
+                crate::fetch_json("https://nodejs.org/dist/index.json")?;
             let mut majors: Vec<String> = Vec::new();
             for v in list.iter().filter_map(|v| v["version"].as_str()) {
                 let major = v.trim_start_matches('v').split('.').next().unwrap_or("");
@@ -139,10 +137,7 @@ pub fn available(id: &str) -> Result<Vec<String>> {
             majors
         }
         "go" => {
-            let out = Command::new("curl")
-                .args(["-fsSL", "https://go.dev/dl/?mode=json"])
-                .output()?;
-            let list: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)?;
+            let list: Vec<serde_json::Value> = crate::fetch_json("https://go.dev/dl/?mode=json")?;
             list.iter()
                 .filter_map(|v| v["version"].as_str())
                 .map(|v| v.trim_start_matches("go").to_string())
@@ -205,10 +200,8 @@ pub fn install(id: &str, version: &str) -> Result<()> {
     let arm = caddy_plat.ends_with("arm64");
     match id {
         "node" => {
-            let out = Command::new("curl")
-                .args(["-fsSL", "https://nodejs.org/dist/index.json"])
-                .output()?;
-            let list: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)?;
+            let list: Vec<serde_json::Value> =
+                crate::fetch_json("https://nodejs.org/dist/index.json")?;
             let full = list
                 .iter()
                 .filter_map(|v| v["version"].as_str())

@@ -236,10 +236,22 @@ pub fn home() -> PathBuf {
 /// The config, or the defaults when there is none yet. Any other read error is
 /// reported: treating it as "no config" would let the next save wipe it.
 pub fn load() -> Result<Config> {
+    let (cfg, migrated) = read()?;
+    if !migrated {
+        return Ok(cfg);
+    }
+    // The migration is a change like any other: saved under the lock.
+    update(|_| Ok(()))?;
+    Ok(read()?.0)
+}
+
+/// The config as on disk, migrated in memory; `true` when the migration changed it.
+fn read() -> Result<(Config, bool)> {
     match fs::read_to_string(home().join("config.toml")) {
         Ok(s) => {
             let mut cfg: Config = toml::from_str(&s).context("config.toml is invalid")?;
-            if cfg.https_default.is_none() {
+            let migrated = cfg.https_default.is_none();
+            if migrated {
                 // Every site used to be HTTPS: the ones there now keep it, new ones get HTTP.
                 for site in sites(&cfg) {
                     cfg.sites
@@ -249,22 +261,64 @@ pub fn load() -> Result<Config> {
                         .get_or_insert(true);
                 }
                 cfg.https_default = Some(false);
-                save(&cfg)?;
             }
-            Ok(cfg)
+            Ok((cfg, migrated))
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((Config::default(), false)),
         Err(e) => Err(e).context("couldn't read config.toml"),
     }
 }
 
-/// Write the config atomically: readers (the app, the CLI) never see a half-written file.
-pub fn save(cfg: &Config) -> Result<()> {
+/// Load, change and save the config with no other change in between: one lock for
+/// the threads of this process, and an advisory lock on `config.lock` for the other
+/// process (the CLI next to the app). Returns the config as saved, and what `f` returned.
+///
+/// `f` must not call `update` (or anything that does, such as `php_install`): the
+/// locks aren't reentrant. Keep it short; long work (downloads) goes before or after.
+pub fn update<T>(f: impl FnOnce(&mut Config) -> Result<T>) -> Result<(Config, T)> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     fs::create_dir_all(home())?;
-    let tmp = home().join(format!("config.toml.{}.tmp", std::process::id()));
-    fs::write(&tmp, toml::to_string_pretty(cfg)?)?;
-    fs::rename(&tmp, home().join("config.toml"))?;
+    let file = fs::File::create(home().join("config.lock")).context("couldn't open config.lock")?;
+    file.lock().context("couldn't lock config.lock")?;
+    let (mut cfg, migrated) = read()?;
+    if migrated {
+        // Saved before `f`, so a `load` inside it sees the migrated file.
+        save(&cfg)?;
+    }
+    let out = f(&mut cfg)?;
+    // ponytail: most core setters save themselves too, so this can write twice; harmless.
+    save(&cfg)?;
+    Ok((cfg, out))
+}
+
+/// Write the config atomically: readers (the app, the CLI) never see a half-written
+/// file. Each write gets its own temp file, so saves from two threads can't clash.
+/// A change based on what's there goes through `update`, which holds the lock.
+pub fn save(cfg: &Config) -> Result<()> {
+    let home = home();
+    fs::create_dir_all(&home)?;
+    let mut tmp = tempfile::Builder::new()
+        .prefix("config.toml.")
+        .suffix(".tmp")
+        .tempfile_in(&home)?;
+    use std::io::Write;
+    tmp.write_all(toml::to_string_pretty(cfg)?.as_bytes())?;
+    tmp.persist(home.join("config.toml"))
+        .context("couldn't save config.toml")?;
     Ok(())
+}
+
+/// Six hex digits of a hash that stays the same from run to run and release to
+/// release (std's `DefaultHasher` makes no such promise): djb2.
+pub(crate) fn stable_hash(s: &str) -> u32 {
+    s.bytes()
+        .fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b))
+}
+
+/// `stable_hash` as six hex digits, for a name that must differ from a clashing one.
+pub(crate) fn short_hash(s: &str) -> String {
+    format!("{:06x}", stable_hash(s) & 0xff_ffff)
 }
 
 pub fn site_name(s: &str) -> String {
@@ -299,21 +353,11 @@ pub struct HiddenSite {
 
 /// The parked folders whose names are in `cfg.hidden`, for the list's "Show Hidden Applications".
 pub fn hidden_sites(cfg: &Config) -> Vec<HiddenSite> {
-    let mut found = BTreeMap::new();
-    for dir in &cfg.paths {
-        let Ok(entries) = fs::read_dir(dir) else {
-            continue;
-        };
-        for e in entries.flatten() {
-            let name = site_name(&e.file_name().to_string_lossy());
-            if e.path().is_dir() && !name.starts_with('.') && cfg.hidden.contains(&name) {
-                found.insert(name, e.path());
-            }
-        }
-    }
-    found
+    parked(cfg)
+        .0
         .into_iter()
-        .map(|(name, path)| {
+        .filter(|(name, _)| cfg.hidden.contains(name))
+        .map(|(name, (path, _))| {
             let kind = cfg
                 .sites
                 .get(&name)
@@ -324,22 +368,55 @@ pub fn hidden_sites(cfg: &Config) -> Vec<HiddenSite> {
         .collect()
 }
 
-pub fn sites(cfg: &Config) -> Vec<Site> {
-    let mut found = BTreeMap::new();
+/// The parked folders by site name, hidden ones too, and a line for each one whose name another folder
+/// already has (`My App` and `my-app`, or `shop` in two parked folders). The folder
+/// whose name is the site name as it is keeps it, else the one with the first path;
+/// the others get `-<hash of their path>`, so a name doesn't depend on `read_dir` order.
+fn parked(cfg: &Config) -> (BTreeMap<String, (PathBuf, PathBuf)>, Vec<String>) {
+    let mut all: Vec<(String, bool, PathBuf, PathBuf)> = vec![];
     for dir in &cfg.paths {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
         };
         for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if e.path().is_dir()
-                && !name.starts_with('.')
-                && !cfg.hidden.contains(&site_name(&name))
-            {
-                found.insert(site_name(&name), (e.path(), Some(dir.clone())));
+            let folder = e.file_name().to_string_lossy().into_owned();
+            if e.path().is_dir() && !folder.starts_with('.') {
+                let name = site_name(&folder);
+                all.push((name.clone(), folder != name, e.path(), dir.clone()));
             }
         }
     }
+    // Keepers first: the exact name, then by path.
+    all.sort();
+    let (mut found, mut clashes) = (BTreeMap::new(), vec![]);
+    for (name, _, path, dir) in all {
+        let name = if found.contains_key(&name) {
+            let unique = format!("{name}-{}", short_hash(&path.to_string_lossy()));
+            clashes.push(format!(
+                "{} is served as {unique}: {name} is another folder's name. Rename the folder to choose.",
+                path.display()
+            ));
+            unique
+        } else {
+            name
+        };
+        found.insert(name, (path, dir));
+    }
+    (found, clashes)
+}
+
+/// What `sites` does about parked folders that would get the same name (see `parked`).
+pub fn site_name_clashes(cfg: &Config) -> Vec<String> {
+    parked(cfg).1
+}
+
+pub fn sites(cfg: &Config) -> Vec<Site> {
+    let mut found: BTreeMap<String, (PathBuf, Option<PathBuf>)> = parked(cfg)
+        .0
+        .into_iter()
+        .filter(|(name, _)| !cfg.hidden.contains(name))
+        .map(|(name, (path, dir))| (name, (path, Some(dir))))
+        .collect();
     for (name, path) in &cfg.links {
         found.insert(name.clone(), (path.clone(), None));
     }
@@ -495,11 +572,25 @@ pub fn run(cmd: &mut Command) -> Result<()> {
 }
 
 pub(crate) fn fetch_text(url: &str) -> Result<String> {
-    let out = Command::new("curl").args(["-fsSL", url]).output()?;
+    let out = Command::new("curl")
+        .args(["-fsSL", url])
+        .output()
+        .context("couldn't run curl")?;
     if !out.status.success() {
-        bail!("couldn't fetch {url}");
+        let why = String::from_utf8_lossy(&out.stderr);
+        let why = why.trim().trim_start_matches("curl: ");
+        bail!(
+            "couldn't fetch {url}: {}",
+            if why.is_empty() { "no answer" } else { why }
+        );
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// `fetch_text` of a JSON document.
+pub(crate) fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T> {
+    serde_json::from_str(&fetch_text(url)?)
+        .with_context(|| format!("{url} sent something unreadable"))
 }
 
 /// The digest for `file` in a checksums listing: the hex word on the line naming
@@ -662,11 +753,7 @@ pub fn installed_php() -> Vec<String> {
 
 pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     let (plat, _) = platform()?;
-    let out = Command::new("curl")
-        .args(["-fsSL", &format!("{PHP_INDEX}?format=json")])
-        .output()?;
-    let list: Vec<serde_json::Value> =
-        serde_json::from_slice(&out.stdout).context("bad PHP index")?;
+    let list: Vec<serde_json::Value> = fetch_json(&format!("{PHP_INDEX}?format=json"))?;
     let prefix = format!("php-{minor}.");
     let suffix = format!("-fpm-{plat}.tar.gz");
     let patch = list
@@ -705,11 +792,11 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
         Ok(())
     })?;
     // The download took a while; save on top of the config as it is now.
-    *cfg = load()?;
-    if cfg.php.is_none() {
-        cfg.php = Some(minor.into());
-        save(cfg)?;
-    }
+    *cfg = update(|c| {
+        c.php.get_or_insert_with(|| minor.into());
+        Ok(())
+    })?
+    .0;
     println!("PHP {full} installed in {}", dir.display());
     Ok(())
 }
@@ -1944,6 +2031,51 @@ pub fn merge_path(current: &str, login: &str) -> String {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+
+    #[test]
+    fn a_failed_download_says_where_and_why() {
+        // Port 1 on loopback: nothing listens, so curl fails without the network.
+        let e = format!(
+            "{:#}",
+            fetch_json::<serde_json::Value>("http://127.0.0.1:1/index.json").unwrap_err()
+        );
+        assert!(
+            e.starts_with("couldn't fetch http://127.0.0.1:1/index.json: "),
+            "{e}"
+        );
+        assert!(!e.contains("EOF"), "{e}");
+    }
+
+    #[test]
+    fn folders_with_one_name_each_get_their_own() {
+        let root = std::env::temp_dir().join(format!("anvil-names-{}", std::process::id()));
+        let (a, b) = (root.join("a"), root.join("b"));
+        for d in [
+            a.join("My App"),
+            a.join("my-app"),
+            a.join("shop"),
+            b.join("shop"),
+        ] {
+            fs::create_dir_all(d).unwrap();
+        }
+        let mut cfg = Config {
+            paths: vec![b.clone(), a.clone()],
+            ..Default::default()
+        };
+        let (found, clashes) = parked(&cfg);
+        // The folder named like its site keeps the name; the first path for equal names.
+        assert_eq!(found["my-app"].0, a.join("my-app"));
+        assert_eq!(found["shop"].0, a.join("shop"));
+        let other = format!("my-app-{}", short_hash(&a.join("My App").to_string_lossy()));
+        assert_eq!(found[&other].0, a.join("My App"));
+        assert_eq!(found.len(), 4);
+        assert_eq!(clashes.len(), 2);
+        assert!(clashes.iter().any(|c| c.contains(&other)), "{clashes:?}");
+        // Another order of parked folders changes nothing.
+        cfg.paths.reverse();
+        assert_eq!(parked(&cfg).0, found);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn a_late_stop_keeps_the_new_starts_pid_file() {

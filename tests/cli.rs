@@ -414,7 +414,7 @@ fn start_stops_children_and_cleans_up_orphans() {
         "children outlived anvil start"
     );
     assert!(!env.home.join("run/pids").exists());
-    assert!(!env.home.join("run/cache.pids").exists());
+    assert!(!env.home.join("run/svc-cache.pids").exists());
 
     // SIGKILL leaves the children behind; the next start ends them.
     for f in [REDIS, "bin/caddy"] {
