@@ -1411,6 +1411,28 @@ impl Server {
             .collect()
     }
 
+    /// Why the server is down when one of its children ended on its own (a crash, a bad
+    /// Caddyfile, a port taken). That child is reaped and dropped from the list, so
+    /// stopping the rest never signals its pid again.
+    pub fn exited(&mut self) -> Option<String> {
+        let i = self
+            .children
+            .iter_mut()
+            .position(|c| !matches!(c.try_wait(), Ok(None)))?;
+        let mut child = self.children.remove(i);
+        let label = self.labels.remove(i);
+        let how = match child.try_wait() {
+            Ok(Some(st)) => format!(" ({st})"),
+            _ => String::new(),
+        };
+        let log = if label == "Caddy" {
+            format!(" — see {}", home().join("log").join("caddy.log").display())
+        } else {
+            String::new()
+        };
+        Some(format!("{label} stopped unexpectedly{how}{log}"))
+    }
+
     /// Blocks until the web server exits.
     pub fn wait(&mut self) -> Result<()> {
         self.children.last_mut().unwrap().wait()?;
@@ -1438,6 +1460,37 @@ impl Drop for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_child_that_ends_is_noticed_and_dropped() {
+        let spawn = |cmd: &str| Command::new("/bin/sh").args(["-c", cmd]).spawn().unwrap();
+        let mut server = Server {
+            children: vec![spawn("sleep 30"), spawn("exit 3")],
+            labels: vec!["PHP 8.4 FPM".into(), "Caddy".into()],
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let why = loop {
+            if let Some(why) = server.exited() {
+                break why;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the exit went unnoticed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert!(
+            why.starts_with("Caddy stopped unexpectedly (exit status: 3)"),
+            "{why}"
+        );
+        assert_eq!(server.labels, ["PHP 8.4 FPM"]);
+        assert_eq!(server.exited(), None);
+        // Stopped here, not through `stop`: that would remove the real run/pids.
+        for mut c in server.children.drain(..) {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
 
     #[test]
     fn domain_suffixes() {

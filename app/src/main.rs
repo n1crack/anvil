@@ -138,8 +138,21 @@ fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
+/// Whether Caddy and PHP-FPM serve. One of them ending on its own takes the server
+/// down: the rest stops in the background, and why shows as a failed start's error does.
 fn running(app: &App) -> bool {
-    app.server.lock().unwrap().is_some()
+    let mut server = app.server.lock().unwrap();
+    let Some(exited) = server.as_mut().map(Server::exited) else {
+        return false;
+    };
+    let Some(why) = exited else {
+        return true;
+    };
+    let dead = server.take();
+    drop(server);
+    *app.error.lock().unwrap() = Some(why);
+    std::thread::spawn(move || drop(dead));
+    false
 }
 
 fn snapshot(app: &App) -> Res<Snapshot> {
@@ -3042,6 +3055,19 @@ fn main() {
                         }
                     });
                     start(&state, &cfg);
+                    // A crashed Caddy or PHP-FPM shows in the menu bar and window within 2 s.
+                    let watch = handle.clone();
+                    std::thread::spawn(move || {
+                        let mut was = true;
+                        loop {
+                            std::thread::sleep(std::time::Duration::from_secs(2));
+                            let now = running(&watch.state::<App>());
+                            if was && !now {
+                                changed(&watch);
+                            }
+                            was = now;
+                        }
+                    });
                     for id in anvil::services::enabled(&cfg) {
                         start_service(&state, &cfg, &id);
                     }
