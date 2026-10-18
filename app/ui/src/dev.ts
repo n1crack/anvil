@@ -436,6 +436,16 @@ export function line(x: Pick<Item, "key" | "name" | "color">, text: string, s: S
   return d;
 }
 
+/** The oldest lines over `max` out in one removal, so the pane changes once, not once a line. */
+export function trimLines(out: HTMLElement, max: number) {
+  const over = out.childElementCount - max;
+  if (over <= 0) return;
+  const r = document.createRange();
+  r.setStartBefore(out.firstElementChild!);
+  r.setEndBefore(out.children[over]);
+  r.deleteContents();
+}
+
 /** New output appended as it comes, nothing drawn twice. One process's unfinished last
  * line (a progress bar redrawn with \r) is drawn live; All shows a line once it ends. */
 function append(v: View, x: Item, text: string, width: number) {
@@ -454,7 +464,7 @@ function append(v: View, x: Item, text: string, width: number) {
     out.append(live);
   }
   term.out.append(out);
-  while (term.out.childElementCount > MAX_LINES) term.out.firstElementChild.remove();
+  trimLines(term.out, MAX_LINES);
   term.follow();
   syncEmpty();
 }

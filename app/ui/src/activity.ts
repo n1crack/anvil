@@ -156,6 +156,9 @@ export async function rowMenu(r) {
   if (items.length) (await M.Menu.new({ items: await Promise.all(items) })).popup();
 }
 
+const cpuText = (r) => (r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`);
+const memText = (r) => (r.memory == null ? "" : mb(r.memory));
+
 export function row(r, inner?: boolean) {
   const tr = document.createElement("tr");
   tr.className = `act-row ${r.state}${inner ? " inner" : ""}`;
@@ -186,14 +189,7 @@ export function row(r, inner?: boolean) {
     d.textContent = r.detail;
     st.append(" ", d);
   }
-  tr.append(
-    name,
-    td(r.port, "num"),
-    td(r.pid, "num"),
-    td(r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`, "num"),
-    td(r.memory == null ? "" : mb(r.memory), "num"),
-    st,
-  );
+  tr.append(name, td(r.port, "num"), td(r.pid, "num"), td(cpuText(r), "num"), td(memText(r), "num"), st);
   return tr;
 }
 
@@ -205,9 +201,10 @@ export function render() {
   const rows = tabRows(data);
   const keys = Object.values(rows).flatMap((rs) => rs.map((r) => r.key));
   if (selected && !keys.includes(selected)) select(null);
-  // Redraw only on a change, so hover and focus survive the polling.
-  const now = JSON.stringify([data, selected, [...busy], tab]);
-  if (now === drawn) return;
+  // Redraw only on a change, so hover and focus survive the polling; usage changes all
+  // the time, so it is left out and written into its cells.
+  const now = JSON.stringify([data, selected, [...busy], tab], (k, v) => (k === "cpu" || k === "memory" ? undefined : v));
+  if (now === drawn) return usage(rows[tab]);
   drawn = now;
   for (const b of document.querySelectorAll("#tabs [role=tab]") as NodeListOf<HTMLElement>) {
     b.setAttribute("aria-selected", String(b.dataset.tab === tab));
@@ -226,6 +223,18 @@ export function render() {
   $("#rows").replaceChildren(...out);
   $("#empty").hidden = rows[tab].length > 0;
   $(".act-table table").hidden = !rows[tab].length;
+}
+
+/** CPU and memory into the drawn rows, only the cells whose text changed. */
+function usage(rows) {
+  const trs = new Map([...document.querySelectorAll<HTMLTableRowElement>("#rows tr.act-row")].map((tr) => [tr.dataset.key, tr]));
+  for (const r of rows) {
+    const tr = trs.get(r.key);
+    if (!tr) continue;
+    const [cpu, mem] = [tr.cells[3], tr.cells[4]];
+    if (cpu.textContent !== cpuText(r)) cpu.textContent = cpuText(r);
+    if (mem.textContent !== memText(r)) mem.textContent = memText(r);
+  }
 }
 
 /** Show a tab; the log of the selected row stays open whichever tab is shown. */
@@ -285,10 +294,31 @@ export async function tail() {
     logStyle = undefined;
     replace = false;
   }
-  // ponytail: the log grows while it is open; drop old lines if a chatty process makes it slow.
-  if (page.text) log.append(colorize(clean(page.text, true), (logStyle ??= sgr())));
+  if (page.text) {
+    // A page at a time, so the oldest can go a page at a time.
+    const p = document.createElement("span");
+    p.append(colorize(clean(page.text, true), (logStyle ??= sgr())));
+    (p as any).lines = page.text.split("\n").length - 1;
+    log.append(p);
+    trimLog(log);
+  }
   logFrom = page.end_offset;
   if (atEnd) log.scrollTop = log.scrollHeight;
+}
+
+export const LOG_LINES = 3000; // about this many newest lines stay in the log
+
+/** Whole pages out, the oldest first, while the rest still has LOG_LINES: in one removal. */
+export function trimLog(log: HTMLElement) {
+  const pages = [...log.children] as any[];
+  let left = pages.reduce((n, p) => n + (p.lines ?? 0), 0);
+  let k = 0;
+  while (k < pages.length - 1 && left - pages[k].lines >= LOG_LINES) left -= pages[k++].lines;
+  if (!k) return;
+  const r = document.createRange();
+  r.setStartBefore(pages[0]);
+  r.setEndBefore(pages[k]);
+  r.deleteContents();
 }
 
 /** Show one row with its log, on its tab: a service page's log button asks for it, as
