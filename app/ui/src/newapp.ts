@@ -76,7 +76,7 @@ if (!TEMPLATES.some((t) => t[0] === newKind)) newKind = "laravel";
 
 const list = () => $("#new-kinds");
 /** The templates shown, past the search. */
-const items = (): HTMLElement[] => [...list().querySelectorAll<HTMLElement>(".kind-item:not([hidden])")];
+const items = (): HTMLElement[] => [...list().querySelectorAll(".kind-item:not([hidden])")] as HTMLElement[];
 
 function pickKind(id: string) {
   newKind = id;
@@ -124,11 +124,11 @@ function drawKinds() {
  * hides, and a hidden choice moves to the first one shown. */
 function filterKinds() {
   const q = $("#new-search").value.trim().toLowerCase();
-  for (const it of list().querySelectorAll<HTMLElement>(".kind-item")) {
+  for (const it of list().querySelectorAll(".kind-item")) {
     const t = TEMPLATES.find((x) => x[0] === it.dataset.kind)!;
     it.hidden = !!q && !`${t[1]} ${t[2]}`.toLowerCase().includes(q);
   }
-  for (const g of list().querySelectorAll<HTMLElement>(".kind-group")) g.hidden = !g.querySelector(".kind-item:not([hidden])");
+  for (const g of list().querySelectorAll(".kind-group")) g.hidden = !g.querySelector(".kind-item:not([hidden])");
   const shown = items();
   $(".kind-none", list()).hidden = shown.length > 0;
   if (shown.length && !shown.some((it) => it.dataset.kind === newKind)) pickKind(shown[0].dataset.kind!);
@@ -255,6 +255,28 @@ function drawOptions() {
   }
   $("#new-opts").replaceChildren(fields, checks);
 }
+
+// Options open and close by height and fade; reduced motion just toggles.
+$("#new-options summary").onclick = (e: MouseEvent) => {
+  const details = $("#new-options");
+  const body = $("#new-opts");
+  if (!body.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  e.preventDefault();
+  if (body.getAnimations().length) return;
+  const opening = !details.open;
+  details.open = true;
+  const h = `${body.offsetHeight}px`;
+  body.style.overflow = "hidden";
+  const run = body.animate(
+    { height: opening ? ["0px", h] : [h, "0px"], opacity: opening ? [0, 1] : [1, 0] },
+    { duration: 160, easing: "ease-out", fill: "forwards" },
+  );
+  run.onfinish = () => {
+    details.open = opening;
+    body.style.overflow = "";
+    run.cancel(); // held at its end until closed, so nothing flashes back
+  };
+};
 
 /* ---------- The sheet ---------- */
 
