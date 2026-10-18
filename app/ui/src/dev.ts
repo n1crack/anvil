@@ -39,7 +39,7 @@ const exitText = (c: CommandChip) => (c.exit?.code == null ? "Ended by a signal"
 const box = el("div", "dev");
 const bar = el("div", "dev-bar");
 const main = el("div", "dev-main");
-const list = el("div", "group procs-list dev-list");
+const list = el("div", "dev-list");
 list.tabIndex = 0;
 list.setAttribute("role", "listbox");
 list.setAttribute("aria-label", "Processes");
@@ -326,17 +326,6 @@ function devButton(name: string) {
 
 function drawBar(name: string) {
   bar.replaceChildren();
-  // Configuring: Table | JSON sits on the toolbar's left, on Configure's line.
-  if (configuring === name) bar.append(modeSeg, el("span", "spacer"));
-  const cmds = procCache.get(name)?.commands ?? [];
-  if (cmds.length && configuring !== name) {
-    const run = barBtn("dev-run", icon("run"), "Run");
-    run.append(el("span", "dev-chevron", "▾"));
-    run.title = "Run one of the app’s scripts";
-    run.setAttribute("aria-haspopup", "menu");
-    run.onclick = () => runMenu(name, run);
-    bar.append(run);
-  }
   const cfg = barBtn("dev-configure", icon("configure"), "Configure");
   cfg.setAttribute("aria-pressed", String(configuring === name));
   cfg.title = "Choose the processes Dev runs and their commands";
@@ -347,9 +336,32 @@ function drawBar(name: string) {
     drawDev(name);
     devTick();
   };
+  // Configure on the left (with Table | JSON while configuring), Start or Stop on the right.
   bar.append(cfg);
+  if (configuring === name) bar.append(modeSeg);
+  bar.append(el("span", "spacer"));
   const all = configuring === name ? null : devButton(name);
   if (all) bar.append(all);
+}
+
+/** Below the processes, a small box of their own for one-off scripts: Run ▾ and each
+ * run with how it went. */
+function commandsBox(name: string, runs: Item[]) {
+  const cmds = procCache.get(name)?.commands ?? [];
+  if (!cmds.length && !runs.length) return null;
+  const card = el("div", "group procs-list dev-card dev-cmds");
+  const head = el("div", "dev-cmds-head");
+  head.append(el("span", null, "Commands"));
+  if (cmds.length) {
+    const run = barBtn("dev-run", icon("run"), "Run");
+    run.append(el("span", "dev-chevron", "▾"));
+    run.title = "Run one of the app’s scripts";
+    run.setAttribute("aria-haspopup", "menu");
+    run.onclick = () => runMenu(name, run);
+    head.append(run);
+  }
+  card.append(head, ...runs.map((x) => entry(name, x)));
+  return card;
 }
 
 /** Called whenever the app's processes are drawn, and when the tab is shown. */
@@ -393,12 +405,14 @@ export function drawDev(name: string) {
 
   const running = procs.filter((x) => x.running).length;
   const anyBad = procs.some((x) => x.crashed);
-  list.replaceChildren(
+  const procCard = el("div", "group procs-list dev-card");
+  procCard.append(
     entry(name, { key: "all", name: "All", color: "", running: !!running, crashed: anyBad }),
     ...procs.map((x) => entry(name, x)),
   );
-  if (!procs.length) list.append(el("p", "dev-none", "No processes yet. Configure adds one."));
-  if (runs.length) list.append(el("div", "dev-divider"), ...runs.map((x) => entry(name, x)));
+  if (!procs.length) procCard.append(el("p", "dev-none", "No processes yet. Configure adds one."));
+  const cmdCard = commandsBox(name, runs);
+  list.replaceChildren(procCard, ...(cmdCard ? [cmdCard] : []));
 
   head.replaceChildren();
   const actions = el("span", "proc-actions");

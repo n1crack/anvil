@@ -998,9 +998,16 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-all:disabled { color: var(--muted); opacity: 1; }
 .dev-main { display: grid; grid-template-columns: var(--list-w, 168px) 12px minmax(0, 1fr); align-items: start; }
 .dev-main[hidden], .dev-conf[hidden] { display: none; }
-.dev-list { max-width: none; overflow: hidden; outline: none; }
-.dev-list:focus-visible { box-shadow: 0 0 0 2px var(--selected); }
-.dev-list > .dev-divider { height: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.dev-list { max-width: none; outline: none; }
+/* Focused, the chosen entry says so; the two boxes get no frame around them. */
+.dev-list:focus-visible .dev-item[aria-selected="true"] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--text) 45%, transparent); }
+/* The processes and, below in a box of their own, the one-off commands. */
+.dev-list { display: flex; flex-direction: column; gap: 10px; }
+.dev-card { max-width: none; overflow: hidden; }
+.dev-cmds-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; padding: 2px 4px 2px 12px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.dev-cmds-head .dev-run { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 22px; padding: 0 8px; font-size: 12px; font-weight: 400; white-space: nowrap; }
+.dev-cmds-head .dev-chevron { font-size: 10px; }
+.dev-cmds-head .dev-run svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .dev-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; font-size: 12px; }
 /* Everything under "All" is one of its parts: a small branch arrow in the indent
  * makes All read as the parent. */

@@ -143,8 +143,10 @@ describe("overview", () => {
   test("the header says what runs and opens Dev; Dev's Start leaves out what Dev start does", async () => {
     await select("vuefinder");
     expect($("#site [data-all]")).toBeNull();
-    // Something in Dev start is stopped: Start (green), right of Configure.
-    expect($$(".dev-bar button").map((b) => b.className)).toEqual(["dev-run", "dev-configure", "dev-all dev-stop"]);
+    // Configure on the left, Start or Stop on the right; Run lives with the commands.
+    expect($$(".dev-bar button").map((b) => b.className)).toEqual(["dev-configure", "dev-all dev-stop"]);
+    expect($(".dev-bar .spacer")).not.toBeNull();
+    expect($(".dev-list .dev-cmds .dev-cmds-head .dev-run")).not.toBeNull();
     const ov = w.mockOv.vuefinder;
     const before = structuredClone(ov.rows);
     for (const r of ov.rows) r.running = false;
@@ -208,7 +210,9 @@ describe("dev", () => {
       "dev-name pc1",
       "dev-name pc2",
     ]);
-    expect($(".dev-list .dev-divider")).not.toBeNull();
+    // The runs sit in a box of their own below the processes.
+    expect($$(".dev-list > .dev-card").length).toBe(2);
+    expect($(".dev-cmds").contains(item("once:test"))).toBe(true);
     // A run's status sits in the dot column: a spinner, then ✓ or ✕ (the code in its tooltip).
     expect(item("once:test").querySelector(".dev-status .spin-dot")).not.toBeNull();
     expect(item("once:preview").firstElementChild!.className).toBe("dev-status ok");
@@ -305,7 +309,7 @@ describe("dev", () => {
   });
 
   test("Run ▾ lists the one-off scripts only, and runs one after a confirm", async () => {
-    $(".dev-bar .dev-run").click();
+    $(".dev-cmds .dev-run").click();
     const names = $$(".dev-run-menu .dev-run-name").map((n) => n.textContent);
     expect(names).toEqual(w.mockOv.vuefinder.commands.map((c) => c.name));
     expect(names).not.toContain("docs:dev");
