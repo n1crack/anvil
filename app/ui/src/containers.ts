@@ -1,7 +1,8 @@
 import type { Container } from "./types";
 import { $, M, el, invoke, mode, selected, showError, showTab, snap, tab } from "./app";
 import { termOut } from "./console";
-import { COLORS, barBtn, icon, line } from "./dev";
+import { COLORS, barBtn, icon, line, trimLines } from "./dev";
+import { shown } from "./live";
 import { late } from "./late";
 import { DOT, containerRun, containerState, loadProcs, procBtn, procBusy, procCache, procLoading } from "./processes";
 import { type Sgr, sgr } from "./term";
@@ -322,7 +323,7 @@ export async function containersTick() {
     out.append(line(l.x, l.text, v.styles.get(l.x.key)!, width));
   }
   term.out.append(out);
-  while (term.out.childElementCount > MAX_LINES) term.out.firstElementChild.remove();
+  term.keep(() => trimLines(term.out, MAX_LINES));
   term.follow();
   syncEmpty();
 }
@@ -342,13 +343,13 @@ late.containersTab = () => {
 // they start over and the lines already on screen (by time) are skipped.
 let ticks = 0;
 setInterval(() => {
-  const shown = !document.hidden && mode === "apps" && !!selected && tab === "containers";
-  if (following && (!shown || following !== selected)) {
+  const visible = shown() && mode === "apps" && !!selected && tab === "containers";
+  if (following && (!visible || following !== selected)) {
     following = "";
     view?.seq.clear();
     invoke("container_logs_stop").catch(() => {});
   }
-  if (!shown || !selected) return;
+  if (!visible || !selected) return;
   if (view?.site === selected) containersTick();
   if (++ticks % 2 === 0 && !procLoading.has(selected)) loadProcs(selected);
 }, 1000);
