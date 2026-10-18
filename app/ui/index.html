@@ -173,7 +173,14 @@
 
   <dialog id="new-app" class="sheet new-sheet" aria-labelledby="new-title">
     <form method="dialog" id="new-form">
-      <h2 id="new-title">New application</h2>
+      <div class="new-top">
+        <h2 id="new-title">New application</h2>
+        <label class="new-search">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3 3"/></svg>
+          <span class="visually-hidden">Search templates</span>
+          <input id="new-search" placeholder="Search" autocomplete="off" spellcheck="false" aria-controls="new-kinds">
+        </label>
+      </div>
       <div id="new-kinds" class="kind-list" role="listbox" tabindex="0" aria-label="Type"></div>
       <label class="field">
         <span>Name</span>

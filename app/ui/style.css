@@ -1905,6 +1905,31 @@ kbd {
 .new-sheet[open] { display: flex; flex-direction: column; }
 .new-sheet [hidden] { display: none !important; }
 #new-form { display: flex; flex-direction: column; min-height: 0; }
+.new-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.new-top h2 { margin: 0; }
+.new-search { position: relative; display: flex; align-items: center; width: 180px; }
+.new-search svg {
+  position: absolute;
+  left: 8px;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+.new-search input {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px 0 26px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-s);
+  background: var(--steel-raised);
+  font-size: 12px;
+}
+.new-search input::placeholder { color: var(--muted); }
+.kind-none { margin: 0; padding: 12px 8px; color: var(--muted); }
 .kind-list {
   display: flex;
   flex-direction: column;

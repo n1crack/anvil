@@ -75,12 +75,13 @@ if (!TEMPLATES.some((t) => t[0] === newKind)) newKind = "laravel";
 /* ---------- Template list ---------- */
 
 const list = () => $("#new-kinds");
-const items = (): HTMLElement[] => [...list().querySelectorAll(".kind-item")];
+/** The templates shown, past the search. */
+const items = (): HTMLElement[] => [...list().querySelectorAll<HTMLElement>(".kind-item:not([hidden])")];
 
 function pickKind(id: string) {
   newKind = id;
   localStorage.setItem("newKind", id);
-  for (const it of items()) it.setAttribute("aria-selected", String(it.dataset.kind === id));
+  for (const it of list().querySelectorAll(".kind-item")) it.setAttribute("aria-selected", String(it.dataset.kind === id));
   const cur = items().find((it) => it.dataset.kind === id);
   if (cur) list().setAttribute("aria-activedescendant", cur.id);
   cur?.scrollIntoView?.({ block: "nearest" });
@@ -116,7 +117,47 @@ function drawKinds() {
     }
     box.append(group);
   }
+  box.append(el("p", "kind-none", "No templates match"));
 }
+
+/** Only the templates whose name or line has the search in it; a group with none
+ * hides, and a hidden choice moves to the first one shown. */
+function filterKinds() {
+  const q = $("#new-search").value.trim().toLowerCase();
+  for (const it of list().querySelectorAll<HTMLElement>(".kind-item")) {
+    const t = TEMPLATES.find((x) => x[0] === it.dataset.kind)!;
+    it.hidden = !!q && !`${t[1]} ${t[2]}`.toLowerCase().includes(q);
+  }
+  for (const g of list().querySelectorAll<HTMLElement>(".kind-group")) g.hidden = !g.querySelector(".kind-item:not([hidden])");
+  const shown = items();
+  $(".kind-none", list()).hidden = shown.length > 0;
+  if (shown.length && !shown.some((it) => it.dataset.kind === newKind)) pickKind(shown[0].dataset.kind!);
+}
+
+$("#new-search").oninput = filterKinds;
+// Up and down from the search walk the templates shown; Enter goes on as in the list.
+$("#new-search").onkeydown = (e: KeyboardEvent) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  e.preventDefault();
+  const all = items();
+  const i = all.findIndex((it) => it.dataset.kind === newKind);
+  const next = all[i + (e.key === "ArrowDown" ? 1 : -1)];
+  if (next) pickKind(next.dataset.kind!);
+};
+// Esc clears the search first, then closes.
+$("#new-app").addEventListener(
+  "keydown",
+  (e: KeyboardEvent) => {
+    const search = $("#new-search");
+    if (e.key !== "Escape" || !search.value || $("#new-form").hidden) return;
+    e.preventDefault();
+    e.stopPropagation();
+    search.value = "";
+    filterKinds();
+    search.focus();
+  },
+  true,
+);
 
 /** The option a key moves to: left/right along the list, up/down to the nearest
  * one in the row above or below (in list order where there is no layout). */
@@ -138,11 +179,12 @@ function neighbour(cur: HTMLElement, key: string) {
 $("#new-kinds").onkeydown = (e: KeyboardEvent) => {
   if (e.key === "Enter") {
     e.preventDefault();
-    return $("#new-form").requestSubmit();
+    return void (items().length && $("#new-form").requestSubmit());
   }
   if (!e.key.startsWith("Arrow")) return;
   e.preventDefault();
   const cur = items().find((it) => it.dataset.kind === newKind) ?? items()[0];
+  if (!cur) return;
   const next = neighbour(cur, e.key);
   if (next) pickKind(next.dataset.kind!);
 };
@@ -221,6 +263,8 @@ export function openNewApp() {
   // Closed while creating: back to its progress.
   if (job && !job.end) return dlg.showModal();
   drawKinds();
+  $("#new-search").value = "";
+  filterKinds();
   pickKind(newKind);
   const parent = $("#new-parent");
   parent.replaceChildren();
@@ -243,7 +287,7 @@ export function openNewApp() {
   $("#new-error").hidden = true;
   showForm(true);
   dlg.showModal();
-  name.focus();
+  $("#new-search").focus();
 }
 
 /** "Its address: my-app.test", from what is typed (the placeholder until then). */
@@ -269,7 +313,7 @@ $("#new-form").onsubmit = (e) => {
   const name = $("#new-name").value.trim();
   const parent = $("#new-parent").value;
   if (!name) return $("#new-name").focus();
-  if (!parent) return;
+  if (!parent || list().querySelector(".kind-none:not([hidden])")) return; // nothing matches the search
   create(newKind, name, parent);
 };
 

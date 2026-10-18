@@ -1070,6 +1070,40 @@ describe("new application", () => {
     $("#new-done").click();
   });
 
+  test("the search has focus, filters templates by name and line, hides empty groups, and Esc clears it before closing", async () => {
+    await openSheet();
+    const search = $("#new-search") as HTMLInputElement;
+    expect(document.activeElement).toBe(search);
+    const type = (q: string) => {
+      search.value = q;
+      search.dispatchEvent(new Event("input"));
+    };
+    const shown = () => kinds().filter((k) => !k.hidden).map((k) => k.dataset.kind);
+    const groups = () => $$("#new-kinds .kind-group:not([hidden]) .kind-head").map((h) => h.textContent);
+    type("server rendering");
+    expect(shown()).toEqual(["next", "nuxt"]);
+    expect(groups()).toEqual(["JavaScript"]);
+    expect(chosenKind()).toBe("next");
+    search.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    expect(chosenKind()).toBe("nuxt");
+    await key("ArrowDown");
+    expect(chosenKind()).toBe("nuxt"); // the last one shown
+    await key("ArrowUp");
+    expect(chosenKind()).toBe("next");
+    type("FLASK");
+    expect(shown()).toEqual(["flask"]);
+    expect(chosenKind()).toBe("flask");
+    type("zzz");
+    expect(shown()).toEqual([]);
+    expect($(".kind-none").hidden).toBe(false);
+    search.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(search.value).toBe("");
+    expect(shown()).toHaveLength(15);
+    expect($(".kind-none").hidden).toBe(true);
+    expect($("#new-app").hasAttribute("open")).toBe(true);
+    $("#new-cancel").click();
+  });
+
   test("the address follows the typed name and the configured TLD", async () => {
     await openSheet();
     expect($("#new-url").textContent).toBe("Its address: my-app.test");
