@@ -1906,7 +1906,6 @@ kbd {
 .new-sheet { width: min(860px, 94vw); max-height: calc(100vh - 32px); }
 .new-sheet[open] { display: flex; flex-direction: column; }
 .new-sheet [hidden] { display: none !important; }
-#new-form { display: flex; flex-direction: column; min-height: 0; }
 .new-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .new-top h2 { margin: 0; }
 .new-search { position: relative; display: flex; align-items: center; width: 180px; }
