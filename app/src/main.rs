@@ -2998,7 +2998,9 @@ fn main() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     let state = handle.state::<App>();
-                    // A fresh Anvil shows only this run's output, as a new terminal would.
+                    // What a crashed Anvil left running stops first; then a fresh Anvil
+                    // shows only this run's output, as a new terminal would.
+                    anvil::apps::kill_all_orphans();
                     anvil::apps::clear_stale_logs();
                     // Log retention now and hourly, off the start's way.
                     std::thread::spawn(|| {

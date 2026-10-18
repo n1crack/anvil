@@ -452,7 +452,29 @@ pub fn running_anywhere(name: &str) -> bool {
 }
 
 fn running_in(home: &Path, name: &str) -> bool {
-    fs::read_to_string(pid_in(home, name)).is_ok_and(|f| f.lines().skip(1).any(crate::alive))
+    fs::read_to_string(pid_in(home, name)).is_ok_and(|f| {
+        f.lines()
+            .skip(1)
+            .any(|l| crate::alive(l.split(' ').next().unwrap_or(l)))
+    })
+}
+
+/// Stop what a crashed Anvil left running: every app and process whose pid file's
+/// owner is gone (see `kill_orphans`). Run once at startup, before `clear_stale_logs`.
+pub fn kill_all_orphans() {
+    orphans_in(&home());
+}
+
+fn orphans_in(home: &Path) {
+    let Ok(dir) = fs::read_dir(home.join("run")) else {
+        return;
+    };
+    for f in dir.flatten() {
+        let name = f.file_name().to_string_lossy().into_owned();
+        if name.starts_with("app-") && name.ends_with(".pids") {
+            kill_orphans(&f.path(), true);
+        }
+    }
 }
 
 /// Stop a whole process group: `npm run dev` leaves node children behind otherwise.
@@ -683,9 +705,10 @@ impl Apps {
             .process_group(0)
             .spawn()
             .with_context(|| format!("failed to start {key}"))?;
+        let at = crate::started(child.id()).unwrap_or_default();
         fs::write(
             pid_in(&self.home, key),
-            format!("{}\n{}", std::process::id(), child.id()),
+            format!("{}\n{} {at}", std::process::id(), child.id()).trim_end(),
         )?;
         self.exits.remove(key);
         self.children.insert(key.to_string(), child);
@@ -1159,6 +1182,48 @@ mod tests {
         assert_eq!(text("shop@queue"), "");
         assert_eq!(text("shop@vite"), "old run\n");
         assert_eq!(text("shop#build"), "old run\n");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn startup_kills_only_the_orphans_anvil_started() {
+        let dir = project(&[("orphans/x", "")]);
+        let home = dir.join("home");
+        fs::create_dir_all(home.join("run")).unwrap();
+        // An owner that is gone: a child that already ended.
+        let mut gone = Command::new("true").spawn().unwrap();
+        gone.wait().unwrap();
+        let sleep = || {
+            Command::new("sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap()
+        };
+        let (mut orphan, mut stranger) = (sleep(), sleep());
+        let at = crate::started(orphan.id()).unwrap();
+        let file = |key, pid, at: &str| {
+            fs::write(pid_in(&home, key), format!("{}\n{pid} {at}", gone.id())).unwrap()
+        };
+        file("shop", orphan.id(), &at);
+        // Same pid file shape, but the pid now names a process started another time.
+        file("shop@queue", stranger.id(), "Mon Jan  1 00:00:00 2001");
+        orphans_in(&home);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while orphan.try_wait().unwrap().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the orphan still runs"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            stranger.try_wait().unwrap().is_none(),
+            "a reused pid was killed"
+        );
+        assert!(!pid_in(&home, "shop").exists());
+        let _ = stranger.kill();
+        let _ = stranger.wait();
         fs::remove_dir_all(dir).unwrap();
     }
 

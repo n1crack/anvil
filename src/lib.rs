@@ -1234,10 +1234,24 @@ pub(crate) fn alive(pid: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// When a process started, as `ps` prints it (`Sat Oct 18 10:02:03 2026`). With the pid
+/// it names one process: a reused pid has another start time.
+pub(crate) fn started(pid: u32) -> Option<String> {
+    let o = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
 /// Clean up after an Anvil that died without stopping its children (crash, SIGKILL).
-/// The pid file is `owner pid` followed by child pids; children are only killed when
-/// the owner is gone and the process still runs one of our binaries.
-/// With `group`, child pids are process-group leaders and the whole group is killed.
+/// The pid file is `owner pid` followed by one line per child: `pid` or `pid started`.
+/// Children are only killed when the owner is gone and the process is still the one
+/// Anvil started: the same start time when recorded (a dev server's shell `exec`s its
+/// command, so its command line no longer names Anvil), else a command line that runs
+/// one of our binaries. With `group`, child pids are process-group leaders and the
+/// whole group is killed.
 pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     let Ok(file) = fs::read_to_string(pid_file) else {
         return;
@@ -1248,11 +1262,19 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     }
     let ours = home().display().to_string();
     let mut killed = false;
-    for pid in pids {
-        let cmd = Command::new("ps")
-            .args(["-p", pid, "-o", "command="])
-            .output();
-        if cmd.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&ours)) {
+    for line in pids {
+        let (pid, at) = line
+            .split_once(' ')
+            .map_or((line, None), |(p, at)| (p, Some(at)));
+        let same = match (at, pid.parse()) {
+            (Some(at), Ok(n)) => started(n).as_deref() == Some(at),
+            (Some(_), Err(_)) => false,
+            (None, _) => Command::new("ps")
+                .args(["-p", pid, "-o", "command="])
+                .output()
+                .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&ours)),
+        };
+        if same {
             let target = if group { format!("-{pid}") } else { pid.into() };
             let _ = Command::new("kill").args(["--", &target]).status();
             killed = true;
