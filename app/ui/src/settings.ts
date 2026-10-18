@@ -640,6 +640,101 @@ $("#git-client").onchange = async (e) => {
   call("set_git_client", { gitClient: app });
 };
 $("#open-config-about").onclick = () => invoke("open_config_dir").catch((e) => showError(String(e)));
+
+/* ---------- About › Credits ---------- */
+
+/** What Anvil downloads onto the Mac or ships, hand-kept: name, what it's for, license
+ * (SPDX where one exists), homepage, how it gets here. Each license was read from the
+ * project's own LICENSE file (October 2026); check again when a source or version changes. */
+export const SOFTWARE: [string, string, string, string, string][] = [
+  ["Caddy", "Web server and HTTPS certificates", "Apache-2.0", "https://caddyserver.com", "Downloaded"],
+  ["PHP", "PHP apps, in static-php-cli’s builds (MIT); PHP 8.0–8.5", "PHP-3.01", "https://www.php.net", "Downloaded"],
+  ["Composer", "PHP packages", "MIT", "https://getcomposer.org", "Downloaded"],
+  ["Node.js", "JavaScript apps", "MIT", "https://nodejs.org", "Downloaded"],
+  ["pnpm", "JavaScript packages", "MIT", "https://pnpm.io", "Downloaded"],
+  ["Yarn", "JavaScript packages (Yarn 1)", "BSD-2-Clause", "https://classic.yarnpkg.com", "Downloaded"],
+  ["Bun", "JavaScript packages; links JavaScriptCore, which is LGPL-2.0", "MIT", "https://bun.sh", "Downloaded"],
+  ["Go", "Go apps", "BSD-3-Clause", "https://go.dev", "Downloaded"],
+  ["Rust (rustup)", "Rust apps", "MIT OR Apache-2.0", "https://rustup.rs", "Downloaded"],
+  [".NET SDK", ".NET apps", "MIT", "https://dotnet.microsoft.com", "Downloaded"],
+  ["Python", "Python apps, in python-build-standalone’s builds (MPL-2.0)", "PSF-2.0", "https://www.python.org", "Downloaded"],
+  ["uv", "Installs Python and its packages", "MIT OR Apache-2.0", "https://docs.astral.sh/uv", "Downloaded"],
+  ["MySQL", "Database (Community Server), with the Universal FOSS Exception", "GPL-2.0-only", "https://www.mysql.com", "Downloaded"],
+  ["PostgreSQL", "Database, in theseus-rs’s builds (PostgreSQL license)", "PostgreSQL", "https://www.postgresql.org", "Downloaded"],
+  [
+    "Redis",
+    "Cache. 8.x: your choice of the three; 7.4: RSALv2 or SSPL-1.0; 7.2: BSD-3-Clause",
+    "RSALv2 / SSPL-1.0 / AGPL-3.0",
+    "https://redis.io",
+    "Built on this Mac",
+  ],
+  ["Mailpit", "Catches the mail apps send", "MIT", "https://mailpit.axllent.org", "Downloaded"],
+  ["Tauri", "The app’s windows and menu bar", "MIT OR Apache-2.0", "https://tauri.app", "Bundled"],
+];
+
+const node = (tag: string, cls: string, ...kids: (Node | string)[]) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  n.append(...kids);
+  return n;
+};
+
+$("#credits-software").replaceChildren(
+  ...SOFTWARE.map(([name, use, license, url, how]) => {
+    const link = node("a", "", name) as HTMLAnchorElement;
+    link.href = url;
+    link.onclick = (e) => {
+      e.preventDefault();
+      invoke("open_url", { url }).catch((err) => showError(String(err)));
+    };
+    return node(
+      "div",
+      "row credit",
+      node("span", "", link, node("small", "", use)),
+      node("span", "credit-meta", license, node("small", "", how)),
+    );
+  }),
+);
+
+type Credit = { name: string; version: string; license: string };
+
+// Both files are written at build time by `pnpm credits` (scripts/credits.mjs).
+const missing = () => node("p", "credit-missing muted", "Not in this build: `pnpm credits` writes it.");
+
+/** The library list, read when About first opens. */
+let creditsLoaded = false;
+function loadCredits() {
+  if (creditsLoaded) return;
+  creditsLoaded = true;
+  fetch("credits.json")
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then(({ rust, npm }: { rust: Credit[]; npm: Credit[] }) => {
+      const rows = (kind: string, list: Credit[]) =>
+        list.map((c) =>
+          node(
+            "div",
+            "credit-lib",
+            node("span", "", c.name),
+            node("span", "muted", c.version),
+            node("span", "muted", c.license),
+            node("span", "muted", kind),
+          ),
+        );
+      $("#credits-list").replaceChildren(...rows("crate", rust), ...rows("npm", npm));
+      $("#credits-count").textContent = String(rust.length + npm.length);
+    })
+    .catch(() => $("#credits-list").replaceChildren(missing()));
+}
+
+// 1 MB of text: read the first time it opens.
+const notices = $("#credits-notices") as HTMLDetailsElement;
+notices.addEventListener("toggle", () => {
+  if (!notices.open || $("#credits-text").textContent) return;
+  fetch("THIRD_PARTY_NOTICES.txt")
+    .then((r) => (r.ok ? r.text() : Promise.reject()))
+    .then((t) => ($("#credits-text").textContent = t))
+    .catch(() => $("#credits-text").replaceChildren(missing()));
+});
 window.__TAURI__.app?.getVersion().then((v) => ($("#version").textContent = `Version ${v}`));
 $("#open-config").onclick = () => invoke("open_config_dir").catch((e) => showError(String(e)));
 
@@ -670,6 +765,7 @@ for (const b of document.querySelectorAll<HTMLElement>("[data-page]")) {
     for (const page of document.querySelectorAll<HTMLElement>(".page")) page.hidden = page.id !== b.dataset.page;
     if (LANGS.some(([id]) => id === b.dataset.page) && !runtimes) loadRuntimes();
     if (b.dataset.page === "node") loadPackageManagers();
+    if (b.dataset.page === "about") loadCredits();
     if (b.dataset.page === "storage") {
       loadAnvilStorage();
       loadAppSizes();

@@ -183,6 +183,22 @@
         <button id="open-config-about">Show Anvil’s folder</button>
       </div>
       <p class="muted small">Licensed under the GNU General Public License v3.0. Built with Rust, Tauri, Caddy and static-php-cli.</p>
+
+      <div class="credits">
+        <h2>Credits</h2>
+        <p class="hint">Software Anvil downloads onto this Mac or ships inside the app, each under its own license.</p>
+        <div id="credits-software" class="group"></div>
+        <h2>Libraries in Anvil</h2>
+        <p class="hint">Compiled into the app and the anvil command, listed when Anvil was built.</p>
+        <details id="credits-libs" class="group">
+          <summary class="row"><span>Rust crates and npm packages</span><span id="credits-count" class="muted"></span></summary>
+          <div id="credits-list"></div>
+        </details>
+        <details id="credits-notices" class="group">
+          <summary class="row"><span>License texts</span></summary>
+          <pre id="credits-text"></pre>
+        </details>
+      </div>
     </section>
   </main>
 

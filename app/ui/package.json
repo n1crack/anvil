@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vp dev",
-    "build": "vp build",
+    "build": "pnpm credits && vp build",
+    "credits": "node scripts/credits.mjs",
     "check": "vp check",
     "lint": "vp lint",
     "fmt": "vp fmt",
