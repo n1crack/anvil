@@ -1,6 +1,7 @@
 // Hide the extra console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use anvil::validate::{process_id, site_name};
 use anvil::{Config, Server, Site};
 use serde::Serialize;
 use std::process::Command;
@@ -810,14 +811,6 @@ enum LogKey<'a> {
     Container(&'a str, &'a str),
 }
 
-fn plain(s: &str, dots: bool) -> bool {
-    !s.is_empty()
-        && !s.starts_with("..")
-        && s != "."
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || (dots && c == '.'))
-}
-
 /// `services` are the configured service ids; any other `service:` key is refused.
 fn parse_log_key<'a>(key: &'a str, services: &[String]) -> Res<LogKey<'a>> {
     let parsed = if key == "web:caddy" {
@@ -826,17 +819,17 @@ fn parse_log_key<'a>(key: &'a str, services: &[String]) -> Res<LogKey<'a>> {
         (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.') && !v.contains(".."))
             .then_some(LogKey::Php(v))
     } else if let Some(id) = key.strip_prefix("service:") {
-        (plain(id, false) && services.iter().any(|s| s == id)).then_some(LogKey::Service(id))
+        (process_id(id) && services.iter().any(|s| s == id)).then_some(LogKey::Service(id))
     } else if let Some(rest) = key.strip_prefix("container:") {
         rest.split_once('/')
-            .filter(|(s, c)| plain(s, true) && plain(c, true))
+            .filter(|(s, c)| site_name(s) && site_name(c))
             .map(|(s, c)| LogKey::Container(s, c))
     } else if let Some((s, id)) = key.split_once('@') {
-        (plain(s, true) && plain(id, false)).then_some(LogKey::Process(s, id))
+        (site_name(s) && process_id(id)).then_some(LogKey::Process(s, id))
     } else if let Some((s, id)) = key.split_once('#') {
-        (plain(s, true) && plain(id, false)).then_some(LogKey::Once(s, id))
+        (site_name(s) && process_id(id)).then_some(LogKey::Once(s, id))
     } else {
-        plain(key, true).then_some(LogKey::App(key))
+        site_name(key).then_some(LogKey::App(key))
     };
     parsed.ok_or_else(|| format!("Not a log: {key}"))
 }
@@ -928,7 +921,7 @@ fn process_run(
     columns: Option<u16>,
     lines: Option<u16>,
 ) -> Res<Overview> {
-    if name.as_deref().is_some_and(|n| !plain(n, false)) {
+    if name.as_deref().is_some_and(|n| !process_id(n)) {
         return Err(format!("Not a process: {name:?}"));
     }
     let (cfg, s) = find_site_cfg(&site)?;
@@ -1210,7 +1203,7 @@ fn set_process(
     reset_host: Option<bool>,
     manual: Option<bool>,
 ) -> Res<Overview> {
-    if !id.is_empty() && !plain(&id, false) {
+    if !id.is_empty() && !process_id(&id) {
         return Err(format!("Not a process: {id}"));
     }
     let s = find_site(&site)?;
@@ -1541,7 +1534,7 @@ async fn open_in_editor(site: String, path: String, line: u32) -> Res<()> {
         let editor = anvil::load()?
             .editor
             .ok_or_else(|| anyhow::anyhow!("No editor set in Settings"))?;
-        let file = anvil::logs::file_in(std::path::Path::new(&s.path), &path)?;
+        let file = anvil::validate::file_in(std::path::Path::new(&s.path), &path)?;
         let (bin, args) = anvil::logs::editor_command(&editor, &file, line);
         // Not waited on here: a launcher script may stay until the editor quits.
         if let Ok(mut child) = Command::new(&bin).args(&args).spawn() {
@@ -1726,7 +1719,7 @@ fn create_options(kind: String) -> Res<Vec<anvil::create::Opt>> {
 /// The creation log of `name` from `from` on, read while `create_app` runs.
 #[tauri::command(async)]
 fn create_log(name: String, from: u64) -> Res<anvil::logs::Text> {
-    anvil::create::check_name(&name).map_err(err)?;
+    anvil::validate::new_app_name(&name).map_err(err)?;
     let file = anvil::create::log_file(&name);
     if !file.exists() {
         return Ok(Default::default());
@@ -1737,7 +1730,7 @@ fn create_log(name: String, from: u64) -> Res<anvil::logs::Text> {
 /// A failed creation's log, shown in Finder (its half-made folder is gone).
 #[tauri::command(async)]
 fn create_reveal(name: String) -> Res<()> {
-    anvil::create::check_name(&name).map_err(err)?;
+    anvil::validate::new_app_name(&name).map_err(err)?;
     anvil::run(
         Command::new("open")
             .arg("-R")
@@ -1829,12 +1822,11 @@ fn setup_all(app: &App, cfg: &Config) -> Res<()> {
         if script.is_empty() {
             return Ok(());
         }
-        let script = script.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!(
-            "do shell script \"{script}\" with prompt \"Anvil sets up .{} addresses and HTTPS on this Mac.\" with administrator privileges",
+        let prompt = format!(
+            "Anvil sets up .{} addresses and HTTPS on this Mac.",
             cfg.tld
         );
-        anvil::run(Command::new("osascript").args(["-e", &script])).map_err(err)
+        anvil::run_as_admin(&script, &prompt).map_err(err)
     });
     if let Some(p) = ports {
         let _ = std::fs::remove_file(p);
@@ -1859,24 +1851,25 @@ fn setup_fix(handle: AppHandle, app: State<App>, step: String) -> Res<anvil::Set
                 return Err(format!("{} isn't a valid domain suffix", cfg.tld));
             }
             let (file, _) = anvil::resolver_file(&cfg);
-            // Backslashes survive AppleScript once, so printf sees \n.
             let script = format!(
-                "do shell script \"mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\\\nport {}\\\\n' > {}\" with prompt \"Anvil sets up .{} addresses on this Mac.\" with administrator privileges",
+                "mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport {}\\n' > {}",
                 cfg.dns_port,
-                file.display(),
-                cfg.tld
+                anvil::shims::sh_quote(&file.to_string_lossy()),
             );
-            anvil::run(Command::new("osascript").args(["-e", &script])).map_err(err)?;
+            let prompt = format!("Anvil sets up .{} addresses on this Mac.", cfg.tld);
+            anvil::run_as_admin(&script, &prompt).map_err(err)?;
         }
         "ports" => {
             let (file, _) = anvil::ports_daemon(&cfg);
             let tmp = anvil::stage_ports_daemon(&cfg).map_err(err)?;
-            let (tmp, file, label) = (tmp.display(), file.display(), anvil::PORTS_LABEL);
+            let q = |p: &std::path::Path| anvil::shims::sh_quote(&p.to_string_lossy());
+            let (tmp, file, label) = (q(&tmp), q(&file), anvil::PORTS_LABEL);
             // bootout first: a changed port reloads the daemon.
             let script = format!(
-                "do shell script \"launchctl bootout system/{label} 2>/dev/null; cp '{tmp}' '{file}' && chown root:wheel '{file}' && chmod 644 '{file}' && launchctl bootstrap system '{file}'\" with prompt \"Anvil lets addresses work without a port number.\" with administrator privileges"
+                "launchctl bootout system/{label} 2>/dev/null; cp {tmp} {file} && chown root:wheel {file} && chmod 644 {file} && launchctl bootstrap system {file}"
             );
-            let res = anvil::run(Command::new("osascript").args(["-e", &script]));
+            let res =
+                anvil::run_as_admin(&script, "Anvil lets addresses work without a port number.");
             let _ = std::fs::remove_file(anvil::home().join("run").join("ports.plist"));
             res.map_err(err)?;
         }
@@ -2254,30 +2247,8 @@ fn remove_service(
 #[tauri::command(async)]
 fn open_url(url: String) -> Res<()> {
     let tld = anvil::load().map(|c| c.tld).unwrap_or_default();
-    if !url.starts_with("https://") && !local_http(&url, &tld) {
-        return Err("Only local and https links can be opened".into());
-    }
+    anvil::validate::link(&url, &tld).map_err(err)?;
     anvil::run(Command::new("open").arg(url)).map_err(err)
-}
-
-/// A plain-http link to this Mac: 127.0.0.1, localhost, or an app's `.<tld>` /
-/// `.localhost` address. The host is read up to the port or path; userinfo (`@`) is
-/// refused so `http://x.test@elsewhere` can't pass for a local address.
-fn local_http(url: &str, tld: &str) -> bool {
-    let Some(rest) = url.strip_prefix("http://") else {
-        return false;
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if authority.contains('@') {
-        return false;
-    }
-    let host = authority
-        .split(':')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let under = |suffix: &str| !suffix.is_empty() && host.ends_with(&format!(".{suffix}"));
-    host == "127.0.0.1" || host == "localhost" || under("localhost") || under(tld)
 }
 
 /* ---------- Settings ---------- */
@@ -3251,19 +3222,6 @@ fn main() {
 #[cfg(test)]
 mod tests {
 
-    #[test]
-    fn only_local_http_links_open() {
-        assert!(local_http("http://shop.test", "test"));
-        assert!(local_http("http://docs.vuefinder.test:8080/x?y", "test"));
-        assert!(local_http("http://web.localhost/", "test"));
-        assert!(local_http("http://127.0.0.1:5173", "test"));
-        assert!(!local_http("http://example.com", "test"));
-        assert!(!local_http("http://shop.test@evil.com", "test"));
-        assert!(!local_http("http://evil.com/?a=.test", "test"));
-        assert!(!local_http("http://test", "test"));
-        assert!(!local_http("http://shop.test", ""));
-        assert!(!local_http("file:///etc/passwd", "test"));
-    }
     use super::*;
 
     #[test]

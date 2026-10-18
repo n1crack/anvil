@@ -499,18 +499,6 @@ pub fn add(
     Ok(id)
 }
 
-fn check_name(id: &str) -> Result<()> {
-    let ok = id.len() <= 40
-        && id.starts_with(|c: char| c.is_ascii_lowercase())
-        && id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-    if !ok {
-        bail!("Use lowercase letters, numbers and dashes for the service name");
-    }
-    Ok(())
-}
-
 fn insert(
     cfg: &mut Config,
     kind: &str,
@@ -528,7 +516,7 @@ fn insert(
         );
     }
     let id = name.map_or_else(|| free_name(cfg, kind), str::to_string);
-    check_name(&id)?;
+    crate::validate::service_id(&id)?;
     if cfg.services.contains_key(&id) {
         bail!("There's already a service called {id}");
     }
@@ -566,7 +554,7 @@ pub fn remove(cfg: &mut Config, id: &str, delete_data: bool) -> Result<()> {
     if !cfg.services.contains_key(id) {
         bail!("There's no service called {id}");
     }
-    check_name(id)?;
+    crate::validate::service_id(id)?;
     cfg.services.remove(id);
     save(cfg)?;
     if delete_data {
@@ -1299,7 +1287,7 @@ mod tests {
             auto.starts_with("redis-") && auto.matches('-').count() == 2,
             "{auto}"
         );
-        assert!(check_name(&auto).is_ok());
+        assert!(crate::validate::service_id(&auto).is_ok());
         cfg.services.remove(&auto);
         assert_eq!(kind_of(&cfg, &id).unwrap(), "redis");
         let p = port(&cfg, &id);

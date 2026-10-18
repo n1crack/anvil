@@ -65,19 +65,6 @@ pub(crate) fn composer() -> Result<PathBuf> {
     Ok(phar)
 }
 
-pub fn check_name(name: &str) -> Result<()> {
-    let ok = !name.is_empty()
-        && name.len() <= 64
-        && !name.starts_with(['.', '-'])
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.');
-    if !ok {
-        bail!("Use lowercase letters, numbers, dots and dashes for the name");
-    }
-    Ok(())
-}
-
 const RUST_MAIN: &str = r#"use std::io::{Read, Write};
 use std::net::TcpListener;
 
@@ -391,7 +378,7 @@ pub fn create(
     opts: &Options,
     size: (u16, u16),
 ) -> Result<PathBuf> {
-    check_name(name)?;
+    crate::validate::new_app_name(name)?;
     // An earlier run's log goes, so a refusal below leaves none to read.
     let _ = fs::remove_file(log_file(name));
     if !TEMPLATES.contains(&kind) {
@@ -698,11 +685,6 @@ mod tests {
 
     #[test]
     fn names_and_simple_templates() {
-        assert!(check_name("my-app").is_ok());
-        assert!(check_name("shop.be").is_ok());
-        for bad in ["", "../x", "My App", ".hidden", "a/b"] {
-            assert!(check_name(bad).is_err(), "{bad}");
-        }
         let parent = std::env::temp_dir().join(format!("anvil-create-{}", std::process::id()));
         let _ = fs::remove_dir_all(&parent);
         fs::create_dir_all(&parent).unwrap();

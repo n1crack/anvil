@@ -1089,6 +1089,10 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
     if p != h.join("log") && !is_cache {
         bail!("Anvil doesn't clean {path}");
     }
+    // One of those folders replaced by a symlink is not followed out of Anvil's home.
+    if std::fs::symlink_metadata(&p).is_ok() && crate::validate::path_in(&h, &p).is_err() {
+        bail!("{path} leads outside Anvil's folder; Anvil won't clean it");
+    }
     let freed: u64 = du(std::slice::from_ref(&p)).values().sum();
     if p == h.join("log") {
         for e in std::fs::read_dir(&p)?.flatten() {
@@ -1243,11 +1247,9 @@ pub fn clean(site: &Site, path: &str, app_running: bool) -> Result<u64> {
     }
     // A folder on the way (e.g. `ios` in `ios/Pods`) may itself be a symlink; never
     // follow one out of the project.
-    let inside = target
+    let inside = Path::new(path)
         .parent()
-        .and_then(|p| p.canonicalize().ok())
-        .zip(site.path.canonicalize().ok())
-        .is_some_and(|(parent, project)| parent.starts_with(project));
+        .is_some_and(|p| crate::validate::path_in(&site.path, p).is_ok());
     if !inside {
         bail!("{path} leads outside the project; Anvil won't delete it");
     }

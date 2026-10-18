@@ -14,6 +14,9 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 tempfile = "3.27.0"
 toml = "1.1.8"
 
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
+
 [workspace]
 members = ["app"]
 

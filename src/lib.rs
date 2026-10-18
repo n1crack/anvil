@@ -16,6 +16,7 @@ pub mod services;
 pub mod shims;
 pub mod style;
 pub mod uninstall;
+pub mod validate;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -573,6 +574,28 @@ pub fn run(cmd: &mut Command) -> Result<()> {
         bail!("{cmd:?} exited with {status}");
     }
     Ok(())
+}
+
+/// Runs a shell `script` as root, after macOS asks for the password with `prompt`. The
+/// script goes to a private (0600) file and the file's path and the prompt reach
+/// AppleScript as arguments, so nothing in them is ever parsed as AppleScript.
+pub fn run_as_admin(script: &str, prompt: &str) -> Result<()> {
+    run_sh_file(script, prompt, ADMIN_SH)
+}
+
+const ADMIN_SH: &str = "do shell script \"/bin/sh \" & quoted form of (item 1 of argv) with prompt (item 2 of argv) with administrator privileges";
+
+fn run_sh_file(script: &str, prompt: &str, applescript: &str) -> Result<()> {
+    // tempfile creates the file 0600; it is removed when `file` drops.
+    let mut file = tempfile::Builder::new()
+        .prefix("anvil-admin-")
+        .suffix(".sh")
+        .tempfile()?;
+    std::io::Write::write_all(&mut file, script.as_bytes())?;
+    run(Command::new("osascript")
+        .args(["-e", "on run argv", "-e", applescript, "-e", "end run"])
+        .arg(file.path())
+        .arg(prompt))
 }
 
 pub(crate) fn fetch_text(url: &str) -> Result<String> {
@@ -1605,6 +1628,24 @@ impl Drop for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The admin path without the password dialog: quotes, `$`, backslashes and
+    /// newlines in the script and the prompt arrive untouched.
+    #[test]
+    fn a_setup_script_runs_from_its_file_as_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("it's \"out\"");
+        let script = format!(
+            "printf 'a\\\\b \"$X\"\\n' > {}\nprintf 'line2\\n' >> {}\n",
+            shims::sh_quote(&out.to_string_lossy()),
+            shims::sh_quote(&out.to_string_lossy())
+        );
+        let plain = ADMIN_SH.replace(" with administrator privileges", "");
+        let plain = plain.replace(" with prompt (item 2 of argv)", "");
+        run_sh_file(&script, "Anvil \"sets\" up", &plain).unwrap();
+        assert_eq!(fs::read_to_string(&out).unwrap(), "a\\b \"$X\"\nline2\n");
+        assert!(run_sh_file("exit 3", "x", &plain).is_err());
+    }
 
     #[test]
     fn a_child_that_ends_is_noticed_and_dropped() {
