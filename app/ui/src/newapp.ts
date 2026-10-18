@@ -328,7 +328,7 @@ function drawLog() {
       return line;
     }),
   );
-  term.out.scrollTop = term.out.scrollHeight;
+  term.follow();
 }
 
 async function readLog() {

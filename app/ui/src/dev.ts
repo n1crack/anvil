@@ -464,7 +464,7 @@ function append(v: View, x: Item, text: string, width: number) {
     out.append(live);
   }
   term.out.append(out);
-  trimLines(term.out, MAX_LINES);
+  term.keep(() => trimLines(term.out, MAX_LINES));
   term.follow();
   syncEmpty();
 }

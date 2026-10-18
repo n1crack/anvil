@@ -1,5 +1,5 @@
 import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, seg, selected, showError, showTab, snap, tab, tilde } from "./app";
-import { readTail, tail, termOut } from "./console";
+import { follower, readTail, tail, termOut } from "./console";
 import { copy } from "./services";
 import { shown } from "./live";
 import { ansi, clean, linkify, sgr } from "./term";
@@ -48,7 +48,7 @@ window.logsTab = (root, visible) => {
   if (lv?.site !== s.name) lv = buildLogs(s);
   panel.replaceChildren(lv.node);
   // Re-attaching resets the scroll box; put it back where the reader left it.
-  $(".logs-list", lv.node).scrollTop = lv.scrollTop;
+  lv.list.restore();
   lv.term.restore();
   if (lv.follow) follow(true);
 };
@@ -74,7 +74,6 @@ export function buildLogs(s) {
     level: "all",
     query: "",
     page: null, // last page from the backend (offsets)
-    scrollTop: 0,
     term: termOut("logs-term"), // plain sources
     tail: null,
     entries: [],
@@ -125,7 +124,7 @@ export function buildLogs(s) {
   };
   $(".logs-more", node).onclick = () => more(v);
   const list = $(".logs-list", node);
-  list.onscroll = () => (v.scrollTop = list.scrollTop);
+  v.list = follower(list, true); // newest first: it follows the top
   v.term.out.hidden = true;
   list.after(v.term.out);
   list.onclick = (e) => {
@@ -263,6 +262,7 @@ export async function loadLogs(v, keepScroll = false) {
   v.shown = 0;
   const list = $(".logs-list", v.node);
   list.replaceChildren();
+  if (!keepScroll) v.list.end(); // another file or filter: from the newest
   list.classList.toggle("untimed", !v.entries.some((e) => e.time));
   showMore(v);
 }
@@ -279,9 +279,10 @@ async function loadText(v, token) {
   const t = tail(v.site, v.source.id);
   await readTail(t);
   if (token !== v.token) return;
+  // Another source starts at its end; the same one again (a filter) stays where it was.
+  if (v.tail?.source !== t.source) v.term.end();
   v.tail = t;
   textMode(v, true);
-  v.term.atEnd = true;
   drawText(v);
 }
 
@@ -360,14 +361,13 @@ function appendText(v, fresh: string) {
   let size = blocks.reduce((n, b) => n + b.size, 0);
   let k = 0;
   while (k < blocks.length - 1 && size > TEXT_MAX) size -= blocks[k++].size;
-  if (k) {
-    const r = document.createRange();
-    r.setStartBefore(blocks[0]);
-    r.setEndBefore(blocks[k]);
-    r.deleteContents();
-    // The block now first starts with the line break that followed the ones removed.
-    if (blocks[k].firstChild?.data === "\n") blocks[k].firstChild.remove();
-  }
+  if (k)
+    v.term.keep(() => {
+      const r = document.createRange();
+      r.setStartBefore(blocks[0]);
+      r.setEndBefore(blocks[k]);
+      r.deleteContents();
+    });
   v.term.follow();
 }
 
@@ -436,7 +436,8 @@ export function groupEntries(entries) {
 /** The rendered row at the newest or oldest end of the list. */
 const edgeRow = (v, newest) => {
   const list = $(".logs-list", v.node);
-  const r = newest ? list.firstElementChild : list.lastElementChild;
+  let r = newest ? list.firstElementChild : list.lastElementChild;
+  if (r?.classList.contains("follow-pill")) r = r.nextElementSibling; // paused, it is on top
   return r?.entries ? r : null;
 };
 
@@ -780,8 +781,11 @@ export async function followTick() {
   const groups = groupEntries(fresh);
   // The same entry again: the newest row counts up instead of a new row.
   const newest = edgeRow(v, true);
-  if (newest && sameEntry(newest.entries[0], groups.at(-1)![0])) grow(v, newest, groups.pop(), false);
-  list.prepend(...groups.map((g) => entryRow(v, g)));
+  v.list.keep(() => {
+    if (newest && sameEntry(newest.entries[0], groups.at(-1)![0])) grow(v, newest, groups.pop(), false);
+    list.prepend(...groups.map((g) => entryRow(v, g)));
+  });
+  v.list.follow();
   v.entries.unshift(...fresh);
   v.shown += fresh.length;
   if (v.entries.length > MAX_ENTRIES) trimEntries(v);

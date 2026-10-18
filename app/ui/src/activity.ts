@@ -1,4 +1,5 @@
 import type { Activity } from "./types";
+import { follower } from "./console";
 import { ownError, shown } from "./live";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
@@ -23,6 +24,7 @@ export const TABS = ["apps", "services", "anvil"];
 export const storedTab = (v: string | null) => (v === "web" ? "anvil" : TABS.includes(v!) ? v! : "apps");
 export let tab = storedTab(localStorage.getItem("act-tab"));
 export let logStyle: Sgr | undefined; // colors carried from one page of the log to the next
+export const logView = follower($("#log")); // follows the end while the reader is there
 
 const errors = new Map<string, string>(); // owner -> its error, see ownError
 export function showError(msg, owner = "") {
@@ -253,6 +255,7 @@ export function select(key) {
   logStyle = undefined;
   logToken++;
   $("#log").textContent = "";
+  logView.end();
   $("#pane").hidden = $("#split").hidden = !key;
   $("#log-title").textContent = key ? `${nameOf(key)} · log` : "";
   render();
@@ -287,7 +290,6 @@ export async function tail() {
     replace = true;
     return tail();
   }
-  const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
   // Containers come back whole (empty when unchanged); files only send what is new.
   if (replace || (key?.startsWith("container:") && page.text)) {
     log.replaceChildren();
@@ -300,10 +302,10 @@ export async function tail() {
     p.append(colorize(clean(page.text, true), (logStyle ??= sgr())));
     (p as any).lines = page.text.split("\n").length - 1;
     log.append(p);
-    trimLog(log);
+    logView.keep(() => trimLog(log));
   }
   logFrom = page.end_offset;
-  if (atEnd) log.scrollTop = log.scrollHeight;
+  logView.follow();
 }
 
 export const LOG_LINES = 3000; // about this many newest lines stay in the log
