@@ -246,7 +246,20 @@ pub fn options(kind: &str, cfg: &Config) -> Vec<Opt> {
         v.extend(versions("node", "Node", runtimes::installed("node"), None));
     }
     v.push(on_off("git", "Git"));
+    // Every template is served; Settings › "HTTPS for new applications" sets the default.
+    let mut https = on_off("https", "HTTPS");
+    if cfg.https_default != Some(true) {
+        https.default = "off".into();
+    }
+    v.push(https);
     v
+}
+
+/// The new app's HTTPS as `opts` chose it; nothing when they don't say.
+fn choose_https(cfg: &mut Config, name: &str, opts: &Options) {
+    if let Some(v) = opts.get("https") {
+        cfg.sites.entry(crate::site_name(name)).or_default().https = Some(v == "on");
+    }
 }
 
 /// `given` checked against `options(kind)`, with every option's default filled
@@ -645,6 +658,14 @@ fn build(
             writeln!(&*log, "Skipped the first commit")?;
         }
     }
+    // Last, so a failed creation leaves no settings for an app that isn't there.
+    if let Some(v) = opts.get("https") {
+        crate::update(|c| {
+            choose_https(c, name, opts);
+            Ok(())
+        })?;
+        writeln!(&*log, "HTTPS {v}")?;
+    }
     writeln!(&*log, "Done")?;
     Ok(())
 }
@@ -708,8 +729,9 @@ mod tests {
         let keys = |k: &str| -> Vec<&str> { options(k, &cfg).iter().map(|o| o.key).collect() };
         assert!(keys("laravel").starts_with(&["kit", "db", "js"]));
         assert!(keys("next").starts_with(&["ts", "tailwind", "js"]));
-        assert_eq!(keys("flask"), ["git"]);
-        assert_eq!(keys("static"), ["git"]);
+        assert_eq!(keys("flask"), ["git", "https"]);
+        assert_eq!(keys("static"), ["git", "https"]);
+        assert!(keys("laravel").ends_with(&["git", "https"]));
         let full = resolve("next", &cfg, &Options::new()).unwrap();
         assert_eq!(full["ts"], "on");
         assert_eq!(full["js"], "npm");
@@ -720,6 +742,8 @@ mod tests {
         assert!(bad("js", "npm; rm -rf ~"));
         assert!(bad("kit", "react")); // a Laravel option
         assert!(bad("ts", "maybe"));
+        assert!(bad("https", "yes"));
+        assert!(!bad("https", "on"));
         assert!(!bad("js", "pnpm"));
         // Without services, SQLite is the only database.
         let db = resolve(
@@ -783,9 +807,40 @@ mod tests {
     }
 
     #[test]
+    fn https_defaults_to_the_setting_and_is_kept_for_the_app() {
+        let mut cfg = Config {
+            https_default: Some(false),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve("laravel", &cfg, &Options::new()).unwrap()["https"],
+            "off"
+        );
+        cfg.https_default = Some(true);
+        assert_eq!(resolve("go", &cfg, &Options::new()).unwrap()["https"], "on");
+        let off = Options::from([("https".into(), "off".into())]);
+        assert_eq!(resolve("go", &cfg, &off).unwrap()["https"], "off");
+
+        choose_https(&mut cfg, "My-App", &off);
+        assert_eq!(cfg.sites["my-app"].https, Some(false));
+        choose_https(
+            &mut cfg,
+            "shop",
+            &Options::from([("https".into(), "on".into())]),
+        );
+        assert_eq!(cfg.sites["shop"].https, Some(true));
+        choose_https(&mut cfg, "blog", &Options::new());
+        assert!(!cfg.sites.contains_key("blog"));
+    }
+
+    #[test]
     fn steps_get_the_log_size() {
         let env = step_env((132, 41));
-        let get = |k: &str| env.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str());
+        let get = |k: &str| {
+            env.iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.as_str())
+        };
         assert_eq!(get("COLUMNS"), Some("132"));
         assert_eq!(get("LINES"), Some("41"));
         assert_eq!(get("FORCE_COLOR"), Some("1"));

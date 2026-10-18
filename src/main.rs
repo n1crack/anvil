@@ -732,6 +732,8 @@ fn run() -> Result<()> {
             // Outside a parked folder the new app needs a link to get its address.
             if !cfg.paths.contains(&parent) {
                 edit(&mut cfg, |c| link(c, &name, path.clone()))?;
+            } else {
+                cfg = load()?; // with the HTTPS creation chose
             }
             println!("Created {}", path.display());
             if let Some(s) = sites(&cfg).into_iter().find(|s| s.path == path) {

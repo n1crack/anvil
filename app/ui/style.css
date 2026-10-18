@@ -1933,6 +1933,8 @@ kbd {
   font-size: 12px;
 }
 .new-search input::placeholder { color: var(--muted); }
+/* Focused on every open: a quiet neutral ring, not the loud one. */
+.new-search input:focus-visible { outline: none; border-color: color-mix(in srgb, var(--text) 40%, transparent); }
 #new-url .new-addr { color: var(--text); }
 .kind-none { margin: 0; padding: 12px 8px; color: var(--muted); }
 .kind-list {
@@ -1940,7 +1942,8 @@ kbd {
   flex-direction: column;
   gap: 8px;
   min-height: 0;
-  max-height: 248px;
+  height: 212px; /* four rows and their headings, searched or not; the rest scrolls */
+  scroll-padding: 2px 0;
   margin: 0 -6px 14px;
   padding: 2px 6px;
   overflow: auto;
@@ -2000,8 +2003,19 @@ kbd {
 .new-options[open] summary > span:first-child::after { transform: rotate(45deg); }
 .new-options summary:hover { color: var(--text); }
 .new-opts-sum { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.new-opts { display: flex; flex-direction: column; gap: 8px; min-height: 92px; padding: 10px 0 0 102px; }
-.opt-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+/* Open, the controls replace the summary, grouped on a slightly raised panel. */
+.new-options[open] .new-opts-sum { visibility: hidden; }
+.opt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--steel-raised) 55%, transparent);
+}
+.opt-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
 .opt-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 12px; }
 .opt-field > span { color: var(--muted); font-size: 11px; }
 .opt-field select {
@@ -2012,7 +2026,7 @@ kbd {
   background: var(--steel-raised);
 }
 .opt-fields:empty { display: none; }
-.opt-checks { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.opt-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
 .opt-check { display: inline-flex; align-items: center; gap: 6px; }
 .opt-check input { margin: 0; accent-color: var(--muted); }
 

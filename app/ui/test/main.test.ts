@@ -1109,7 +1109,13 @@ describe("new application", () => {
     fill("my-app");
     await key("Enter");
     await wait(80);
-    expect(calls("create_app").at(-1)![1]).toMatchObject({ kind: "laravel", name: "my-app", parent: "/Users/x/Sites", columns: 100, lines: 30 });
+    expect(calls("create_app").at(-1)![1]).toMatchObject({
+      kind: "laravel",
+      name: "my-app",
+      parent: "/Users/x/Sites",
+      columns: 100,
+      lines: 30,
+    });
     $("#new-done").click();
   });
 
@@ -1121,7 +1127,10 @@ describe("new application", () => {
       search.value = q;
       search.dispatchEvent(new Event("input"));
     };
-    const shown = () => kinds().filter((k) => !k.hidden).map((k) => k.dataset.kind);
+    const shown = () =>
+      kinds()
+        .filter((k) => !k.hidden)
+        .map((k) => k.dataset.kind);
     const groups = () => $$("#new-kinds .kind-group:not([hidden]) .kind-head").map((h) => h.textContent);
     type("server rendering");
     expect(shown()).toEqual(["next", "nuxt"]);
@@ -1161,32 +1170,72 @@ describe("new application", () => {
     await openSheet();
     await pick("laravel");
     expect(($("#new-options") as HTMLDetailsElement).open).toBe(false);
-    expect($("#new-opts-sum").textContent).toBe("No starter kit · SQLite · npm · PHP 8.4 · Git");
+    expect($("#new-opts-sum").textContent).toBe("No starter kit · SQLite · npm · PHP 8.4 · Git · HTTPS");
     const keys = () => $$("#new-opts [data-key]").map((x) => x.dataset.key);
-    expect(keys()).toEqual(["kit", "db", "js", "php", "git"]);
+    expect(keys()).toEqual(["kit", "db", "js", "php", "git", "https"]);
     const kit = $('#new-opts select[data-key="kit"]') as HTMLSelectElement;
     kit.value = "livewire";
     kit.dispatchEvent(new Event("change"));
-    expect($("#new-opts-sum").textContent).toBe("Livewire · SQLite · npm · PHP 8.4 · Git");
+    expect($("#new-opts-sum").textContent).toBe("Livewire · SQLite · npm · PHP 8.4 · Git · HTTPS");
 
     await pick("next");
-    expect(keys()).toEqual(["js", "node", "ts", "tailwind", "git"]);
+    expect(keys()).toEqual(["js", "node", "ts", "tailwind", "git", "https"]);
     const tw = $('#new-opts input[data-key="tailwind"]') as HTMLInputElement;
     tw.checked = false;
     tw.dispatchEvent(new Event("change"));
-    expect($("#new-opts-sum").textContent).toBe("TypeScript · npm · Node 24 · Git");
+    expect($("#new-opts-sum").textContent).toBe("TypeScript · npm · Node 24 · Git · HTTPS");
 
     await pick("flask");
-    expect(keys()).toEqual(["git"]);
+    expect(keys()).toEqual(["git", "https"]);
 
     await pick("laravel");
     expect($("#new-opts-sum").textContent).toContain("Livewire");
     fill("kit-app");
     submit();
     await wait(80);
-    expect(calls("create_app").at(-1)![1].options).toEqual({ kit: "livewire", db: "sqlite", js: "npm", php: "8.4", git: "on" });
+    expect(calls("create_app").at(-1)![1].options).toEqual({
+      kit: "livewire",
+      db: "sqlite",
+      js: "npm",
+      php: "8.4",
+      git: "on",
+      https: "on",
+    });
     $("#new-done").click();
     localStorage.removeItem("newOpts:laravel");
+  });
+
+  test("HTTPS sits next to Git, starts from the Settings default each time, and is sent with the options", async () => {
+    w.mockHttpsDefault = false;
+    await openSheet();
+    await pick("flask");
+    const https = $('#new-opts input[data-key="https"]') as HTMLInputElement;
+    expect(https.closest(".opt-checks")!.textContent).toBe("GitHTTPS");
+    expect(https.checked).toBe(false);
+    expect($("#new-opts-sum").textContent).toBe("Git");
+    https.checked = true;
+    https.dispatchEvent(new Event("change"));
+    expect($("#new-opts-sum").textContent).toBe("Git · HTTPS");
+    await pick("go");
+    await pick("flask");
+    expect(($('#new-opts input[data-key="https"]') as HTMLInputElement).checked).toBe(false); // not remembered
+    w.mockHttpsDefault = true;
+    await pick("go");
+    expect(($('#new-opts input[data-key="https"]') as HTMLInputElement).checked).toBe(true);
+    // Open, the summary gives way to the controls on their panel.
+    ($("#new-options summary") as HTMLElement).click();
+    expect(($("#new-options") as HTMLDetailsElement).open).toBe(true);
+    expect($("#new-opts .opt-panel .opt-checks")).not.toBeNull();
+    await wait(200);
+    ($("#new-options summary") as HTMLElement).click();
+    await wait(200);
+    expect(($("#new-options") as HTMLDetailsElement).open).toBe(false);
+    fill("api");
+    submit();
+    await wait(80);
+    expect(calls("create_app").at(-1)![1].options).toEqual({ git: "on", https: "on" });
+    $("#new-done").click();
+    localStorage.removeItem("newOpts:flask");
   });
 
   test("Create turns the sheet into the creation: steps tick, the log is colored, then ready, and Open selects the app", async () => {

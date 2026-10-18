@@ -603,7 +603,9 @@ const mockCreateOptions = (kind) =>
         ["22", "Node 22"],
       ]),
     ],
-  })[kind]?.concat(mockOnOff("git", "Git")) ?? [mockOnOff("git", "Git")];
+  })[kind]?.concat(mockOnOff("git", "Git"), mockHttps()) ?? [mockOnOff("git", "Git"), mockHttps()];
+// Its default follows Settings › HTTPS for new applications.
+const mockHttps = () => ({ ...mockOnOff("https", "HTTPS"), default: window.mockHttpsDefault === false ? "off" : "on" });
 const mockHandle = (cmd, a) => {
   const ov = a?.site && mockOv[a.site];
   switch (cmd) {

@@ -213,7 +213,9 @@ async function loadOptions(kind: string) {
   if (kind !== newKind) return; // another template was picked meanwhile
   opts = got;
   const saved = JSON.parse(localStorage.getItem(`newOpts:${kind}`) ?? "{}");
-  chosen = Object.fromEntries(opts.map((o) => [o.key, o.choices.some((c) => c[0] === saved[o.key]) ? saved[o.key] : o.default]));
+  // HTTPS always starts from Settings › "HTTPS for new applications".
+  const keep = (o: Opt) => o.key !== "https" && o.choices.some((c) => c[0] === saved[o.key]);
+  chosen = Object.fromEntries(opts.map((o) => [o.key, keep(o) ? saved[o.key] : o.default]));
   drawOptions();
 }
 
@@ -253,15 +255,27 @@ function drawOptions() {
     label.append(el("span", null, o.label), sel);
     fields.append(label);
   }
-  $("#new-opts").replaceChildren(fields, checks);
+  const panel = el("div", "opt-panel");
+  panel.append(fields, checks);
+  $("#new-opts").replaceChildren(panel);
 }
 
-// Options open and close by height and fade; reduced motion just toggles.
+// Options open and close by height and fade (reduced motion just toggles). The sheet
+// keeps its height: the template list gives Options its room and gets it back.
 $("#new-options summary").onclick = (e: MouseEvent) => {
+  const dlg = $("#new-app");
   const details = $("#new-options");
   const body = $("#new-opts");
-  if (!body.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   e.preventDefault();
+  if (!dlg.style.height && dlg.offsetHeight) dlg.style.height = `${dlg.offsetHeight}px`;
+  const done = (open: boolean) => {
+    details.open = open;
+    if (!open) dlg.style.height = "";
+    items()
+      .find((it) => it.dataset.kind === newKind)
+      ?.scrollIntoView?.({ block: open ? "start" : "nearest" }); // the chosen one stays in view
+  };
+  if (!body.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return done(!details.open);
   if (body.getAnimations().length) return;
   const opening = !details.open;
   details.open = true;
@@ -272,7 +286,7 @@ $("#new-options summary").onclick = (e: MouseEvent) => {
     { duration: 160, easing: "ease-out", fill: "forwards" },
   );
   run.onfinish = () => {
-    details.open = opening;
+    done(opening);
     body.style.overflow = "";
     run.cancel(); // held at its end until closed, so nothing flashes back
   };
