@@ -24,10 +24,6 @@ pub struct Process {
     pub autostart: bool,
     /// The command was overridden in the app's settings.
     pub edited: bool,
-    /// A package.json command script the user pinned as a row.
-    pub pinned: bool,
-    /// Kept on top: listed first after the app's own row.
-    pub top: bool,
     /// Left out of Dev start (the header's Start): started by hand only.
     pub manual: bool,
     /// Added in Anvil rather than detected.
@@ -41,8 +37,6 @@ pub struct ProcessChange {
     pub command: Option<Option<String>>,
     pub autostart: Option<bool>,
     pub hidden: Option<bool>,
-    pub pinned: Option<bool>,
-    pub top: Option<bool>,
     /// The address's subdomain label; `Some(None)` goes back to the automatic one.
     pub host: Option<Option<String>>,
     pub manual: Option<bool>,
@@ -68,8 +62,6 @@ pub fn apply_process_change(
     }
     p.autostart = change.autostart.unwrap_or(p.autostart);
     p.hidden = change.hidden.unwrap_or(p.hidden);
-    p.pinned = change.pinned.unwrap_or(p.pinned);
-    p.top = change.top.unwrap_or(p.top);
     p.manual = change.manual.unwrap_or(p.manual);
     if let Some(host) = change.host {
         p.host = match host {
@@ -146,14 +138,13 @@ pub fn add_process(
 }
 
 /// Back to what is detected: added processes go, hidden ones return, and commands,
-/// Dev start, Start with Anvil and pins are the defaults again. Addresses and Keep on
-/// Top stay: the Configure table doesn't show them.
+/// Dev start and Start with Anvil are the defaults again. Addresses stay: the
+/// Configure table doesn't show them.
 fn reset_entries(site: &mut crate::SiteConfig) {
     site.processes.retain(|_, p| !p.added);
     for p in site.processes.values_mut() {
         *p = crate::ProcessConfig {
             host: p.host.take(),
-            top: p.top,
             ..Default::default()
         };
     }
@@ -283,13 +274,6 @@ fn apply_settings(
     else {
         return procs;
     };
-    let pinned = |id: &str| set.get(id).is_some_and(|p| p.pinned);
-    let extra: Vec<Process> = pinned_scripts(&site.path, &pinned)
-        .into_iter()
-        .map(|(p, _)| p)
-        .filter(|p| !procs.iter().any(|d| d.id == p.id))
-        .collect();
-    procs.extend(extra);
     // The user's own, after the detected ones; a detected id wins over an added one.
     let added: Vec<Process> = set
         .iter()
@@ -310,8 +294,6 @@ fn apply_settings(
     for p in &mut procs {
         if let Some(c) = set.get(&p.id) {
             p.autostart = c.autostart;
-            p.pinned = c.pinned;
-            p.top = c.top;
             p.manual = c.manual;
             if let Some(command) = &c.command {
                 p.command = command.clone();
@@ -329,35 +311,6 @@ pub fn script_texts(dir: &Path) -> std::collections::BTreeMap<String, String> {
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .and_then(|j| serde_json::from_value(j["scripts"].clone()).ok())
         .unwrap_or_default()
-}
-
-/// The package.json command scripts `keep` accepts, as rows in file order, each with
-/// whether the script pins its own port.
-fn pinned_scripts(dir: &Path, keep: &dyn Fn(&str) -> bool) -> Vec<(Process, bool)> {
-    let json: serde_json::Value = fs::read_to_string(dir.join("package.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default();
-    let empty = serde_json::Map::new();
-    let scripts = json["scripts"].as_object().unwrap_or(&empty);
-    let commands = package_scripts(dir).1;
-    let ids = script_ids(scripts);
-    scripts
-        .iter()
-        .filter_map(|(n, c)| Some((n, c.as_str()?)))
-        .filter(|(n, _)| commands.contains(n) && keep(&ids[*n]))
-        .map(|(name, command)| {
-            let p = Process {
-                id: ids[name].clone(),
-                name: name.clone(),
-                command: start_command(name, command, scripts),
-                source: "package.json",
-                server: is_server_script(name, command),
-                ..Default::default()
-            };
-            (p, pin_flags(command).is_some())
-        })
-        .collect()
 }
 
 fn detect_base(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>) -> Vec<Process> {
@@ -601,16 +554,9 @@ fn all_rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
         taken.extend(crate::services::web_port(cfg, &id));
     }
     let mut prefixes: Vec<String> = vec![];
-    // Pinned command scripts that pin their own port are rows like the servers.
     let set = |id: &str| cfg.sites.get(&site.name)?.processes.get(id);
-    let pinned = |id: &str| set(id).is_some_and(|p| p.pinned);
     let mut procs = package_scripts(&site.path).0;
     procs.retain(|p| p.name != "dev");
-    procs.extend(
-        pinned_scripts(&site.path, &pinned)
-            .into_iter()
-            .filter_map(|(p, pins)| pins.then_some(p)),
-    );
     procs
         .into_iter()
         .map(|mut p| {
@@ -1838,42 +1784,6 @@ echo '{DEV_JSON}'
         assert!(!cfg.sites["shop"].processes.contains_key("queue"));
         fs::remove_dir_all(dir.parent().unwrap()).unwrap();
 
-        // A pinned command script becomes a row after the detected ones.
-        let pkg = r#"{"dev":"vite","build-only":"vite build","docs:dev":"run-s build-only docs:serve","docs:serve":"vitepress dev docs","docs:build":"npm run build && vitepress build docs","lint":"oxlint"}"#;
-        let s = vite_site("pin", "vuefinder", pkg);
-        let mut cfg = crate::Config::default();
-        let pin = ProcessChange {
-            pinned: Some(true),
-            ..Default::default()
-        };
-        settings(&mut cfg, "vuefinder", "docs-serve", pin);
-        let pin = ProcessChange {
-            pinned: Some(true),
-            ..Default::default()
-        };
-        settings(&mut cfg, "vuefinder", "lint", pin);
-        let pin = ProcessChange {
-            pinned: Some(true),
-            ..Default::default()
-        };
-        settings(&mut cfg, "vuefinder", "gone", pin);
-        let p = detect_in(&s, Path::new("php"), Path::new("cache"), Some(&cfg));
-        let ids: Vec<_> = p.iter().map(|p| p.id.as_str()).collect();
-        assert_eq!(ids, ["docs-dev", "docs-serve", "lint"]);
-        let serve = &p[1];
-        assert!(serve.pinned && !p[0].pinned);
-        assert_eq!((serve.source, serve.server), ("package.json", false));
-        assert_eq!(
-            serve.command,
-            "npm run docs:serve -- --port $PORT --strictPort --host 127.0.0.1"
-        );
-        assert!(serve.port.is_some());
-        assert!(address(&cfg, &s, "docs-serve").is_some());
-        // A command that doesn't serve has no port or address.
-        assert_eq!((p[2].command.as_str(), p[2].port), ("npm run lint", None));
-        assert!(address(&cfg, &s, "lint").is_none());
-        fs::remove_dir_all(&s.path).unwrap();
-
         // Validation: no empty command, no id for the app's own row.
         let mut sc = crate::SiteConfig::default();
         for command in ["", "  "] {
@@ -1892,18 +1802,15 @@ echo '{DEV_JSON}'
     }
 
     #[test]
-    fn keep_on_top_is_stored_and_cleared() {
-        let mut sc = crate::SiteConfig::default();
-        let top = |on| ProcessChange {
-            top: Some(on),
-            ..Default::default()
-        };
-        apply_process_change(&mut sc, "queue", top(true)).unwrap();
-        assert!(sc.processes["queue"].top);
+    fn old_pinned_and_top_keys_are_read_and_not_written() {
+        let old = "[processes.queue]\npinned = true\ntop = true\nautostart = true\n";
+        let sc: crate::SiteConfig = toml::from_str(old).unwrap();
+        assert!(sc.processes["queue"].autostart);
         let saved = toml::to_string(&sc).unwrap();
-        assert!(saved.contains("top = true"), "{saved}");
-        apply_process_change(&mut sc, "queue", top(false)).unwrap();
-        assert!(sc.processes.is_empty());
+        assert!(
+            !saved.contains("pinned") && !saved.contains("top"),
+            "{saved}"
+        );
     }
 
     #[test]
@@ -2018,7 +1925,7 @@ echo '{DEV_JSON}'
         assert!(!cfg.sites["shop"].processes.contains_key("reverb"));
         assert_eq!(ids(&cfg), ["queue", "logs"]);
 
-        // Reset: back to the detected list; an address label and Keep on Top stay.
+        // Reset: back to the detected list; an address label stays.
         settings(
             &mut cfg,
             "shop",
@@ -2026,7 +1933,6 @@ echo '{DEV_JSON}'
             ProcessChange {
                 command: Some(Some("php artisan queue:work".into())),
                 autostart: Some(true),
-                top: Some(true),
                 host: Some(Some("jobs".into())),
                 ..Default::default()
             },
@@ -2040,7 +1946,6 @@ echo '{DEV_JSON}'
         assert_eq!(
             left["queue"],
             crate::ProcessConfig {
-                top: true,
                 host: Some("jobs".into()),
                 ..Default::default()
             }

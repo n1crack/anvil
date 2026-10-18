@@ -1,5 +1,4 @@
 // Hide the extra console window on Windows release builds.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use anvil::validate::{process_id, site_name};
 use anvil::{Config, Server, Site};
@@ -465,7 +464,7 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
     });
     let mut rows: Vec<ProcessRow> = main.into_iter().chain(rows).collect();
     // The app's own row first, then those kept on top, each group in detection order.
-    rows.sort_by_key(|r| (!r.main, !r.process.top));
+    rows.sort_by_key(|r| !r.main);
     rows.into_iter()
         .map(|mut r| {
             // The site row is the web server's; it has no process, log or errors of its own.
@@ -782,13 +781,8 @@ fn activity(app: State<App>) -> Res<Activity> {
                 rows.push(r);
             }
         }
-        // The app's own row first, then the processes kept on top.
-        let kept = |key: &str| {
-            key.strip_prefix(&format!("{}@", site.name))
-                .and_then(|id| cfg.sites.get(&site.name)?.processes.get(id))
-                .is_some_and(|p| p.top)
-        };
-        rows.sort_by_key(|r| (r.key != site.name, !kept(&r.key)));
+        // The app's own row first.
+        rows.sort_by_key(|r| r.key != site.name);
         if !rows.is_empty() {
             groups.push(AppGroup {
                 site: site.name.clone(),
@@ -1200,8 +1194,6 @@ fn set_process(
     reset: Option<bool>,
     autostart: Option<bool>,
     hidden: Option<bool>,
-    pinned: Option<bool>,
-    top: Option<bool>,
     host: Option<String>,
     reset_host: Option<bool>,
     manual: Option<bool>,
@@ -1223,9 +1215,6 @@ fn set_process(
         if manual == Some(true) {
             return Err("The app's own server always starts with Dev".into());
         }
-        if top.is_some() {
-            return Err("The app's own row is always first".into());
-        }
         if !anvil::apps::runs_process(&s.kind) {
             return Err(format!("Anvil serves {site}; it has no command of its own"));
         }
@@ -1239,8 +1228,6 @@ fn set_process(
             command,
             autostart,
             hidden,
-            pinned,
-            top,
             manual,
             host: if reset_host == Some(true) {
                 Some(None)
@@ -1983,20 +1970,6 @@ fn start_service(app: &App, cfg: &Config, id: &str) {
     };
 }
 
-/// Turning a service on also makes it start with Anvil, and vice versa.
-#[tauri::command(async)]
-fn set_service(handle: AppHandle, app: State<App>, id: String, on: bool) -> Res<Vec<ServiceRow>> {
-    let (cfg, ()) = edit(|c| anvil::services::set_enabled(c, &id, on))?;
-    if on {
-        start_service(&app, &cfg, &id);
-    } else {
-        stop_service(&app, &id);
-        app.service_errors.lock().unwrap().remove(&id);
-    }
-    changed(&handle);
-    services(app)
-}
-
 #[tauri::command(async)]
 fn set_service_port(
     handle: AppHandle,
@@ -2017,23 +1990,6 @@ fn set_service_port(
     if was_running || cfg.services.get(&id).is_some_and(|s| s.enabled) {
         start_service(&app, &cfg, &id);
     }
-    changed(&handle);
-    services(app)
-}
-
-/// Downloads (and for Redis, compiles) off the main thread, then starts it.
-#[tauri::command]
-async fn install_service(handle: AppHandle, id: String) -> Res<Vec<ServiceRow>> {
-    let (job_cfg, job_id) = (anvil::load().map_err(err)?, id.clone());
-    tauri::async_runtime::spawn_blocking(move || {
-        anvil::services::ensure_installed(&job_cfg, &job_id)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(err)?;
-    let app = handle.state::<App>();
-    let (cfg, ()) = edit(|c| anvil::services::set_enabled(c, &id, true))?;
-    start_service(&app, &cfg, &id);
     changed(&handle);
     services(app)
 }
@@ -3051,9 +3007,7 @@ fn main() {
             set_login,
             open_config_dir,
             services,
-            set_service,
             set_service_port,
-            install_service,
             service_kinds,
             service_contents,
             service_data,

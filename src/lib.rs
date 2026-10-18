@@ -123,6 +123,8 @@ pub struct SiteConfig {
 }
 
 /// What the user changed about one process of an app (see `processes::set_process`).
+/// Older configs may still hold `pinned` and `top`; unknown keys are ignored on read
+/// and dropped on the next save.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct ProcessConfig {
     /// Replaces the detected command.
@@ -134,12 +136,6 @@ pub struct ProcessConfig {
     /// Not listed among the app's processes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
-    /// A package.json command script shown as a row.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub pinned: bool,
-    /// Kept on top: listed first after the app's own row.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub top: bool,
     /// The subdomain label of an extra dev server's address (`docs` in
     /// `docs.vuefinder.test`), replacing the automatic one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
