@@ -1019,7 +1019,7 @@ describe("polls and races", () => {
   });
 
   test("Dev drops the lines over its cap in one removal", async () => {
-    const { trimLines } = await import("../src/dev");
+    const { trimLines } = await import("../src/stream");
     const out = document.createElement("div");
     for (let i = 0; i < 600; i++) out.append(Object.assign(document.createElement("div"), { textContent: `l${i}` }));
     trimLines(out, 500);

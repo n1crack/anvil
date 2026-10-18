@@ -1,11 +1,10 @@
 import type { CommandChip, ProcessRow } from "./types";
-import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, mode, popAt, seg, selected, showError, showTab, snap, tab } from "./app";
-import { type Tail, readTail, tail, termOut } from "./console";
+import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, popAt, seg, selected, showError, showTab, snap, tab } from "./app";
+import { type Tail, readTail, tail } from "./console";
 import { late } from "./late";
-import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
-import { shown } from "./live";
-import { listSplitter } from "./split";
-import { type Sgr, clean, colorize, sgr } from "./term";
+import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache } from "./processes";
+import { type Sgr, sgr } from "./term";
+import { line, streamPane } from "./stream";
 
 /* Dev tab: the app's dev processes on the left, the chosen one's output live on the right,
  * as `php artisan dev` shows them in a terminal. "All" (the default) merges every
@@ -14,7 +13,6 @@ import { type Sgr, clean, colorize, sgr } from "./term";
 
 const devSel = new Map<string, string>(); // site name -> "all", "app", "proc:<id>" or "once:<id>"
 export const COLORS = 6; // name colors pc0…pc5 (blue, purple, pink, orange, green, cyan), as concurrently gives them
-const MAX_LINES = 5000; // lines kept on screen
 
 type Item = { key: string; name: string; color: string; running: boolean; crashed: boolean; row?: ProcessRow; run?: CommandChip };
 
@@ -36,24 +34,21 @@ const runItems = (name: string): Item[] =>
 const scriptLabel = (c: CommandChip) => (c.source === "composer.json" ? `composer ${c.name}` : `npm run ${c.name}`);
 const exitText = (c: CommandChip) => (c.exit?.code == null ? "Ended by a signal" : `Exited with code ${c.exit.code}`);
 
-const box = el("div", "dev");
-const bar = el("div", "dev-bar");
-const main = el("div", "dev-main");
-const list = el("div", "dev-list");
-list.tabIndex = 0;
-list.setAttribute("role", "listbox");
-list.setAttribute("aria-label", "Processes");
-const pane = el("section", "console dev-pane");
-const head = el("header", "console-head dev-head");
-const term = termOut("console-out dev-out");
-const empty = el("div", "dev-empty");
-term.out.tabIndex = 0;
-// The keys (see main.onkeydown), said once; hidden when the pane is too narrow for it.
-const keysHint = el("p", "dev-keys", "↑↓ select · s start · x stop · r restart · q stop all · c clear");
-pane.append(head, term.out, empty, keysHint);
-main.append(list, listSplitter(main, "dev-list-width", 120), pane);
+const pane = streamPane({
+  listCls: "dev-list",
+  label: "Processes",
+  widthKey: "dev-list-width",
+  minWidth: 120,
+  sel: devSel,
+  draw: (name) => drawDev(name),
+  tick: () => devTick(),
+  keys,
+  current: () => view,
+  entries: (name) => [...procItems(name), ...runItems(name)].map((x) => x.key),
+});
+const { box, bar, main, list, term, syncEmpty, pick } = pane;
 const conf = el("div", "dev-conf");
-box.append(bar, main, conf);
+box.append(conf);
 
 // What is shown: which app and entry, each source's reader, its unfinished last line and
 // the style it ends in, whether each entry ran when last drawn, and the live last line.
@@ -71,26 +66,14 @@ let configuring: string | null = null; // the site whose processes are being con
 let draft: { name: string; command: string } | null = null; // a process being added
 let confError = "";
 
-function syncEmpty() {
-  const none = !term.out.querySelector(".dev-line");
-  empty.hidden = !none;
-  pane.classList.toggle("is-empty", none);
-}
-
 /** An entry's output began again (a restart, Clear): its lines go, and so does its reader. */
 function forget(v: View, key: string) {
   v.tails.delete(key);
   v.pending.delete(key);
   v.styles.delete(key);
   if (v.live?.dataset.key === key) v.live = null;
-  for (const l of term.out.querySelectorAll(`[data-key="${key}"]`)) l.remove();
+  for (const l of term.out.querySelectorAll(`[data-key="${CSS.escape(key)}"]`)) l.remove();
   syncEmpty();
-}
-
-function pick(name: string, key: string) {
-  devSel.set(name, key);
-  drawDev(name);
-  devTick();
 }
 
 /** The output pane in characters, for COLUMNS and LINES of what starts from here (in
@@ -118,21 +101,12 @@ function headerAll(action: "start" | "stop") {
   if (devAll.site === view?.site && devAll[action] && !devAll.busy) devAll.run(action, termSize());
 }
 
-/* Keys, like mprocs, while the focus is in the list or the output; never while typing
- * nor with a modifier (those are the menu's). What changes on screen is the feedback. */
-main.onkeydown = (e) => {
-  const v = view;
-  if (!v || e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
-  const name = v.site;
+/** The keys after ↑↓ (see `streamPane`). */
+function keys(k: string, name: string) {
+  const v = view!;
   const procs = procItems(name);
-  const items = [...procs, ...runItems(name)];
-  const one = items.find((x) => x.key === v.key);
-  const k = e.key;
-  if (k === "ArrowDown" || k === "ArrowUp" || k === "j" || k === "k") {
-    const keys = ["all", ...items.map((x) => x.key)];
-    const i = keys.indexOf(v.key) + (k === "ArrowDown" || k === "j" ? 1 : -1);
-    if (i >= 0 && i < keys.length) pick(name, keys[i]);
-  } else if (k === "s") {
+  const one = [...procs, ...runItems(name)].find((x) => x.key === v.key);
+  if (k === "s") {
     if (!one) headerAll("start");
     else if (one.row && !one.running) runProc(name, one, "start");
   } else if (k === "x") {
@@ -149,9 +123,9 @@ main.onkeydown = (e) => {
       v.live = null;
       syncEmpty();
     }
-  } else return;
-  e.preventDefault();
-};
+  } else return false;
+  return true;
+}
 
 /** Start, stop or restart a process; a restart starts its output over. */
 async function runProc(name: string, x: Item, action: string) {
@@ -220,10 +194,6 @@ async function itemMenu(name: string, x: Item, at: HTMLElement) {
 }
 
 function entry(name: string, x: Item) {
-  const it = el("div", "dev-item");
-  it.setAttribute("role", "option");
-  it.setAttribute("aria-selected", String(x.key === view?.key));
-  it.dataset.key = x.key;
   // The status column: a process's dot; a run's spinner, then ✓ or ✕.
   let status: HTMLElement;
   if (!x.run) status = el("span", `dot ${x.running ? "on" : x.crashed ? "bad" : ""}`);
@@ -238,24 +208,15 @@ function entry(name: string, x: Item) {
   }
   const label =
     x.run?.source === "composer.json" && runItems(name).some((y) => y.key !== x.key && y.name === x.name) ? `composer ${x.name}` : x.name;
-  it.append(status, el("span", `dev-name ${x.color}`.trim(), label));
+  const parts = [status, el("span", `dev-name ${x.color}`.trim(), label)];
   if (x.run) {
     const c = x.run;
     const x2 = procBtn("×", c.running ? `Stop and dismiss ${c.name}` : `Dismiss ${c.name}`, () => dismiss(name, c));
     x2.className = "dev-dismiss";
     x2.title = c.running ? "Stop and dismiss" : "Dismiss";
-    it.append(x2);
+    parts.push(x2);
   }
-  it.onclick = () => {
-    pick(name, x.key);
-    list.focus();
-  };
-  if (x.key !== "all")
-    it.oncontextmenu = (e) => {
-      e.preventDefault();
-      itemMenu(name, x, it);
-    };
-  return it;
+  return pane.entry(name, x.key, parts, x.key === "all" ? undefined : (it) => itemMenu(name, x, it));
 }
 
 /** Run ▾: the app's one-off scripts, each with its script muted; choosing one asks first. */
@@ -383,16 +344,10 @@ export function drawDev(name: string) {
   const items = [...procs, ...runs];
   let key = devSel.get(name) ?? "all";
   if (key !== "all" && !items.some((x) => x.key === key)) key = "all";
-  if (view?.site !== name || view.key !== key) {
-    view = { site: name, key, tails: new Map(), pending: new Map(), styles: new Map(), ran: new Map(), live: null };
-    term.out.replaceChildren();
-    term.atEnd = true;
-  }
-  if (box.parentNode !== panel) {
-    panel.replaceChildren(box);
-    term.restore();
-  }
-  const v = view;
+  const fresh = view?.site !== name || view.key !== key;
+  if (fresh) view = { site: name, key, tails: new Map(), pending: new Map(), styles: new Map(), ran: new Map(), live: null };
+  pane.attach(panel, fresh);
+  const v = view!;
   for (const x of items) {
     if (v.ran.get(x.key) === false && x.running) forget(v, x.key);
     v.ran.set(x.key, x.running);
@@ -414,15 +369,12 @@ export function drawDev(name: string) {
   const cmdCard = commandsBox(name, runs);
   list.replaceChildren(procCard, ...(cmdCard ? [cmdCard] : []));
 
-  head.replaceChildren();
-  const actions = el("span", "proc-actions");
   const one = items.find((x) => x.key === key);
-  if (!one) {
-    head.append(el("span", "console-title", "All"), el("span", "dev-cmd", `${running} of ${procs.length} running`));
-  } else if (one.run) {
+  if (!one) pane.heading("All", `${running} of ${procs.length} running`);
+  else if (one.run) {
     const c = one.run;
-    head.append(el("span", "console-title", c.name), el("span", "dev-cmd", scriptLabel(c)));
-    if (c.exit && !c.running && c.exit.code !== 0) head.append(el("span", "dev-exit bad", exitText(c)));
+    const bad = c.exit && !c.running && c.exit.code !== 0 ? [el("span", "dev-exit bad", exitText(c))] : [];
+    const actions = pane.heading(c.name, scriptLabel(c), ...bad);
     if (c.running) actions.append(procBtn("■ Stop", `Stop ${scriptLabel(c)}`, () => dismiss(name, c)));
     else {
       const again = procBtn("↻ Run again", `Run ${scriptLabel(c)} again`, () =>
@@ -432,7 +384,7 @@ export function drawDev(name: string) {
     }
   } else {
     const r = one.row!;
-    head.append(el("span", "console-title", r.name), el("span", "dev-cmd", r.command));
+    const actions = pane.heading(r.name, r.command);
     if (r.running || r.crashed) {
       actions.append(procBtn("Restart", `Restart ${r.name}`, () => runProc(name, one, "restart")));
       actions.append(procBtn("■", r.running ? `Stop ${r.name}` : `Dismiss ${r.name}`, () => runProc(name, one, "stop")));
@@ -442,46 +394,13 @@ export function drawDev(name: string) {
       actions.append(start);
     }
   }
-  head.append(actions);
 
   // Nothing on screen yet: whether it runs, and ▶ for a stopped process.
-  empty.replaceChildren();
   const stopped = one ? !one.running : !running;
-  if (!stopped) empty.append(el("span", null, "No output yet"));
-  else if (one?.run) empty.append(el("span", null, "No output"));
-  else {
-    empty.append(el("span", null, "Not running"));
-    // All has the toolbar's Start; one process gets its own ▶.
-    if (one) {
-      const go = procBtn("▶", `Start ${one.name}`, () => runProc(name, one, "start"));
-      go.title = `Start ${one.name}`;
-      empty.append(go);
-    }
-  }
-  syncEmpty();
-}
-
-/** One line of output, its style carried on in `s`; in All (`width` ≥ 0), tagged with its
- * process's name in its color. Also the Containers tab's. */
-export function line(x: Pick<Item, "key" | "name" | "color">, text: string, s: Sgr, width: number) {
-  const d = el("div", "dev-line");
-  d.dataset.key = x.key;
-  // The text in its own column, so a wrapped line stays right of the tag.
-  const body = el("span", "dev-text");
-  body.append(colorize(clean(text, true), s));
-  if (width >= 0) d.append(el("span", `dev-tag ${x.color}`.trim(), `${x.name.padEnd(width)} │ `));
-  d.append(body);
-  return d;
-}
-
-/** The oldest lines over `max` out in one removal, so the pane changes once, not once a line. */
-export function trimLines(out: HTMLElement, max: number) {
-  const over = out.childElementCount - max;
-  if (over <= 0) return;
-  const r = document.createRange();
-  r.setStartBefore(out.firstElementChild!);
-  r.setEndBefore(out.children[over]);
-  r.deleteContents();
+  if (!stopped) pane.notice("No output yet");
+  else if (one?.run) pane.notice("No output");
+  // All has the toolbar's Start; one process gets its own ▶.
+  else pane.notice("Not running", one && { name: one.name, run: () => runProc(name, one, "start") });
 }
 
 /** New output appended as it comes, nothing drawn twice. One process's unfinished last
@@ -501,10 +420,7 @@ function append(v: View, x: Item, text: string, width: number) {
     v.live = live;
     out.append(live);
   }
-  term.out.append(out);
-  term.keep(() => trimLines(term.out, MAX_LINES));
-  term.follow();
-  syncEmpty();
+  pane.push(out);
 }
 
 /** New output for what is shown. */
@@ -810,19 +726,7 @@ function drawConf(name: string, force = false) {
 }
 
 late.drawDev = drawDev;
-late.devTab = () => {
-  if (!selected) return;
-  drawDev(selected);
-  devTick();
-  if (!main.hidden && box.isConnected) list.focus({ preventScroll: true });
-  // WebKit forgets a hidden pane's scroll position: put it back once it is laid out.
-  requestAnimationFrame(term.restore);
-};
+late.devTab = pane.shownTab;
 
 // Only while the tab is shown: output twice a second, the processes' states every two.
-let ticks = 0;
-setInterval(() => {
-  if (!shown() || mode !== "apps" || !selected || tab !== "dev") return;
-  if (view?.site === selected) devTick();
-  if (++ticks % 4 === 0 && !procLoading.has(selected)) loadProcs(selected);
-}, 500);
+pane.poll("dev", 500, 4);

@@ -1,11 +1,9 @@
 import type { Container } from "./types";
-import { $, M, el, invoke, mode, selected, showError, showTab, snap, tab } from "./app";
-import { termOut } from "./console";
-import { COLORS, barBtn, icon, line, trimLines } from "./dev";
-import { shown } from "./live";
-import { listSplitter } from "./split";
+import { $, M, el, invoke, selected, showError, showTab, snap, tab } from "./app";
+import { COLORS, barBtn, icon } from "./dev";
+import { line, streamPane } from "./stream";
 import { late } from "./late";
-import { DOT, containerRun, containerState, loadProcs, procBtn, procBusy, procCache, procLoading } from "./processes";
+import { DOT, containerRun, containerState, procBtn, procBusy, procCache } from "./processes";
 import { type Sgr, sgr } from "./term";
 
 /* Containers tab: a Docker Compose app's services on the left, the chosen one's log live
@@ -16,7 +14,6 @@ import { type Sgr, sgr } from "./term";
  * down or rm, so containers and their volumes stay. */
 
 const containerSel = new Map<string, string>(); // site name -> "all" or a service
-const MAX_LINES = 5000;
 
 type Item = { key: string; name: string; color: string; c: Container; state: ReturnType<typeof containerState>; busy?: string };
 
@@ -61,22 +58,20 @@ export function stamped(raw: string, after: string | null) {
   return out;
 }
 
-const box = el("div", "dev containers");
-const bar = el("div", "dev-bar");
-const main = el("div", "dev-main");
-const list = el("div", "group procs-list dev-list");
-list.tabIndex = 0;
-list.setAttribute("role", "listbox");
-list.setAttribute("aria-label", "Containers");
-const pane = el("section", "console dev-pane");
-const head = el("header", "console-head dev-head");
-const term = termOut("console-out dev-out");
-const empty = el("div", "dev-empty");
-term.out.tabIndex = 0;
-const keysHint = el("p", "dev-keys", "↑↓ select · s start · x stop · r restart · q stop all · c clear");
-pane.append(head, term.out, empty, keysHint);
-main.append(list, listSplitter(main, "containers-list-width", 160), pane);
-box.append(bar, main);
+const pane = streamPane({
+  cls: "containers",
+  listCls: "group procs-list dev-list",
+  label: "Containers",
+  widthKey: "containers-list-width",
+  minWidth: 160,
+  sel: containerSel,
+  draw: (name) => drawContainers(name),
+  tick: () => containersTick(),
+  keys,
+  current: () => view,
+  entries: (name) => items(name).map((x) => x.key),
+});
+const { bar, list, term, empty, syncEmpty } = pane;
 
 // What is shown: which app and entry, the time and number of the last line read per
 // service, requests on their way, and each service's colors carried from line to line.
@@ -92,18 +87,6 @@ let view: View | null = null;
 let following = ""; // the app whose log streams Anvil keeps
 let allBusy: "" | "start" | "stop" = "";
 let allSite = "";
-
-function syncEmpty() {
-  const none = !term.out.querySelector(".dev-line");
-  empty.hidden = !none;
-  pane.classList.toggle("is-empty", none);
-}
-
-function pick(name: string, key: string) {
-  containerSel.set(name, key);
-  drawContainers(name);
-  containersTick();
-}
 
 /** Start, stop or restart one container; Docker can take a while, so its row says so. */
 const runOne = (name: string, x: Item, action: string) => containerRun(name, [x.name], action, x.name);
@@ -124,18 +107,11 @@ async function runAll(name: string, action: "start" | "stop") {
   if (selected === name) drawContainers(name);
 }
 
-main.onkeydown = (e) => {
-  const v = view;
-  if (!v || e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
-  const name = v.site;
+/** The keys after ↑↓ (see `streamPane`). */
+function keys(k: string, name: string) {
   const all = items(name);
-  const one = all.find((x) => x.key === v.key);
-  const k = e.key;
-  if (k === "ArrowDown" || k === "ArrowUp" || k === "j" || k === "k") {
-    const keys = ["all", ...all.map((x) => x.key)];
-    const i = keys.indexOf(v.key) + (k === "ArrowDown" || k === "j" ? 1 : -1);
-    if (i >= 0 && i < keys.length) pick(name, keys[i]);
-  } else if (k === "s") {
+  const one = all.find((x) => x.key === view!.key);
+  if (k === "s") {
     if (!one) runAll(name, "start");
     else if (!up(one) && !one.busy) runOne(name, one, "start");
   } else if (k === "x") {
@@ -148,9 +124,9 @@ main.onkeydown = (e) => {
     // The screen only: Docker keeps the log.
     for (const l of term.out.querySelectorAll(one ? `[data-key="${CSS.escape(one.key)}"]` : ".dev-line")) l.remove();
     syncEmpty();
-  } else return;
-  e.preventDefault();
-};
+  } else return false;
+  return true;
+}
 
 const webOf = (x: Item) => (x.c.ports[0] ? `http://localhost:${x.c.ports[0]}` : null);
 
@@ -171,11 +147,6 @@ async function itemMenu(name: string, x: Item) {
 }
 
 function entry(name: string, x: Item | null, running = 0, bad = false) {
-  const key = x?.key ?? "all";
-  const it = el("div", "dev-item");
-  it.setAttribute("role", "option");
-  it.setAttribute("aria-selected", String(key === view?.key));
-  it.dataset.key = key;
   let status: HTMLElement;
   if (x?.busy) {
     status = el("span", "dev-status");
@@ -183,22 +154,12 @@ function entry(name: string, x: Item | null, running = 0, bad = false) {
   } else status = el("span", `dot ${x ? DOT[x.state] : running ? "on" : bad ? "bad" : ""}`);
   status.title =
     x?.busy ?? (x ? { running: "Running", starting: "Starting", crashed: "Exited with an error", stopped: "Stopped" }[x.state] : "");
-  it.append(status, el("span", "dev-name", x?.name ?? "All"));
-  if (x) {
-    const d = el("span", `dev-exit${x.state === "crashed" && !x.busy ? " bad" : ""}`, x.busy ?? detail(x));
-    d.title = d.textContent;
-    it.append(d);
-  }
-  it.onclick = () => {
-    pick(name, key);
-    list.focus();
-  };
-  if (x)
-    it.oncontextmenu = (e) => {
-      e.preventDefault();
-      itemMenu(name, x);
-    };
-  return it;
+  const parts = [status, el("span", "dev-name", x?.name ?? "All")];
+  if (!x) return pane.entry(name, "all", parts);
+  const d = el("span", `dev-exit${x.state === "crashed" && !x.busy ? " bad" : ""}`, x.busy ?? detail(x));
+  d.title = d.textContent;
+  parts.push(d);
+  return pane.entry(name, x.key, parts, () => itemMenu(name, x));
 }
 
 /** Start (green) while a container is down, else Stop (red) while any runs; a spinner while Docker works. */
@@ -235,15 +196,9 @@ export function drawContainers(name: string) {
   const all = items(name);
   let key = containerSel.get(name) ?? "all";
   if (key !== "all" && !all.some((x) => x.key === key)) key = "all";
-  if (view?.site !== name || view.key !== key) {
-    view = { site: name, key, since: new Map(), seq: new Map(), asking: new Set(), styles: new Map() };
-    term.out.replaceChildren();
-    term.atEnd = true;
-  }
-  if (box.parentNode !== panel) {
-    panel.replaceChildren(box);
-    term.restore();
-  }
+  const fresh = view?.site !== name || view.key !== key;
+  if (fresh) view = { site: name, key, since: new Map(), seq: new Map(), asking: new Set(), styles: new Map() };
+  pane.attach(panel, fresh);
   drawBar(name, all);
 
   const running = all.filter(up).length;
@@ -259,12 +214,10 @@ export function drawContainers(name: string) {
   if (o?.docker_error) list.append(el("p", "dev-none", `Can’t read ${o.compose_file ?? "the compose file"}`));
   else if (!all.length) list.append(el("p", "dev-none", "The compose file has no services."));
 
-  head.replaceChildren();
-  const actions = el("span", "proc-actions");
   const one = all.find((x) => x.key === key);
-  if (!one) head.append(el("span", "console-title", "All"), el("span", "dev-cmd", `${running} of ${all.length} running`));
+  if (!one) pane.heading("All", `${running} of ${all.length} running`);
   else {
-    head.append(el("span", "console-title", one.name), el("span", "dev-cmd", one.busy ?? detail(one)));
+    const actions = pane.heading(one.name, one.busy ?? detail(one));
     if (!one.busy && up(one)) {
       actions.append(procBtn("Restart", `Restart ${one.name}`, () => runOne(name, one, "restart")));
       actions.append(procBtn("■", `Stop ${one.name}`, () => runOne(name, one, "stop")));
@@ -274,21 +227,11 @@ export function drawContainers(name: string) {
       actions.append(start);
     }
   }
-  head.append(actions);
 
-  empty.replaceChildren();
   empty.classList.toggle("is-error", !!o?.docker_error && !one);
-  if (o?.docker_error && !one) empty.append(el("span", null, o.docker_error));
-  else if (one ? up(one) : running) empty.append(el("span", null, "No output yet"));
-  else {
-    empty.append(el("span", null, one?.busy ?? "Not running"));
-    if (one && !one.busy) {
-      const go = procBtn("▶", `Start ${one.name}`, () => runOne(name, one, "start"));
-      go.title = `Start ${one.name}`;
-      empty.append(go);
-    }
-  }
-  syncEmpty();
+  if (o?.docker_error && !one) pane.notice(o.docker_error);
+  else if (one ? up(one) : running) pane.notice("No output yet");
+  else pane.notice(one?.busy ?? "Not running", one && !one.busy ? { name: one.name, run: () => runOne(name, one, "start") } : undefined);
 }
 
 /** New log lines for what is shown; All merges them by time. */
@@ -326,34 +269,19 @@ async function containersTick() {
     if (!v.styles.has(l.x.key)) v.styles.set(l.x.key, sgr());
     out.append(line(l.x, l.text, v.styles.get(l.x.key)!, width));
   }
-  term.out.append(out);
-  term.keep(() => trimLines(term.out, MAX_LINES));
-  term.follow();
-  syncEmpty();
+  pane.push(out);
 }
 
 late.drawContainers = drawContainers;
-late.containersTab = () => {
-  if (!selected) return;
-  drawContainers(selected);
-  containersTick();
-  if (box.isConnected) list.focus({ preventScroll: true });
-  // WebKit forgets a hidden pane's scroll position: put it back once it is laid out.
-  requestAnimationFrame(term.restore);
-};
+late.containersTab = pane.shownTab;
 
 // Only while the tab is shown: the logs every second, the containers' states every two.
 // Once it is hidden or shows another app, Anvil's log streams for it end; shown again,
 // they start over and the lines already on screen (by time) are skipped.
-let ticks = 0;
-setInterval(() => {
-  const visible = shown() && mode === "apps" && !!selected && tab === "containers";
+pane.poll("containers", 1000, 2, (visible) => {
   if (following && (!visible || following !== selected)) {
     following = "";
     view?.seq.clear();
     invoke("container_logs_stop").catch(() => {});
   }
-  if (!visible || !selected) return;
-  if (view?.site === selected) containersTick();
-  if (++ticks % 2 === 0 && !procLoading.has(selected)) loadProcs(selected);
-}, 1000);
+});
