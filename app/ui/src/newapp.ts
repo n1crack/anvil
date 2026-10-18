@@ -222,11 +222,9 @@ async function loadOptions(kind: string) {
 function setOpt(key: string, value: string) {
   chosen[key] = value;
   localStorage.setItem(`newOpts:${newKind}`, JSON.stringify(chosen));
-  $("#new-opts-sum").textContent = summary();
 }
 
 function drawOptions() {
-  $("#new-opts-sum").textContent = summary();
   const fields = el("div", "opt-fields");
   const checks = el("div", "opt-checks");
   for (const o of opts) {
@@ -260,24 +258,6 @@ function drawOptions() {
   $("#new-opts").replaceChildren(panel);
 }
 
-// Options open beside the templates: the sheet turns into two columns, the templates a
-// single tall list on the left and the form with its options on the right; closing goes
-// back to the grid. Reduced motion just switches.
-$("#new-options summary").onclick = (e: MouseEvent) => {
-  e.preventDefault();
-  const dlg = $("#new-app");
-  const details = $("#new-options");
-  const opening = !details.open;
-  details.open = opening;
-  dlg.classList.toggle("opts-open", opening);
-  items()
-    .find((it) => it.dataset.kind === newKind)
-    ?.scrollIntoView?.({ block: "nearest" }); // the chosen one stays in view
-  const body = $("#new-opts");
-  if (opening && body.animate && !matchMedia("(prefers-reduced-motion: reduce)").matches)
-    body.animate({ opacity: [0, 1], transform: ["translateY(-4px)", "none"] }, { duration: 160, easing: "ease-out" });
-};
-
 /* ---------- The sheet ---------- */
 
 export function openNewApp() {
@@ -305,8 +285,6 @@ export function openNewApp() {
     preview();
   };
   preview();
-  $("#new-options").open = false;
-  dlg.classList.remove("opts-open");
   $("#new-error").hidden = true;
   showForm(true);
   dlg.showModal();

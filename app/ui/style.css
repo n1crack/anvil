@@ -1949,7 +1949,7 @@ kbd {
 
 /* New application: templates grouped by language, two per row, each a monochrome
  * glyph, its name and a line about it; the chosen one a neutral highlight and a check. */
-.new-sheet { width: min(720px, 92vw); max-height: calc(100vh - 32px); transition: width 0.16s ease-out; }
+.new-sheet { width: min(860px, 94vw); max-height: calc(100vh - 32px); }
 .new-sheet[open] { display: flex; flex-direction: column; }
 .new-sheet [hidden] { display: none !important; }
 #new-form { display: flex; flex-direction: column; min-height: 0; }
@@ -2021,34 +2021,8 @@ kbd {
 .kind-check { display: grid; place-items: center; visibility: hidden; color: var(--text); }
 .kind-item[aria-selected="true"] .kind-check { visibility: visible; }
 
-/* Options: closed to one muted line of the current choices. */
-.new-options { margin: 2px 0 0; }
-.new-options summary {
-  display: grid;
-  grid-template-columns: 90px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
-  min-height: 24px;
-  list-style: none;
-  color: var(--muted);
-}
-.new-options summary::-webkit-details-marker { display: none; }
-.new-options summary > span:first-child::after {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin: 0 0 2px 7px;
-  border: solid currentColor;
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(-45deg);
-  transition: transform 0.15s;
-}
-.new-options[open] summary > span:first-child::after { transform: rotate(45deg); }
-.new-options summary:hover { color: var(--text); }
-.new-opts-sum { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-/* Open, the controls replace the summary, grouped on a slightly raised panel. */
-.new-options[open] .new-opts-sum { visibility: hidden; }
+/* Options: always shown, a small heading over the grouped panel. */
+.new-opts-title { margin: 2px 0 0; color: var(--muted); font-size: 12px; font-weight: 500; }
 .opt-panel {
   display: flex;
   flex-direction: column;
@@ -3079,10 +3053,9 @@ body.activity {
 /* Between the Dev or Containers list and the output, as tall as they are. */
 .list-split { align-self: stretch; }
 
-/* Options open: two columns. The templates become one tall list on the left (at least
- * as many rows as the form beside them is high), the form and its options on the right. */
-.new-sheet.opts-open { width: min(860px, 94vw); }
-.new-sheet.opts-open #new-form {
+/* Two columns: the templates one tall list on the left (as tall as the form beside it),
+ * the form and its options on the right. */
+.new-sheet #new-form {
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);
   grid-template-areas:
@@ -3095,15 +3068,14 @@ body.activity {
   grid-template-rows: auto auto auto 1fr auto auto;
   column-gap: 20px;
 }
-.new-sheet.opts-open .new-top { grid-area: top; }
+.new-sheet .new-top { grid-area: top; }
 /* As tall as the form beside it, never taller: it must not stretch the sheet. */
-.new-sheet.opts-open #new-kinds { grid-area: kinds; height: 0; min-height: 100%; margin: 0; }
-.new-sheet.opts-open #new-form { min-height: 380px; }
-.new-sheet.opts-open .kind-group { grid-template-columns: 1fr; }
-.new-sheet.opts-open #new-form > .field:nth-of-type(1) { grid-area: name; }
-.new-sheet.opts-open #new-form > .field:nth-of-type(2) { grid-area: loc; }
-.new-sheet.opts-open #new-options { grid-area: opts; }
-.new-sheet.opts-open #new-error { grid-area: err; }
-.new-sheet.opts-open #new-form > .sheet-actions { grid-area: actions; }
-.new-sheet.opts-open #new-form > .field { grid-template-columns: 70px minmax(0, 1fr); }
-@media (prefers-reduced-motion: reduce) { .new-sheet { transition: none; } }
+.new-sheet #new-kinds { grid-area: kinds; height: 0; min-height: 100%; margin: 0; }
+.new-sheet #new-form { min-height: 380px; }
+.new-sheet .kind-group { grid-template-columns: 1fr; }
+.new-sheet #new-form > .field:nth-of-type(1) { grid-area: name; }
+.new-sheet #new-form > .field:nth-of-type(2) { grid-area: loc; }
+.new-sheet #new-options { grid-area: opts; }
+.new-sheet #new-error { grid-area: err; }
+.new-sheet #new-form > .sheet-actions { grid-area: actions; }
+.new-sheet #new-form > .field { grid-template-columns: 70px minmax(0, 1fr); }
