@@ -1,40 +1,94 @@
 /* Terminal output, shared by the main window's console and the Processes window. */
 
-/** Terminal output as a terminal would leave it: progress bars redraw a line with \r
- * or \b; escape codes don't belong in plain text. With `colors`, SGR codes (colors,
- * bold) stay for `ansi` to draw. */
+/** Terminal output as a terminal would leave it: progress bars redraw a line with \r,
+ * \b or cursor codes (composer's and npm's ESC[1G ESC[2K); other escape codes don't
+ * belong in plain text. With `colors`, SGR codes (colors, bold) stay for `ansi` to draw. */
 export function clean(text, colors = false) {
-  return text
-    .replace(
-      colors
-        ? /\x1b\[(?![0-9;]*m)[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g
-        : /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g,
-      "",
-    )
-    .split("\n")
-    .map((l) => {
-      l = overstrike(l.slice(l.lastIndexOf("\r", l.length - 2) + 1).replace(/\r$/, ""));
-      return l.replace(colors ? /[\x00-\x08\x0b-\x1a\x1c-\x1f\x7f]/g : /[\x00-\x08\x0b-\x1f\x7f]/g, "");
-    })
+  const rows: (string | Row)[] = [];
+  let r = 0; // the row the cursor is on
+  for (const l of text.replace(colors ? STRIP_KEEP_SGR : STRIP, "").split("\n")) {
+    if (r === rows.length && !CURSOR.test(l)) rows.push(l);
+    else r = draw(rows, r, l);
+    r++;
+  }
+  return rows
+    .map((row) => (typeof row === "string" ? row : row.cells.map((c) => c[0] + c[1]).join("") + row.tail))
+    .map((l) => l.replace(colors ? /[\x00-\x08\x0b-\x1a\x1c-\x1f\x7f]/g : /[\x00-\x08\x0b-\x1f\x7f]/g, ""))
     .join("\n");
 }
 
-/** A line with backspaces as a terminal leaves it: \b moves back one column and what
- * comes next overwrites it. Color codes take no column, so `0%\e[0m\b\b1%` is `1%`. */
-function overstrike(l: string) {
-  if (!l.includes("\b")) return l;
-  const cells: string[] = [];
-  let at = 0;
-  let codes = ""; // color codes waiting for the next character
-  for (const [t] of l.matchAll(/\x1b\[[0-9;]*m|[\s\S]/gu)) {
-    if (t.length > 1 && t[0] === "\x1b") codes += t;
-    else if (t === "\b") at = Math.max(0, at - 1);
+// Escape codes dropped: all but the cursor moves `draw` follows (and SGR, with colors).
+const STRIP = /\x1b\[(?![0-9]*[GKCDA])[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g;
+const STRIP_KEEP_SGR = /\x1b\[(?![0-9;]*m|[0-9]*[GKCDA])[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g;
+const CURSOR = /[\r\b]|\x1b\[[0-9]*[GKCDA]/;
+
+/** A drawn row: each column's color codes and character, and the codes after the last. */
+type Row = { cells: [string, string][]; tail: string };
+
+function toRow(row: string | Row | undefined): Row {
+  if (row && typeof row !== "string") return row;
+  const out: Row = { cells: [], tail: "" };
+  for (const [t] of (row ?? "").matchAll(/\x1b\[[0-9;]*m|[\s\S]/gu)) {
+    if (t.length > 1 && t[0] === "\x1b") out.tail += t;
     else {
-      cells[at++] = codes + t;
+      out.cells.push([out.tail, t]);
+      out.tail = "";
+    }
+  }
+  return out;
+}
+
+/** Only the codes after the last reset still matter: redraws don't pile them up. */
+const sinceReset = (codes: string) => codes.slice([...codes.matchAll(/\x1b\[0?m/g)].at(-1)?.index ?? 0);
+
+/** One line written onto `rows` from row `r` as a terminal would: \r starts the line
+ * over (once something is written), \b and CSI n D move back, CSI n C forward, CSI n G
+ * to a column, CSI K / 1K / 2K erase, CSI n A goes up (not above the first row there
+ * is). Color codes take no column; an erased cell's codes go to the next character, so
+ * no reset is lost: `0%\e[0m\b\b1%` is `1%`. Returns the row it ends on.
+ * ponytail: one column per code point; wide characters and wrapping aren't measured. */
+function draw(rows: (string | Row)[], r: number, l: string) {
+  let row = (rows[r] = toRow(rows[r]));
+  let at = 0;
+  let fresh = false; // after \r: the next character starts the line over
+  let codes = row.tail; // color codes waiting for the next character
+  row.tail = "";
+  const lose = (from: number, to: number, blank: boolean) => {
+    const cut = row.cells.slice(from, to);
+    codes = cut.map((c) => c[0]).join("") + codes;
+    if (blank) for (let i = from; i < Math.min(to, row.cells.length); i++) row.cells[i] = ["", " "];
+    else row.cells.splice(from, to - from);
+  };
+  for (const [t, arg, op] of l.matchAll(/\x1b\[([0-9;]*)([mGKCDA])|[\s\S]/gu)) {
+    const n = Number(arg) || 1;
+    if (op === "m") {
+      codes += t;
+      continue;
+    }
+    if (t === "\r") {
+      [at, fresh] = [0, true];
+      continue;
+    }
+    if (!op && t !== "\b" && fresh) lose(0, row.cells.length, false);
+    fresh = false;
+    if (t === "\b" || op === "D") at = Math.max(0, at - (op ? n : 1));
+    else if (op === "C") at += n;
+    else if (op === "G") at = n - 1;
+    else if (op === "K") lose(arg === "1" || arg === "2" ? 0 : at, arg === "1" ? at + 1 : row.cells.length, arg === "1");
+    else if (op === "A") {
+      r = Math.max(0, r - n);
+      row = rows[r] = toRow(rows[r]);
+      codes = row.tail + codes;
+      row.tail = "";
+    } else {
+      while (row.cells.length < at) row.cells.push(["", " "]);
+      row.cells[at] = [sinceReset((row.cells[at]?.[0] ?? "") + codes), t];
+      at++;
       codes = "";
     }
   }
-  return cells.join("") + codes;
+  row.tail = sinceReset(codes);
+  return r;
 }
 
 /** A color: one of the 16 (a class, so the theme picks it) or any other as CSS. */

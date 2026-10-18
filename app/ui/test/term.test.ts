@@ -12,6 +12,63 @@ describe("clean", () => {
   test("drops escape codes", () => {
     expect(clean("\x1b[31mred\x1b[0m ok")).toBe("red ok");
     expect(clean("\x1b[2Kline")).toBe("line");
+    expect(clean("a\r\n\x1b[?25lb\x1b[3;1Hc")).toBe("a\nbc");
+  });
+});
+
+describe("clean follows cursor moves on a line", () => {
+  // Symfony's ProgressBar (composer install): Cursor::moveToColumn(1), then clearLine().
+  test("composer's progress bar is one bar, as it ends", () => {
+    const bar = (n: number, fill: string, pct: string) => ` ${String(n).padStart(3)}/109 [${fill}]  ${pct}%`;
+    const raw =
+      "Installing dependencies from lock file\n" +
+      bar(0, ">" + "-".repeat(27), "  0") +
+      "\x1b[1G\x1b[2K" +
+      bar(26, "======>" + "-".repeat(21), " 23") +
+      "\x1b[1G\x1b[2K" +
+      bar(109, "=".repeat(28), "100") +
+      "\n";
+    expect(clean(raw)).toBe(`Installing dependencies from lock file\n${bar(109, "=".repeat(28), "100")}\n`);
+    // Unfinished, as the Dev tab draws its live line.
+    expect(clean(raw.slice(0, raw.lastIndexOf("\x1b[1G")))).toBe(
+      `Installing dependencies from lock file\n${bar(26, "======>" + "-".repeat(21), " 23")}`,
+    );
+  });
+  // npm 10's spinner: readline's cursorTo(0) (ESC[1G) and clearLine(1) (ESC[0K).
+  test("npm's spinner leaves only its last frame, and the line after it", () => {
+    expect(clean("⠋\x1b[1G\x1b[0K⠙\x1b[1G\x1b[0K⠹\x1b[1G\x1b[0K\nadded 3 packages")).toBe("\nadded 3 packages");
+    expect(clean("⠋\x1b[1G\x1b[0K⠙")).toBe("⠙");
+  });
+  // pnpm (log-update, ansi-escapes' eraseLines(2)): ESC[2K ESC[1A ESC[2K ESC[G.
+  test("pnpm's two-line redraw goes up a line", () => {
+    const raw = "Progress: resolved 1\nPackages: +3\x1b[2K\x1b[1A\x1b[2K\x1b[GProgress: resolved 9\nPackages: +9";
+    expect(clean(raw)).toBe("Progress: resolved 9\nPackages: +9");
+    // On one line (the Dev tab draws line by line) up stays on it.
+    expect(clean("abc\x1b[1A\x1b[2K\x1b[Gxy")).toBe("xy");
+  });
+  test("columns, forward and back, partial erases", () => {
+    expect(clean("abcdef\x1b[3Gx")).toBe("abxdef");
+    expect(clean("abcdef\x1b[3G\x1b[K")).toBe("ab");
+    expect(clean("abcdef\x1b[3G\x1b[1K")).toBe("   def");
+    expect(clean("ab\x1b[2Cx")).toBe("ab  x");
+    expect(clean("abcd\x1b[2Dx")).toBe("abxd");
+    expect(clean("\x1b[5Gx")).toBe("    x");
+  });
+  test("\\r starts over only once something follows", () => {
+    expect(clean("long line\rshort")).toBe("short");
+    expect(clean("kept\r")).toBe("kept");
+  });
+  test("an erased color's reset is kept, so the color doesn't run on", () => {
+    expect(clean("\x1b[32m 50%\x1b[0m\x1b[1G\x1b[2K100%", true)).toBe("\x1b[0m100%");
+    const div = document.createElement("div");
+    div.append(colorize(clean("\x1b[32mgo\x1b[0m\x1b[1G\x1b[2Kdone\nnext", true)));
+    expect(div.querySelector(".ansi2")).toBeNull();
+    expect(div.textContent).toBe("done\nnext");
+  });
+  test("redraws don't pile codes up", () => {
+    const raw = Array.from({ length: 500 }, (_, i) => `\x1b[1G\x1b[2K\x1b[36m${i}\x1b[0m`).join("");
+    expect(clean(raw)).toBe("499");
+    expect(clean(raw, true).length).toBeLessThan(40);
   });
 });
 
