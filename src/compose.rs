@@ -143,10 +143,16 @@ fn containers_with(docker: &Path, dir: &Path) -> Result<Vec<Container>> {
     let services = compose(docker, dir, &["config", "--services"], READ)?;
     let ps = compose(docker, dir, &["ps", "--all", "--format", "json"], READ)?;
     let ps = parse_ps(&ps);
-    Ok(services
+    // By name: `config --services` gives dependency order, which changes as services do.
+    let mut services: Vec<&str> = services
         .lines()
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .collect();
+    services.sort_unstable();
+    services.dedup();
+    Ok(services
+        .into_iter()
         .map(|name| match ps.iter().find(|r| r.0 == name) {
             Some((_, state, health, ports, exit_code)) => Container {
                 service: name.into(),
@@ -183,7 +189,7 @@ pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
         status: String,
         ports: String,
     }
-    lines
+    let mut rows = lines
         .lines()
         .filter_map(|l| serde_json::from_str::<Line>(l).ok())
         .filter(|l| !l.dir.is_empty() && !l.service.is_empty())
@@ -210,7 +216,10 @@ pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
             };
             (PathBuf::from(l.dir), c)
         })
-        .collect()
+        .collect::<Vec<_>>();
+    // `docker ps` lists by creation, so a restart moves a container: by folder and name.
+    rows.sort_by(|a, b| (&a.0, &a.1.service).cmp(&(&b.0, &b.1.service)));
+    rows
 }
 
 fn running_with(docker: &Path) -> Result<Vec<(PathBuf, Container)>> {
@@ -527,19 +536,20 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                (
-                    PathBuf::from("/Users/x/elpida"),
-                    s("sphere"),
-                    s("running"),
-                    Some(s("healthy")),
-                    vec![2593]
-                ),
+                // By folder and name, not docker's order.
                 (
                     PathBuf::from("/Users/x/elpida"),
                     s("nobetci"),
                     s("running"),
                     None,
                     vec![]
+                ),
+                (
+                    PathBuf::from("/Users/x/elpida"),
+                    s("sphere"),
+                    s("running"),
+                    Some(s("healthy")),
+                    vec![2593]
                 ),
                 (
                     PathBuf::from("/Users/x/shop"),
@@ -617,13 +627,14 @@ ps) echo '{"Service":"web","State":"running","Health":"","Publishers":[{"Publish
 esac"#,
         );
         let c = containers_with(&docker, &d).unwrap();
+        // By name, not in the order compose gives them.
         assert_eq!(
-            (c[0].service.as_str(), c[0].state.as_str(), &c[0].ports[..]),
-            ("web", "running", &[8080][..])
+            (c[0].service.as_str(), c[0].state.as_str()),
+            ("db", "stopped")
         );
         assert_eq!(
-            (c[1].service.as_str(), c[1].state.as_str()),
-            ("db", "stopped")
+            (c[1].service.as_str(), c[1].state.as_str(), &c[1].ports[..]),
+            ("web", "running", &[8080][..])
         );
     }
 
