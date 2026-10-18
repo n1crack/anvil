@@ -496,23 +496,8 @@ impl Logs {
 
     /// End every stream: their process groups are killed and reaped.
     pub fn stop(&mut self) {
-        if self.follows.is_empty() {
-            return;
-        }
-        let groups: Vec<String> = self
-            .follows
-            .values()
-            .map(|f| format!("-{}", f.child.id()))
-            .collect();
-        let _ = Command::new("kill")
-            .arg("-KILL")
-            .arg("--")
-            .args(&groups)
-            .stderr(Stdio::null())
-            .status();
         for (_, mut f) in std::mem::take(&mut self.follows) {
-            let _ = f.child.kill();
-            let _ = f.child.wait();
+            crate::terminate(&mut f.child, Duration::ZERO);
         }
     }
 }

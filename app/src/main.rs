@@ -176,9 +176,13 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         let crashed: Vec<String> = apps.crashed().into_iter().map(|(k, _)| k).collect();
         (live, crashed)
     };
-    let app_states = app_states(&sites, &live, &crashed, &running_containers(&sites), |p| {
-        std::net::TcpStream::connect(("127.0.0.1", p)).is_ok()
-    });
+    let app_states = app_states(
+        &sites,
+        &live,
+        &crashed,
+        &running_containers(&sites),
+        anvil::port_answers,
+    );
     Ok(Snapshot {
         app_states,
         app_errors: app.app_errors.lock().unwrap().clone(),
@@ -299,15 +303,14 @@ fn sites_changed(handle: &AppHandle, app: &App, cfg: &Config) {
 }
 
 fn start_app(app: &App, cfg: &Config, name: &str) {
-    let result = anvil::sites(cfg)
-        .into_iter()
-        .find(|s| s.name == name)
-        .ok_or_else(|| anyhow::anyhow!("No app named {name}"))
-        .and_then(|site| app.apps.lock().unwrap().start(&site, &cfg.tld));
+    let result = site_in(cfg, name).and_then(|site| {
+        let started = app.apps.lock().unwrap().start(&site, &cfg.tld);
+        started.map_err(err)
+    });
     let mut errors = app.app_errors.lock().unwrap();
     match result {
         Ok(()) => errors.remove(name),
-        Err(e) => errors.insert(name.into(), err(e)),
+        Err(e) => errors.insert(name.into(), e),
     };
 }
 
@@ -565,11 +568,16 @@ fn find_site(name: &str) -> Res<Site> {
 /// The app and the config it was read from, loaded once.
 fn find_site_cfg(name: &str) -> Res<(Config, Site)> {
     let cfg = anvil::load().map_err(err)?;
-    let site = anvil::sites(&cfg)
+    let site = site_in(&cfg, name)?;
+    Ok((cfg, site))
+}
+
+/// The app named `name` in `cfg`, else "No app named".
+fn site_in(cfg: &Config, name: &str) -> Res<Site> {
+    anvil::sites(cfg)
         .into_iter()
         .find(|s| s.name == name)
-        .ok_or_else(|| format!("No app named {name}"))?;
-    Ok((cfg, site))
+        .ok_or_else(|| format!("No app named {name}"))
 }
 
 /// One line of the Processes window.
@@ -634,10 +642,6 @@ fn exit_detail(e: &anvil::apps::Exit) -> String {
         Some(c) => format!("Exited with code {c}"),
         None => "Ended by a signal".into(),
     }
-}
-
-fn listening(port: u16) -> bool {
-    std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
 }
 
 /// Everything Anvil runs: the web server, apps with their processes and containers, services.
@@ -740,7 +744,7 @@ fn activity(app: State<App>) -> Res<Activity> {
                     r
                 };
                 // A server is starting until its port answers.
-                if r.port.is_some_and(|p| !listening(p)) {
+                if r.port.is_some_and(|p| !anvil::port_answers(p)) {
                     r.state = "starting";
                 }
                 rows.push(measured(r, &table, pid, true));
@@ -872,7 +876,6 @@ fn activity_log_clear(key: String) -> Res<()> {
 
 /// The log file behind a Processes-window row; None for a container (Docker keeps it).
 fn activity_log_file(key: &str) -> Res<Option<std::path::PathBuf>> {
-    let log = anvil::home().join("log");
     // The service list is read only for a service key; Caddy and PHP logs need no config.
     let services = if key.starts_with("service:") {
         anvil::services::instances(&anvil::load().map_err(err)?)
@@ -880,8 +883,8 @@ fn activity_log_file(key: &str) -> Res<Option<std::path::PathBuf>> {
         vec![]
     };
     let file = match parse_log_key(key, &services)? {
-        LogKey::Caddy => log.join("caddy.log"),
-        LogKey::Php(v) => log.join(format!("php-{v}-fpm.log")),
+        LogKey::Caddy => anvil::caddy_log(),
+        LogKey::Php(v) => anvil::php_fpm_log(v),
         LogKey::Service(id) => anvil::services::log_file(id),
         LogKey::App(site) => {
             find_site(site)?;
@@ -1245,16 +1248,10 @@ fn set_process(
                 host.map(Some)
             },
         };
-        let routes = |c: &Config| {
-            anvil::processes::server_rows(c, &s)
-                .into_iter()
-                .map(|r| (r.id, r.host, r.port))
-                .collect::<Vec<_>>()
-        };
         let (cfg, reroute) = edit(|c| {
-            let before = routes(c);
+            let before = routes(c, &s);
             anvil::processes::set_process(c, &s, &id, change)?;
-            Ok(routes(c) != before)
+            Ok(routes(c, &s) != before)
         })?;
         let key = anvil::processes::key(&s.name, &id);
         let was_running = app.apps.lock().unwrap().running(&key);
@@ -1278,17 +1275,31 @@ fn set_process(
         // Only a server row's route needs the web server reloaded, and that restart
         // (Caddy, PHP-FPM) runs in the background so the click answers at once.
         if reroute {
-            let handle = handle.clone();
-            std::thread::spawn(move || {
-                if let Ok(cfg) = anvil::load() {
-                    sites_changed(&handle, &handle.state::<App>(), &cfg);
-                }
-            });
+            reroute_later(&handle);
         }
     }
     changed(&handle);
     let (cfg, s) = find_site_cfg(&site)?;
     Ok(overview(&app, &cfg, &s))
+}
+
+/// What the web server routes for an app's server rows: a change needs a reload.
+fn routes(c: &Config, s: &Site) -> Vec<(String, String, u16)> {
+    anvil::processes::server_rows(c, s)
+        .into_iter()
+        .map(|r| (r.id, r.host, r.port))
+        .collect()
+}
+
+/// Reload the web server for changed routes in the background, so the click answers
+/// at once (Caddy and PHP-FPM restart).
+fn reroute_later(handle: &AppHandle) {
+    let handle = handle.clone();
+    std::thread::spawn(move || {
+        if let Ok(cfg) = anvil::load() {
+            sites_changed(&handle, &handle.state::<App>(), &cfg);
+        }
+    });
 }
 
 /// Add a process of the user's own (Configure's + Add process); `name` is also its id.
@@ -1311,14 +1322,8 @@ fn process_add(
 #[tauri::command(async)]
 fn processes_reset(handle: AppHandle, app: State<App>, site: String) -> Res<Overview> {
     let s = find_site(&site)?;
-    let routes = |c: &Config| {
-        anvil::processes::server_rows(c, &s)
-            .into_iter()
-            .map(|r| (r.id, r.host, r.port))
-            .collect::<Vec<_>>()
-    };
     let (cfg, before) = edit(|c| {
-        let before = routes(c);
+        let before = routes(c, &s);
         anvil::processes::reset_processes(c, &s)?;
         Ok(before)
     })?;
@@ -1338,13 +1343,8 @@ fn processes_reset(handle: AppHandle, app: State<App>, site: String) -> Res<Over
         stop_app(&app, &k);
         app.app_errors.lock().unwrap().remove(&k);
     }
-    if routes(&cfg) != before {
-        let handle = handle.clone();
-        std::thread::spawn(move || {
-            if let Ok(cfg) = anvil::load() {
-                sites_changed(&handle, &handle.state::<App>(), &cfg);
-            }
-        });
+    if routes(&cfg, &s) != before {
+        reroute_later(&handle);
     }
     changed(&handle);
     Ok(overview(&app, &cfg, &s))
@@ -1355,11 +1355,7 @@ fn processes_reset(handle: AppHandle, app: State<App>, site: String) -> Res<Over
 #[tauri::command]
 async fn resources(handle: AppHandle, site: String) -> Res<anvil::resources::Resources> {
     tauri::async_runtime::spawn_blocking(move || {
-        let cfg = anvil::load().map_err(err)?;
-        let s = anvil::sites(&cfg)
-            .into_iter()
-            .find(|s| s.name == site)
-            .ok_or_else(|| format!("No app named {site}"))?;
+        let (cfg, s) = find_site_cfg(&site)?;
         let (total, items) = anvil::resources::disk(&s);
         let app = handle.state::<App>();
         let pid = app.apps.lock().unwrap().pid(&s.name);
@@ -1381,11 +1377,7 @@ async fn resources(handle: AppHandle, site: String) -> Res<anvil::resources::Res
 #[tauri::command]
 async fn git_info(site: String) -> Res<Option<anvil::git::GitInfo>> {
     tauri::async_runtime::spawn_blocking(move || {
-        let cfg = anvil::load().map_err(err)?;
-        let s = anvil::sites(&cfg)
-            .into_iter()
-            .find(|s| s.name == site)
-            .ok_or_else(|| format!("No app named {site}"))?;
+        let s = find_site(&site)?;
         Ok(anvil::git::info(&s.path))
     })
     .await
@@ -1393,12 +1385,7 @@ async fn git_info(site: String) -> Res<Option<anvil::git::GitInfo>> {
 }
 
 fn site_dir(site: &str) -> Res<std::path::PathBuf> {
-    let cfg = anvil::load().map_err(err)?;
-    anvil::sites(&cfg)
-        .into_iter()
-        .find(|s| s.name == site)
-        .map(|s| s.path)
-        .ok_or_else(|| format!("No app named {site}"))
+    find_site(site).map(|s| s.path)
 }
 
 /// Dependencies from the app's manifests and lock files, cached until they change.
@@ -1425,11 +1412,7 @@ async fn package_updates(site: String) -> Res<Vec<anvil::packages::Update>> {
 #[tauri::command]
 async fn clean(handle: AppHandle, site: String, path: String) -> Res<u64> {
     tauri::async_runtime::spawn_blocking(move || {
-        let cfg = anvil::load().map_err(err)?;
-        let s = anvil::sites(&cfg)
-            .into_iter()
-            .find(|s| s.name == site)
-            .ok_or_else(|| format!("No app named {site}"))?;
+        let s = find_site(&site)?;
         let running = handle.state::<App>().apps.lock().unwrap().running(&s.name);
         anvil::resources::clean(&s, &path, running).map_err(err)
     })
@@ -1443,11 +1426,7 @@ async fn with_site<T: Send + 'static>(
     f: impl FnOnce(Site) -> anyhow::Result<T> + Send + 'static,
 ) -> Res<T> {
     tauri::async_runtime::spawn_blocking(move || {
-        let cfg = anvil::load().map_err(err)?;
-        let s = anvil::sites(&cfg)
-            .into_iter()
-            .find(|s| s.name == site)
-            .ok_or_else(|| format!("No app named {site}"))?;
+        let s = find_site(&site)?;
         f(s).map_err(err)
     })
     .await
@@ -1923,11 +1902,7 @@ fn set_site_ini(
 /// Next restarts itself when its config changes.
 #[tauri::command(async)]
 fn allow_next_origin(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
-    let cfg = anvil::load().map_err(err)?;
-    let s = anvil::sites(&cfg)
-        .into_iter()
-        .find(|s| s.name == site)
-        .ok_or_else(|| format!("No site named {site}"))?;
+    let (cfg, s) = find_site_cfg(&site)?;
     anvil::apps::allow_next_origin(&s.path, &cfg.tld).map_err(err)?;
     changed(&handle);
     snapshot(&app)
@@ -2336,8 +2311,7 @@ fn git_client(cfg: &Config) -> Option<String> {
 
 /// Which of `apps` are installed in the usual macOS app folders.
 fn installed_apps(apps: &[&str]) -> Vec<String> {
-    let user =
-        std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Applications");
+    let user = anvil::user_home().join("Applications");
     let dirs = [
         std::path::Path::new("/Applications"),
         std::path::Path::new("/Applications/Utilities"),
@@ -2694,11 +2668,7 @@ fn show_processes(handle: AppHandle, select: Option<String>) {
 
 #[tauri::command(async)]
 fn open(site: String, target: String) -> Res<()> {
-    let cfg = anvil::load().map_err(err)?;
-    let s = anvil::sites(&cfg)
-        .into_iter()
-        .find(|s| s.name == site)
-        .ok_or_else(|| format!("No site named {site}"))?;
+    let (cfg, s) = find_site_cfg(&site)?;
     let mut cmd = Command::new("open");
     match target.as_str() {
         "browser" => cmd.arg(anvil::site_url(&cfg, &s)),
@@ -3014,7 +2984,7 @@ fn main() {
     // Opened from Finder, Anvil gets launchd's short PATH; what it starts (pnpm,
     // Homebrew tools, nvm's node…) needs the one a terminal has.
     if let Some(login) = anvil::login_path() {
-        let path = anvil::merge_path(&std::env::var("PATH").unwrap_or_default(), &login);
+        let path = anvil::merge_path(&anvil::env_path(), &login);
         // SAFETY: no other thread exists yet.
         unsafe { std::env::set_var("PATH", path) };
     }
@@ -3223,6 +3193,15 @@ fn main() {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn an_unknown_app_is_named_in_the_error() {
+        let cfg = Config::default();
+        assert_eq!(
+            site_in(&cfg, "shop").err().as_deref(),
+            Some("No app named shop")
+        );
+    }
 
     #[test]
     fn log_keys_are_parsed_and_paths_rejected() {

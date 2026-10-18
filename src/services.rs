@@ -13,7 +13,6 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -243,13 +242,11 @@ fn category(id: &str) -> &'static str {
     }
 }
 
-fn in_use(port: u16) -> bool {
-    TcpStream::connect(("127.0.0.1", port)).is_ok()
-}
+use crate::port_answers as in_use;
 
 /// The next free port after `port`, for when another program holds it.
 fn next_free(port: u16) -> Option<u16> {
-    (port + 1..port.saturating_add(100)).find(|p| !in_use(*p))
+    crate::free_port(&[], port + 1..port.saturating_add(100))
 }
 
 fn default_port(id: &str) -> u16 {
@@ -465,9 +462,7 @@ fn free_name(cfg: &Config, kind: &str) -> String {
 
 /// `from` or the next port no service and no other program uses.
 fn free_port(taken: &[u16], from: u16) -> u16 {
-    (from..u16::MAX)
-        .find(|p| !taken.contains(p) && !in_use(*p))
-        .unwrap_or(from)
+    crate::free_port(taken, from..u16::MAX).unwrap_or(from)
 }
 
 /// Whether a version of a kind's program is installed.

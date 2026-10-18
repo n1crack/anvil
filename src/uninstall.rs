@@ -46,9 +46,8 @@ impl Step {
 }
 
 fn tilde(p: &Path) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    match p.strip_prefix(&home) {
-        Ok(rest) if !home.is_empty() => format!("~/{}", rest.display()),
+    match p.strip_prefix(crate::user_home()) {
+        Ok(rest) => format!("~/{}", rest.display()),
         _ => p.display().to_string(),
     }
 }
@@ -74,8 +73,7 @@ fn fingerprint(cert: &Path) -> Option<String> {
 }
 
 fn login_keychain() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-        .join("Library/Keychains/login.keychain-db")
+    crate::user_home().join("Library/Keychains/login.keychain-db")
 }
 
 /// Everything there is to undo, in the order it has to happen: the
@@ -119,7 +117,7 @@ pub fn plan(cfg: &Config) -> Vec<Step> {
         steps.push(Step::Ports(daemon));
     }
 
-    let user = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let user = crate::user_home();
     // The login item (tauri-plugin-autostart names it after the app), only if it starts Anvil.
     // It starts the app's binary, anvil-app, inside Anvil.app or a development build.
     let agent = user.join("Library/LaunchAgents/Anvil.plist");
@@ -249,7 +247,7 @@ fn anvil_process(cmd: &str, home: &str) -> bool {
 /// not be inside ~/.anvil are unknown and it is kept.
 pub fn uninstall(cfg: &Config, config_ok: bool, yes: bool) -> Result<()> {
     let h = home();
-    let user = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let user = crate::user_home();
     let problem = if config_ok {
         home_problem(&h, &user, &projects(cfg))
     } else {

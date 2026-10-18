@@ -664,12 +664,7 @@ fn dotenv(dir: &Path) -> BTreeMap<String, String> {
 
 /// The `host:port` in a URL like `postgres://user:pw@127.0.0.1:5433/db`.
 fn authority(url: &str) -> Option<&str> {
-    url.split("://")
-        .nth(1)?
-        .split(['/', '?'])
-        .next()?
-        .rsplit('@')
-        .next()
+    crate::validate::authority(url)?.rsplit('@').next()
 }
 
 fn url_port(url: &str) -> Option<u16> {

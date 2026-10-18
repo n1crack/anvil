@@ -475,28 +475,6 @@ fn orphans_in(home: &Path) {
     }
 }
 
-/// Stop a whole process group: `npm run dev` leaves node children behind otherwise.
-fn terminate_group(child: &mut Child, grace: Duration) {
-    let group = format!("-{}", child.id());
-    let kill = |sig: &str| {
-        let _ = Command::new("kill")
-            .args([sig, "--", &group])
-            .stderr(Stdio::null())
-            .status();
-    };
-    kill("-TERM");
-    let deadline = std::time::Instant::now() + grace;
-    while std::time::Instant::now() < deadline {
-        if let Ok(Some(_)) = child.try_wait() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    // Anything in the group still alive gets killed.
-    kill("-KILL");
-    let _ = child.wait();
-}
-
 /// A process taken out of `Apps` (`take`), still to be stopped.
 pub struct Stopping {
     child: Child,
@@ -506,7 +484,7 @@ pub struct Stopping {
 impl Stopping {
     /// Stop its whole group: SIGTERM, then SIGKILL after 5 s.
     pub fn wait(mut self) {
-        terminate_group(&mut self.child, Duration::from_secs(5));
+        crate::terminate(&mut self.child, Duration::from_secs(5));
         crate::remove_pid_file(&self.pid_file, self.child.id());
     }
 }

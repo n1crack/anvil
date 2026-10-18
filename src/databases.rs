@@ -138,14 +138,10 @@ pub fn contents(cfg: &Config, id: &str) -> Result<Contents> {
         }
         _ => {
             let web = web_port(cfg, id).context("no inbox port")?;
-            let out = Command::new("curl")
-                .args(["-fsS", "--max-time", "3"])
-                .arg(format!("http://127.0.0.1:{web}/api/v1/messages?limit=1"))
-                .output()?;
-            if !out.status.success() {
-                bail!("{id} isn't answering");
-            }
-            let v: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+            let url = format!("http://127.0.0.1:{web}/api/v1/messages?limit=1");
+            let out = crate::curl(&["-fsS", "--max-time", "3"], &url)
+                .map_err(|_| anyhow::anyhow!("{id} isn't answering"))?;
+            let v: serde_json::Value = serde_json::from_slice(&out)?;
             c.messages = v["total"].as_u64();
         }
     }
@@ -208,15 +204,10 @@ pub fn empty(cfg: &Config, id: &str) -> Result<()> {
         "redis" => client(cfg, id, "FLUSHALL").map(drop),
         "mailpit" => {
             let web = web_port(cfg, id).context("no inbox port")?;
-            let ok = Command::new("curl")
-                .args(["-fsS", "--max-time", "3", "-X", "DELETE"])
-                .arg(format!("http://127.0.0.1:{web}/api/v1/messages"))
-                .status()?
-                .success();
-            if !ok {
-                bail!("{id} isn't answering");
-            }
-            Ok(())
+            let url = format!("http://127.0.0.1:{web}/api/v1/messages");
+            crate::curl(&["-fsS", "--max-time", "3", "-X", "DELETE"], &url)
+                .map(drop)
+                .map_err(|_| anyhow::anyhow!("{id} isn't answering"))
         }
         _ => bail!("Drop databases one by one instead"),
     }
@@ -242,12 +233,12 @@ pub fn clients(kind: &str) -> Vec<&'static str> {
         "redis" => &["TablePlus", "RedisInsight", "Another Redis Desktop Manager"],
         _ => &[],
     };
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::user_home();
     apps.iter()
         .copied()
         .filter(|a| {
             std::path::Path::new(&format!("/Applications/{a}.app")).exists()
-                || std::path::Path::new(&format!("{home}/Applications/{a}.app")).exists()
+                || home.join(format!("Applications/{a}.app")).exists()
         })
         .collect()
 }

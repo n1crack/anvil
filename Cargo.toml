@@ -9,6 +9,7 @@ description = "Anvil — your tools, your rules. A free, open local dev environm
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 ctrlc = { version = "3.5.2", features = ["termination"] }
+nix = { version = "0.31.3", features = ["signal", "user"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 tempfile = "3.27.0"

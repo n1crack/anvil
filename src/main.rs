@@ -302,9 +302,7 @@ fn start(cfg: &Config) -> Result<()> {
     std::thread::spawn(move || {
         let _ = rx.recv();
         // Stopping the web server ends `server.wait()` below.
-        let _ = Command::new("kill")
-            .arg(pids.last().unwrap().1.to_string())
-            .status();
+        sigterm(pids.last().unwrap().1);
     });
     server.wait()?;
     drop(apps);
@@ -365,7 +363,7 @@ fn print_setup(cfg: &Config) -> Result<()> {
         println!(
             "Adding {} to PATH in {} so php, composer, laravel, node, npm and npx follow each site's versions.",
             home().join("shims").display(),
-            shims::shell_rc_files(&PathBuf::from(std::env::var_os("HOME").unwrap_or_default()))
+            shims::shell_rc_files(&user_home())
                 .iter()
                 .map(|f| f.display().to_string())
                 .collect::<Vec<_>>()

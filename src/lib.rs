@@ -19,6 +19,8 @@ pub mod uninstall;
 pub mod validate;
 
 use anyhow::{Context, Result, bail};
+use nix::sys::signal::Signal;
+use nix::unistd::Pid;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -233,9 +235,22 @@ pub(crate) fn state_dirs_in(home: &Path) -> Result<()> {
 pub fn home() -> PathBuf {
     std::env::var_os("ANVIL_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").expect("HOME not set")).join(".anvil")
+        .unwrap_or_else(|| user_home().join(".anvil"))
+}
+
+/// The user's home folder: `$HOME`, else the account's entry when HOME isn't set, so
+/// a path is never silently made relative to the current folder.
+pub fn user_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            nix::unistd::User::from_uid(nix::unistd::getuid())
+                .ok()
+                .flatten()
+                .map(|u| u.dir)
         })
+        .expect("no home folder: HOME is not set and the account has none")
 }
 
 /// The config, or the defaults when there is none yet. Any other read error is
@@ -598,9 +613,12 @@ fn run_sh_file(script: &str, prompt: &str, applescript: &str) -> Result<()> {
         .arg(prompt))
 }
 
-pub(crate) fn fetch_text(url: &str) -> Result<String> {
+/// `curl <args> <url>`'s body; an error, with curl's reason, when it fails (`-f` makes an
+/// HTTP error a failure).
+pub(crate) fn curl(args: &[&str], url: &str) -> Result<Vec<u8>> {
     let out = Command::new("curl")
-        .args(["-fsSL", url])
+        .args(args)
+        .arg(url)
         .output()
         .context("couldn't run curl")?;
     if !out.status.success() {
@@ -611,7 +629,11 @@ pub(crate) fn fetch_text(url: &str) -> Result<String> {
             if why.is_empty() { "no answer" } else { why }
         );
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok(out.stdout)
+}
+
+pub(crate) fn fetch_text(url: &str) -> Result<String> {
+    Ok(String::from_utf8_lossy(&curl(&["-fsSL"], url)?).into_owned())
 }
 
 /// `fetch_text` of a JSON document.
@@ -740,7 +762,7 @@ pub(crate) fn replace_dir(dir: &Path, fill: impl FnOnce(&Path) -> Result<()>) ->
     Ok(())
 }
 
-fn php_dir(v: &str) -> PathBuf {
+pub fn php_dir(v: &str) -> PathBuf {
     home().join("php").join(v)
 }
 
@@ -907,10 +929,7 @@ fn fpm_conf(v: &str, global: &BTreeMap<String, String>, sites: &[Site]) -> Strin
     };
     let mut s = format!(
         "[global]\nerror_log = {}\ndaemonize = no\n",
-        home()
-            .join("log")
-            .join(format!("php-{v}-fpm.log"))
-            .display()
+        php_fpm_log(v).display()
     );
     let values = |ini: &BTreeMap<String, String>| -> String {
         ini.iter()
@@ -1147,8 +1166,7 @@ pub fn trust() -> Result<()> {
         bail!("No certificate authority yet — start Anvil once, then trust it");
     }
     // ponytail: macOS login keychain only; Linux (update-ca-certificates / NSS) comes with the Linux port.
-    let keychain = PathBuf::from(std::env::var_os("HOME").unwrap())
-        .join("Library/Keychains/login.keychain-db");
+    let keychain = user_home().join("Library/Keychains/login.keychain-db");
     run(Command::new("security")
         .args(["add-trusted-cert", "-r", "trustRoot", "-k"])
         .arg(keychain)
@@ -1388,11 +1406,13 @@ fn pid_file() -> PathBuf {
 }
 
 pub(crate) fn alive(pid: &str) -> bool {
-    Command::new("kill")
-        .args(["-0", pid])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    pid.parse()
+        .is_ok_and(|p| nix::sys::signal::kill(Pid::from_raw(p), None).is_ok())
+}
+
+/// SIGTERM to one process, if it is still there.
+pub fn sigterm(pid: u32) {
+    let _ = nix::sys::signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
 }
 
 /// When a process started, as `ps` prints it (`Sat Oct 18 10:02:03 2026`). With the pid
@@ -1435,9 +1455,13 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
                 .output()
                 .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&ours)),
         };
-        if same {
-            let target = if group { format!("-{pid}") } else { pid.into() };
-            let _ = Command::new("kill").args(["--", &target]).status();
+        if let (true, Ok(p)) = (same, pid.parse()) {
+            let p = Pid::from_raw(p);
+            let _ = if group {
+                nix::sys::signal::killpg(p, Signal::SIGTERM)
+            } else {
+                nix::sys::signal::kill(p, Signal::SIGTERM)
+            };
             killed = true;
         }
     }
@@ -1445,6 +1469,16 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     if killed {
         std::thread::sleep(std::time::Duration::from_millis(500)); // let ports close
     }
+}
+
+/// Whether something listens on this Mac's `port`.
+pub fn port_answers(port: u16) -> bool {
+    TcpStream::connect(("127.0.0.1", port)).is_ok()
+}
+
+/// The first of `ports` that neither a program here nor `taken` uses.
+pub(crate) fn free_port(taken: &[u16], mut ports: std::ops::Range<u16>) -> Option<u16> {
+    ports.find(|p| !taken.contains(p) && !port_answers(*p))
 }
 
 /// Remove a pid file only while it still names `pid`: a stop that finishes after a new
@@ -1461,19 +1495,31 @@ pub(crate) fn remove_pid_file(file: &Path, pid: u32) {
     }
 }
 
-/// Ask a process to shut down cleanly (SIGTERM); force it after `grace`.
+/// Ask a child to shut down cleanly (SIGTERM), force it (SIGKILL) after `grace`, and
+/// reap it. A child started as a process-group leader (`process_group(0)`) is stopped
+/// with its whole group, so `npm run dev` leaves no node behind; any other child alone.
 pub(crate) fn terminate(child: &mut Child, grace: std::time::Duration) {
-    let _ = Command::new("kill")
-        .args(["-TERM", &child.id().to_string()])
-        .status();
-    let deadline = std::time::Instant::now() + grace;
-    while std::time::Instant::now() < deadline {
-        if let Ok(Some(_)) = child.try_wait() {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+    use nix::sys::signal::{kill, killpg};
+    let pid = Pid::from_raw(child.id() as i32);
+    let group = killpg(pid, Signal::SIGTERM).is_ok();
+    if !group {
+        let _ = kill(pid, Signal::SIGTERM);
     }
-    let _ = child.kill();
+    let deadline = std::time::Instant::now() + grace;
+    let mut exited = false;
+    while !exited && std::time::Instant::now() < deadline {
+        exited = matches!(child.try_wait(), Ok(Some(_)));
+        if !exited {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+    // Anything in the group still alive gets killed, even after its leader ended.
+    if group {
+        let _ = killpg(pid, Signal::SIGKILL);
+    }
+    if !exited {
+        let _ = child.kill();
+    }
     let _ = child.wait();
 }
 
@@ -1487,7 +1533,7 @@ pub struct Server {
 impl Server {
     pub fn start(cfg: &Config) -> Result<Server> {
         kill_orphans(&pid_file(), false);
-        if TcpStream::connect(("127.0.0.1", cfg.https_port)).is_ok() {
+        if port_answers(cfg.https_port) {
             bail!(
                 "Port {} is already in use — is Anvil already running?",
                 cfg.https_port
@@ -1530,7 +1576,7 @@ impl Server {
 
         let file = home().join("run").join("Caddyfile");
         fs::write(&file, caddyfile(cfg, &sites))?;
-        let log = fs::File::create(home().join("log").join("caddy.log"))?;
+        let log = fs::File::create(caddy_log())?;
         server.labels.push("Caddy".into());
         server.children.push(
             caddy_cmd()
@@ -1594,7 +1640,7 @@ impl Server {
             _ => String::new(),
         };
         let log = if label == "Caddy" {
-            format!(" — see {}", home().join("log").join("caddy.log").display())
+            format!(" — see {}", caddy_log().display())
         } else {
             String::new()
         };
@@ -1628,6 +1674,73 @@ impl Drop for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A group leader is stopped with its group (a grandchild that ignores nothing
+    /// dies too); a plain child alone, and one that ignores SIGTERM is killed.
+    #[test]
+    fn terminate_stops_a_group_or_a_single_child() {
+        use std::os::unix::process::CommandExt;
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("grandchild");
+        let mut leader = Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "sleep 30 & echo $! > '{}'; wait",
+                pid_file.display()
+            ))
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let grandchild = (0..100)
+            .find_map(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                fs::read_to_string(&pid_file)
+                    .ok()
+                    .filter(|s| s.ends_with('\n'))
+            })
+            .unwrap();
+        let grandchild = grandchild.trim().to_string();
+        assert!(alive(&grandchild));
+        terminate(&mut leader, std::time::Duration::from_secs(5));
+        assert!(matches!(leader.try_wait(), Ok(Some(_))));
+        // The orphaned sleep is reaped by launchd; give it a moment.
+        let gone = (0..50).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            !alive(&grandchild)
+        });
+        assert!(gone, "the group's other process survived");
+
+        let start = std::time::Instant::now();
+        let mut stubborn = Command::new("sh")
+            .args(["-c", "trap '' TERM; sleep 30"])
+            .spawn()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        terminate(&mut stubborn, std::time::Duration::from_millis(300));
+        assert!(matches!(stubborn.try_wait(), Ok(Some(_))));
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn ports_paths_and_homes() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let p = l.local_addr().unwrap().port();
+        assert!(port_answers(p));
+        assert_ne!(free_port(&[], p..p.saturating_add(50)), Some(p));
+        assert_eq!(free_port(&[p + 1], p + 1..p + 2), None);
+        drop(l);
+        assert_eq!(
+            prepend_path(Path::new("/a b"), "/usr/bin:/bin"),
+            "/a b:/usr/bin:/bin"
+        );
+        assert!(user_home().is_absolute());
+        let e = curl(&["-fsS", "--max-time", "2"], "http://127.0.0.1:1/").unwrap_err();
+        assert!(
+            e.to_string()
+                .starts_with("couldn't fetch http://127.0.0.1:1/: "),
+            "{e}"
+        );
+    }
 
     /// The admin path without the password dialog: quotes, `$`, backslashes and
     /// newlines in the script and the prompt arrive untouched.
@@ -2082,6 +2195,26 @@ fn parse_login_path(out: &str) -> Option<String> {
 }
 
 /// `current` with the login shell's entries added after it, each directory once.
+/// The web server's (Caddy's) log.
+pub fn caddy_log() -> PathBuf {
+    home().join("log").join("caddy.log")
+}
+
+/// One PHP version's FPM log.
+pub fn php_fpm_log(v: &str) -> PathBuf {
+    home().join("log").join(format!("php-{v}-fpm.log"))
+}
+
+/// The PATH this process runs with.
+pub fn env_path() -> String {
+    std::env::var("PATH").unwrap_or_default()
+}
+
+/// `dir` first on `path`.
+pub fn prepend_path(dir: &Path, path: &str) -> String {
+    format!("{}:{path}", dir.display())
+}
+
 pub fn merge_path(current: &str, login: &str) -> String {
     let mut seen = std::collections::HashSet::new();
     current

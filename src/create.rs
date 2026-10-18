@@ -479,12 +479,8 @@ fn build(
     match kind {
         "laravel" | "statamic" | "symfony" => {
             let v = opts.get("php").context("Install a PHP version first")?;
-            let php_bin = home().join("php").join(v).join("php");
-            let path = format!(
-                "{}:{}",
-                php_bin.parent().unwrap().display(),
-                std::env::var("PATH").unwrap_or_default()
-            );
+            let php_bin = crate::php_dir(v).join("php");
+            let path = crate::prepend_path(php_bin.parent().unwrap(), &crate::env_path());
             let phar = composer()?;
             let composer = |args: &[&str], cwd: &Path| {
                 sh(

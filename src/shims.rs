@@ -33,9 +33,7 @@ pub fn pick_cli(exe: &Path, user_home: &Path, exists: impl Fn(&Path) -> bool) ->
     .unwrap_or_else(|| "anvil".into())
 }
 
-fn user_home() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-}
+use crate::user_home;
 
 /// Write the shims into `<home>/shims`.
 pub fn install(home: &Path) -> Result<()> {
@@ -84,8 +82,7 @@ fn php_version(pinned: Option<String>, cfg: &Config, installed: &[String]) -> Re
 }
 
 fn path_with(dir: &Path) -> (String, String) {
-    let path = std::env::var("PATH").unwrap_or_default();
-    ("PATH".into(), format!("{}:{path}", dir.display()))
+    ("PATH".into(), crate::prepend_path(dir, &crate::env_path()))
 }
 
 pub type Resolved = (PathBuf, Vec<String>, Vec<(String, String)>);
@@ -107,7 +104,7 @@ pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result
                 .and_then(|s| cfg.sites.get(&s.name))
                 .and_then(|s| s.php.clone());
             let v = php_version(pinned, cfg, &installed_php())?;
-            let php_dir = h.join("php").join(&v);
+            let php_dir = crate::php_dir(&v);
             let php = php_dir.join("php");
             if tool == "php" {
                 return Ok((php, vec![], vec![]));

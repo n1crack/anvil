@@ -261,10 +261,7 @@ pub fn detect(site: &Site) -> Vec<Process> {
 
 /// `detect` with a config already loaded.
 pub fn detect_with(site: &Site, cfg: Option<&crate::Config>) -> Vec<Process> {
-    let php = home()
-        .join("php")
-        .join(site.php.as_deref().unwrap_or_default())
-        .join("php");
+    let php = crate::php_dir(site.php.as_deref().unwrap_or_default()).join("php");
     detect_in(site, &php, &home().join("cache"), cfg)
 }
 
@@ -843,10 +840,6 @@ pub struct Script {
     pub run: String,
 }
 
-fn quoted(s: &str) -> String {
-    format!("'{}'", s.replace('\'', r"'\''"))
-}
-
 /// The app's one-off scripts: package.json's commands (see `package_scripts`), then a PHP
 /// app's composer.json scripts other than `dev` and Composer's event hooks.
 pub fn one_off_scripts(site: &Site) -> Vec<Script> {
@@ -858,7 +851,7 @@ pub fn one_off_scripts(site: &Site) -> Vec<Script> {
         .map(|name| Script {
             id: ids[&name].clone(),
             text: texts.get(&name).cloned().unwrap_or_default(),
-            run: format!("npm run {}", quoted(&name)),
+            run: format!("npm run {}", crate::shims::sh_quote(&name)),
             source: "package.json",
             name,
         })
@@ -873,10 +866,7 @@ pub fn one_off_scripts(site: &Site) -> Vec<Script> {
     let Some(scripts) = composer["scripts"].as_object() else {
         return out;
     };
-    let php = home()
-        .join("php")
-        .join(site.php.as_deref().unwrap_or_default())
-        .join("php");
+    let php = crate::php_dir(site.php.as_deref().unwrap_or_default()).join("php");
     let phar = home().join("bin/composer.phar");
     let ids = unique_ids(scripts.keys());
     for (name, v) in scripts {
@@ -902,9 +892,9 @@ pub fn one_off_scripts(site: &Site) -> Vec<Script> {
             id,
             run: format!(
                 "{} {} run-script {}",
-                quoted(&php.display().to_string()),
-                quoted(&phar.display().to_string()),
-                quoted(name)
+                crate::shims::sh_quote(&php.display().to_string()),
+                crate::shims::sh_quote(&phar.display().to_string()),
+                crate::shims::sh_quote(name)
             ),
             text,
             source: "composer.json",
@@ -1102,7 +1092,7 @@ pub fn address(cfg: &crate::Config, site: &Site, id: &str) -> Option<String> {
 /// Settings, first on PATH, with Node's caches kept in Anvil's folder.
 pub fn env(site: &Site) -> Vec<(String, String)> {
     let mut env = vec![];
-    let mut path = std::env::var("PATH").unwrap_or_default();
+    let mut path = crate::env_path();
     // The project's .nvmrc / .node-version when installed, else the newest.
     if let Some(node) = apps::runtime_version("node", &site.path) {
         env = runtimes::env("node", &node);
@@ -1114,7 +1104,7 @@ pub fn env(site: &Site) -> Vec<(String, String)> {
         path = runtimes::with_pms(&path);
     }
     if let Some(v) = &site.php {
-        path = format!("{}:{path}", home().join("php").join(v).display());
+        path = crate::prepend_path(&crate::php_dir(v), &path);
     }
     env.push(("PATH".into(), path));
     env

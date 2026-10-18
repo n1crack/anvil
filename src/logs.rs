@@ -2,7 +2,7 @@
 //! from the end, and Monolog entries (one header line plus any continuation
 //! lines) are kept whole.
 
-use crate::{Site, apps, home};
+use crate::{Site, apps};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::fs::{self, File};
@@ -118,7 +118,7 @@ pub fn sources(site: &Site) -> Vec<LogSource> {
         out.extend(source(&id, &script.name, &path));
     }
     if let Some(v) = site.php.as_ref().filter(|_| apps::is_php(&site.kind)) {
-        let path = home().join("log").join(format!("php-{v}-fpm.log"));
+        let path = crate::php_fpm_log(v);
         out.extend(source("php-fpm", &format!("PHP-FPM {v}"), &path));
     }
     out

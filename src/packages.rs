@@ -6,7 +6,6 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
@@ -761,20 +760,15 @@ fn stable(v: &str) -> bool {
 }
 
 fn fetch(url: &str) -> Option<Value> {
-    let out = Command::new("curl")
-        .args([
-            "-sfL",
-            "--compressed",
-            "--max-time",
-            "15",
-            "-A",
-            "anvil (local dev environment)",
-        ])
-        .arg(url)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-    serde_json::from_slice(&out.stdout).ok()
+    let args = [
+        "-sfL",
+        "--compressed",
+        "--max-time",
+        "15",
+        "-A",
+        "anvil (local dev environment)",
+    ];
+    serde_json::from_slice(&crate::curl(&args, url).ok()?).ok()
 }
 
 /// The newest stable version of one package, from its registry.

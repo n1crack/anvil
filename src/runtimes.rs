@@ -374,7 +374,7 @@ pub fn uninstall(id: &str, version: &str) -> Result<()> {
 /// Environment that puts one runtime version first on PATH and keeps its
 /// caches inside Anvil.
 pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
-    let path = std::env::var("PATH").unwrap_or_default();
+    let path = crate::env_path();
     let d = |p: PathBuf| p.display().to_string();
     let mut e: Vec<(String, String)> = Vec::new();
     let cache = home().join("cache");
@@ -446,7 +446,7 @@ pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
     };
     // Node apps also find the package managers installed from Settings.
     let path = if id == "node" { with_pms(&path) } else { path };
-    e.push(("PATH".into(), format!("{}:{path}", bin.display())));
+    e.push(("PATH".into(), crate::prepend_path(&bin, &path)));
     e
 }
 
@@ -472,7 +472,7 @@ fn pm_dirs() -> [PathBuf; 2] {
 /// `path` with Anvil's package managers in front.
 pub fn with_pms(path: &str) -> String {
     let [pm, bun] = pm_dirs();
-    format!("{}:{}:{path}", pm.display(), bun.display())
+    crate::prepend_path(&pm, &crate::prepend_path(&bun, path))
 }
 
 /// One package manager as found on a PATH.
@@ -521,7 +521,7 @@ fn find(name: &str, path: &str, envs: &[(String, String)]) -> Option<(Found, Pat
     })
     .filter(|v| !v.is_empty());
     let real = fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
-    let user = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let user = crate::user_home();
     let source = source_of(&real, &home(), &user);
     Some((
         Found {
@@ -536,7 +536,7 @@ fn find(name: &str, path: &str, envs: &[(String, String)]) -> Option<(Found, Pat
 /// npm, pnpm, yarn and bun as an app sees them (the newest Anvil Node.js) and
 /// as a terminal does (the login shell's PATH, without Anvil's runtimes).
 pub fn package_managers() -> Vec<PackageManager> {
-    let base = std::env::var("PATH").unwrap_or_default();
+    let base = crate::env_path();
     let apps_env = match installed("node").first() {
         Some(v) => env("node", v),
         None => vec![("PATH".into(), with_pms(&base))],
