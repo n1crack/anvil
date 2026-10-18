@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -746,12 +746,62 @@ fn command(cfg: &Config, id: &str) -> Command {
     c
 }
 
+/// `svc-<id>`: a service named `app-blog` or `caddy` gets files of its own instead of
+/// the app `blog`'s or the web server's.
 fn pid_file(id: &str) -> PathBuf {
-    home().join("run").join(format!("{id}.pids"))
+    pid_in(&home(), id)
+}
+
+fn pid_in(home: &Path, id: &str) -> PathBuf {
+    home.join("run").join(format!("svc-{id}.pids"))
 }
 
 pub fn log_file(id: &str) -> PathBuf {
-    home().join("log").join(format!("{id}.log"))
+    log_in(&home(), id)
+}
+
+fn log_in(home: &Path, id: &str) -> PathBuf {
+    home.join("log").join(format!("svc-{id}.log"))
+}
+
+/// The pid file name from before `svc-`: still read, for a service an older Anvil
+/// started and still runs (`migrate_files` leaves that one where it is).
+fn legacy_pid_file(id: &str) -> PathBuf {
+    home().join("run").join(format!("{id}.pids"))
+}
+
+/// Move the services' pid files and logs from `<id>.pids`/`<id>.log` to the `svc-`
+/// names. Run at startup, before `apps::kill_all_orphans` (it would take a service's
+/// `app-<x>.pids` for an app's). A pid file whose Anvil still runs stays: that Anvil
+/// removes it by its old name when it stops the service. A log that could be another
+/// one's (`caddy.log`, `app-*`, `create-*`, `php-*`) stays too.
+pub fn migrate_files(cfg: &Config) {
+    migrate_files_in(&home(), &instances(cfg));
+}
+
+fn migrate_files_in(home: &Path, ids: &[String]) {
+    for id in ids {
+        let old = home.join("run").join(format!("{id}.pids"));
+        if let Ok(f) = fs::read_to_string(&old) {
+            let mut lines = f.lines();
+            let owner_gone = !lines.next().is_some_and(crate::alive);
+            // An app's pid file has "<pid> <start time>" lines; a service's only pids.
+            let a_service_s = !id.starts_with("app-") || lines.all(|l| !l.contains(' '));
+            let new = pid_in(home, id);
+            if owner_gone && a_service_s && !new.exists() {
+                let _ = fs::rename(&old, new);
+            }
+        }
+        let shared = id == "caddy"
+            || ["app-", "create-", "php-"]
+                .iter()
+                .any(|p| id.starts_with(p));
+        let (old, new) = (home.join("log").join(format!("{id}.log")), log_in(home, id));
+        if !shared && old.is_file() && !new.exists() {
+            // Safe while a service still writes to it: its open file moves along.
+            let _ = fs::rename(old, new);
+        }
+    }
 }
 
 /// Running services, keyed by id.
@@ -884,6 +934,7 @@ pub fn enabled(cfg: &Config) -> Vec<String> {
 pub fn halt(id: &str, mut c: Child) {
     terminate(&mut c, Duration::from_secs(10));
     crate::remove_pid_file(&pid_file(id), c.id());
+    crate::remove_pid_file(&legacy_pid_file(id), c.id());
 }
 
 /// Everything of a start but the bookkeeping (`Services::begin`/`finish`): check, init,
@@ -895,6 +946,10 @@ pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
         bail!("{} {v} is not installed", name(kind));
     }
     kill_orphans(&pid_file(id), false);
+    if !id.starts_with("app-") {
+        // Left by an Anvil from before `svc-` (an `app-` one is the app's to clean up).
+        kill_orphans(&legacy_pid_file(id), false);
+    }
     let port = port(cfg, id);
     for p in [Some(port), web_port(cfg, id)].into_iter().flatten() {
         if in_use(p) {
@@ -941,6 +996,46 @@ impl Drop for Services {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_files_move_to_svc_names_and_never_take_anothers() {
+        let home = std::env::temp_dir().join(format!("anvil-svc-files-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        crate::state_dirs_in(&home).unwrap();
+        let (run, log) = (home.join("run"), home.join("log"));
+        // A service named like an app's files and one named like the web server's log.
+        assert_ne!(pid_in(&home, "app-blog"), run.join("app-blog.pids"));
+        assert_ne!(log_in(&home, "caddy"), log.join("caddy.log"));
+
+        let dead = "999999"; // no such process: its Anvil is gone
+        let me = std::process::id().to_string();
+        fs::write(run.join("redis.pids"), format!("{dead}\n123")).unwrap();
+        fs::write(log.join("redis.log"), "old output").unwrap();
+        fs::write(run.join("mysql.pids"), format!("{me}\n456")).unwrap(); // its Anvil runs
+        fs::write(log.join("caddy.log"), "web server").unwrap();
+        fs::write(run.join("app-blog.pids"), format!("{dead}\n789 Mon Oct 12")).unwrap();
+        let ids = ["redis", "mysql", "caddy", "app-blog"].map(String::from);
+        migrate_files_in(&home, &ids);
+
+        assert_eq!(
+            fs::read_to_string(pid_in(&home, "redis")).unwrap(),
+            format!("{dead}\n123")
+        );
+        assert!(!run.join("redis.pids").exists());
+        assert_eq!(
+            fs::read_to_string(log_in(&home, "redis")).unwrap(),
+            "old output"
+        );
+        assert!(run.join("mysql.pids").exists() && !pid_in(&home, "mysql").exists());
+        assert_eq!(
+            fs::read_to_string(log.join("caddy.log")).unwrap(),
+            "web server"
+        );
+        assert!(!log_in(&home, "caddy").exists());
+        // The app blog's pid file (with start times) is not the service's.
+        assert!(run.join("app-blog.pids").exists() && !pid_in(&home, "app-blog").exists());
+        fs::remove_dir_all(home).unwrap();
+    }
 
     #[test]
     fn every_mysql_version_has_pinned_checksums() {

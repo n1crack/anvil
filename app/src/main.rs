@@ -3075,6 +3075,7 @@ fn main() {
                     let state = handle.state::<App>();
                     // What a crashed Anvil left running stops first; then a fresh Anvil
                     // shows only this run's output, as a new terminal would.
+                    anvil::services::migrate_files(&cfg);
                     anvil::apps::kill_all_orphans();
                     anvil::apps::clear_stale_logs();
                     // Log retention now and hourly, off the start's way.

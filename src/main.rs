@@ -252,6 +252,7 @@ fn start(cfg: &Config) -> Result<()> {
     ctrlc::set_handler(move || {
         let _ = tx.send(());
     })?;
+    services::migrate_files(cfg);
     let mut services = services::Services::default();
     for (id, e) in services.start_enabled(cfg) {
         eprintln!("  {id}: {}", style::error(e));
