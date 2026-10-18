@@ -293,7 +293,7 @@ export function openNewApp() {
 /** "Its address: my-app.test", from what is typed (the placeholder until then). */
 export function preview() {
   const name = $("#new-name");
-  $("#new-url").textContent = `Its address: ${name.value || name.placeholder}.${snap.tld}`;
+  $("#new-url").replaceChildren("Its address: ", el("span", "new-addr", `${name.value || name.placeholder}.${snap.tld}`));
 }
 
 function showForm(on: boolean) {

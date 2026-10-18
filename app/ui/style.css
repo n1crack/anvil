@@ -1929,6 +1929,7 @@ kbd {
   font-size: 12px;
 }
 .new-search input::placeholder { color: var(--muted); }
+#new-url .new-addr { color: var(--text); }
 .kind-none { margin: 0; padding: 12px 8px; color: var(--muted); }
 .kind-list {
   display: flex;
