@@ -2,7 +2,8 @@ import type { CommandChip, ProcessRow } from "./types";
 import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, mode, popAt, selected, showError, showTab, snap, tab } from "./app";
 import { type Tail, readTail, tail, termOut } from "./console";
 import { late } from "./late";
-import { confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
+import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
+import { shown } from "./live";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
 /* Dev tab: the app's dev processes on the left, the chosen one's output live on the right,
@@ -435,6 +436,16 @@ export function line(x: Pick<Item, "key" | "name" | "color">, text: string, s: S
   return d;
 }
 
+/** The oldest lines over `max` out in one removal, so the pane changes once, not once a line. */
+export function trimLines(out: HTMLElement, max: number) {
+  const over = out.childElementCount - max;
+  if (over <= 0) return;
+  const r = document.createRange();
+  r.setStartBefore(out.firstElementChild!);
+  r.setEndBefore(out.children[over]);
+  r.deleteContents();
+}
+
 /** New output appended as it comes, nothing drawn twice. One process's unfinished last
  * line (a progress bar redrawn with \r) is drawn live; All shows a line once it ends. */
 function append(v: View, x: Item, text: string, width: number) {
@@ -453,7 +464,7 @@ function append(v: View, x: Item, text: string, width: number) {
     out.append(live);
   }
   term.out.append(out);
-  while (term.out.childElementCount > MAX_LINES) term.out.firstElementChild.remove();
+  term.keep(() => trimLines(term.out, MAX_LINES));
   term.follow();
   syncEmpty();
 }
@@ -486,7 +497,7 @@ export async function devTick() {
 /** Save one change to a process; a failure shows below the table. */
 async function save(name: string, args: Record<string, unknown>, cmd = "set_process") {
   try {
-    procCache.set(name, await invoke(cmd, { site: name, ...args }));
+    await askProcs(name, cmd, args);
     confError = "";
     return true;
   } catch (e) {
@@ -650,7 +661,7 @@ late.openDev = openDev;
 // Only while the tab is shown: output twice a second, the processes' states every two.
 let ticks = 0;
 setInterval(() => {
-  if (document.hidden || mode !== "apps" || !selected || tab !== "dev") return;
+  if (!shown() || mode !== "apps" || !selected || tab !== "dev") return;
   if (view?.site === selected) devTick();
   if (++ticks % 4 === 0 && !procLoading.has(selected)) loadProcs(selected);
 }, 500);

@@ -833,6 +833,139 @@ describe("logs", () => {
   });
 });
 
+describe("polls and races", () => {
+  const entry = (message: string) => ({ time: "2026-10-17 10:00:00", env: "local", level: "error", message, context: null, trace: [] });
+
+  test("a process's output opened directly is followed, new lines added to what is drawn", async () => {
+    document.hasFocus = () => true;
+    const logs = await import("../src/logs");
+    await select("shop");
+    w.showLog("shop", "once:build");
+    await wait(80);
+    logs.follow(false); // ticks by hand below
+    const term = $(".logs-term");
+    const base = (await w.__TAURI__.core.invoke("log_text", { site: "shop", source: "once:build", from: 0 })).text;
+    const first = term.firstElementChild;
+    const n = calls("log_text").length;
+    w.mockLogs = { "once:build": `${base}next http://shop.test/a\n` };
+    await logs.followTick();
+    w.mockLogs = { "once:build": `${base}next http://shop.test/a\nand more\n` };
+    await logs.followTick();
+    expect(calls("log_text").length).toBe(n + 2);
+    expect(term.firstElementChild).toBe(first); // not drawn again
+    // A block per tick: the last two are what each tick added.
+    expect([...term.children].slice(-2).map((b) => b.textContent)).toEqual(["next http://shop.test/a", "and more"]);
+    expect(term.textContent!.split("✓ built in 3.41s")).toHaveLength(2);
+    expect(term.querySelector(".term-link")?.textContent).toBe("http://shop.test/a");
+    delete w.mockLogs;
+  });
+
+  test("log_tail: one at a time, and an answer for a view changed meanwhile is dropped", async () => {
+    const logs = await import("../src/logs");
+    w.showLog("shop", "laravel.log");
+    await wait(80);
+    logs.follow(false);
+    const n = calls("log_tail").length;
+    w.mockDelay = { log_tail: 60 };
+    w.mockTail = [entry("tail once")];
+    await Promise.all([logs.followTick(), logs.followTick(), logs.followTick()]);
+    expect(calls("log_tail").length).toBe(n + 1);
+    const rows = () => $$(".logs-list .log-msg").filter((m) => m.textContent === "tail once");
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].closest(".log")!.querySelector(".log-count")).toBeNull();
+    w.mockTail = [entry("tail late")];
+    const tick = logs.followTick();
+    ($$(".logs-bar .seg button").find((b) => b.textContent === "Errors") as HTMLElement).click();
+    await tick;
+    await wait(80);
+    w.mockDelay = {};
+    expect($$(".logs-list .log-msg").filter((m) => m.textContent === "tail late")).toHaveLength(0);
+    ($$(".logs-bar .seg button").find((b) => b.textContent === "All") as HTMLElement).click();
+    await wait(80);
+  });
+
+  test("following keeps at most MAX_ENTRIES entries; Load older starts again from the newest page", async () => {
+    const logs = await import("../src/logs");
+    w.mockTail = Array.from({ length: logs.MAX_ENTRIES + 300 }, (_, i) => entry(`flood ${i}`));
+    await logs.followTick();
+    const shown = $$(".logs-list .log").reduce((n, li: any) => n + li.entries.length, 0);
+    expect(shown).toBeLessThanOrEqual(logs.MAX_ENTRIES);
+    expect(logs.lv.entries.length).toBeLessThanOrEqual(logs.MAX_ENTRIES);
+    expect(logs.lv.shown).toBe(shown);
+    expect($(".logs-more").hidden).toBe(false);
+    const reads = calls("log_read").length;
+    $(".logs-more").click();
+    await wait(80);
+    expect(calls("log_read").length).toBe(reads + 1);
+    expect(logs.lv.trimmed).toBe(false);
+  });
+
+  test("Dev drops the lines over its cap in one removal", async () => {
+    const { trimLines } = await import("../src/dev");
+    const out = document.createElement("div");
+    for (let i = 0; i < 600; i++) out.append(Object.assign(document.createElement("div"), { textContent: `l${i}` }));
+    trimLines(out, 500);
+    expect(out.childElementCount).toBe(500);
+    expect(out.firstElementChild!.textContent).toBe("l100");
+    trimLines(out, 500);
+    expect(out.childElementCount).toBe(500);
+  });
+
+  test("a processes poll asked before an action doesn't undo the action's answer", async () => {
+    const p = await import("../src/processes");
+    const row = () => p.procCache.get("vuefinder")!.rows.find((r) => r.kind !== "site")!;
+    const ov = w.mockOv.vuefinder;
+    const r = ov.rows.find((x) => x.kind !== "site");
+    const was = r.running;
+    w.mockDelay = { processes: 60 };
+    const poll = p.loadProcs("vuefinder");
+    r.running = !was; // what the action does
+    await p.loadProcs("vuefinder", "process_run", { name: r.id, action: was ? "stop" : "start" });
+    r.running = was; // what the poll read before it
+    await poll;
+    w.mockDelay = {};
+    expect(row().running).toBe(!was);
+    await p.loadProcs("vuefinder"); // a poll asked after it does count
+    expect(row().running).toBe(was);
+  });
+
+  test("a state poll asked before an action doesn't undo the action's snapshot", async () => {
+    const app = await import("../src/app");
+    const was = w.mockSnap.running;
+    w.mockDelay = { state: 60 };
+    const poll = app.call("state");
+    w.mockSnap.running = !was;
+    await app.call("app_run", { site: "shop", action: "start" });
+    w.mockSnap.running = was;
+    await poll;
+    w.mockDelay = {};
+    expect(app.snap.running).toBe(!was);
+    await app.call("state");
+    expect(app.snap.running).toBe(was);
+  });
+
+  test("the error banner stays until its owner clears it, or it is dismissed", async () => {
+    const app = await import("../src/app");
+    w.mockSnap.error = "Caddy failed to start";
+    w.mockDelay = { services: 50 };
+    const services = w.loadServices(); // answers after the state
+    await app.call("state");
+    await services;
+    w.mockDelay = {};
+    expect($("#error").hidden).toBe(false);
+    expect($("#error-text").textContent).toBe("Caddy failed to start");
+    w.mockSnap.error = null;
+    await app.call("state");
+    expect($("#error").hidden).toBe(true);
+    app.showError("Push failed");
+    await w.loadServices();
+    await app.call("state");
+    expect($("#error-text").textContent).toBe("Push failed");
+    $("#error-close").click();
+    expect($("#error").hidden).toBe(true);
+  });
+});
+
 describe("packages", () => {
   test("All until a check exists, no check on opening; then Outdated with a tab per manager", async () => {
     $('.tabs [data-tab="packages"]').click();

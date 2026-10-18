@@ -32,9 +32,9 @@ export const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
 export async function serviceCall(cmd: string, args?: Record<string, unknown>) {
   try {
     services = await invoke(cmd, args);
-    showError(null);
+    showError(null, cmd);
   } catch (e) {
-    showError(String(e));
+    showError(String(e), cmd);
   }
   if (mode === "services") renderMain();
   else if (selected)

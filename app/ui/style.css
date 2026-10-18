@@ -929,6 +929,28 @@ button.proc-name:hover { text-decoration: underline; }
   -webkit-user-select: text;
 }
 .console-out:empty::before { content: "No output yet"; color: #8d959f; }
+/* A log paused away from its newest edge: this pill, pinned at that edge, jumps back
+ * (console.ts follower). Its text is CSS so the log's own text stays the log's. */
+.follow-pill {
+  position: sticky;
+  z-index: 2;
+  bottom: 8px;
+  display: block;
+  width: max-content;
+  height: 22px;
+  margin: -22px 0 0 auto;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 11px;
+  background: rgba(48, 54, 61, 0.94);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  color: #e8ebee;
+  font: 600 11px/20px -apple-system, system-ui, sans-serif;
+  white-space: nowrap;
+}
+.follow-pill::before { content: attr(data-label); }
+.follow-pill:hover { background: rgba(64, 71, 79, 0.96); }
+.logs-list > .follow-pill { top: 8px; bottom: auto; margin: 0 8px -22px auto; }
 /* A URL in output: nothing special until ⌘ is held, then it reads as a link. */
 .link-mod .term-link:hover { text-decoration: underline; cursor: pointer; }
 .ansi-b { font-weight: 700; }
@@ -2437,6 +2459,7 @@ button.log-file:hover { text-decoration-color: currentColor; }
   -webkit-user-select: text;
 }
 .logs-term[hidden] { display: none; }
+.logs-term > .term-block { display: block; }
 .logs-term:empty::before { content: attr(data-empty); color: #8d959f; }
 .logs-term mark { border-radius: 2px; background: rgba(227, 179, 65, 0.35); color: inherit; }
 [data-panel="logs"] .logs > .logs-term { flex: 1; min-height: 0; }

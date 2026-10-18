@@ -140,6 +140,18 @@ describe("links", () => {
     expect(div.textContent).toBe("  ➜  Local:   http://localhost:5174/\nsee https://laravel.com/docs, then http://shop.test.");
   });
 
+  test("many URLs cost one pass: 5000 lines, each with a colored URL, well under the old minutes", () => {
+    const text = Array.from({ length: 5000 }, (_, i) => `\x1b[32m10:00:0${i % 10}\x1b[39m GET http://localhost:5173/f${i}.ts 200`).join(
+      "\n",
+    );
+    const t = performance.now();
+    const div = render(text);
+    expect(performance.now() - t).toBeLessThan(5000);
+    expect(links(div).length).toBe(5000);
+    expect(links(div).at(-1)!.dataset.url).toBe("http://localhost:5173/f4999.ts");
+    expect(div.textContent).toBe(clean(text));
+  });
+
   test("⌘-click opens through open_url; a plain click opens nothing", async () => {
     const calls: [string, any][] = [];
     (window as any).__TAURI__ = { core: { invoke: async (cmd: string, args: any) => void calls.push([cmd, args]) } };

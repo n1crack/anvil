@@ -1,7 +1,8 @@
 import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, seg, selected, showError, showTab, snap, tab, tilde } from "./app";
-import { readTail, tail, termOut } from "./console";
+import { follower, readTail, tail, termOut } from "./console";
 import { copy } from "./services";
-import { ansi, clean, linkify } from "./term";
+import { shown } from "./live";
+import { ansi, clean, linkify, sgr } from "./term";
 
 /* Logs tab: an app's log files, newest first. app.js calls logsTab() from showTab. */
 
@@ -47,7 +48,7 @@ window.logsTab = (root, visible) => {
   if (lv?.site !== s.name) lv = buildLogs(s);
   panel.replaceChildren(lv.node);
   // Re-attaching resets the scroll box; put it back where the reader left it.
-  $(".logs-list", lv.node).scrollTop = lv.scrollTop;
+  lv.list.restore();
   lv.term.restore();
   if (lv.follow) follow(true);
 };
@@ -73,7 +74,6 @@ export function buildLogs(s) {
     level: "all",
     query: "",
     page: null, // last page from the backend (offsets)
-    scrollTop: 0,
     term: termOut("logs-term"), // plain sources
     tail: null,
     entries: [],
@@ -124,7 +124,7 @@ export function buildLogs(s) {
   };
   $(".logs-more", node).onclick = () => more(v);
   const list = $(".logs-list", node);
-  list.onscroll = () => (v.scrollTop = list.scrollTop);
+  v.list = follower(list, true); // newest first: it follows the top
   v.term.out.hidden = true;
   list.after(v.term.out);
   list.onclick = (e) => {
@@ -256,11 +256,13 @@ export async function loadLogs(v, keepScroll = false) {
   }
   if (token !== v.token) return;
   v.page = page;
+  v.trimmed = false;
   v.tailFrom = page.end_offset;
   v.entries = page.entries;
   v.shown = 0;
   const list = $(".logs-list", v.node);
   list.replaceChildren();
+  if (!keepScroll) v.list.end(); // another file or filter: from the newest
   list.classList.toggle("untimed", !v.entries.some((e) => e.time));
   showMore(v);
 }
@@ -277,9 +279,10 @@ async function loadText(v, token) {
   const t = tail(v.site, v.source.id);
   await readTail(t);
   if (token !== v.token) return;
+  // Another source starts at its end; the same one again (a filter) stays where it was.
+  if (v.tail?.source !== t.source) v.term.end();
   v.tail = t;
   textMode(v, true);
-  v.term.atEnd = true;
   drawText(v);
 }
 
@@ -289,23 +292,82 @@ export const KEYWORDS = {
   warning: /\bwarn(ing)?\b|⚠/i,
 };
 
+// The text drawn is kept to about what `readTail` keeps of the output.
+export const TEXT_MAX = 524288;
+
+/** Lines as one block (display: block, so adding one doesn't lay out the others again):
+ * colors carried in `v.style`, links found line by line. */
+function textBlock(v, lines: string[]) {
+  const b = el("span", "term-block");
+  lines.forEach((l, i) => {
+    if (i) b.append("\n");
+    b.append(linkify(ansi(l, v.style)));
+  });
+  b.size = lines.reduce((n, l) => n + l.length + 1, 0);
+  return b;
+}
+
 /** The output with ANSI colors, only the lines that match the filters, matches marked.
- * ponytail: redraws all of it on each change; append-only if big outputs get slow. */
-export function drawText(v) {
+ * With `fresh` (what `readTail` just read) and no filter, only that is added. */
+export function drawText(v, fresh?: string) {
+  const out = v.term.out;
+  if (fresh != null && !filtered(v) && !v.tail.cleared && v.style) return appendText(v, fresh);
+  v.tail.cleared = false;
+  v.style = sgr();
+  v.live = null;
   const q = v.query.toLowerCase();
-  let lines = clean(v.tail.raw, true).replace(/\n$/, "").split("\n");
+  // Unfiltered, an unfinished last line is drawn apart, to be drawn again once it ends.
+  const end = filtered(v) ? v.tail.raw.length : v.tail.raw.lastIndexOf("\n") + 1;
+  v.pending = v.tail.raw.slice(end);
+  let lines = clean(v.tail.raw.slice(0, end), true).replace(/\n$/, "").split("\n");
+  if (!end) lines = [];
   if (filtered(v))
     lines = lines.filter((l) => {
       const t = clean(l);
       return (v.level === "all" || KEYWORDS[v.level].test(t)) && (!q || t.toLowerCase().includes(q));
     });
-  const out = v.term.out;
   out.dataset.empty = filtered(v) ? "Nothing matches." : "No output yet.";
-  out.replaceChildren(v.tail.raw ? linkify(ansi(lines.join("\n"))) : "");
+  out.replaceChildren(); // empty, it says why (data-empty)
+  if (lines.length) out.append(textBlock(v, lines));
+  liveLine(v);
   if (q) mark(out, q);
   const n = lines.length;
   $(".logs-status", v.node).textContent = filtered(v) ? `${n} matching ${n === 1 ? "line" : "lines"} in ${v.source.label}` : "";
   $(".logs-status", v.node).title = tilde(v.source.path);
+  v.term.follow();
+}
+
+/** The unfinished last line (a progress bar redrawn with \r), drawn after the rest. */
+function liveLine(v) {
+  v.live?.remove();
+  v.live = null;
+  if (!v.pending) return;
+  v.live = el("span", "term-block");
+  v.live.append(linkify(ansi(clean(v.pending, true), { ...v.style })));
+  v.term.out.append(v.live);
+}
+
+/** Following without a filter: the new lines go after the others, the oldest blocks go
+ * once there is more than TEXT_MAX. Nothing drawn before is drawn again. */
+function appendText(v, fresh: string) {
+  const out = v.term.out;
+  const text = v.pending + fresh;
+  const end = text.lastIndexOf("\n") + 1;
+  v.pending = text.slice(end);
+  v.live?.remove();
+  if (end) out.append(textBlock(v, clean(text.slice(0, end - 1), true).split("\n")));
+  liveLine(v);
+  const blocks = [...out.children].filter((b: any) => b.size != null) as any[];
+  let size = blocks.reduce((n, b) => n + b.size, 0);
+  let k = 0;
+  while (k < blocks.length - 1 && size > TEXT_MAX) size -= blocks[k++].size;
+  if (k)
+    v.term.keep(() => {
+      const r = document.createRange();
+      r.setStartBefore(blocks[0]);
+      r.setEndBefore(blocks[k]);
+      r.deleteContents();
+    });
   v.term.follow();
 }
 
@@ -339,6 +401,7 @@ export function fetchPage(v, before) {
 
 /** Load older: first rows already fetched, then the next page. */
 export async function more(v) {
+  if (v.shown >= v.entries.length && v.trimmed) return loadLogs(v);
   if (v.shown >= v.entries.length && v.page.truncated) {
     const btn = $(".logs-more", v.node);
     btn.disabled = true;
@@ -373,7 +436,8 @@ export function groupEntries(entries) {
 /** The rendered row at the newest or oldest end of the list. */
 const edgeRow = (v, newest) => {
   const list = $(".logs-list", v.node);
-  const r = newest ? list.firstElementChild : list.lastElementChild;
+  let r = newest ? list.firstElementChild : list.lastElementChild;
+  if (r?.classList.contains("follow-pill")) r = r.nextElementSibling; // paused, it is on top
   return r?.entries ? r : null;
 };
 
@@ -404,7 +468,7 @@ export function showMore(v) {
   } else {
     status(v);
   }
-  $(".logs-more", v.node).hidden = v.shown >= v.entries.length && !v.page?.truncated;
+  $(".logs-more", v.node).hidden = v.shown >= v.entries.length && !v.page?.truncated && !v.trimmed;
 }
 
 export function status(v) {
@@ -678,20 +742,29 @@ export function follow(on) {
 
 export async function followTick() {
   const v = lv;
-  if (!v?.source || !v.page || !v.node.isConnected || v.node.closest("[hidden]")) return follow(false);
-  if (document.hidden || !document.hasFocus()) return;
+  // A plain source has no page: its output is read as text (loadText).
+  if (!v?.source || (!plain(v.source) && !v.page) || !v.node.isConnected || v.node.closest("[hidden]")) return follow(false);
+  if (!shown() || !document.hasFocus()) return;
   const token = v.token;
   if (plain(v.source)) {
-    if (v.tail && (await readTail(v.tail)) && token === v.token) drawText(v);
+    const t = v.tail;
+    const fresh = t && (await readTail(t));
+    if (fresh && token === v.token && t === v.tail && lv === v) drawText(v, fresh);
     return;
   }
+  // One at a time: a slow read must not be followed by a second one from the same offset.
+  if (v.tailing) return;
+  v.tailing = true;
   let page;
   try {
     page = await invoke("log_tail", { site: v.site, source: v.source.id, from: v.tailFrom });
   } catch {
     return;
+  } finally {
+    v.tailing = false;
   }
-  if (token !== v.token) return;
+  // Another file, filter or app since: this answer is for a view no longer shown.
+  if (token !== v.token || lv !== v) return;
   // The file shrank (cleared or rotated): start over.
   if (page.end_offset < v.tailFrom) return loadLogs(v, true);
   v.tailFrom = page.end_offset;
@@ -708,11 +781,30 @@ export async function followTick() {
   const groups = groupEntries(fresh);
   // The same entry again: the newest row counts up instead of a new row.
   const newest = edgeRow(v, true);
-  if (newest && sameEntry(newest.entries[0], groups.at(-1)![0])) grow(v, newest, groups.pop(), false);
-  list.prepend(...groups.map((g) => entryRow(v, g)));
+  v.list.keep(() => {
+    if (newest && sameEntry(newest.entries[0], groups.at(-1)![0])) grow(v, newest, groups.pop(), false);
+    list.prepend(...groups.map((g) => entryRow(v, g)));
+  });
+  v.list.follow();
   v.entries.unshift(...fresh);
   v.shown += fresh.length;
+  if (v.entries.length > MAX_ENTRIES) trimEntries(v);
   status(v);
+}
+
+export const MAX_ENTRIES = 2000; // entries kept while following
+
+/** A long follow: the oldest rows and entries go. Load older then starts again from the
+ * newest page, since what was dropped has no offset to read on from. */
+function trimEntries(v) {
+  let old;
+  while (v.shown > MAX_ENTRIES && (old = edgeRow(v, false))) {
+    v.shown -= old.entries.length;
+    old.remove();
+  }
+  v.entries.length = MAX_ENTRIES;
+  v.trimmed = true;
+  $(".logs-more", v.node).hidden = false;
 }
 
 export async function clearLog(v) {

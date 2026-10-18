@@ -1,5 +1,6 @@
 import type { Snapshot } from "./types";
 import { late } from "./late";
+import { ownError, shown } from "./live";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -29,20 +30,38 @@ export const url = (s) => {
 export const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
 export let snapAt = 0; // when the last snapshot arrived
+let snapAsked = 0; // numbers each request for a snapshot…
+let snapShown = 0; // …and this one's is in `snap`
+
+/** A snapshot from `cmd`, unless one asked for later already came: true when it is newest. */
+async function askSnap(cmd: string, args?: Record<string, unknown>) {
+  const n = ++snapAsked;
+  const next = await invoke(cmd, args);
+  if (!next) return true;
+  if (n < snapShown) return false;
+  snapShown = n;
+  snap = next;
+  snapAt = Date.now();
+  return true;
+}
 
 export async function call(cmd: string, args?: Record<string, unknown>) {
   try {
-    snap = (await invoke(cmd, args)) ?? snap;
-    snapAt = Date.now();
+    if (!(await askSnap(cmd, args))) return;
+    showError(null, cmd);
     render();
   } catch (e) {
-    showError(String(e));
+    showError(String(e), cmd);
   }
 }
 
-export function showError(msg) {
-  $("#error-text").textContent = msg ?? "";
-  $("#error").hidden = !msg;
+const errors = new Map<string, string>(); // owner -> its error, see ownError
+/** The error banner: `owner`'s error, or null to clear only that one. Without an owner it
+ * stays until dismissed. */
+export function showError(msg, owner = "") {
+  const text = ownError(errors, msg, owner);
+  $("#error-text").textContent = text;
+  $("#error").hidden = !text;
 }
 
 export let toastTimer;
@@ -128,7 +147,7 @@ export async function loadSetup(busy?: string) {
 }
 
 export function render() {
-  showError(snap.error);
+  showError(snap.error, "snapshot");
 
   const power = $("#power");
   power.dataset.on = snap.running;
@@ -1303,12 +1322,16 @@ export function renderRunSettings(s, root) {
 
 // While an app is starting, check back until its port answers. Only the list dots
 // and the run box change, so nothing the user is typing gets redrawn.
+let starting = false; // that check on its way
 setInterval(async () => {
-  if (!snap || !Object.values(snap.app_states).includes("starting")) return;
+  if (starting || !shown() || mode !== "apps" || !snap || !Object.values(snap.app_states).includes("starting")) return;
+  starting = true;
   try {
-    snap = await invoke("state");
+    if (!(await askSnap("state"))) return;
   } catch {
     return;
+  } finally {
+    starting = false;
   }
   if (mode !== "apps") return;
   renderList();
@@ -1515,7 +1538,10 @@ $("#list").onkeydown = (e) => {
   if (next) select(next.dataset.name);
 };
 
-$("#error-close").onclick = () => showError(null);
+$("#error-close").onclick = () => {
+  errors.clear();
+  showError(null);
+};
 
 // Keyboard: ⌘1–9 tabs in order, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
 /* ---------- Shortcuts: the menu bar and the keyboard run the same actions ---------- */

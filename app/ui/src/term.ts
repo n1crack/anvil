@@ -142,41 +142,48 @@ function stamped(line: string) {
 }
 
 /** A log as a terminal shows it (`clean(text, true)` first): lines with escape codes
- * drawn by `ansi`, plain ones by `stamped`. `s` carries colors across calls. */
+ * drawn by `ansi`, plain ones by `stamped`. `s` carries colors across calls. Links are
+ * found line by line: DOM ranges get slower the more siblings their parent has. */
 export function colorize(text: string, s: Sgr = sgr()) {
   const out = document.createDocumentFragment();
   text.split("\n").forEach((line, i) => {
     if (i) out.append("\n");
     const styled = Object.values(s).some((v) => v != null && v !== false);
-    out.append(styled || line.includes("\x1b") ? ansi(line, s) : stamped(line));
+    out.append(linkify(styled || line.includes("\x1b") ? ansi(line, s) : stamped(line)));
   });
-  return linkify(out);
+  return out;
 }
 
 // http(s) up to a space or quote, without the punctuation that ends a sentence.
 const URL_RE = /\bhttps?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]/g;
+
+// One range for every call: WebKit keeps each live range up to date on every DOM change
+// until it is collected, so a range per call (per line) made all changes slower.
+let linkRange: Range | undefined;
 
 /** Drawn output with its URLs as links, also when colors split one (vite's bold port in
  * http://localhost:5173/). A link opens on ⌘-click (see below); a plain click selects. */
 export function linkify<T extends Node>(root: T): T {
   const text = root.textContent ?? "";
   if (!text.includes("http")) return root;
-  // From the last, so the text before each one stays where it was.
+  // The text nodes and where each starts, read once. Links go in from the last, so the
+  // nodes before each one keep their place: a node split by a link keeps its first part.
+  const texts: Text[] = [];
+  const starts: number[] = [];
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = 0; walk.nextNode(); n += (walk.currentNode as Text).length) {
+    texts.push(walk.currentNode as Text);
+    starts.push(n);
+  }
+  let i = texts.length - 1; // only moves back, so all the links cost one pass
+  const at = (pos: number, end: boolean): [Text, number] => {
+    while (i > 0 && (end ? starts[i] >= pos : starts[i] > pos)) i--;
+    return [texts[i], pos - starts[i]];
+  };
+  const range = (linkRange ??= document.createRange());
   for (const m of [...text.matchAll(URL_RE)].reverse()) {
-    const texts: Text[] = [];
-    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    while (walk.nextNode()) texts.push(walk.currentNode as Text);
-    const at = (pos: number, end: boolean): [Text, number] => {
-      let n = 0;
-      for (const t of texts) {
-        if (pos < n + t.length || (end && pos === n + t.length)) return [t, pos - n];
-        n += t.length;
-      }
-      return [texts.at(-1)!, texts.at(-1)!.length];
-    };
-    const range = document.createRange();
-    range.setStart(...at(m.index, false));
     range.setEnd(...at(m.index + m[0].length, true));
+    range.setStart(...at(m.index, false));
     const a = document.createElement("span");
     a.className = "term-link";
     a.dataset.url = m[0];

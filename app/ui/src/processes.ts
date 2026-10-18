@@ -1,6 +1,7 @@
 import type { Container, Overview } from "./types";
 import { $, el, invoke, mode, popAt, renderSite, selected, showError, showTab, snap, tab } from "./app";
 import { late } from "./late";
+import { shown } from "./live";
 
 /* An app's processes as the Overview and the header see them: the backend's overview
  * (rows, one-off scripts, Docker Compose containers), the header's Dev start/stop, one
@@ -17,18 +18,40 @@ window.renderProcesses = (s) => {
   loadProcs(s.name);
 };
 
-/** Ask the backend; false when it failed (the error is shown). */
+let procAsked = 0; // numbers every request for an overview
+const procShown = new Map<string, number>(); // site name -> newest number in procCache
+const actShown = new Map<string, number>(); // the same, for actions only
+const procAsking = new Map<string, number>(); // site name -> loadProcs calls on their way
+
+/** `cmd`'s overview of the site into procCache, unless it is old news: a poll is dropped
+ * when anything asked after it answered first (an action it started before), an action
+ * only when a later action did. */
+export async function askProcs(name: string, cmd: string, args = {}) {
+  const n = ++procAsked;
+  const o = await invoke(cmd, { site: name, ...args });
+  const action = cmd !== "processes";
+  if (n < ((action ? actShown : procShown).get(name) ?? 0)) return;
+  if (action) actShown.set(name, n);
+  procShown.set(name, Math.max(n, procShown.get(name) ?? 0));
+  procCache.set(name, o);
+}
+
+/** Ask the backend; false when it failed (the error is shown). The site stays in
+ * procLoading, which holds the polls back, until every call for it has answered. */
 export async function loadProcs(name, cmd = "processes", args = {}) {
   const before = JSON.stringify(procCache.get(name));
   let ok = true;
   procLoading.add(name);
+  procAsking.set(name, (procAsking.get(name) ?? 0) + 1);
   try {
-    procCache.set(name, await invoke(cmd, { site: name, ...args }));
+    await askProcs(name, cmd, args);
+    showError(null, cmd);
   } catch (e) {
-    showError(String(e));
+    showError(String(e), cmd);
     ok = false;
   }
-  procLoading.delete(name);
+  procAsking.set(name, procAsking.get(name)! - 1);
+  if (!procAsking.get(name)) procLoading.delete(name);
   // Redraw only on a change, so focus and tooltips survive the polling.
   if (selected === name && JSON.stringify(procCache.get(name)) !== before) drawProcs(name);
   return ok;
@@ -41,10 +64,12 @@ export async function containerRun(name, services, action, service?: string) {
   const word = { start: "starting…", stop: "stopping…", restart: "restarting…" }[action];
   for (const k of keys) procBusy.set(k, word);
   if (selected === name) drawProcs(name);
+  const cmd = service ? "container_run" : "containers_run";
   try {
-    procCache.set(name, await invoke(service ? "container_run" : "containers_run", { site: name, service, action }));
+    await askProcs(name, cmd, { service, action });
+    showError(null, cmd);
   } catch (e) {
-    showError(String(e));
+    showError(String(e), cmd);
   }
   for (const k of keys) procBusy.delete(k);
   if (selected === name) drawProcs(name);
@@ -213,7 +238,7 @@ export function drawProcs(name) {
 
 // While the Overview is shown, keep the Dev and Containers lines fresh.
 setInterval(() => {
-  if (document.hidden || mode !== "apps" || !selected || tab !== "overview") return;
+  if (!shown() || mode !== "apps" || !selected || tab !== "overview") return;
   const o = procCache.get(selected);
   if (procLoading.has(selected) || !(devRows(o).length || o?.containers || o?.docker_error)) return;
   loadProcs(selected);

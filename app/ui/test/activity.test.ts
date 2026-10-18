@@ -140,3 +140,46 @@ describe("asked to show a row", () => {
     $('#tabs [data-tab="apps"]').click();
   });
 });
+
+describe("long-open window", () => {
+  test("usage changes are written into the row; the table isn't rebuilt", async () => {
+    const { load } = await import("../src/activity");
+    await load();
+    const tr = $('tr[data-key="shop@queue"]');
+    activity.apps[0].rows[0].cpu = 12.5;
+    activity.apps[0].rows[0].memory = 50 * 1048576;
+    await load();
+    expect($('tr[data-key="shop@queue"]')).toBe(tr);
+    expect(tr.children[3].textContent).toBe("12.5%");
+    expect(tr.children[4].textContent).toBe("50 MB");
+    activity.apps[0].rows[0].state = "crashed";
+    await load();
+    expect($('tr[data-key="shop@queue"]')).not.toBe(tr);
+    activity.apps[0].rows[0].state = "running";
+    await load();
+  });
+
+  test("the log keeps about LOG_LINES of the newest pages, the oldest go in one removal", async () => {
+    const { trimLog, LOG_LINES } = await import("../src/activity");
+    const log = document.createElement("pre");
+    for (let i = 0; i < 10; i++) {
+      const p = document.createElement("span") as any;
+      p.textContent = `page ${i}\n`.repeat(1000);
+      p.lines = 1000;
+      log.append(p);
+    }
+    trimLog(log);
+    expect(log.children).toHaveLength(LOG_LINES / 1000);
+    expect(log.firstElementChild!.textContent).toMatch(/^page 7\n/);
+  });
+
+  test("an error stays until its owner clears it: a poll that works keeps an action's", async () => {
+    const { load, showError } = await import("../src/activity");
+    showError("Stop failed", "act");
+    await load();
+    expect($("#error").hidden).toBe(false);
+    expect($("#error").textContent).toBe("Stop failed");
+    showError(null, "act");
+    expect($("#error").hidden).toBe(true);
+  });
+});

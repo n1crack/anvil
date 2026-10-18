@@ -1,4 +1,5 @@
 import type { Settings } from "./types";
+import { ownError } from "./live";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -9,16 +10,18 @@ export let s: Settings = null as unknown as Settings; // set by the first load
 export async function call(cmd: string, args?: Record<string, unknown>) {
   try {
     s = (await invoke(cmd, args)) ?? s;
-    showError(null);
+    showError(null, cmd);
     render();
   } catch (e) {
-    showError(String(e));
+    showError(String(e), cmd);
   }
 }
 
-export function showError(msg) {
-  $("#error").textContent = msg ?? "";
-  $("#error").hidden = !msg;
+const errors = new Map<string, string>(); // owner -> its error, see ownError
+export function showError(msg, owner = "") {
+  const text = ownError(errors, msg, owner);
+  $("#error").textContent = text;
+  $("#error").hidden = !text;
 }
 
 window.refresh = () => {
@@ -109,9 +112,9 @@ export function versionRow(
 export async function loadRuntimes() {
   try {
     runtimes = await invoke("runtimes");
-    showError(null);
+    showError(null, "runtimes");
   } catch (e) {
-    showError(String(e));
+    showError(String(e), "runtimes");
   }
   renderLanguages();
 }
@@ -140,9 +143,9 @@ export async function installRuntime(id: string, version: string) {
   renderLanguages();
   try {
     await invoke("runtime_install", { id, version });
-    showError(null);
+    showError(null, "runtime_install");
   } catch (e) {
-    showError(String(e));
+    showError(String(e), "runtime_install");
   }
   installing.delete(k);
   loadRuntimes();
@@ -488,9 +491,9 @@ $("#clean-all-safe").onclick = async () => {
   drawSizes();
   try {
     const [freed, failed] = await invoke("clean_all_safe");
-    showError(failed.length ? `Freed ${bytes(freed)}. Couldn't clean: ${[...new Set(failed)].join(", ")}` : null);
+    showError(failed.length ? `Freed ${bytes(freed)}. Couldn't clean: ${[...new Set(failed)].join(", ")}` : null, "clean_all_safe");
   } catch (e) {
-    showError(String(e));
+    showError(String(e), "clean_all_safe");
   }
   deleting = false;
   scanApps();

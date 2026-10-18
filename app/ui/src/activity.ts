@@ -1,4 +1,6 @@
 import type { Activity } from "./types";
+import { follower } from "./console";
+import { ownError, shown } from "./live";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
 /* The Processes window: everything Anvil runs, with usage, Restart/Stop (right-click)
@@ -22,10 +24,13 @@ export const TABS = ["apps", "services", "anvil"];
 export const storedTab = (v: string | null) => (v === "web" ? "anvil" : TABS.includes(v!) ? v! : "apps");
 export let tab = storedTab(localStorage.getItem("act-tab"));
 export let logStyle: Sgr | undefined; // colors carried from one page of the log to the next
+export const logView = follower($("#log")); // follows the end while the reader is there
 
-export function showError(msg) {
-  $("#error").textContent = msg ?? "";
-  $("#error").hidden = !msg;
+const errors = new Map<string, string>(); // owner -> its error, see ownError
+export function showError(msg, owner = "") {
+  const text = ownError(errors, msg, owner);
+  $("#error").textContent = text;
+  $("#error").hidden = !text;
 }
 
 export let loading: Promise<void> | null = null; // the `activity` request on its way: a slow Docker must not stack them
@@ -34,9 +39,9 @@ export function load() {
   loading ??= (async () => {
     try {
       data = await invoke("activity");
-      showError(null);
+      showError(null, "activity");
     } catch (e) {
-      return showError(String(e));
+      return showError(String(e), "activity");
     } finally {
       loading = null;
     }
@@ -123,9 +128,9 @@ export async function act(key, action?) {
   render();
   try {
     await run(key, action);
-    showError(null);
+    showError(null, "act");
   } catch (e) {
-    showError(String(e));
+    showError(String(e), "act");
   }
   busy.delete(key);
   // A restart begins a new log (see `Apps::spawn`): read it from the start.
@@ -152,6 +157,9 @@ export async function rowMenu(r) {
   }
   if (items.length) (await M.Menu.new({ items: await Promise.all(items) })).popup();
 }
+
+const cpuText = (r) => (r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`);
+const memText = (r) => (r.memory == null ? "" : mb(r.memory));
 
 export function row(r, inner?: boolean) {
   const tr = document.createElement("tr");
@@ -183,14 +191,7 @@ export function row(r, inner?: boolean) {
     d.textContent = r.detail;
     st.append(" ", d);
   }
-  tr.append(
-    name,
-    td(r.port, "num"),
-    td(r.pid, "num"),
-    td(r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`, "num"),
-    td(r.memory == null ? "" : mb(r.memory), "num"),
-    st,
-  );
+  tr.append(name, td(r.port, "num"), td(r.pid, "num"), td(cpuText(r), "num"), td(memText(r), "num"), st);
   return tr;
 }
 
@@ -202,9 +203,10 @@ export function render() {
   const rows = tabRows(data);
   const keys = Object.values(rows).flatMap((rs) => rs.map((r) => r.key));
   if (selected && !keys.includes(selected)) select(null);
-  // Redraw only on a change, so hover and focus survive the polling.
-  const now = JSON.stringify([data, selected, [...busy], tab]);
-  if (now === drawn) return;
+  // Redraw only on a change, so hover and focus survive the polling; usage changes all
+  // the time, so it is left out and written into its cells.
+  const now = JSON.stringify([data, selected, [...busy], tab], (k, v) => (k === "cpu" || k === "memory" ? undefined : v));
+  if (now === drawn) return usage(rows[tab]);
   drawn = now;
   for (const b of document.querySelectorAll("#tabs [role=tab]") as NodeListOf<HTMLElement>) {
     b.setAttribute("aria-selected", String(b.dataset.tab === tab));
@@ -225,6 +227,18 @@ export function render() {
   $(".act-table table").hidden = !rows[tab].length;
 }
 
+/** CPU and memory into the drawn rows, only the cells whose text changed. */
+function usage(rows) {
+  const trs = new Map([...document.querySelectorAll<HTMLTableRowElement>("#rows tr.act-row")].map((tr) => [tr.dataset.key, tr]));
+  for (const r of rows) {
+    const tr = trs.get(r.key);
+    if (!tr) continue;
+    const [cpu, mem] = [tr.cells[3], tr.cells[4]];
+    if (cpu.textContent !== cpuText(r)) cpu.textContent = cpuText(r);
+    if (mem.textContent !== memText(r)) mem.textContent = memText(r);
+  }
+}
+
 /** Show a tab; the log of the selected row stays open whichever tab is shown. */
 export function showTab(name) {
   tab = name;
@@ -241,6 +255,7 @@ export function select(key) {
   logStyle = undefined;
   logToken++;
   $("#log").textContent = "";
+  logView.end();
   $("#pane").hidden = $("#split").hidden = !key;
   $("#log-title").textContent = key ? `${nameOf(key)} · log` : "";
   render();
@@ -275,17 +290,37 @@ export async function tail() {
     replace = true;
     return tail();
   }
-  const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
   // Containers come back whole (empty when unchanged); files only send what is new.
   if (replace || (key?.startsWith("container:") && page.text)) {
     log.replaceChildren();
     logStyle = undefined;
     replace = false;
   }
-  // ponytail: the log grows while it is open; drop old lines if a chatty process makes it slow.
-  if (page.text) log.append(colorize(clean(page.text, true), (logStyle ??= sgr())));
+  if (page.text) {
+    // A page at a time, so the oldest can go a page at a time.
+    const p = document.createElement("span");
+    p.append(colorize(clean(page.text, true), (logStyle ??= sgr())));
+    (p as any).lines = page.text.split("\n").length - 1;
+    log.append(p);
+    logView.keep(() => trimLog(log));
+  }
   logFrom = page.end_offset;
-  if (atEnd) log.scrollTop = log.scrollHeight;
+  logView.follow();
+}
+
+export const LOG_LINES = 3000; // about this many newest lines stay in the log
+
+/** Whole pages out, the oldest first, while the rest still has LOG_LINES: in one removal. */
+export function trimLog(log: HTMLElement) {
+  const pages = [...log.children] as any[];
+  let left = pages.reduce((n, p) => n + (p.lines ?? 0), 0);
+  let k = 0;
+  while (k < pages.length - 1 && left - pages[k].lines >= LOG_LINES) left -= pages[k++].lines;
+  if (!k) return;
+  const r = document.createRange();
+  r.setStartBefore(pages[0]);
+  r.setEndBefore(pages[k]);
+  r.deleteContents();
 }
 
 /** Show one row with its log, on its tab: a service page's log button asks for it, as
@@ -301,7 +336,7 @@ if (window.activitySelect) reveal(window.activitySelect);
 
 // Fresh while the window is shown, focused or not.
 setInterval(() => {
-  if (document.hidden) return;
+  if (!shown()) return;
   load();
   if (selected && tailing !== logToken) tail();
 }, 2000);
