@@ -1,5 +1,5 @@
 import type { CommandChip, ProcessRow } from "./types";
-import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, mode, popAt, selected, showError, showTab, snap, tab } from "./app";
+import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, mode, popAt, seg, selected, showError, showTab, snap, tab } from "./app";
 import { type Tail, readTail, tail, termOut } from "./console";
 import { late } from "./late";
 import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache, procLoading } from "./processes";
@@ -564,7 +564,137 @@ function field(value: string, aria: string, placeholder: string, onsave: ((v: st
   return input;
 }
 
+/* ---------- Configure: the processes as JSON ---------- */
+
+let confMode: "table" | "json" = "table";
+const modeSeg = seg(
+  "Edit as",
+  [
+    ["table", "Table"],
+    ["json", "JSON"],
+  ],
+  "table",
+  (m) => {
+    confMode = m as "table" | "json";
+    confError = "";
+    if (selected) drawConf(selected, true);
+  },
+);
+modeSeg.classList.add("dev-conf-mode");
+type Mods = [typeof import("./jsoneditor"), typeof import("./confjson")];
+let mods: Promise<Mods> | null = null; // CodeMirror, loaded on the first JSON
+const js = {
+  site: "",
+  base: "", // the JSON of the processes as they are
+  ed: null as null | ReturnType<Mods[0]["jsonEditor"]>,
+  busy: false,
+  wrap: el("div", "dev-json"),
+  host: el("div", "dev-json-editor"),
+  msg: el("p", "dev-json-msg"),
+  format: el("button", null, "Format"),
+  cancel: el("button", null, "Cancel"),
+  apply: el("button", "primary", "Apply"),
+};
+{
+  const foot = el("div", "dev-conf-foot");
+  foot.append(js.format, el("span", "spacer"), js.cancel, js.apply);
+  js.wrap.append(js.host, js.msg, foot);
+}
+
+/** The line a position is on, 1-based. */
+const lineOf = (text: string, at: number) => text.slice(0, at).split("\n").length;
+
+/** Apply's and Format's state and the line under the editor, after every edit. */
+function syncJson(m: Mods[1], name: string) {
+  if (!js.ed) return;
+  const text = js.ed.text;
+  const main = devRows(procCache.get(name)).find((r) => r.main)?.name;
+  const { problems } = m.check(text, main);
+  const p = problems[0];
+  const more = problems.length > 1 ? ` (${problems.length - 1} more)` : "";
+  js.msg.className = `dev-json-msg${p || confError ? " error-text" : ""}`;
+  js.msg.textContent = confError || (p ? `Line ${lineOf(text, p.from)}: ${p.message}${more}` : text === js.base ? "" : "Ready to apply");
+  js.apply.disabled = js.busy || !!problems.length || text === js.base;
+  js.cancel.disabled = js.busy;
+  let parses = true;
+  try {
+    JSON.parse(text);
+  } catch {
+    parses = false;
+  }
+  js.format.disabled = js.busy || !parses;
+}
+
+async function drawJson(name: string) {
+  if (conf.firstChild !== modeSeg || !conf.contains(js.wrap)) conf.replaceChildren(modeSeg, js.wrap);
+  const rows = devRows(procCache.get(name));
+  if (js.site !== name) {
+    js.ed?.view.destroy();
+    js.ed = null;
+    js.site = name;
+    js.host.replaceChildren(el("span", "dev-json-loading", "Loading the editor…"));
+  }
+  const [ed, m] = await (mods ??= Promise.all([import("./jsoneditor"), import("./confjson")]));
+  if (js.site !== name) return;
+  const text = m.toJson(rows);
+  const main = () => devRows(procCache.get(name)).find((r) => r.main)?.name;
+  if (!js.ed) {
+    js.base = text;
+    js.host.replaceChildren();
+    js.ed = ed.jsonEditor(
+      js.host,
+      text,
+      (t) => m.check(t, main()).problems,
+      () => {
+        confError = "";
+        syncJson(m, name);
+      },
+    );
+  } else if (!js.busy && js.ed.text === js.base && text !== js.base) {
+    // Not edited here: follows changes made elsewhere.
+    js.base = text;
+    js.ed.set(text);
+  } else js.base = text;
+  syncJson(m, name);
+  js.format.onclick = () => {
+    try {
+      js.ed!.set(JSON.stringify(JSON.parse(js.ed!.text), null, 2));
+    } catch {}
+  };
+  js.cancel.onclick = () => {
+    js.ed!.set(js.base);
+    confError = "";
+    confMode = "table";
+    drawConf(name, true);
+  };
+  js.apply.onclick = async () => {
+    const { items } = m.check(js.ed!.text, main());
+    if (!items) return;
+    js.busy = true;
+    syncJson(m, name);
+    try {
+      await m.apply(
+        m.plan(devRows(procCache.get(name)), items),
+        ([cmd, args]) => askProcs(name, cmd, args),
+        () => devRows(procCache.get(name)),
+      );
+      confError = "";
+      js.base = m.toJson(devRows(procCache.get(name)));
+      js.ed!.set(js.base);
+    } catch (e) {
+      confError = String(e);
+      await loadProcs(name);
+    } finally {
+      js.busy = false;
+      if (selected === name) drawProcs(name);
+      syncJson(m, name);
+    }
+  };
+}
+
 function drawConf(name: string, force = false) {
+  for (const b of modeSeg.children) b.setAttribute("aria-pressed", String((b as HTMLElement).dataset.id === confMode));
+  if (confMode === "json") return void drawJson(name);
   // Someone is typing: a poll doesn't wipe it.
   const active = document.activeElement as HTMLInputElement | null;
   if (!force && active && conf.contains(active) && active.value !== active.defaultValue) return;
@@ -660,7 +790,7 @@ function drawConf(name: string, force = false) {
     devTick();
   };
   foot.append(plus, reset, el("span", "spacer"), done);
-  conf.replaceChildren(table, error, foot);
+  conf.replaceChildren(modeSeg, table, error, foot);
 }
 
 /** Open the tab, on one entry if given. */

@@ -1080,6 +1080,12 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-conf-error { margin: 8px 0 0; font-size: 12px; }
 .dev-conf-foot { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
 .dev-conf-foot .spacer { flex: 1; }
+/* Table | JSON, over what it switches. */
+.dev-conf-mode { width: max-content; margin-bottom: 12px; }
+/* JSON: one fixed-height editor (CodeMirror, jsoneditor.ts), its first problem in one line under it. */
+.dev-json-editor { height: max(240px, calc(100vh - 420px)); overflow: hidden; border: 1px solid var(--edge); border-radius: var(--radius-m); background: var(--steel-raised); }
+.dev-json-loading { display: block; padding: 10px 12px; color: var(--muted); font-size: 12px; }
+.dev-json-msg { min-height: 1.5em; margin: 8px 0 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The Overview's one line about Dev. */
 button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--steel-raised); color: var(--text); font-size: 13px; text-align: left; }
@@ -1893,14 +1899,16 @@ kbd {
 
 /* The main action: a little stronger than the others, never colored. */
 .sheet-actions .primary,
-.pop-confirm .primary {
+.pop-confirm .primary,
+.dev-conf-foot .primary {
   border-color: color-mix(in srgb, var(--text) 28%, transparent);
   background: color-mix(in srgb, var(--text) 13%, transparent);
   color: var(--text);
   font-weight: 600;
 }
 
-.sheet-actions .primary:disabled { opacity: 0.6; }
+.sheet-actions .primary:disabled,
+.dev-conf-foot button:disabled { opacity: 0.5; }
 .sheet-actions .link { padding: 0; border: 0; background: none; color: var(--muted); }
 .sheet-actions .link:hover { color: var(--text); }
 

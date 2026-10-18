@@ -340,6 +340,19 @@ describe("dev", () => {
     expect(names()).toEqual(["dev", "docs:dev", "docs:site"]);
     expect(box("docs:site in Dev start").checked).toBe(true);
 
+    // JSON: the same processes in an editor; Apply waits for a change without errors.
+    ($('.dev-conf-mode [data-id="json"]') as HTMLElement).click();
+    await wait(400);
+    expect($(".dev-conf-table")).toBeNull();
+    const editor = $(".dev-json-editor .cm-content");
+    expect(editor).toBeTruthy();
+    expect(JSON.parse(editor.textContent!.replace(/\s+/g, " ")).map((x) => x.name)).toEqual(["dev", "docs:dev", "docs:site"]);
+    const jsonBtn = (t: string) => $$(".dev-json button").find((b) => b.textContent === t)! as HTMLButtonElement;
+    expect(jsonBtn("Apply").disabled).toBe(true);
+    jsonBtn("Cancel").click();
+    await wait();
+    expect($(".dev-conf-table")).toBeTruthy();
+
     $$(".dev-conf-foot button")
       .find((b) => b.textContent === "Done")!
       .click();

@@ -13,6 +13,15 @@
     "test": "vp test run",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
+    "@lezer/highlight": "^1.2.5"
+  },
   "devDependencies": {
     "happy-dom": "^21.0.3",
     "typescript": "^7.0.2",
