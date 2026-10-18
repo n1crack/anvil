@@ -767,9 +767,11 @@ fn containers() -> BTreeMap<u16, String> {
     };
     for _ in 0..60 {
         if let Ok(Some(_)) = child.try_wait() {
-            use std::io::Read;
-            let mut out = String::new();
-            let _ = child.stdout.take().map(|mut s| s.read_to_string(&mut out));
+            let out = child
+                .stdout
+                .take()
+                .map(crate::read_lossy)
+                .unwrap_or_default();
             return parse_docker_ps(&out);
         }
         std::thread::sleep(std::time::Duration::from_millis(50));

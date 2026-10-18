@@ -60,13 +60,7 @@ fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<St
         Err(e) => bail!("Couldn't run docker: {e}"),
     };
     // Read on threads so a chatty command can't fill the pipe and stall.
-    let reader = |mut r: Box<dyn Read + Send>| {
-        std::thread::spawn(move || {
-            let mut s = String::new();
-            let _ = r.read_to_string(&mut s);
-            s
-        })
-    };
+    let reader = |r: Box<dyn Read + Send>| std::thread::spawn(move || crate::read_lossy(r));
     let out = reader(Box::new(child.stdout.take().unwrap()));
     let err = reader(Box::new(child.stderr.take().unwrap()));
     let deadline = Instant::now() + timeout;

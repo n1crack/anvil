@@ -1781,9 +1781,15 @@ pub fn output_within(cmd: &mut Command, limit: std::time::Duration) -> Option<St
             }
         }
     }
-    let mut out = String::new();
-    std::io::Read::read_to_string(&mut child.stdout?, &mut out).ok()?;
-    Some(out)
+    Some(read_lossy(child.stdout?))
+}
+
+/// All of `r` as text; invalid UTF-8 becomes U+FFFD instead of an empty string
+/// (`read_to_string` returns an error and leaves its buffer empty).
+pub fn read_lossy(mut r: impl std::io::Read) -> String {
+    let mut buf = Vec::new();
+    let _ = r.read_to_end(&mut buf);
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// The PATH printed after the marker; shells may print banners around it.
@@ -1810,6 +1816,11 @@ pub fn merge_path(current: &str, login: &str) -> String {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+
+    #[test]
+    fn read_lossy_keeps_text_around_invalid_bytes() {
+        assert_eq!(read_lossy(&b"ok \xff done\n"[..]), "ok \u{fffd} done\n");
+    }
 
     #[test]
     fn reads_the_path_after_banners() {

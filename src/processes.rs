@@ -454,7 +454,6 @@ const DEV_COMMANDS: &str = "vendor/laravel/framework/src/Illuminate/Foundation/D
 /// What `composer run dev` / `php artisan dev` would start, asked of Laravel 13 itself
 /// (minus `server`, which Anvil already runs). `None` when it can't be asked.
 pub fn laravel_dev_commands(dir: &Path, php: &Path) -> Option<Vec<(String, String)>> {
-    use std::io::Read;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
     if !dir.join(DEV_COMMANDS).is_file() {
@@ -482,8 +481,7 @@ pub fn laravel_dev_commands(dir: &Path, php: &Path) -> Option<Vec<(String, Strin
             None => std::thread::sleep(Duration::from_millis(20)),
         }
     };
-    let mut out = String::new();
-    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    let out = crate::read_lossy(child.stdout.take()?);
     if !status.success() {
         return None;
     }
