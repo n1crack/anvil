@@ -236,10 +236,22 @@ pub fn home() -> PathBuf {
 /// The config, or the defaults when there is none yet. Any other read error is
 /// reported: treating it as "no config" would let the next save wipe it.
 pub fn load() -> Result<Config> {
+    let (cfg, migrated) = read()?;
+    if !migrated {
+        return Ok(cfg);
+    }
+    // The migration is a change like any other: saved under the lock.
+    update(|_| Ok(()))?;
+    Ok(read()?.0)
+}
+
+/// The config as on disk, migrated in memory; `true` when the migration changed it.
+fn read() -> Result<(Config, bool)> {
     match fs::read_to_string(home().join("config.toml")) {
         Ok(s) => {
             let mut cfg: Config = toml::from_str(&s).context("config.toml is invalid")?;
-            if cfg.https_default.is_none() {
+            let migrated = cfg.https_default.is_none();
+            if migrated {
                 // Every site used to be HTTPS: the ones there now keep it, new ones get HTTP.
                 for site in sites(&cfg) {
                     cfg.sites
@@ -249,21 +261,51 @@ pub fn load() -> Result<Config> {
                         .get_or_insert(true);
                 }
                 cfg.https_default = Some(false);
-                save(&cfg)?;
             }
-            Ok(cfg)
+            Ok((cfg, migrated))
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((Config::default(), false)),
         Err(e) => Err(e).context("couldn't read config.toml"),
     }
 }
 
-/// Write the config atomically: readers (the app, the CLI) never see a half-written file.
-pub fn save(cfg: &Config) -> Result<()> {
+/// Load, change and save the config with no other change in between: one lock for
+/// the threads of this process, and an advisory lock on `config.lock` for the other
+/// process (the CLI next to the app). Returns the config as saved, and what `f` returned.
+///
+/// `f` must not call `update` (or anything that does, such as `php_install`): the
+/// locks aren't reentrant. Keep it short; long work (downloads) goes before or after.
+pub fn update<T>(f: impl FnOnce(&mut Config) -> Result<T>) -> Result<(Config, T)> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     fs::create_dir_all(home())?;
-    let tmp = home().join(format!("config.toml.{}.tmp", std::process::id()));
-    fs::write(&tmp, toml::to_string_pretty(cfg)?)?;
-    fs::rename(&tmp, home().join("config.toml"))?;
+    let file = fs::File::create(home().join("config.lock")).context("couldn't open config.lock")?;
+    file.lock().context("couldn't lock config.lock")?;
+    let (mut cfg, migrated) = read()?;
+    if migrated {
+        // Saved before `f`, so a `load` inside it sees the migrated file.
+        save(&cfg)?;
+    }
+    let out = f(&mut cfg)?;
+    // ponytail: most core setters save themselves too, so this can write twice; harmless.
+    save(&cfg)?;
+    Ok((cfg, out))
+}
+
+/// Write the config atomically: readers (the app, the CLI) never see a half-written
+/// file. Each write gets its own temp file, so saves from two threads can't clash.
+/// A change based on what's there goes through `update`, which holds the lock.
+pub fn save(cfg: &Config) -> Result<()> {
+    let home = home();
+    fs::create_dir_all(&home)?;
+    let mut tmp = tempfile::Builder::new()
+        .prefix("config.toml.")
+        .suffix(".tmp")
+        .tempfile_in(&home)?;
+    use std::io::Write;
+    tmp.write_all(toml::to_string_pretty(cfg)?.as_bytes())?;
+    tmp.persist(home.join("config.toml"))
+        .context("couldn't save config.toml")?;
     Ok(())
 }
 
@@ -705,11 +747,11 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
         Ok(())
     })?;
     // The download took a while; save on top of the config as it is now.
-    *cfg = load()?;
-    if cfg.php.is_none() {
-        cfg.php = Some(minor.into());
-        save(cfg)?;
-    }
+    *cfg = update(|c| {
+        c.php.get_or_insert_with(|| minor.into());
+        Ok(())
+    })?
+    .0;
     println!("PHP {full} installed in {}", dir.display());
     Ok(())
 }
