@@ -1067,10 +1067,164 @@ fn autostart_processes(app: &App, cfg: &Config) {
             .into_iter()
             .filter(|p| p.autostart)
         {
-            let started = app.apps.lock().unwrap().start_process(&site, &p, &cfg.tld);
-            if let Err(e) = started {
-                let key = anvil::processes::key(&site.name, &p.id);
-                app.app_errors.lock().unwrap().insert(key, err(e));
+            start_process(app, cfg, &site, &p);
+        }
+    }
+}
+
+fn start_process(app: &App, cfg: &Config, site: &Site, p: &anvil::processes::Process) {
+    let started = app.apps.lock().unwrap().start_process(site, p, &cfg.tld);
+    if let Err(e) = started {
+        let key = anvil::processes::key(&site.name, &p.id);
+        app.app_errors.lock().unwrap().insert(key, err(e));
+    }
+}
+
+/// A release newer than this one, as `update_check` found it.
+#[derive(Clone, Serialize)]
+struct Release {
+    version: String,
+    notes: Option<String>,
+}
+
+/// What the last check found; windows opened later read it with `update_state`.
+static FOUND: Mutex<Option<Release>> = Mutex::new(None);
+/// When the app's binary on disk was written, as of this process's start.
+static STARTED_EXE: std::sync::OnceLock<Option<std::time::SystemTime>> = std::sync::OnceLock::new();
+
+fn exe_mtime() -> Option<std::time::SystemTime> {
+    std::env::current_exe()
+        .ok()?
+        .metadata()
+        .ok()?
+        .modified()
+        .ok()
+}
+
+/// A newer build replaced the binary on disk since this process started (a local build).
+fn rebuilt() -> bool {
+    let started = *STARTED_EXE.get_or_init(exe_mtime);
+    started.is_some() && exe_mtime() > started
+}
+
+#[derive(Serialize)]
+struct UpdateState {
+    update: Option<Release>,
+    /// Offer Relaunch: the binary on disk is newer than this process.
+    relaunch: bool,
+}
+
+#[tauri::command(async)]
+fn update_state() -> UpdateState {
+    UpdateState {
+        update: FOUND.lock().unwrap().clone(),
+        relaunch: rebuilt(),
+    }
+}
+
+/// The newest release, when it is newer than this Anvil; windows hear of it as `update`.
+#[tauri::command]
+async fn update_check(handle: AppHandle) -> Res<Option<Release>> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = handle.updater().map_err(|e| e.to_string())?;
+    let found = update.check().await.map_err(|e| e.to_string())?;
+    let found = found.map(|u| Release {
+        version: u.version,
+        notes: u.body,
+    });
+    *FOUND.lock().unwrap() = found.clone();
+    let _ = handle.emit("update", ());
+    Ok(found)
+}
+
+/// Download and install the newest release (progress as `update-progress`, a percent or
+/// null), then restart into it with the same dev processes running.
+#[tauri::command]
+async fn update_install(handle: AppHandle) -> Res<()> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = handle.updater().map_err(|e| e.to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("Anvil is up to date")?;
+    let (mut got, mut shown) = (0u64, None);
+    update
+        .download_and_install(
+            |chunk, total| {
+                got += chunk as u64;
+                let pct = total.map(|t| (got * 100 / t.max(1)).min(100));
+                if shown != Some(pct) {
+                    shown = Some(pct);
+                    let _ = handle.emit("update-progress", pct);
+                }
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    relaunch(handle)
+}
+
+/// Restart Anvil; the dev processes running now start again in the new one.
+#[tauri::command(async)]
+fn relaunch(handle: AppHandle) -> Res<()> {
+    let keys: Vec<String> = handle
+        .state::<App>()
+        .apps
+        .lock()
+        .unwrap()
+        .list()
+        .into_iter()
+        .map(|(k, ..)| k)
+        // Scripts run once (`<site>#…`) finish on their own.
+        .filter(|k| !k.contains('#'))
+        .collect();
+    save_keys(&restore_file(), &keys).map_err(|e| e.to_string())?;
+    handle.restart()
+}
+
+/// The dev processes to start again after a restart, one key per line.
+fn restore_file() -> std::path::PathBuf {
+    anvil::home().join("run").join("restart-processes")
+}
+
+fn save_keys(path: &std::path::Path, keys: &[String]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, keys.join("\n"))
+}
+
+/// The keys `save_keys` wrote, once: the file is gone afterwards.
+fn take_keys(path: &std::path::Path) -> Vec<String> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let _ = std::fs::remove_file(path);
+    text.lines()
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// Start what ran before a restart: apps (`<site>`) and their processes (`<site>@<id>`)
+/// that still exist; ones running already (Start with Anvil) are left alone.
+fn restore_processes(app: &App, cfg: &Config, keys: &[String]) {
+    for key in keys {
+        let (name, id) = key
+            .split_once('@')
+            .map_or((key.as_str(), None), |(n, i)| (n, Some(i)));
+        let Ok(site) = site_in(cfg, name) else {
+            continue;
+        };
+        match id {
+            None => start_app(app, cfg, name),
+            Some(id) => {
+                let found = anvil::processes::detect_with(&site, Some(cfg))
+                    .into_iter()
+                    .find(|p| p.id == id);
+                if let Some(p) = found {
+                    start_process(app, cfg, &site, &p);
+                }
             }
         }
     }
@@ -2944,8 +3098,11 @@ fn main() {
         // SAFETY: no other thread exists yet.
         unsafe { std::env::set_var("PATH", path) };
     }
+    // The binary's age now, for Relaunch to compare against.
+    STARTED_EXE.get_or_init(exe_mtime);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -3046,7 +3203,11 @@ fn main() {
             package_manager_install,
             package_manager_uninstall,
             runtime_install,
-            runtime_uninstall
+            runtime_uninstall,
+            update_state,
+            update_check,
+            update_install,
+            relaunch
         ])
         .setup(|app| {
             if let Ok(cfg) = anvil::load() {
@@ -3093,9 +3254,23 @@ fn main() {
                         start_app(&state, &cfg, &site.name);
                     }
                     autostart_processes(&state, &cfg);
+                    restore_processes(&state, &cfg, &take_keys(&restore_file()));
                     changed(&handle);
                 });
             }
+            // Look for a release 10 s in, then daily; installing waits for the user.
+            // ponytail: thread::sleep pauses while the Mac sleeps, so "daily" is daily awake time.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                loop {
+                    let _ = tauri::async_runtime::block_on(update_check(handle.clone()));
+                    if rebuilt() {
+                        let _ = handle.emit("update", ());
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(24 * 3600));
+                }
+            });
             // Template image: macOS recolours it for light and dark menu bars.
             TrayIconBuilder::with_id("anvil")
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
@@ -3119,6 +3294,10 @@ fn main() {
                     update_dock(w.app_handle());
                 }
                 WindowEvent::Destroyed => update_dock(w.app_handle()),
+                // A local build replaced the binary: offer Relaunch when the user comes back.
+                WindowEvent::Focused(true) if rebuilt() => {
+                    let _ = w.app_handle().emit("update", ());
+                }
                 _ => {}
             }
         })
@@ -3151,6 +3330,18 @@ fn main() {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn restart_keys_are_read_once() {
+        let dir = std::env::temp_dir().join(format!("anvil-restart-{}", std::process::id()));
+        let file = dir.join("run").join("restart-processes");
+        let keys = vec!["shop".to_string(), "shop@queue".to_string()];
+        save_keys(&file, &keys).unwrap();
+        assert_eq!(take_keys(&file), keys);
+        assert!(!file.exists());
+        assert!(take_keys(&file).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn an_unknown_app_is_named_in_the_error() {

@@ -880,6 +880,8 @@ const mockHandle = (cmd, a) => {
       return window.mockStorageLast ?? null;
     case "clean_all_safe":
       return [162529280, []];
+    case "update_check":
+      return window.mockUpdate ?? null;
     default:
       return null;
   }

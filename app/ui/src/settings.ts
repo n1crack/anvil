@@ -1,5 +1,6 @@
 import type { Settings } from "./types";
 import { ownError } from "./live";
+import { restart, type Release } from "./update";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -739,6 +740,37 @@ notices.addEventListener("toggle", () => {
     .catch(() => $("#credits-text").replaceChildren(missing()));
 });
 window.__TAURI__.app?.getVersion().then((v) => ($("#version").textContent = `Version ${v}`));
+
+/** About's update line: what the last check found, or (`check`) a new check's answer. */
+async function showUpdate(check: boolean) {
+  const result = $("#update-result");
+  const go = $("#update-go");
+  if (go.disabled) return; // downloading: the line shows progress
+  let found: Release | null;
+  if (check) {
+    $("#update-check").disabled = true;
+    result.classList.remove("error-text");
+    result.textContent = "Checking…";
+  }
+  try {
+    found = check ? await invoke("update_check") : ((await invoke("update_state"))?.update ?? null);
+  } catch (e) {
+    result.textContent = String(e);
+    result.classList.add("error-text");
+    return;
+  } finally {
+    $("#update-check").disabled = false;
+  }
+  if (!found && !check) return;
+  result.textContent = found ? `Version ${found.version} is available` : "Anvil is up to date";
+  go.hidden = !found;
+  $("#update-notes").textContent = found?.notes ?? "";
+  $("#update-notes").hidden = !found?.notes;
+}
+$("#update-check").onclick = () => showUpdate(true);
+$("#update-go").onclick = () => restart($("#update-go"), $("#update-result"), false);
+window.__TAURI__.event.listen("update", () => showUpdate(false));
+showUpdate(false);
 $("#open-config").onclick = () => invoke("open_config_dir").catch((e) => showError(String(e)));
 
 for (const input of document.querySelectorAll<HTMLInputElement>("[data-ini]")) {

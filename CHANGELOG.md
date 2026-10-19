@@ -47,6 +47,9 @@ Until 1.0.0, minor versions may contain breaking changes.
 - The CLI uses color on a terminal; `NO_COLOR` turns it off.
 - The macOS app carries the `anvil` CLI: setup puts it on PATH with the other
   terminal commands, so the CLI needs no separate install.
+- Updates: Anvil checks for a new release daily and shows "Update available" in
+  the titlebar (Settings › About › "Check for updates" asks now). "Restart to
+  update" installs it and brings back the dev processes that were running.
 
 ### Changed
 

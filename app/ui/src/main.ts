@@ -10,5 +10,7 @@ import "./processes";
 import "./dev";
 import "./containers";
 import { sidebarSplitter } from "./split";
+import { updateBar } from "./update";
 
 sidebarSplitter();
+updateBar();

@@ -167,3 +167,20 @@ describe("storage", () => {
     expect($$("#app-sizes .row").length).toBe(2);
   });
 });
+
+describe("about", () => {
+  test("Check for updates answers inline, with Restart to update only for a newer release", async () => {
+    await open("about");
+    $("#update-check").click();
+    await wait();
+    expect($("#update-result").textContent).toBe("Anvil is up to date");
+    expect($("#update-go").hidden).toBe(true);
+
+    w.mockUpdate = { version: "0.2.0", notes: "Faster starts." };
+    $("#update-check").click();
+    await wait();
+    expect($("#update-result").textContent).toBe("Version 0.2.0 is available");
+    expect($("#update-go").hidden).toBe(false);
+    expect($("#update-notes").textContent).toBe("Faster starts.");
+  });
+});
