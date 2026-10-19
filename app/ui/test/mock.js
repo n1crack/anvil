@@ -707,6 +707,18 @@ const mockHandle = (cmd, a) => {
       return window.mockPackages;
     case "package_updates":
       return window.mockUpdates;
+    case "package_audit":
+      if (a.ecosystem === "npm") throw "pnpm audit failed: request to registry timed out";
+      return [
+        {
+          package: "guzzlehttp/guzzle",
+          version: "7.9.2",
+          severity: "high",
+          title: "Noncanonical host can bypass host-based checks",
+          url: "https://github.com/advisories/GHSA-v5mv-p594-2x33",
+          fixed: null,
+        },
+      ];
     case "activity":
       return window.mockActivity;
     case "activity_log": {

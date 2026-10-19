@@ -1,11 +1,16 @@
 import { $, ago, el, invoke, renderMain, seg, selected, showError, snap } from "./app";
 
 /* Packages tab: an app's dependencies from its manifests and lock files, a tab per
- * package manager, with newer versions inline. Scripts live in the Overview's Commands. */
+ * package manager, with newer versions and known vulnerabilities inline. Scripts live
+ * in the Overview's Commands. */
 
 const pkgCache = new Map<string, any>(); // site name -> packages or { error }
 // site name -> { list, at } once checked, "checking" on its way, or { error, at }
 export const pkgUpdates = new Map<string, any>();
+// site name -> ecosystem id -> { list, at }, "checking", or { list?, at?, error }
+export const pkgAudits = new Map<string, Record<string, any>>();
+// Ecosystems whose package manager has an audit Anvil runs.
+const AUDITED = new Set(["composer", "npm"]);
 let pkgQuery = ""; // one search over every list
 export const pkgView = new Map<string, string>(); // site name -> "all" or "outdated"
 const pkgEco = new Map<string, string>(); // site name -> ecosystem shown
@@ -54,6 +59,34 @@ async function checkUpdates(name) {
     // A failed check keeps what the last one found.
     pkgUpdates.set(name, { list: prev?.list, at: prev?.at, error: String(e) });
   }
+  if (selected === name) drawPackages(name);
+}
+
+/** The last security check per ecosystem, kept across restarts like the update check. */
+function auditsOf(name) {
+  if (!pkgAudits.has(name)) {
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem(`pkgAudits:${name}`) ?? "{}") ?? {};
+    } catch {}
+    pkgAudits.set(name, saved);
+  }
+  return pkgAudits.get(name)!;
+}
+
+async function checkAudit(name, eco) {
+  const all = auditsOf(name);
+  const prev = all[eco];
+  all[eco] = "checking";
+  drawPackages(name);
+  try {
+    all[eco] = { list: await invoke("package_audit", { site: name, ecosystem: eco }), at: Date.now() };
+  } catch (e) {
+    // A failed check keeps what the last one found.
+    all[eco] = { list: prev?.list, at: prev?.at, error: String(e) };
+  }
+  const done = Object.fromEntries(Object.entries(all).filter(([, v]) => v !== "checking"));
+  localStorage.setItem(`pkgAudits:${name}`, JSON.stringify(done));
   if (selected === name) drawPackages(name);
 }
 
@@ -150,6 +183,8 @@ export function drawPackages(name) {
     body.append(tabs);
   }
 
+  if (AUDITED.has(eco.id)) body.append(auditSection(name, eco, needle));
+
   const rows = rowsOf(eco);
   if (rows.length) {
     const list = el("dl", newer.size ? "group pkg-list updates" : "group pkg-list");
@@ -185,6 +220,50 @@ function updatesStatus(up) {
     s.textContent = up.error;
   } else s.textContent = `checked ${ago(new Date(up.at))}`;
   return s;
+}
+
+/** "Check security", what the last check found and when; its advisories, most severe first. */
+function auditSection(name, eco, needle) {
+  const a = auditsOf(name)[eco.id];
+  const box = el("div", "pkg-audit");
+  const head = el("p", "pkg-audit-head");
+  const check = el("button", "inline-action pkg-audit-check", a === "checking" ? "Checking…" : "Check security");
+  check.disabled = a === "checking";
+  check.onclick = () => checkAudit(name, eco.id);
+  const status = el("span", "pkg-status muted");
+  if (a?.error) {
+    status.classList.add("error");
+    status.textContent = a.error;
+  } else if (a?.list) {
+    const n = a.list.length;
+    const found = n ? `${n} known ${n === 1 ? "vulnerability" : "vulnerabilities"}` : "No known vulnerabilities";
+    status.textContent = `${found} · checked ${ago(new Date(a.at))}`;
+  }
+  head.append(check, status);
+  box.append(head);
+  const list = (a?.list ?? []).filter((v) => !needle || v.package.toLowerCase().includes(needle));
+  if (list.length) {
+    const dl = el("dl", "group pkg-list pkg-audit-list");
+    for (const v of list) dl.append(auditRow(v));
+    box.append(dl);
+  }
+  return box;
+}
+
+function auditRow(v) {
+  const row = el("div", "row");
+  const dt = el("dt");
+  const title = el(v.url ? "a" : "span", null, v.title || "Untitled advisory");
+  if (v.url) {
+    title.href = v.url;
+    title.onclick = (ev) => {
+      ev.preventDefault();
+      invoke("open_url", { url: v.url }).catch((err) => showError(String(err)));
+    };
+  }
+  dt.append(title, el("span", "pkg-dev", v.version ? `${v.package} ${v.version}` : v.package));
+  row.append(dt, el("dd", "pkg-ver", v.fixed ? `${v.severity} · fixed in ${v.fixed}` : v.severity));
+  return row;
 }
 
 function pkgRow(eco, x, update) {

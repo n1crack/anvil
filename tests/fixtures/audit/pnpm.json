@@ -1,0 +1,61 @@
+{
+  "advisories": {
+    "1097678": {
+      "findings": [
+        {
+          "version": "1.2.0",
+          "paths": [
+            ".>minimist"
+          ],
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1097678,
+      "title": "Prototype Pollution in minimist",
+      "module_name": "minimist",
+      "vulnerable_versions": ">=1.0.0 <1.2.6",
+      "patched_versions": ">=1.2.6",
+      "severity": "critical",
+      "cwe": "CWE-1321",
+      "github_advisory_id": "GHSA-xvch-5gv4-984h",
+      "url": "https://github.com/advisories/GHSA-xvch-5gv4-984h"
+    },
+    "1106913": {
+      "findings": [
+        {
+          "version": "4.17.15",
+          "paths": [
+            ".>lodash"
+          ],
+          "dev": false,
+          "optional": false,
+          "bundled": false
+        }
+      ],
+      "id": 1106913,
+      "title": "Command Injection in lodash",
+      "module_name": "lodash",
+      "vulnerable_versions": "<4.17.21",
+      "patched_versions": ">=4.17.21",
+      "severity": "high",
+      "cwe": "CWE-77, CWE-94",
+      "github_advisory_id": "GHSA-35jh-r3h4-6jhm",
+      "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm"
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 4,
+      "high": 3,
+      "critical": 1
+    },
+    "dependencies": 2,
+    "devDependencies": 0,
+    "optionalDependencies": 0,
+    "totalDependencies": 2
+  }
+}

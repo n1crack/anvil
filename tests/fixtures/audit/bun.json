@@ -1,0 +1,49 @@
+{
+  "lodash": [
+    {
+      "id": 1106913,
+      "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm",
+      "title": "Command Injection in lodash",
+      "severity": "high",
+      "vulnerable_versions": "<4.17.21",
+      "cwe": [
+        "CWE-77",
+        "CWE-94"
+      ],
+      "cvss": {
+        "score": 7.2,
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"
+      }
+    }
+  ],
+  "minimist": [
+    {
+      "id": 1097678,
+      "url": "https://github.com/advisories/GHSA-xvch-5gv4-984h",
+      "title": "Prototype Pollution in minimist",
+      "severity": "critical",
+      "vulnerable_versions": ">=1.0.0 <1.2.6",
+      "cwe": [
+        "CWE-1321"
+      ],
+      "cvss": {
+        "score": 9.8,
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+      }
+    },
+    {
+      "id": 1096465,
+      "url": "https://github.com/advisories/GHSA-vh95-rmgr-6w4m",
+      "title": "Prototype Pollution in minimist",
+      "severity": "moderate",
+      "vulnerable_versions": ">=1.0.0 <1.2.3",
+      "cwe": [
+        "CWE-1321"
+      ],
+      "cvss": {
+        "score": 5.6,
+        "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L"
+      }
+    }
+  ]
+}

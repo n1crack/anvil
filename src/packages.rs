@@ -847,6 +847,305 @@ pub fn updates(p: &Packages) -> Vec<Update> {
     found.into_inner().unwrap()
 }
 
+/* ---------- Security ---------- */
+
+/// One known vulnerability in an installed package, from the package manager's audit.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Advisory {
+    pub package: String,
+    /// The installed version, from the audit or else the lock file.
+    pub version: Option<String>,
+    /// As the tool names it: info, low, moderate (medium for Composer), high or critical.
+    pub severity: String,
+    pub title: String,
+    pub url: Option<String>,
+    /// Where it is fixed when the tool says, e.g. ">=1.2.6" (a range) or "1.2.8".
+    pub fixed: Option<String>,
+}
+
+fn advisory(package: &str, version: Option<&str>, a: &Value) -> Advisory {
+    let s = |k: &str| a[k].as_str().filter(|v| !v.is_empty()).map(String::from);
+    Advisory {
+        package: package.into(),
+        version: version.map(String::from),
+        severity: s("severity").unwrap_or_else(|| "unknown".into()),
+        title: s("title").or_else(|| s("Issue")).unwrap_or_default(),
+        url: s("url").or_else(|| s("link")).or_else(|| s("URL")),
+        // "<0.0.0" is the registry's "no fix".
+        fixed: s("patched_versions").filter(|v| v != "<0.0.0"),
+    }
+}
+
+/// `composer audit --format=json`: advisories by package, a list (or an object
+/// when Composer filtered some out) each.
+fn composer_audit(v: &Value) -> Option<Vec<Advisory>> {
+    let by_pkg = v.get("advisories")?;
+    let mut out = Vec::new();
+    for (name, list) in by_pkg.as_object().into_iter().flatten() {
+        let items: Vec<&Value> = match list {
+            Value::Array(a) => a.iter().collect(),
+            Value::Object(o) => o.values().collect(),
+            _ => continue,
+        };
+        out.extend(items.into_iter().map(|a| advisory(name, None, a)));
+    }
+    Some(out)
+}
+
+/// `npm audit --json` (report v2): per vulnerable package, `via` holds its own
+/// advisories as objects and the packages it is vulnerable through as names.
+fn npm_audit(v: &Value) -> Option<Vec<Advisory>> {
+    let mut out = Vec::new();
+    for (name, vuln) in v.get("vulnerabilities")?.as_object()? {
+        // A fix that is a newer version of this package, not of a parent.
+        let fix = &vuln["fixAvailable"];
+        let fixed = (fix["name"].as_str() == Some(name))
+            .then(|| fix["version"].as_str().map(String::from))
+            .flatten();
+        for via in vuln["via"].as_array().into_iter().flatten() {
+            if via.is_object() {
+                out.push(Advisory {
+                    fixed: fixed.clone(),
+                    ..advisory(name, None, via)
+                });
+            }
+        }
+    }
+    Some(out)
+}
+
+/// npm's advisory objects as pnpm (`advisories` by id) and yarn classic print
+/// them: one per installed version in `findings`.
+fn npm_advisory(a: &Value, out: &mut Vec<Advisory>) {
+    let name = a["module_name"].as_str().unwrap_or_default();
+    let versions: Vec<&str> = a["findings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f["version"].as_str())
+        .collect();
+    if versions.is_empty() {
+        out.push(advisory(name, None, a));
+    }
+    for v in versions {
+        out.push(advisory(name, Some(v), a));
+    }
+}
+
+fn pnpm_audit(v: &Value) -> Option<Vec<Advisory>> {
+    let mut out = Vec::new();
+    for a in v.get("advisories")?.as_object()?.values() {
+        npm_advisory(a, &mut out);
+    }
+    Some(out)
+}
+
+/// `yarn audit --json` (classic): one JSON object per line, an `auditAdvisory`
+/// for each path to a vulnerable package.
+fn yarn_classic_audit(text: &str) -> Option<Vec<Advisory>> {
+    let mut out = Vec::new();
+    let mut summary = false;
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let v: Value = serde_json::from_str(line).ok()?;
+        match v["type"].as_str() {
+            Some("auditAdvisory") => npm_advisory(&v["data"]["advisory"], &mut out),
+            Some("auditSummary") => summary = true,
+            _ => {}
+        }
+    }
+    (summary || !out.is_empty()).then_some(out)
+}
+
+/// `yarn npm audit --json` (berry): one `{"value": name, "children": {…}}` per
+/// line, nothing at all when it finds nothing.
+fn yarn_berry_audit(text: &str) -> Option<Vec<Advisory>> {
+    let mut out = Vec::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let v: Value = serde_json::from_str(line).ok()?;
+        let c = &v["children"];
+        let name = v["value"].as_str()?;
+        let severity = c["Severity"].as_str().map(str::to_lowercase);
+        let versions: Vec<&str> = c["Tree Versions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let one = |version: Option<&str>| Advisory {
+            severity: severity.clone().unwrap_or_else(|| "unknown".into()),
+            ..advisory(name, version, c)
+        };
+        if versions.is_empty() {
+            out.push(one(None));
+        }
+        out.extend(versions.into_iter().map(|v| one(Some(v))));
+    }
+    Some(out)
+}
+
+/// `bun audit --json`: advisories by package name, without installed or fixed versions.
+fn bun_audit(v: &Value) -> Option<Vec<Advisory>> {
+    let mut out = Vec::new();
+    for (name, list) in v.as_object()? {
+        for a in list.as_array().into_iter().flatten() {
+            out.push(advisory(name, None, a));
+        }
+    }
+    Some(out)
+}
+
+fn parse_audit(kind: &str, out: &str) -> Option<Vec<Advisory>> {
+    let json = || serde_json::from_str::<Value>(out).ok();
+    match kind {
+        "composer" => composer_audit(&json()?),
+        "npm" => npm_audit(&json()?),
+        "pnpm" => pnpm_audit(&json()?),
+        "yarn" => yarn_classic_audit(out),
+        "yarn-berry" => yarn_berry_audit(out),
+        "bun" => bun_audit(&json()?),
+        _ => None,
+    }
+}
+
+/// The audit for an ecosystem: (parser, program, arguments), the program
+/// picked by the lock file.
+fn audit_command(
+    e: &Ecosystem,
+    dir: &Path,
+) -> anyhow::Result<(&'static str, &'static str, &'static [&'static str])> {
+    Ok(match (e.id, e.lock.as_deref()) {
+        // The lock file, so it works before `composer install`; abandoned packages aren't vulnerabilities.
+        ("composer", Some(_)) => (
+            "composer",
+            "composer",
+            &[
+                "audit",
+                "--locked",
+                "--format=json",
+                "--abandoned=ignore",
+                "--no-interaction",
+            ],
+        ),
+        ("npm", Some("package-lock.json")) => ("npm", "npm", &["audit", "--json"]),
+        ("npm", Some("pnpm-lock.yaml")) => ("pnpm", "pnpm", &["audit", "--json"]),
+        ("npm", Some("yarn.lock")) => {
+            let berry = fs::read_to_string(dir.join("yarn.lock"))
+                .is_ok_and(|t| t.lines().any(|l| l == "__metadata:"));
+            if berry {
+                let args = &["npm", "audit", "--all", "--recursive", "--json"];
+                ("yarn-berry", "yarn", args)
+            } else {
+                ("yarn", "yarn", &["audit", "--json"])
+            }
+        }
+        ("npm", Some(_)) => ("bun", "bun", &["audit", "--json"]),
+        ("composer" | "npm", None) => {
+            anyhow::bail!("No lock file to audit yet: install the packages first")
+        }
+        _ => anyhow::bail!("Anvil can't check {} packages for vulnerabilities", e.label),
+    })
+}
+
+/// The most severe first, then by package.
+fn severity_rank(s: &str) -> u8 {
+    match s {
+        "critical" => 0,
+        "high" => 1,
+        "moderate" | "medium" => 2,
+        "low" => 3,
+        _ => 4,
+    }
+}
+
+/// Run the package manager's own audit for ecosystem `eco` in `dir`, with the
+/// PHP and Node versions Anvil gives the app.
+pub fn audit(dir: &Path, eco: &str, cfg: &crate::Config) -> anyhow::Result<Vec<Advisory>> {
+    use anyhow::Context;
+    let p = cached(dir);
+    let e = p
+        .ecosystems
+        .iter()
+        .find(|e| e.id == eco)
+        .with_context(|| format!("No {eco} packages in {}", dir.display()))?;
+    let (kind, tool, args) = audit_command(e, dir)?;
+    let (program, pre, env) = match tool {
+        "composer" | "npm" => crate::shims::resolve(tool, dir, cfg)?,
+        // bun needs no Node; Anvil's package managers come first like for the apps.
+        "bun" => (
+            tool.into(),
+            vec![],
+            vec![("PATH".into(), crate::runtimes::with_pms(&crate::env_path()))],
+        ),
+        // pnpm and yarn run on the app's Node, whose PATH has Anvil's package managers.
+        _ => (
+            tool.into(),
+            vec![],
+            crate::shims::resolve("node", dir, cfg)?.2,
+        ),
+    };
+    // ponytail: no time limit, the tools time out on the network themselves.
+    let out = std::process::Command::new(&program)
+        .args(pre)
+        .args(args)
+        .envs(env)
+        .env("COREPACK_ENABLE_DOWNLOAD_PROMPT", "0")
+        .env("NO_COLOR", "1")
+        .env("FORCE_COLOR", "0")
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .with_context(|| format!("couldn't run {tool}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed = parse_audit(kind, &stdout);
+    let mut list = match parsed {
+        // An empty answer is only believed from a run that succeeded.
+        Some(l) if !l.is_empty() || out.status.success() => l,
+        _ => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let npm_error = serde_json::from_str::<Value>(&stdout)
+                .ok()
+                .and_then(|v| v["error"]["summary"].as_str().map(String::from));
+            let why = npm_error
+                .or_else(|| {
+                    // Yarn berry reports its errors on stdout.
+                    stderr
+                        .lines()
+                        .chain(stdout.lines())
+                        .map(str::trim)
+                        // Composer's "In AuditCommand.php line 120:" header.
+                        .find(|l| !l.is_empty() && !(l.starts_with("In ") && l.ends_with(':')))
+                        .map(String::from)
+                })
+                .unwrap_or_else(|| format!("exited with {}", out.status));
+            anyhow::bail!("{tool} audit failed: {why}");
+        }
+    };
+    for a in list.iter_mut().filter(|a| a.version.is_none()) {
+        a.version = e
+            .packages
+            .iter()
+            .find(|p| p.name == a.package)
+            .and_then(|p| p.version.clone())
+            .or_else(|| {
+                e.locked
+                    .iter()
+                    .find(|(n, _)| *n == a.package)
+                    .map(|(_, v)| v.clone())
+            });
+    }
+    // Yarn classic repeats an advisory for each path to the package.
+    list.sort_by(|a, b| {
+        (severity_rank(&a.severity), &a.package, &a.version, &a.title).cmp(&(
+            severity_rank(&b.severity),
+            &b.package,
+            &b.version,
+            &b.title,
+        ))
+    });
+    list.dedup();
+    Ok(list)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1190,6 +1489,193 @@ renamed = { package = "real-name", version = "0.3" }
                 ("Vite".into(), "7.0.4".into()),
             ]
         );
+    }
+
+    /// Real outputs (trimmed) of each tool on a throwaway project pinning
+    /// lodash 4.17.15, minimist 1.2.0 or guzzlehttp/guzzle 7.4.0.
+    fn audit_sample(kind: &str, file: &str) -> Vec<Advisory> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audit")
+            .join(file);
+        parse_audit(kind, &fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn brief(list: &[Advisory]) -> Vec<(&str, Option<&str>, &str, Option<&str>)> {
+        list.iter()
+            .map(|a| {
+                (
+                    a.package.as_str(),
+                    a.version.as_deref(),
+                    a.severity.as_str(),
+                    a.fixed.as_deref(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn composer_audit_json() {
+        let list = audit_sample("composer", "composer.json");
+        assert_eq!(
+            brief(&list),
+            [
+                ("guzzlehttp/guzzle", None, "high", None),
+                ("guzzlehttp/guzzle", None, "medium", None)
+            ]
+        );
+        assert_eq!(
+            list[0].title,
+            "Guzzle: Noncanonical host can bypass host-based checks"
+        );
+        assert_eq!(
+            list[0].url.as_deref(),
+            Some("https://github.com/advisories/GHSA-v5mv-p594-2x33")
+        );
+        // Filtered output keeps its numeric keys, so the list becomes an object.
+        let v: Value = serde_json::from_str(
+            r#"{"advisories":{"a/b":{"1":{"title":"T","link":"L","severity":null}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            composer_audit(&v).unwrap()[0],
+            Advisory {
+                package: "a/b".into(),
+                version: None,
+                severity: "unknown".into(),
+                title: "T".into(),
+                url: Some("L".into()),
+                fixed: None
+            }
+        );
+        assert!(parse_audit("composer", "Composer could not find a composer.json").is_none());
+    }
+
+    #[test]
+    fn npm_audit_json() {
+        let list = audit_sample("npm", "npm.json");
+        assert_eq!(
+            brief(&list),
+            [
+                ("lodash", None, "high", Some("4.18.1")),
+                ("lodash", None, "high", Some("4.18.1")),
+                ("minimist", None, "moderate", Some("1.2.8")),
+                ("minimist", None, "critical", Some("1.2.8"))
+            ]
+        );
+        assert_eq!(list[0].title, "Command Injection in lodash");
+        assert_eq!(
+            list[0].url.as_deref(),
+            Some("https://github.com/advisories/GHSA-35jh-r3h4-6jhm")
+        );
+        // A fix through a parent package isn't this package's fixed version.
+        let v: Value = serde_json::from_str(
+            r#"{"vulnerabilities":{"a":{"via":["b",{"title":"T","severity":"low","url":"U"}],
+                "fixAvailable":{"name":"parent","version":"2.0.0"}},"b":{"via":[],"fixAvailable":true}}}"#,
+        )
+        .unwrap();
+        assert_eq!(brief(&npm_audit(&v).unwrap()), [("a", None, "low", None)]);
+        assert!(parse_audit("npm", "").is_none());
+    }
+
+    #[test]
+    fn pnpm_audit_json() {
+        let list = audit_sample("pnpm", "pnpm.json");
+        assert_eq!(
+            brief(&list),
+            [
+                ("minimist", Some("1.2.0"), "critical", Some(">=1.2.6")),
+                ("lodash", Some("4.17.15"), "high", Some(">=4.17.21"))
+            ]
+        );
+        assert_eq!(list[1].title, "Command Injection in lodash");
+    }
+
+    #[test]
+    fn yarn_audits() {
+        let classic = audit_sample("yarn", "yarn-classic.ndjson");
+        assert_eq!(
+            brief(&classic),
+            [
+                ("minimist", Some("1.2.0"), "moderate", Some(">=1.2.3")),
+                ("minimist", Some("1.2.0"), "critical", Some(">=1.2.6"))
+            ]
+        );
+        assert_eq!(
+            classic[0].url.as_deref(),
+            Some("https://github.com/advisories/GHSA-vh95-rmgr-6w4m")
+        );
+        // Nothing found: only the summary line.
+        let clean = r#"{"type":"auditSummary","data":{"vulnerabilities":{"info":0}}}"#;
+        assert_eq!(parse_audit("yarn", clean), Some(vec![]));
+        assert_eq!(parse_audit("yarn", ""), None);
+
+        let berry = audit_sample("yarn-berry", "yarn-berry.ndjson");
+        assert_eq!(
+            brief(&berry),
+            [
+                ("lodash", Some("4.17.15"), "high", None),
+                ("minimist", Some("1.2.0"), "critical", None)
+            ]
+        );
+        assert_eq!(berry[0].title, "Command Injection in lodash");
+        assert_eq!(
+            berry[1].url.as_deref(),
+            Some("https://github.com/advisories/GHSA-xvch-5gv4-984h")
+        );
+        // Berry prints nothing when it finds nothing.
+        assert_eq!(parse_audit("yarn-berry", ""), Some(vec![]));
+        assert_eq!(parse_audit("yarn-berry", "Usage Error: x"), None);
+    }
+
+    #[test]
+    fn bun_audit_json() {
+        let list = audit_sample("bun", "bun.json");
+        assert_eq!(
+            brief(&list),
+            [
+                ("lodash", None, "high", None),
+                ("minimist", None, "critical", None),
+                ("minimist", None, "moderate", None)
+            ]
+        );
+        assert_eq!(list[0].title, "Command Injection in lodash");
+        assert_eq!(parse_audit("bun", "{}"), Some(vec![]));
+    }
+
+    #[test]
+    fn audit_follows_the_lock_file() {
+        let dir = std::env::temp_dir().join(format!("anvil-pkg-audit-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let eco = |lock: Option<&str>| Ecosystem {
+            id: "npm",
+            label: "Node",
+            lock: lock.map(String::from),
+            ..Default::default()
+        };
+        let kind = |lock| {
+            audit_command(&eco(lock), &dir)
+                .map(|c| c.0)
+                .map_err(|e| e.to_string())
+        };
+        assert_eq!(kind(Some("package-lock.json")), Ok("npm"));
+        assert_eq!(kind(Some("pnpm-lock.yaml")), Ok("pnpm"));
+        assert_eq!(kind(Some("bun.lock")), Ok("bun"));
+        fs::write(
+            dir.join("yarn.lock"),
+            "# yarn lockfile v1\n\nms@^2:\n  version \"2.1.3\"\n",
+        )
+        .unwrap();
+        assert_eq!(kind(Some("yarn.lock")), Ok("yarn"));
+        fs::write(dir.join("yarn.lock"), "__metadata:\n  version: 8\n").unwrap();
+        assert_eq!(kind(Some("yarn.lock")), Ok("yarn-berry"));
+        assert!(kind(None).unwrap_err().contains("No lock file"));
+        let cargo = Ecosystem {
+            id: "cargo",
+            label: "Cargo",
+            ..Default::default()
+        };
+        assert!(audit_command(&cargo, &dir).is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -2581,6 +2581,11 @@ button.log-file:hover { text-decoration-color: currentColor; }
 
 .pkg-none { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 
+/* The security check of the tab's package manager, above its packages. */
+.pkg-audit-head { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+.pkg-audit-head .inline-action { flex: none; margin-left: 0; }
+.pkg-audit-list { margin-bottom: 16px; }
+
 /* Which log: one line of segments, or a menu when there are many. */
 .logs-files { display: flex; margin-bottom: 10px; }
 .logs-files[hidden] { display: none; }

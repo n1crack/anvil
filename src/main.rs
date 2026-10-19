@@ -115,6 +115,9 @@ enum Cmd {
         /// Also ask the registries for newer versions
         #[arg(long)]
         updates: bool,
+        /// Also run each package manager's security audit (composer audit, npm/pnpm/yarn/bun audit)
+        #[arg(long)]
+        audit: bool,
     },
     /// Download the web server, put the terminal shims on PATH and print the
     /// one-time system setup command
@@ -1061,7 +1064,11 @@ fn run() -> Result<()> {
                 }
             }
         }
-        Cmd::Packages { site, updates } => {
+        Cmd::Packages {
+            site,
+            updates,
+            audit,
+        } => {
             let named = site
                 .as_deref()
                 .and_then(|n| sites(&cfg).into_iter().find(|s| s.name == site_name(n)));
@@ -1108,6 +1115,33 @@ fn run() -> Result<()> {
                         p.version.as_deref().unwrap_or("-"),
                         if p.dev { dim(" dev") } else { String::new() }
                     );
+                }
+                if !audit {
+                    continue;
+                }
+                match packages::audit(&dir, e.id, &cfg) {
+                    Ok(list) if list.is_empty() => {
+                        println!("  {}", green("No known vulnerabilities"))
+                    }
+                    Ok(list) => {
+                        println!(
+                            "  {}",
+                            bold(format!("{} known vulnerabilities", list.len()))
+                        );
+                        for a in list {
+                            let fixed =
+                                a.fixed.map_or(String::new(), |f| format!(", fixed in {f}"));
+                            println!(
+                                "  {:<10} {} {}{fixed}: {}{}",
+                                a.severity,
+                                a.package,
+                                a.version.as_deref().unwrap_or("-"),
+                                a.title,
+                                a.url.map_or(String::new(), |u| dim(format!(" {u}")))
+                            );
+                        }
+                    }
+                    Err(err) => println!("  {}", red(format!("{err:#}"))),
                 }
             }
         }

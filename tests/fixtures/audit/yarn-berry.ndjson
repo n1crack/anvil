@@ -1,0 +1,2 @@
+{"value":"lodash","children":{"ID":1106913,"Issue":"Command Injection in lodash","URL":"https://github.com/advisories/GHSA-35jh-r3h4-6jhm","Severity":"high","Vulnerable Versions":"<4.17.21","Tree Versions":["4.17.15"],"Dependents":["x@workspace:."]}}
+{"value":"minimist","children":{"ID":1097678,"Issue":"Prototype Pollution in minimist","URL":"https://github.com/advisories/GHSA-xvch-5gv4-984h","Severity":"critical","Vulnerable Versions":">=1.0.0 <1.2.6","Tree Versions":["1.2.0"],"Dependents":["x@workspace:."]}}

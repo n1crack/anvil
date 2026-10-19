@@ -64,6 +64,11 @@ Until 1.0.0, minor versions may contain breaking changes.
   shows the keys and the Laravel `.env` lines (`AWS_ENDPOINT`,
   `AWS_USE_PATH_STYLE_ENDPOINT=true`, `AWS_BUCKET`), and the header opens its
   web console.
+- Security check in the Packages tab: "Check security" on the Composer or Node
+  tab runs that package manager's own audit (`composer audit`, or `npm`,
+  `pnpm`, `yarn` or `bun audit`, picked by the lock file) with the app's PHP and
+  Node.js versions, and lists each advisory with its package, installed
+  version, severity and fix. `anvil packages --audit` does the same in the CLI.
 
 ### Changed
 

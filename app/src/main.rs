@@ -1635,6 +1635,17 @@ async fn package_updates(site: String) -> Res<Vec<anvil::packages::Update>> {
     .map_err(|e| e.to_string())?
 }
 
+/// Known vulnerabilities in one ecosystem of the app, from its package manager's audit.
+#[tauri::command]
+async fn package_audit(site: String, ecosystem: String) -> Res<Vec<anvil::packages::Advisory>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (cfg, s) = find_site_cfg(&site)?;
+        anvil::packages::audit(&s.path, &ecosystem, &cfg).map_err(err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Delete one cleanable item of an app (see `resources::clean` for the guards).
 #[tauri::command]
 async fn clean(handle: AppHandle, site: String, path: String) -> Res<u64> {
@@ -3305,6 +3316,7 @@ fn main() {
             resources,
             packages,
             package_updates,
+            package_audit,
             clean,
             log_sources,
             log_read,

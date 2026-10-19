@@ -1147,6 +1147,28 @@ describe("packages", () => {
     expect($(".pkg-status").textContent).toBe("checked just now");
     expect(calls("package_updates")).toHaveLength(1);
   });
+
+  test("Check security runs the tab's audit on request and shows it inline", async () => {
+    $('.tabs [data-tab="packages"]').click();
+    await wait(80);
+    ($('.pkg-ecos [data-id="composer"]') as HTMLElement).click();
+    expect(calls("package_audit")).toHaveLength(0);
+    expect($(".pkg-audit-check").textContent).toBe("Check security");
+    $(".pkg-audit-check").click();
+    await wait(80);
+    expect(calls("package_audit")).toHaveLength(1);
+    expect($(".pkg-audit-head .pkg-status").textContent).toBe("1 known vulnerability · checked just now");
+    const row = $(".pkg-audit-list .row");
+    expect(row.querySelector("dt")?.textContent).toBe("Noncanonical host can bypass host-based checksguzzlehttp/guzzle 7.9.2");
+    expect(row.querySelector("dd")?.textContent).toBe("high");
+    // Another tab has its own check; a failure is said inline.
+    ($('.pkg-ecos [data-id="npm"]') as HTMLElement).click();
+    expect($(".pkg-audit-head .pkg-status").textContent).toBe("");
+    $(".pkg-audit-check").click();
+    await wait(80);
+    expect($(".pkg-audit-head .pkg-status.error").textContent).toBe("pnpm audit failed: request to registry timed out");
+    expect($$(".pkg-audit-list")).toHaveLength(0);
+  });
 });
 
 describe("new application", () => {
