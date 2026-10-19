@@ -909,10 +909,13 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// A folder with `files`, a new one each call (tests run in parallel).
     fn project(files: &[(&str, &str)]) -> PathBuf {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "anvil-detect-{}-{}",
+            "anvil-detect-{}-{}-{}",
             std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             files.first().map_or("empty", |f| f.0).replace('/', "_")
         ));
         let _ = fs::remove_dir_all(&dir);
@@ -1414,6 +1417,12 @@ mod tests {
         apps.set_size("other", 3, 0);
         assert_eq!(apps.sizes["other"], (20, 5));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn each_test_project_has_its_own_folder() {
+        // Two tests asking for the same files run in parallel: one's clean-up mustn't race the other.
+        assert_ne!(project(&[("x/y", "")]), project(&[("x/y", "")]));
     }
 
     #[test]
