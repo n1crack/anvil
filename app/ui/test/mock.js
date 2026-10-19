@@ -626,7 +626,7 @@ const mockHandle = (cmd, a) => {
       if (window.mockRemoveFail && !a.force) throw window.mockRemoveFail;
       return mockSnap;
     case "worktree_new_db":
-      return window.mockNewDb ?? { choices: ["copy", "empty", "share"], default: "copy", main_database: "shop" };
+      return window.mockNewDb ?? { choices: ["copy", "empty"], default: "copy", main_database: "shop" };
     case "worktree_db":
       if (window.mockDbFail) throw window.mockDbFail;
       mockSnap.worktrees[a.site].db = a.choice;

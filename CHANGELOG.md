@@ -80,13 +80,14 @@ Until 1.0.0, minor versions may contain breaking changes.
   and installs or adds it. Anvil never writes the file.
 - Git worktrees run side by side. Each worktree of an app appears under it in
   the sidebar and answers at `<app>--<name>.test`, with its own processes (Dev
-  tab, queue, Vite). Its database is a copy of the app's, an empty one, or the
-  app's own ("Share main's"), picked when you create it (`--db copy|share|empty`)
-  and made the first time it is used. Settings › Database for new worktrees sets
-  the default, also for worktrees made outside Anvil. Tests (`artisan test`,
-  PHPUnit, Pest, ParaTest) never run on the app's database: they use the
-  worktree's own, or with Share an empty `<db>_test`. A database Anvil didn't
-  make is only used after "Use existing" (`anvil worktree use-db`). Its Redis and
+  tab, queue, Vite). It always has a database of its own, a copy of the app's
+  or an empty one, picked when you create it (`--db copy|empty`) and made the
+  first time it is used. Settings › Database for new worktrees sets the
+  default, also for worktrees made outside Anvil. A test config (phpunit.xml,
+  `.env.testing`) that would put tests on the app's database stops the
+  worktree's terminal commands until it names a test database of its own. A
+  database Anvil didn't make is only used after "Use existing"
+  (`anvil worktree use-db`). Its Redis and
   cache keys get their own prefix. Removing a worktree stops its processes and
   drops its database only when you ask; databases left behind by worktrees that
   are gone are listed with Delete and Keep. A worktree made outside Anvil gets

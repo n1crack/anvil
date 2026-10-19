@@ -82,7 +82,7 @@ struct WorktreeView {
     db: anvil::worktrees::DbChoice,
     /// What it may choose now (`worktrees::choices`).
     choices: Vec<anvil::worktrees::DbChoice>,
-    /// Its own database is made: the choice is then that one or Share.
+    /// Its own database is made: the choice is then that one.
     prepared: bool,
     /// Its own database (a name, or a SQLite file in it); `None` when there's none to give it.
     database: Option<String>,
@@ -2201,7 +2201,7 @@ fn worktree_remove(
     snapshot(&app)
 }
 
-/// Copy of main, Empty or Share main's for the worktree `site`.
+/// Copy of main or Empty for the worktree `site`.
 #[tauri::command(async)]
 fn worktree_db(
     handle: AppHandle,

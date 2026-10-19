@@ -1567,7 +1567,7 @@ describe("worktrees", () => {
   const wt = "shop--feature-x";
   const view = (o = {}) => ({
     db: "copy",
-    choices: ["copy", "share"],
+    choices: ["copy"],
     prepared: true,
     database: "shop_feature_x",
     main_database: "shop",
@@ -1604,28 +1604,20 @@ describe("worktrees", () => {
     await show();
     expect($('[data-panel="overview"] .worktree-of').textContent).toBe("Worktree of shop · branch feature/login");
     expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop_feature_x (copy of shop)");
-    const choice = dbRow().querySelector("select") as HTMLSelectElement;
-    // Made already: its own database or main's, nothing that would remake it.
-    expect([...choice.options].map((o) => o.textContent)).toEqual(["Own database (shop_feature_x)", "Share main's"]);
-    expect(choice.value).toBe("copy");
+    // Made already: nothing left to choose, nothing that would remake it.
+    expect(dbRow().querySelector("select")).toBeNull();
+    expect(dbRow().textContent).not.toContain("Share");
     expect(ovText()).toContain("S3 buckets and search indexes are shared with shop");
     expect(ovText()).not.toContain("Docker services");
     expect(ovText()).not.toContain("config:clear");
     expect(dbRow().querySelector("button")).toBeNull(); // made already: no Prepare
-    choice.value = "share";
-    choice.dispatchEvent(new Event("change"));
-    await wait(80);
-    expect(calls("worktree_db").at(-1)![1]).toEqual({ site: wt, choice: "share" });
-    // Share warns inline.
-    expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop's database");
-    expect(dbRow().textContent).toContain("Migrations and commands from the terminal run on shop; tests still get their own database.");
   });
 
-  test("before its database is made all three choices show; a refused one says why inline", async () => {
-    await show({ pending: true, prepared: false, copies: [], choices: ["copy", "empty", "share"] });
+  test("before its database is made both choices show; a refused one says why inline", async () => {
+    await show({ pending: true, prepared: false, copies: [], choices: ["copy", "empty"] });
     const choice = () => dbRow().querySelector("select") as HTMLSelectElement;
-    expect([...choice().options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty", "Share main's"]);
-    w.mockDbFail = "shop--feature-x can't use that database (its own database is made already; choose it or Share main's)";
+    expect([...choice().options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty"]);
+    w.mockDbFail = "shop--feature-x can't use that database (its own database is made already)";
     try {
       choice().value = "empty";
       choice().dispatchEvent(new Event("change"));
@@ -1635,11 +1627,10 @@ describe("worktrees", () => {
       delete w.mockDbFail;
     }
     // Main on a server Anvil doesn't manage: the default Copy shows, but can't be picked.
-    await show({ choices: ["share", "empty"], prepared: false, pending: false, copies: [] });
+    await show({ choices: ["empty"], prepared: false, pending: false, copies: [] });
     const opts = [...choice().options];
     expect(opts.map((o) => [o.textContent, o.disabled])).toEqual([
       ["Copy of main", true],
-      ["Share main's", false],
       ["Empty", false],
     ]);
   });
@@ -1791,24 +1782,17 @@ describe("worktrees", () => {
     expect($("#ask-check").textContent).toContain("New branch");
     ($("#ask-input") as HTMLInputElement).value = "feature/login";
     ($("#ask-new") as HTMLInputElement).checked = true;
-    // The database: what main's allows, Settings' default picked; Share says what it means.
+    // The database: what main's allows, Settings' default picked.
     const db = $("#ask-db") as HTMLSelectElement;
     expect($("#ask-db-row").hidden).toBe(false);
-    expect([...db.options].map((o) => o.textContent)).toEqual(["Copy of main", "Share main's", "Empty"]);
+    expect([...db.options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty"]);
     expect(db.value).toBe("copy");
-    expect($("#ask-db-note").hidden).toBe(true);
-    db.value = "share";
-    db.dispatchEvent(new Event("change"));
-    expect($("#ask-db-note").hidden).toBe(false);
-    expect($("#ask-db-note").textContent).toBe(
-      "Migrations and commands from the terminal run on shop; tests still get their own database.",
-    );
+    db.value = "empty";
     $("#ask").dispatchEvent(new Event("submit"));
     await wait(60);
-    expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "feature/login", new: true, db: "share" });
+    expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "feature/login", new: true, db: "empty" });
     expect($("#ask-check").hidden).toBe(true);
     expect($("#ask-db-row").hidden).toBe(true);
-    expect($("#ask-db-note").hidden).toBe(true);
   });
 
   test("New Worktree… offers only what main's database allows, and nothing without one", async () => {
@@ -1820,16 +1804,15 @@ describe("worktrees", () => {
       await wait();
     };
     try {
-      w.mockNewDb = { choices: ["share", "empty"], default: "share", main_database: "shop" };
+      w.mockNewDb = { choices: ["empty"], default: "empty", main_database: "shop" };
       await open();
       const db = $("#ask-db") as HTMLSelectElement;
-      expect([...db.options].map((o) => o.value)).toEqual(["share", "empty"]);
-      expect(db.value).toBe("share");
-      expect($("#ask-db-note").hidden).toBe(false);
+      expect([...db.options].map((o) => o.value)).toEqual(["empty"]);
+      expect(db.value).toBe("empty");
       $("#ask-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
       await wait();
       expect($("#ask-db-row").hidden).toBe(true);
-      w.mockNewDb = { choices: ["copy", "empty", "share"], default: "copy", main_database: null };
+      w.mockNewDb = { choices: ["copy", "empty"], default: "copy", main_database: null };
       await open();
       expect($("#ask-db-row").hidden).toBe(true);
       ($("#ask-input") as HTMLInputElement).value = "x";

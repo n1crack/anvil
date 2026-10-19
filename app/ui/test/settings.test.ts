@@ -189,7 +189,7 @@ describe("general", () => {
   test("Database for new worktrees shows the stored default and stores a new one", async () => {
     await open("general");
     const sel = $("#worktree-db") as HTMLSelectElement;
-    expect([...sel.options].map((o) => o.textContent)).toEqual(["Copy of main", "Share main's", "Empty"]);
+    expect([...sel.options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty"]);
     expect(sel.value).toBe("copy");
     sel.value = "empty";
     sel.dispatchEvent(new Event("change"));

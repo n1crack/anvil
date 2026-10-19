@@ -90,10 +90,9 @@
         </label>
         <div class="row"><span>Applications answer at<small id="ports"></small></span><span id="address" class="value"></span></div>
         <label class="row">
-          <span>Database for new worktrees<small>Also what a worktree opened outside Anvil uses. Tests never run on main’s database.</small></span>
+          <span>Database for new worktrees<small>Also what a worktree opened outside Anvil uses. Each worktree has a database of its own.</small></span>
           <select id="worktree-db">
             <option value="copy">Copy of main</option>
-            <option value="share">Share main's</option>
             <option value="empty">Empty</option>
           </select>
         </label>

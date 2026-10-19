@@ -680,7 +680,7 @@ export function ask(label: string, placeholder?: string, preview?: (v: string) =
   const hint = $("#ask-hint");
   const box = $("#ask-check");
   box.hidden = !check;
-  $("#ask-db-row").hidden = $("#ask-db-note").hidden = true; // newWorktree shows them
+  $("#ask-db-row").hidden = true; // newWorktree shows it
 
   $("span", box).textContent = check ?? "";
   $("#ask-new").checked = false;
@@ -697,7 +697,7 @@ export function ask(label: string, placeholder?: string, preview?: (v: string) =
   };
   return new Promise((resolve) => {
     const done = (value) => {
-      form.hidden = box.hidden = $("#ask-db-row").hidden = $("#ask-db-note").hidden = true;
+      form.hidden = box.hidden = $("#ask-db-row").hidden = true;
       form.onsubmit = input.onkeydown = input.oninput = null;
       resolve(value);
     };
@@ -732,14 +732,9 @@ async function newWorktree(s) {
   const db = await invoke("worktree_new_db", { site: s.name }).catch(() => null);
   const answer = ask(`New worktree of ${s.name}`, "Branch, e.g. feature/login", undefined, "New branch");
   const sel = $("#ask-db");
-  const note = $("#ask-db-note");
   if (db?.main_database) {
-    const order = ["copy", "share", "empty"].filter((c) => db.choices.includes(c));
-    sel.replaceChildren(...order.map((c) => new Option(DB_CHOICES[c], c)));
+    sel.replaceChildren(...db.choices.map((c) => new Option(DB_CHOICES[c], c)));
     sel.value = db.default;
-    note.textContent = shareNote(db.main_database);
-    sel.onchange = () => (note.hidden = sel.value !== "share");
-    sel.onchange();
     $("#ask-db-row").hidden = false;
   }
   const branch = await answer;
@@ -1219,8 +1214,7 @@ function projectNeeds(s, root) {
   else $('[data-panel="overview"] .group', root).prepend(row);
 }
 
-const DB_CHOICES = { copy: "Copy of main", empty: "Empty", share: "Share main's" };
-const shareNote = (db: string) => `Migrations and commands from the terminal run on ${db}; tests still get their own database.`;
+const DB_CHOICES = { copy: "Copy of main", empty: "Empty" };
 const prepareErrors = new Map<string, string>(); // a failed Prepare database, across re-renders
 const preparing = new Set<string>();
 const dbErrors = new Map<string, string>(); // a refused database choice, across re-renders
@@ -1240,7 +1234,6 @@ function worktreeLines(s, root) {
     rows.push(r);
   };
   if (v.database) {
-    const share = v.db === "share";
     const how = !v.choices.includes(v.db)
       ? "on a server Anvil doesn't manage"
       : v.adopted
@@ -1248,32 +1241,30 @@ function worktreeLines(s, root) {
         : v.db === "copy"
           ? `copy of ${v.main_database ?? main}`
           : "empty";
-    const dd = el("dd", null, share ? `${main}'s database` : `${v.database} (${how})`);
-    // Once made, its own database (reused after a Share) or main's; before, what main's allows.
-    const label = (c) => (v.prepared && c !== "share" ? `Own database (${v.database})` : DB_CHOICES[c]);
-    const sel = el("select");
-    sel.setAttribute("aria-label", "Database");
-    for (const c of v.choices) sel.add(new Option(label(c), c));
-    if (!v.choices.includes(v.db)) {
-      // A choice main's database no longer allows: shown as it is, not offered.
-      const now = new Option(label(v.db), v.db);
-      now.disabled = true;
-      sel.prepend(now);
-    }
-    sel.value = v.db;
-    sel.onchange = async () => {
-      dbErrors.delete(s.name);
-      try {
-        await invoke("worktree_db", { site: s.name, choice: sel.value });
-      } catch (e) {
-        dbErrors.set(s.name, String(e));
+    const dd = el("dd", null, `${v.database} (${how})`);
+    // Until it's made, what main's database allows; a choice it no longer allows shows, not offered.
+    if (v.choices.length > 1 || !v.choices.includes(v.db)) {
+      const sel = el("select");
+      sel.setAttribute("aria-label", "Database");
+      for (const c of v.choices) sel.add(new Option(DB_CHOICES[c], c));
+      if (!v.choices.includes(v.db)) {
+        const now = new Option(DB_CHOICES[v.db], v.db);
+        now.disabled = true;
+        sel.prepend(now);
       }
-      call("state");
-    };
-    dd.append(" ", sel);
-    if (share)
-      dd.append(el("div", "muted", shareNote(v.main_database && v.main_database !== `${main}'s` ? v.main_database : `${main}'s database`)));
-    else if (v.preparing) dd.append(el("div", "muted", v.preparing));
+      sel.value = v.db;
+      sel.onchange = async () => {
+        dbErrors.delete(s.name);
+        try {
+          await invoke("worktree_db", { site: s.name, choice: sel.value });
+        } catch (e) {
+          dbErrors.set(s.name, String(e));
+        }
+        call("state");
+      };
+      dd.append(" ", sel);
+    }
+    if (v.preparing) dd.append(el("div", "muted", v.preparing));
     else if (v.pending) {
       const b = el("button", "inline-action", preparing.has(s.name) ? "Preparing…" : "Prepare database");
       b.disabled = preparing.has(s.name);

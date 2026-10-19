@@ -278,8 +278,7 @@ enum WorktreeCmd {
         /// Create the branch, from the app's current one
         #[arg(long)]
         new: bool,
-        /// Its database: copy (of main's), share (main's) or empty; unset follows
-        /// Settings' default
+        /// Its own database: copy (of main's) or empty; unset follows Settings' default
         #[arg(long)]
         db: Option<worktrees::DbChoice>,
     },
@@ -1458,9 +1457,9 @@ mod tests {
             }
         ));
         assert!(matches!(
-            parse(&["add", "x", "--db", "share"]),
+            parse(&["add", "x", "--db", "empty"]),
             WorktreeCmd::Add {
-                db: Some(worktrees::DbChoice::Share),
+                db: Some(worktrees::DbChoice::Empty),
                 ..
             }
         ));
@@ -1468,8 +1467,10 @@ mod tests {
             parse(&["add", "x"]),
             WorktreeCmd::Add { db: None, .. }
         ));
-        let bad = Cli::try_parse_from(["anvil", "worktree", "add", "x", "--db", "main"]);
-        assert!(bad.is_err());
+        for bad in ["main", "share"] {
+            let argv = ["anvil", "worktree", "add", "x", "--db", bad];
+            assert!(Cli::try_parse_from(argv).is_err(), "{bad}");
+        }
         assert!(matches!(
             parse(&["use-db", "shop--x", "--yes"]),
             WorktreeCmd::UseDb { yes: true, .. }

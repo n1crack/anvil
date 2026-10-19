@@ -1310,7 +1310,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
                 error_page(
                     &format!("{} has no database of its own", site.name),
                     &format!(
-                        "Anvil can't point it at its own database ({reason}). Choose Share main's to use main's database."
+                        "Anvil can't point it at its own database ({reason}), so nothing of it runs."
                     ),
                 ),
             );
@@ -2580,16 +2580,16 @@ mod tests {
             worktree_name("shop", Path::new("/s/.claude/worktrees/agent-1a2b")),
             "agent-1a2b"
         );
-        let mut w = site("m--x", "/tmp/my app--x", None);
+        // A real worktree (in a folder with a space) whose main has no `.env`.
+        let (_, x) = worktrees::tests::repo("my app");
+        let mut w = site("m--x", x.to_str().unwrap(), None);
         w.worktree_of = Some("m".into());
         let mut bad = site("m--y", "/tmp/a\"b", None);
         bad.worktree_of = Some("m".into());
-        // No real checkout behind these: Share, so no main `.env` is needed.
-        let mut cfg = Config::default();
-        cfg.worktrees.entry("m--x".into()).or_default().db = worktrees::DbChoice::Share;
+        let cfg = Config::default();
         let c = caddyfile(&cfg, &[w, bad]);
         assert!(
-            c.contains("m--x.test {\n\troot * \"/tmp/my app--x\""),
+            c.contains(&format!("m--x.test {{\n\troot * \"{}\"", x.display())),
             "{c}"
         );
         assert!(!c.contains("m--y"));

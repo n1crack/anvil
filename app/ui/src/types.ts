@@ -61,12 +61,12 @@ export interface Snapshot {
   leftovers: Leftover[];
 }
 
-export type DbChoice = "copy" | "empty" | "share";
+export type DbChoice = "copy" | "empty";
 
 export interface WorktreeView {
   db: DbChoice;
-  /** What it may choose now: what main's database allows (external: empty or share)
-   * until its own is made, then that one or share. */
+  /** What it may choose now: what main's database allows (external: empty only)
+   * until its own is made, then that one. */
   choices: DbChoice[];
   /** Its own database is made. */
   prepared: boolean;
@@ -246,7 +246,7 @@ export interface Settings {
   trim_app_logs: boolean;
   notifications: boolean;
   https_default: boolean;
-  worktree_db: "copy" | "empty" | "share";
+  worktree_db: DbChoice;
   login: boolean;
   config_dir: string;
 }

@@ -42,10 +42,10 @@ pub enum DbChoice {
     /// Its own database, a copy of the main app's.
     #[default]
     Copy,
-    /// Its own database, empty (filled by migrations).
+    /// Its own database, empty (filled by migrations). A `share` stored before Share
+    /// main's was removed loads as this: a worktree never uses main's database.
+    #[serde(alias = "share")]
     Empty,
-    /// The main app's database.
-    Share,
 }
 
 impl std::str::FromStr for DbChoice {
@@ -54,8 +54,8 @@ impl std::str::FromStr for DbChoice {
         match s {
             "copy" => Ok(DbChoice::Copy),
             "empty" => Ok(DbChoice::Empty),
-            "share" => Ok(DbChoice::Share),
-            _ => Err(format!("\"{s}\" isn't one of copy, share, empty")),
+            "share" => Err("a worktree always has its own database: copy or empty".into()),
+            _ => Err(format!("\"{s}\" isn't one of copy, empty")),
         }
     }
 }
@@ -107,11 +107,6 @@ fn fit(mut name: String) -> String {
     name
 }
 
-/// The empty database a test run gets in a worktree that shares main's: `<db_name>_test`.
-pub fn test_db_name(site: &Site) -> String {
-    fit(format!("{}_test", db_name(site)))
-}
-
 /// The name of main's database on a server, as main's `.env` gives it, by `env`'s rules:
 /// a URL's path, else `DB_DATABASE` with a server connection or none named, else Laravel's
 /// `laravel`; `None` for SQLite or no settings.
@@ -160,16 +155,6 @@ pub fn is_mains_database(site: &Site, db: &str) -> bool {
         || mains.is_some_and(|m| Path::new(&m).is_absolute() && real_file(Path::new(&m)) == file)
 }
 
-/// The database a worktree's run uses (`env_for`'s): its own, or with `test` while it
-/// shares main's, its test database.
-pub fn run_db(cfg: &Config, site: &Site, test: bool) -> String {
-    if test && choice(cfg, site) == DbChoice::Share {
-        test_db_name(site)
-    } else {
-        db_name(site)
-    }
-}
-
 /// The worktree's record; for one Anvil has none of (opened outside Anvil, say), Settings'
 /// default choice.
 fn record(cfg: &Config, site: &Site) -> WorktreeConfig {
@@ -198,12 +183,6 @@ pub fn choice(cfg: &Config, site: &Site) -> DbChoice {
     record(cfg, site).db
 }
 
-/// Its own database (not a test run's) is recorded.
-fn own_made(w: &WorktreeConfig, site: &Site) -> bool {
-    let test = test_db_name(site);
-    w.copies.iter().any(|(_, db)| *db != test)
-}
-
 /// Where the main app keeps its data, as far as a worktree's own copy goes.
 #[derive(Debug, PartialEq)]
 pub enum MainDb {
@@ -218,11 +197,11 @@ pub enum MainDb {
 }
 
 impl MainDb {
-    /// What a worktree can choose: an external database can only be shared or made empty.
+    /// What a worktree can choose: one on a server Anvil doesn't manage can only be empty.
     pub fn choices(&self) -> &'static [DbChoice] {
         match self {
-            MainDb::External => &[DbChoice::Share, DbChoice::Empty],
-            _ => &[DbChoice::Copy, DbChoice::Empty, DbChoice::Share],
+            MainDb::External => &[DbChoice::Empty],
+            _ => &[DbChoice::Copy, DbChoice::Empty],
         }
     }
 }
@@ -320,41 +299,17 @@ pub(crate) enum Op<'a> {
 }
 
 /// What's left to do for the worktree `site`: its choice and main's database, or
-/// `None` when it shares, has its copy already, or there's nothing Anvil can make.
+/// `None` when it has its own already, or there's nothing Anvil can make.
 pub fn pending(cfg: &Config, site: &Site) -> Option<(DbChoice, MainDb)> {
-    todo(cfg, site, false).map(|(choice, db, _)| (choice, db))
-}
-
-/// Where a test run in a worktree that shares main's database goes, if it's SQLite.
-const TEST_SQLITE: &str = "database/testing.sqlite";
-
-/// `pending` and the database's name; with `test` (a test run), a worktree that shares
-/// main's gets an empty test database (`test_db_name`, or `TEST_SQLITE`) instead.
-fn todo(cfg: &Config, site: &Site, test: bool) -> Option<(DbChoice, MainDb, String)> {
     site.worktree_of.as_ref()?;
     let w = record(cfg, site);
-    if w.db == DbChoice::Share {
-        let name = test_db_name(site);
-        if !test || w.copies.iter().any(|(_, db)| *db == name) {
-            return None;
-        }
-        return match main_db(cfg, site) {
-            MainDb::None | MainDb::External => None,
-            MainDb::Sqlite { from, .. } => {
-                let to = site.path.join(TEST_SQLITE);
-                let db = MainDb::Sqlite { from, to };
-                (!site.path.join(TEST_SQLITE).exists()).then_some((DbChoice::Empty, db, name))
-            }
-            db => Some((DbChoice::Empty, db, name)),
-        };
-    }
-    if own_made(&w, site) {
+    if !w.copies.is_empty() {
         return None;
     }
     match main_db(cfg, site) {
         MainDb::None | MainDb::External => None,
         MainDb::Sqlite { to, .. } if to.exists() => None,
-        db => Some((w.db, db, db_name(site))),
+        db => Some((w.db, db)),
     }
 }
 
@@ -362,19 +317,15 @@ fn todo(cfg: &Config, site: &Site, test: bool) -> Option<(DbChoice, MainDb, Stri
 pub fn prepared(cfg: &Config, site: &Site) -> bool {
     cfg.worktrees
         .get(&site.name)
-        .is_some_and(|w| own_made(w, site))
+        .is_some_and(|w| !w.copies.is_empty())
         || matches!(main_db(cfg, site), MainDb::Sqlite { to, .. } if to.exists())
 }
 
 /// What the worktree may choose now: what main's database allows until its own is made,
-/// then only that one (Copy or Empty, as made; Copy after a Share) or Share.
+/// then only that one.
 pub fn choices(cfg: &Config, site: &Site) -> Vec<DbChoice> {
     if prepared(cfg, site) {
-        let own = match choice(cfg, site) {
-            DbChoice::Empty => DbChoice::Empty,
-            _ => DbChoice::Copy,
-        };
-        return vec![own, DbChoice::Share];
+        return vec![choice(cfg, site)];
     }
     main_db(cfg, site).choices().to_vec()
 }
@@ -386,7 +337,7 @@ pub struct NewDb {
     pub choices: Vec<DbChoice>,
     /// Settings' default when allowed, else the first choice.
     pub default: DbChoice,
-    /// Main's database as Share's note names it; `None` when main has no database settings.
+    /// Main's database by name; `None` when main has no database settings (nothing to choose).
     pub main_database: Option<String>,
 }
 
@@ -417,9 +368,9 @@ pub fn set_db(cfg: &mut Config, site: &Site, choice: DbChoice) -> anyhow::Result
     let allowed = choices(cfg, site);
     if !allowed.contains(&choice) {
         let why = if prepared(cfg, site) {
-            "its own database is made already; choose it or Share main's"
+            "its own database is made already"
         } else {
-            "main's database is on a server Anvil doesn't manage; choose Empty or Share main's"
+            "main's database is on a server Anvil doesn't manage; choose Empty"
         };
         anyhow::bail!("{} can't use that database ({why})", site.name);
     }
@@ -442,14 +393,14 @@ pub fn set_db_at(cfg: &mut Config, folder: &Path, choice: DbChoice) -> anyhow::R
 pub(crate) fn prepare_with(
     cfg: &mut Config,
     site: &Site,
-    test: bool,
     marker: &Path,
     say: &mut dyn FnMut(&str),
     run: &mut dyn FnMut(&Config, &str, Op) -> anyhow::Result<bool>,
 ) -> anyhow::Result<bool> {
-    let Some((choice, db, name)) = todo(cfg, site, test) else {
+    let Some((choice, db)) = pending(cfg, site) else {
         return Ok(false);
     };
+    let name = db_name(site);
     match db {
         MainDb::Sqlite { from, to } => {
             if choice == DbChoice::Copy && !from.exists() {
@@ -568,17 +519,7 @@ pub fn prepare_site(site: &Site, say: &mut dyn FnMut(&str)) -> anyhow::Result<()
 /// starts; `true` when it made one. What it made on a server is recorded in
 /// `cfg.worktrees` (and saved). Slow: hold no other lock across it.
 pub fn prepare(cfg: &mut Config, site: &Site, say: &mut dyn FnMut(&str)) -> anyhow::Result<bool> {
-    prepare_for(cfg, site, false, say)
-}
-
-/// `prepare`; with `test`, for a test run (`env_for`).
-pub fn prepare_for(
-    cfg: &mut Config,
-    site: &Site,
-    test: bool,
-    say: &mut dyn FnMut(&str),
-) -> anyhow::Result<bool> {
-    if todo(cfg, site, test).is_none() {
+    if pending(cfg, site).is_none() {
         return Ok(false);
     }
     let run = crate::home().join("run");
@@ -591,7 +532,7 @@ pub fn prepare_for(
         cfg.worktrees.insert(site.name.clone(), w);
     }
     let marker = run.join(format!("prepare-{}.copying", site.name));
-    let made = prepare_with(cfg, site, test, &marker, say, &mut on_server)?;
+    let made = prepare_with(cfg, site, &marker, say, &mut on_server)?;
     if made {
         let mine = record(cfg, site);
         let (saved, ()) = crate::update(|c| {
@@ -694,84 +635,62 @@ fn real_file(file: &Path) -> PathBuf {
 /// reach the main app's database or Redis keys. Empty for anything but a worktree.
 /// Set variables win over the worktree's `.env` (Laravel, dotenv, Next.js, Prisma).
 /// `Err(reason)` when Anvil can't work out the worktree's own database: then nothing
-/// of the worktree runs (`checked_env`, no PHP-FPM pool) unless it shares main's.
+/// of the worktree runs (`checked_env`, no PHP-FPM pool).
 pub fn env(cfg: &Config, site: &Site) -> Result<Vec<(String, String)>, String> {
-    env_for(cfg, site, false)
-}
-
-/// `env`; with `test`, for a test run (`artisan test`, PHPUnit, Pest, ParaTest): never on
-/// main's database, so a worktree that shares it gets its empty test database
-/// (`test_db_name`, or `database/testing.sqlite`).
-pub fn env_for(cfg: &Config, site: &Site, test: bool) -> Result<Vec<(String, String)>, String> {
     if site.worktree_of.is_none() {
         return Ok(Vec::new());
     }
     let mut env: Vec<(String, String)> = Vec::new();
-    let share = choice(cfg, site) == DbChoice::Share;
-    let tests_apart = share && test;
-    let db = if tests_apart {
-        test_db_name(site)
-    } else {
-        db_name(site)
+    let db = db_name(site);
+    let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
+    // What its processes would load: main's `.env` (copied in), then its own files
+    // over it, in Next.js' order (the last one wins).
+    let mut files = vec![
+        crate::resources::dotenv(&main),
+        crate::resources::dotenv(&site.path),
+    ];
+    for f in [".env.development", ".env.local", ".env.development.local"] {
+        files.push(crate::resources::dotenv_file(&site.path.join(f)));
+    }
+    let last = |k: &str| {
+        files
+            .iter()
+            .rev()
+            .find_map(|f| f.get(k).filter(|v| !v.is_empty()))
     };
-    if !share || tests_apart {
-        let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
-        // What its processes would load: main's `.env` (copied in), then its own files
-        // over it, in Next.js' order (the last one wins).
-        let mut files = vec![
-            crate::resources::dotenv(&main),
-            crate::resources::dotenv(&site.path),
-        ];
-        for f in [".env.development", ".env.local", ".env.development.local"] {
-            files.push(crate::resources::dotenv_file(&site.path.join(f)));
-        }
-        let last = |k: &str| {
-            files
-                .iter()
-                .rev()
-                .find_map(|f| f.get(k).filter(|v| !v.is_empty()))
-        };
-        // Any file naming a server counts: Laravel reads only `.env`, Next.js all of them.
-        let server = files.iter().any(|f| {
-            f.get("DB_CONNECTION")
-                .is_some_and(|c| !c.is_empty() && c != "sqlite")
-        });
-        let sqlite = last("DB_CONNECTION").map(String::as_str) == Some("sqlite");
-        if server || (!sqlite && files.iter().any(|f| f.contains_key("DB_DATABASE"))) {
-            // Laravel falls back to `laravel` without DB_DATABASE: never main's.
-            env.push(("DB_DATABASE".into(), db.clone()));
-        } else if sqlite
-            && tests_apart
-            && last("DB_DATABASE").map(String::as_str) != Some(":memory:")
+    // Any file naming a server counts: Laravel reads only `.env`, Next.js all of them.
+    let server = files.iter().any(|f| {
+        f.get("DB_CONNECTION")
+            .is_some_and(|c| !c.is_empty() && c != "sqlite")
+    });
+    let sqlite = last("DB_CONNECTION").map(String::as_str) == Some("sqlite");
+    if server || (!sqlite && files.iter().any(|f| f.contains_key("DB_DATABASE"))) {
+        // Laravel falls back to `laravel` without DB_DATABASE: never main's.
+        env.push(("DB_DATABASE".into(), db.clone()));
+    } else if sqlite
+        && let Some(file) = last("DB_DATABASE").and_then(|f| sqlite_file(&main, &site.path, f))
+    {
+        env.push(("DB_DATABASE".into(), file));
+    }
+    for key in ["DB_URL", "DATABASE_URL"] {
+        // Every one of them must be rewritable, whichever file wins.
+        for url in files
+            .iter()
+            .filter_map(|f| f.get(key))
+            .filter(|u| !u.is_empty())
         {
-            let file = site.path.join(TEST_SQLITE).display().to_string();
-            env.push(("DB_DATABASE".into(), file));
-        } else if sqlite
-            && let Some(file) = last("DB_DATABASE").and_then(|f| sqlite_file(&main, &site.path, f))
-        {
-            env.push(("DB_DATABASE".into(), file));
+            with_db(url, &db, &main, &site.path)
+                .ok_or_else(|| format!("{key} uses a kind of database Anvil can't rewrite"))?;
         }
-        for key in ["DB_URL", "DATABASE_URL"] {
-            // Every one of them must be rewritable, whichever file wins.
-            for url in files
-                .iter()
-                .filter_map(|f| f.get(key))
-                .filter(|u| !u.is_empty())
-            {
-                with_db(url, &db, &main, &site.path)
-                    .ok_or_else(|| format!("{key} uses a kind of database Anvil can't rewrite"))?;
-            }
-            if let Some(url) = last(key).and_then(|u| with_db(u, &db, &main, &site.path)) {
-                env.push((key.into(), url));
-            }
+        if let Some(url) = last(key).and_then(|u| with_db(u, &db, &main, &site.path)) {
+            env.push((key.into(), url));
         }
     }
-    let prefix = format!("{}_", db_name(site));
+    let prefix = format!("{db}_");
     env.push(("APP_URL".into(), crate::site_url(cfg, site)));
     env.push(("REDIS_PREFIX".into(), prefix.clone()));
     env.push(("CACHE_PREFIX".into(), prefix));
-    if (!share || tests_apart)
-        && site.php.is_some()
+    if site.php.is_some()
         && let Some((k, _)) = env.iter().find(|(k, v)| !fpm_safe(k, v))
     {
         return Err(format!("{k} holds characters PHP-FPM can't take"));
@@ -787,18 +706,9 @@ pub(crate) fn fpm_safe(k: &str, v: &str) -> bool {
 
 /// `env`, or the error that refuses to start anything of a worktree it can't separate from main.
 pub fn checked_env(cfg: &Config, site: &Site) -> anyhow::Result<Vec<(String, String)>> {
-    checked_env_for(cfg, site, false)
-}
-
-/// `checked_env` for `env_for`.
-pub fn checked_env_for(
-    cfg: &Config,
-    site: &Site,
-    test: bool,
-) -> anyhow::Result<Vec<(String, String)>> {
-    env_for(cfg, site, test).map_err(|reason| {
+    env(cfg, site).map_err(|reason| {
         anyhow::anyhow!(
-            "Anvil can't point {} at its own database ({reason}); choose Share main's to use main's database",
+            "Anvil can't point {} at its own database ({reason}), so nothing of it runs",
             site.name
         )
     })
@@ -874,7 +784,7 @@ pub fn add(
         && !new_db(cfg, app).choices.contains(&choice)
     {
         anyhow::bail!(
-            "A worktree of {} can't use that database (main's database is on a server Anvil doesn't manage; choose Empty or Share main's)",
+            "A worktree of {} can't use that database (main's database is on a server Anvil doesn't manage; choose Empty)",
             app.name
         );
     }
@@ -1259,21 +1169,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn share_choice_leaves_the_database_alone() {
-        let dotenv = "DB_DATABASE=shop\nDATABASE_URL=mysql://root@127.0.0.1/shop\n";
-        let (mut cfg, site) = worktree_site("share", dotenv);
-        cfg.worktrees.insert(
-            site.name.clone(),
-            WorktreeConfig {
-                db: DbChoice::Share,
-                ..Default::default()
-            },
-        );
-        let env = env(&cfg, &site).unwrap();
-        assert_eq!(get(&env, "DB_DATABASE"), None);
-        assert_eq!(get(&env, "DATABASE_URL"), None);
-        assert_eq!(get(&env, "REDIS_PREFIX"), Some("shop_feature_x_"));
-        assert_eq!(get(&env, "CACHE_PREFIX"), Some("shop_feature_x_"));
+    fn a_stored_share_loads_as_empty() {
+        let cfg: Config =
+            toml::from_str("worktree_db = \"share\"\n[worktrees.\"shop--x\"]\ndb = \"share\"\n")
+                .unwrap();
+        assert_eq!(cfg.worktree_db, DbChoice::Empty);
+        assert_eq!(cfg.worktrees["shop--x"].db, DbChoice::Empty);
+        let e = "share".parse::<DbChoice>().unwrap_err();
+        assert_eq!(e, "a worktree always has its own database: copy or empty");
     }
 
     #[test]
@@ -1324,33 +1227,23 @@ pub(crate) mod tests {
         let err = checked_env(&cfg, &site).unwrap_err().to_string();
         assert_eq!(
             err,
-            "Anvil can't point shop--feature-x at its own database (DATABASE_URL uses a kind of database Anvil can't rewrite); choose Share main's to use main's database"
+            "Anvil can't point shop--feature-x at its own database (DATABASE_URL uses a kind of database Anvil can't rewrite), so nothing of it runs"
         );
-        // Share lifts it: main's database, on purpose.
-        cfg.worktrees.insert(
-            site.name.clone(),
-            WorktreeConfig {
-                db: DbChoice::Share,
-                ..Default::default()
-            },
-        );
-        let env = env(&cfg, &site).unwrap();
-        assert_eq!(get(&env, "DATABASE_URL"), None);
+        // Empty doesn't lift it: that needs the URL rewritten too.
+        cfg.worktrees.entry(site.name.clone()).or_default().db = DbChoice::Empty;
+        assert!(env(&cfg, &site).is_err());
     }
 
     #[test]
     fn a_value_php_fpm_cant_take_leaves_the_worktree_without_a_database() {
         let dotenv = "DB_URL=mysql://root:pa$$w0rd@127.0.0.1/shop\n";
-        let (mut cfg, mut site) = worktree_site("fpmsafe", dotenv);
+        let (cfg, mut site) = worktree_site("fpmsafe", dotenv);
         assert_eq!(
             env(&cfg, &site).unwrap_err(),
             "DB_URL holds characters PHP-FPM can't take"
         );
         // Only PHP-FPM can't take it: a Node worktree gets it as it is.
         site.php = None;
-        assert!(env(&cfg, &site).is_ok());
-        site.php = Some("8.4".into());
-        cfg.worktrees.entry(site.name.clone()).or_default().db = DbChoice::Share;
         assert!(env(&cfg, &site).is_ok());
     }
 
@@ -1390,22 +1283,11 @@ pub(crate) mod tests {
     /// `prepare_with` on `srv`: whether it made one, and what was said and asked in
     /// order (`Running` left out). The copy marker sits next to the worktree.
     fn prep(cfg: &mut Config, site: &Site, srv: &Server) -> anyhow::Result<(bool, Vec<String>)> {
-        prep_as(cfg, site, srv, false)
-    }
-
-    /// `prep` for a test run with `test`.
-    fn prep_as(
-        cfg: &mut Config,
-        site: &Site,
-        srv: &Server,
-        test: bool,
-    ) -> anyhow::Result<(bool, Vec<String>)> {
         let log = std::cell::RefCell::new(Vec::new());
         let marker = marker_of(site);
         let made = prepare_with(
             cfg,
             site,
-            test,
             &marker,
             &mut |line| log.borrow_mut().push(line.to_string()),
             &mut |_, id, op| {
@@ -1566,7 +1448,7 @@ pub(crate) mod tests {
             _ => Ok(matches!(op, Op::Running)),
         };
         let marker = marker_of(&site);
-        assert!(prepare_with(&mut cfg, &site, false, &marker, &mut |_| {}, &mut failing).is_err());
+        assert!(prepare_with(&mut cfg, &site, &marker, &mut |_| {}, &mut failing).is_err());
         assert!(marker.exists());
         assert!(!cfg.worktrees.contains_key(&site.name));
         // Next time the half database is there: dropped and copied again.
@@ -1652,16 +1534,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn share_choice_does_nothing() {
-        let (cfg, site) = worktree_site("prep-share", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
-        let mut cfg = with_postgres(cfg);
-        cfg.worktrees.entry(site.name.clone()).or_default().db = DbChoice::Share;
-        let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
-        assert!(!made && log.is_empty());
-        assert!(cfg.worktrees[&site.name].copies.is_empty());
-    }
-
-    #[test]
     fn an_external_database_is_not_copied() {
         for (name, dotenv) in [
             (
@@ -1680,7 +1552,7 @@ pub(crate) mod tests {
             assert!(!made && log.is_empty() && cfg.worktrees.is_empty());
             let db = main_db(&cfg, &site);
             assert_eq!(db, MainDb::External, "{name}");
-            assert_eq!(db.choices(), [DbChoice::Share, DbChoice::Empty]);
+            assert_eq!(db.choices(), [DbChoice::Empty]);
         }
         // An Anvil one may be copied.
         let (cfg, site) = worktree_site("ext-not", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
@@ -1692,7 +1564,7 @@ pub(crate) mod tests {
                 database: "laravel".into()
             }
         );
-        assert_eq!(db.choices().len(), 3);
+        assert_eq!(db.choices(), [DbChoice::Copy, DbChoice::Empty]);
     }
 
     #[test]
@@ -1816,24 +1688,26 @@ pub(crate) mod tests {
     #[test]
     fn the_database_choice_follows_main_and_what_is_made() {
         use DbChoice::*;
-        // Main on a server Anvil doesn't manage: Empty or Share only.
+        // Main on a server Anvil doesn't manage: Empty only.
         let (mut cfg, site) = worktree_site(
             "choice-ext",
             "DB_CONNECTION=mysql\nDB_HOST=db.example.com\n",
         );
-        assert_eq!(choices(&cfg, &site), [Share, Empty]);
-        assert!(set_db(&mut cfg, &site, Copy).is_err());
+        assert_eq!(choices(&cfg, &site), [Empty]);
+        let e = set_db(&mut cfg, &site, Copy).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "shop--feature-x can't use that database (main's database is on a server Anvil doesn't manage; choose Empty)"
+        );
         set_db(&mut cfg, &site, Empty).unwrap();
-        // Made already: its own (as made) or Share; Share and back reuses it.
+        // Made already: only that one.
         let (mut cfg, site) = worktree_site("choice-made", "DB_CONNECTION=sqlite\n");
-        assert_eq!(choices(&cfg, &site), [Copy, Empty, Share]);
+        assert_eq!(choices(&cfg, &site), [Copy, Empty]);
         recorded(&mut cfg, &site);
-        assert_eq!(choices(&cfg, &site), [Copy, Share]);
+        assert_eq!(choices(&cfg, &site), [Copy]);
         let e = set_db(&mut cfg, &site, Empty).unwrap_err();
         assert!(e.to_string().contains("made already"), "{e}");
-        set_db(&mut cfg, &site, Share).unwrap();
         set_db(&mut cfg, &site, Copy).unwrap();
-        assert_eq!(cfg.worktrees[&site.name].copies.len(), 1);
         assert!(pending(&cfg, &site).is_none());
     }
 
@@ -2062,75 +1936,20 @@ pub(crate) mod tests {
     #[test]
     fn settings_default_applies_to_a_worktree_opened_outside_anvil() {
         let dotenv = "DB_CONNECTION=pgsql\nDB_PORT=5433\nDB_DATABASE=shop\n";
-        let (cfg, site) = worktree_site("default-share", dotenv);
+        let (cfg, site) = worktree_site("default-empty", dotenv);
         let mut cfg = with_postgres(cfg);
-        cfg.worktree_db = DbChoice::Share;
-        assert_eq!(get(&env(&cfg, &site).unwrap(), "DB_DATABASE"), None);
-        assert!(pending(&cfg, &site).is_none());
-        // Empty by default: made empty, and the choice stays with it.
         cfg.worktree_db = DbChoice::Empty;
+        assert_eq!(pending(&cfg, &site).map(|p| p.0), Some(DbChoice::Empty));
+        // Made empty, and the choice stays with it.
         let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
         assert!(made);
         assert_eq!(log[1], "Anvil: preparing shop_feature_x (empty)");
-        cfg.worktree_db = DbChoice::Share;
+        cfg.worktree_db = DbChoice::Copy;
         assert_eq!(cfg.worktrees[&site.name].db, DbChoice::Empty);
         assert_eq!(
             get(&env(&cfg, &site).unwrap(), "DB_DATABASE"),
             Some("shop_feature_x")
         );
-    }
-
-    #[test]
-    fn a_test_run_with_share_gets_an_empty_test_database() {
-        let dotenv = "DB_CONNECTION=pgsql\nDB_PORT=5433\nDB_DATABASE=shop\n";
-        let (cfg, site) = worktree_site("test-share", dotenv);
-        let mut cfg = with_postgres(cfg);
-        set_db(&mut cfg, &site, DbChoice::Share).unwrap();
-        // Everything else shares main's; a test run doesn't.
-        assert_eq!(get(&env(&cfg, &site).unwrap(), "DB_DATABASE"), None);
-        let test = env_for(&cfg, &site, true).unwrap();
-        assert_eq!(get(&test, "DB_DATABASE"), Some("shop_feature_x_test"));
-        let (made, log) = prep_as(&mut cfg, &site, &Server::default(), true).unwrap();
-        assert!(made);
-        assert_eq!(
-            log,
-            [
-                "postgres-x exists shop_feature_x_test",
-                "Anvil: preparing shop_feature_x_test (empty)",
-                "postgres-x create shop_feature_x_test"
-            ]
-        );
-        // Recorded like a copy, so Remove and leftovers see it; made once.
-        let w = &cfg.worktrees[&site.name];
-        assert_eq!(w.db, DbChoice::Share);
-        assert_eq!(
-            w.copies,
-            [("postgres-x".to_string(), "shop_feature_x_test".to_string())]
-        );
-        let (made, _) = prep_as(&mut cfg, &site, &Server::default(), true).unwrap();
-        assert!(!made);
-        assert_eq!(leftovers(&cfg, &[]).len(), 1);
-        // The test database isn't its own: Copy later still makes that one.
-        assert!(!prepared(&cfg, &site));
-        set_db(&mut cfg, &site, DbChoice::Copy).unwrap();
-        let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
-        assert!(made);
-        assert_eq!(log[2], "postgres-x clone shop shop_feature_x");
-        // With Copy, a test run uses the worktree's own.
-        let test = env_for(&cfg, &site, true).unwrap();
-        assert_eq!(get(&test, "DB_DATABASE"), Some("shop_feature_x"));
-    }
-
-    #[test]
-    fn a_test_run_with_share_on_sqlite_gets_testing_sqlite() {
-        let (mut cfg, site) = worktree_site("test-sqlite", "DB_CONNECTION=sqlite\n");
-        set_db(&mut cfg, &site, DbChoice::Share).unwrap();
-        let file = site.path.join("database/testing.sqlite");
-        let test = env_for(&cfg, &site, true).unwrap();
-        assert_eq!(get(&test, "DB_DATABASE"), file.to_str());
-        let (made, log) = prep_as(&mut cfg, &site, &Server::default(), true).unwrap();
-        assert!(made && file.exists());
-        assert_eq!(log, ["Anvil: preparing database/testing.sqlite (empty)"]);
     }
 
     #[test]
@@ -2163,28 +1982,25 @@ pub(crate) mod tests {
         let (mut cfg, app) = parked_app("add-db", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
         cfg.worktree_db = DbChoice::Empty;
         let new = new_db(&cfg, &app);
-        assert_eq!(
-            new.choices,
-            [DbChoice::Copy, DbChoice::Empty, DbChoice::Share]
-        );
+        assert_eq!(new.choices, [DbChoice::Copy, DbChoice::Empty]);
         assert_eq!(new.default, DbChoice::Empty);
         assert_eq!(new.main_database.as_deref(), Some("laravel"));
-        let folder = add(&cfg, &app, "feat", true, Some(DbChoice::Share)).unwrap();
-        set_db_at(&mut cfg, &folder, DbChoice::Share).unwrap();
-        assert_eq!(cfg.worktrees["shop--feat"].db, DbChoice::Share);
+        let folder = add(&cfg, &app, "feat", true, Some(DbChoice::Copy)).unwrap();
+        set_db_at(&mut cfg, &folder, DbChoice::Copy).unwrap();
+        assert_eq!(cfg.worktrees["shop--feat"].db, DbChoice::Copy);
     }
 
     #[test]
     fn a_new_worktree_refuses_a_choice_main_doesnt_allow() {
         let (cfg, app) = parked_app("add-ext", "DB_CONNECTION=mysql\nDB_HOST=db.example.com\n");
         let new = new_db(&cfg, &app);
-        assert_eq!(new.choices, [DbChoice::Share, DbChoice::Empty]);
+        assert_eq!(new.choices, [DbChoice::Empty]);
         // Copy, Settings' default, isn't offered: the first one is.
-        assert_eq!(new.default, DbChoice::Share);
+        assert_eq!(new.default, DbChoice::Empty);
         let e = add(&cfg, &app, "feat", true, Some(DbChoice::Copy)).unwrap_err();
         assert_eq!(
             e.to_string(),
-            "A worktree of shop can't use that database (main's database is on a server Anvil doesn't manage; choose Empty or Share main's)"
+            "A worktree of shop can't use that database (main's database is on a server Anvil doesn't manage; choose Empty)"
         );
         assert!(!app.path.with_file_name("shop--feat").exists());
         // No database settings: nothing to choose.
