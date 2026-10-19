@@ -281,7 +281,24 @@ pub fn resolve(cfg: &Config, app: &str, main: &Path, kind: &str) -> Resolved {
     };
     let copy = pick("copy", |h| h.copy.is_some()).copy;
     let copy_database = pick("copy_database", |h| h.copy_database.is_some()).copy_database;
-    let keys = pick("keys", |h| h.keys.is_some()).keys;
+    let mut keys = pick("keys", |h| h.keys.is_some()).keys;
+    // Only the user's own layer takes database keys out: one a team file or a preset leaves
+    // out comes from the next layer down that sets it (Settings sets them all).
+    if !cfg
+        .sites
+        .get(app)
+        .is_some_and(|s| s.worktree.keys.is_some())
+        && let Some(keys) = keys.as_mut()
+    {
+        for k in DB_KEYS {
+            let below = layers.iter().skip(1).filter_map(|(_, h)| h.keys.as_ref());
+            if let Some(v) = below.filter_map(|l| l.get(k)).next()
+                && !keys.contains_key(k)
+            {
+                keys.insert(k.into(), v.clone());
+            }
+        }
+    }
     let check = pick("check", |h| h.check.is_some()).check;
     let after_create = pick("after_create", |h| h.after_create.is_some()).after_create;
     Resolved {
@@ -2205,6 +2222,46 @@ pub(crate) mod tests {
             err.contains("take it out to share main's database"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn only_the_apps_own_keys_can_leave_the_database_keys_out() {
+        let (mut cfg, site) = worktree_site("team-keys", "DB_CONNECTION=mysql\nDB_DATABASE=shop\n");
+        let main = main_of(&site.path).unwrap();
+        let url_only = BTreeMap::from([("APP_URL".to_string(), "{url}".to_string())]);
+        let db_keys_are_the_worktrees = |cfg: &Config| {
+            let keys = hooks(cfg, &site).keys;
+            assert_eq!(keys.get("APP_URL").map(String::as_str), Some("{url}"));
+            for k in DB_KEYS {
+                assert_eq!(keys.get(k).map(String::as_str), Some("{db}"), "{k}");
+            }
+            // Only the database keys come back.
+            assert!(!keys.contains_key("REDIS_PREFIX"));
+            let env = env(cfg, &site).unwrap();
+            assert_eq!(get(&env, "DB_DATABASE"), Some("shop_feature_x"));
+        };
+        // A team's `.anvil.toml` leaving them out.
+        fs::write(
+            main.join(".anvil.toml"),
+            "[worktree]\nkeys = { APP_URL = \"{url}\" }\n",
+        )
+        .unwrap();
+        db_keys_are_the_worktrees(&cfg);
+        // A preset edited that way.
+        fs::remove_file(main.join(".anvil.toml")).unwrap();
+        cfg.worktree_presets.insert(
+            "laravel".into(),
+            Hooks {
+                keys: Some(url_only.clone()),
+                ..Hooks::default()
+            },
+        );
+        db_keys_are_the_worktrees(&cfg);
+        // The user's own app settings can: the worktree shares main's database.
+        cfg.sites.entry("shop".into()).or_default().worktree.keys = Some(url_only);
+        let keys = hooks(&cfg, &site).keys;
+        assert!(DB_KEYS.iter().all(|k| !keys.contains_key(*k)), "{keys:?}");
+        assert_eq!(get(&env(&cfg, &site).unwrap(), "DB_DATABASE"), None);
     }
 
     #[test]
