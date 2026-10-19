@@ -1161,6 +1161,8 @@ fn env_with(
     if site.worktree_of.is_none() {
         return Ok(Vec::new());
     }
+    // Only the app's own layer takes database keys out (`resolve`): the messages say so.
+    let app = site.worktree_of.as_deref().unwrap_or("main");
     // Symfony Runtime's `dotenv_overload`: its env files win over the process env, so
     // Anvil's keys can't keep it off main's database.
     let composer = fs::read_to_string(site.path.join("composer.json")).unwrap_or_default();
@@ -1207,7 +1209,7 @@ fn env_with(
                 // Left out, the worktree's `.env` (main's) would win: nothing of it runs.
                 None if DB_KEYS.contains(&key.as_str()) => {
                     return Err(format!(
-                        "{key} has no value from the worktree keys; give it one, or take it out to share main's database"
+                        "{key} has no value from the worktree keys; give it one, or take it out of {app}'s own worktree keys, in its Settings tab under Worktrees, to share {app}'s database"
                     ));
                 }
                 // Named like a database (a Redis index, say): its own reason.
@@ -1269,8 +1271,7 @@ fn env_with(
     };
     if let Some((k, _)) = env.iter().find(|(k, v)| is_db(k) && mains(v)) {
         return Err(format!(
-            "{k} names {}'s database; take it out of the worktree keys to share that database",
-            site.worktree_of.as_deref().unwrap_or("main")
+            "{k} names {app}'s database; take it out of {app}'s own worktree keys, in its Settings tab under Worktrees, to share that database"
         ));
     }
     if site.php.is_some()
@@ -2286,7 +2287,7 @@ pub(crate) mod tests {
         keys.insert("DB_DATABASE".into(), "{port}".into());
         let err = env_with(&cfg, &site, &keys, false).unwrap_err();
         assert!(
-            err.contains("take it out to share main's database"),
+            err == "DB_DATABASE has no value from the worktree keys; give it one, or take it out of shop's own worktree keys, in its Settings tab under Worktrees, to share shop's database",
             "{err}"
         );
     }
@@ -3841,7 +3842,7 @@ pub(crate) mod tests {
         cfg.sites.entry("shop".into()).or_default().worktree.keys = Some(keys.clone());
         assert_eq!(
             env_err(&cfg, &site),
-            "DB_DATABASE names shop's database; take it out of the worktree keys to share that database"
+            "DB_DATABASE names shop's database; take it out of shop's own worktree keys, in its Settings tab under Worktrees, to share that database"
         );
         // Any key naming a database, not only Laravel's.
         let mut other = shipped("laravel").keys.unwrap();
