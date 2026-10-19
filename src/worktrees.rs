@@ -996,7 +996,7 @@ fn env_with(
         crate::resources::dotenv(&main),
         crate::resources::dotenv(&site.path),
     ];
-    for f in [".env.development", ".env.local", ".env.development.local"] {
+    for f in &RUNTIME_ENV[1..] {
         files.push(crate::resources::dotenv_file(&site.path.join(f)));
     }
     let last = |k: &str| {
@@ -1431,10 +1431,18 @@ fn copy_in(main: &Path, wt: &Path, list: &[String]) -> anyhow::Result<Vec<PathBu
     Ok(todo)
 }
 
-/// An env file: `.env`, `.env.local`, `config/.env.testing`…
+/// The env files at the project's root that `env` reads as the processes' env, in Next.js'
+/// order (the last one wins). Only these get keys written: never `.env.example`, `.env.testing`
+/// or anything else a `.env*` matched.
+const RUNTIME_ENV: [&str; 4] = [
+    ".env",
+    ".env.development",
+    ".env.local",
+    ".env.development.local",
+];
+
 fn is_env_file(f: &Path) -> bool {
-    f.file_name()
-        .is_some_and(|n| n.to_string_lossy().starts_with(".env"))
+    RUNTIME_ENV.iter().any(|r| f == Path::new(r))
 }
 
 /// `text` with each line setting one of `values`' keys (`KEY=…`, `export KEY=…`) set to its
@@ -3343,6 +3351,31 @@ pub(crate) mod tests {
         );
         // SESSION_COOKIE isn't one of the keys: still main's.
         assert_eq!(same_as_main(&cfg, &site), ["SESSION_COOKIE"]);
+    }
+
+    #[test]
+    fn rewrite_writes_only_the_env_files_processes_read() {
+        let dotenv = "DB_CONNECTION=pgsql\nDB_DATABASE=shop\n";
+        let (cfg, site) = worktree_site("runtime", dotenv);
+        let main = main_of(&site.path).unwrap();
+        fs::write(main.join(".worktreeinclude"), ".env*\n").unwrap();
+        for f in [".env", ".env.local", ".env.example", ".env.testing"] {
+            fs::write(main.join(f), dotenv).unwrap();
+            fs::write(site.path.join(f), dotenv).unwrap();
+        }
+        rewrite(&cfg, &site).unwrap();
+        for f in [".env", ".env.local"] {
+            let text = fs::read_to_string(site.path.join(f)).unwrap();
+            assert!(text.contains("DB_DATABASE=shop_feature_x"), "{f}: {text}");
+        }
+        // The committed example and the test config stay as they are.
+        for f in [".env.example", ".env.testing"] {
+            assert_eq!(
+                fs::read_to_string(site.path.join(f)).unwrap(),
+                dotenv,
+                "{f}"
+            );
+        }
     }
 
     #[test]
