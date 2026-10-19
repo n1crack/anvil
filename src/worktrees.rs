@@ -555,6 +555,35 @@ pub fn main_of(dir: &Path) -> Option<PathBuf> {
     common.parent().map(Path::to_path_buf)
 }
 
+/// Create a worktree of `app` for `branch` (a new branch with `new_branch`) in
+/// `<parent of the app>/<app>--<site name of the branch>`, and give it the app's `.env` when it
+/// has none (git ignores it, so a fresh checkout lacks it). The app's own files are not touched.
+pub fn add(_cfg: &Config, app: &Site, branch: &str, new_branch: bool) -> anyhow::Result<PathBuf> {
+    let Some(parent) = app.path.parent() else {
+        anyhow::bail!("{} has no parent folder", app.path.display());
+    };
+    let folder = parent.join(joined(&app.name, &crate::site_name(branch)));
+    if folder.exists() {
+        anyhow::bail!("{} already exists", folder.display());
+    }
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C").arg(&app.path).args(["worktree", "add"]);
+    if new_branch {
+        cmd.args(["-b", branch]).arg(&folder);
+    } else {
+        cmd.arg(&folder).arg(branch);
+    }
+    let out = cmd.output()?;
+    if !out.status.success() {
+        anyhow::bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    let (from, to) = (app.path.join(".env"), folder.join(".env"));
+    if from.is_file() && !to.exists() {
+        fs::copy(from, to)?;
+    }
+    Ok(folder)
+}
+
 /// A database Anvil copied for a worktree that is gone. Never dropped on its own.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Leftover {
@@ -1265,5 +1294,51 @@ pub(crate) mod tests {
         let e = remove_with(&mut cfg, &site, true, false, &mut never).unwrap_err();
         assert!(e.to_string().contains("couldn't check"), "{e}");
         assert!(site.path.exists());
+    }
+
+    #[test]
+    fn add_creates_the_folder_next_to_the_app() {
+        let (main, _) = repo("add");
+        let root = main.parent().unwrap().join("apps");
+        fs::create_dir(&root).unwrap();
+        let shop = root.join("shop");
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                shop.to_str().unwrap(),
+                "-b",
+                "shop",
+            ],
+        );
+        let mut app = crate::tests::site("shop", shop.to_str().unwrap(), None);
+        app.path = shop.clone();
+        fs::write(shop.join(".env"), "A=1\n").unwrap();
+        let cfg = Config::default();
+        let folder = add(&cfg, &app, "feature/login", true).unwrap();
+        assert_eq!(folder, root.join("shop--feature-login"));
+        assert_eq!(fs::read(folder.join(".env")).unwrap(), b"A=1\n");
+        assert_eq!(fs::read(shop.join(".env")).unwrap(), b"A=1\n");
+        // An existing branch, and a folder already there.
+        git(&shop, &["branch", "old"]);
+        assert!(
+            add(&cfg, &app, "old", false)
+                .unwrap()
+                .ends_with("shop--old")
+        );
+        let e = add(&cfg, &app, "old", false).unwrap_err().to_string();
+        assert!(e.contains("already exists"), "{e}");
+    }
+
+    #[test]
+    fn add_refuses_an_existing_folder() {
+        let (main, _) = repo("addx");
+        let mut app = crate::tests::site("main", main.to_str().unwrap(), None);
+        app.path = main.clone();
+        fs::create_dir(main.parent().unwrap().join("main--b")).unwrap();
+        let e = add(&Config::default(), &app, "b", true).unwrap_err();
+        assert!(e.to_string().contains("already exists"));
     }
 }

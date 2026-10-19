@@ -41,6 +41,11 @@ enum Cmd {
     Unlink { name: String },
     /// List sites
     Sites,
+    /// Parallel workspaces: git worktrees of an app, each served on its own
+    Worktree {
+        #[command(subcommand)]
+        cmd: WorktreeCmd,
+    },
     /// Manage PHP versions
     Php {
         #[command(subcommand)]
@@ -259,6 +264,30 @@ impl NewOpts {
         }
         Ok(out)
     }
+}
+
+#[derive(Subcommand)]
+enum WorktreeCmd {
+    /// List worktrees, of one app or of every app
+    List { app: Option<String> },
+    /// Add a worktree of the current app (or --app) next to it
+    Add {
+        branch: String,
+        #[arg(long)]
+        app: Option<String>,
+        /// Create the branch, from the app's current one
+        #[arg(long)]
+        new: bool,
+    },
+    /// Remove a worktree: its folder, and with --drop-db its database copies
+    Remove {
+        name: String,
+        #[arg(long)]
+        drop_db: bool,
+        /// Remove even with uncommitted changes or unpushed commits
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -712,7 +741,7 @@ fn run() -> Result<()> {
             // Compose") or address doesn't push the rest out of line.
             let host = all
                 .iter()
-                .map(|s| s.host.chars().count())
+                .map(|s| s.host.chars().count() + 2 * s.worktree_of.is_some() as usize)
                 .max()
                 .unwrap_or(0);
             let kind = all
@@ -721,9 +750,10 @@ fn run() -> Result<()> {
                 .max()
                 .unwrap_or(0);
             for s in &all {
+                let indent = if s.worktree_of.is_some() { "  " } else { "" };
                 println!(
                     "{:<host$} {} {} {}",
-                    s.host,
+                    format!("{indent}{}", s.host),
                     dim(format!("{:<kind$}", apps::label(&s.kind))),
                     match &s.php {
                         Some(v) => green(format!("{v:<5}")),
@@ -734,6 +764,54 @@ fn run() -> Result<()> {
             }
             for c in site_name_clashes(&cfg) {
                 eprintln!("{}", yellow(c));
+            }
+        }
+        Cmd::Worktree { cmd } => {
+            let all = sites(&cfg);
+            match cmd {
+                WorktreeCmd::List { app } => {
+                    let app = app.map(|a| site_name(&a));
+                    for s in all.iter().filter(|s| {
+                        s.worktree_of.is_some() && (app.is_none() || s.worktree_of == app)
+                    }) {
+                        println!(
+                            "{} {} {}",
+                            s.name,
+                            s.branch.as_deref().unwrap_or("(detached)"),
+                            dim(s.path.display())
+                        );
+                    }
+                }
+                WorktreeCmd::Add { branch, app, new } => {
+                    let cwd = std::env::current_dir()?;
+                    let found = match &app {
+                        Some(a) => all.iter().find(|s| s.name == site_name(a)),
+                        None => all.iter().find(|s| cwd.starts_with(&s.path)),
+                    };
+                    let app = found
+                        .filter(|s| s.worktree_of.is_none())
+                        .context("Name an app with --app, or run this inside one")?;
+                    let folder = worktrees::add(&cfg, app, &branch, new)?;
+                    println!("Added {}", folder.display());
+                }
+                WorktreeCmd::Remove {
+                    name,
+                    drop_db,
+                    force,
+                } => {
+                    let s = all
+                        .iter()
+                        .find(|s| s.name == site_name(&name) && s.worktree_of.is_some())
+                        .with_context(|| format!("No worktree named {name}"))?;
+                    if apps::running_anywhere(&s.name) {
+                        bail!("Stop {} in Anvil first", s.name);
+                    }
+                    // Saved after Ok and Err alike: a failed drop has removed the records of
+                    // the databases that did go.
+                    let result = edit(&mut cfg, |c| Ok(worktrees::remove(c, s, drop_db, force)))?;
+                    result?;
+                    println!("Removed {}", s.name);
+                }
             }
         }
         Cmd::Php {
@@ -1318,6 +1396,34 @@ mod tests {
             Cmd::New { opts, .. } => opts,
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn worktree_subcommands_parse() {
+        let parse = |a: &[&str]| match Cli::try_parse_from(["anvil", "worktree"].iter().chain(a))
+            .unwrap()
+            .cmd
+        {
+            Cmd::Worktree { cmd } => cmd,
+            _ => unreachable!(),
+        };
+        assert!(matches!(parse(&["list"]), WorktreeCmd::List { app: None }));
+        assert!(matches!(
+            parse(&["add", "x", "--new", "--app", "shop"]),
+            WorktreeCmd::Add {
+                new: true,
+                app: Some(_),
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse(&["remove", "shop--x", "--drop-db", "--force"]),
+            WorktreeCmd::Remove {
+                drop_db: true,
+                force: true,
+                ..
+            }
+        ));
     }
 
     const LARAVEL: &[&str] = &["kit", "db", "js", "php", "git", "https"];
