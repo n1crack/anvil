@@ -508,10 +508,15 @@ fn main_databases(main: &Path) -> Vec<String> {
         None if get("DB_CONNECTION").is_some() && !sqlite => out.push("laravel".into()),
         _ => {}
     }
-    // The other env files its processes may load (Next.js', Symfony's), not the test ones.
-    let mut others = runtime_env(main, false, false);
-    others.extend(runtime_env(main, true, false));
-    for f in others.iter().filter(|f| *f != ".env") {
+    // Every other env file at its root (`.env.prod`, `.env.test`, …): one some run of it
+    // loads. Not the examples (`.env.example`, `.env.dist`, `*.dist`).
+    let others: Vec<String> = fs::read_dir(main)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|f| f.starts_with(".env.") && f != ".env.example" && !f.ends_with(".dist"))
+        .collect();
+    for f in &others {
         let env = crate::resources::dotenv_file(&main.join(f));
         let get = |k: &str| env.get(k).map(String::as_str).filter(|v| !v.is_empty());
         out.extend(
@@ -1629,26 +1634,37 @@ const RUNTIME_ENV: [&str; 4] = [
 
 /// The env files at `dir`'s root a process loads, in its order (the last one wins): `RUNTIME_ENV`,
 /// or Symfony's `.env`, `.env.local` (not for tests), `.env.<APP_ENV>`, `.env.<APP_ENV>.local`.
-/// APP_ENV is `test` for a test run, else what `.env.local` or `.env` sets, else `dev`.
+/// APP_ENV is `test` for a test run, else as `symfony_env_files` works it out.
 fn runtime_env(dir: &Path, symfony: bool, test: bool) -> Vec<String> {
     if !symfony {
         return RUNTIME_ENV.map(String::from).to_vec();
     }
-    let app_env = if test {
-        "test".to_string()
-    } else {
-        [".env.local", ".env"]
-            .iter()
-            .find_map(|f| {
-                crate::resources::dotenv_file(&dir.join(f))
-                    .remove("APP_ENV")
-                    .filter(|v| {
-                        !v.is_empty()
-                            && v.chars()
-                                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-                    })
-            })
-            .unwrap_or_else(|| "dev".into())
+    symfony_env_files(dir, test, std::env::var("APP_ENV").ok())
+}
+
+/// Symfony's `Dotenv::loadEnv` order with APP_ENV `process` (the process env's, which wins),
+/// else `.env`'s, then `.env.local`'s unless that says `test` (it skips `.env.local`), else `dev`.
+fn symfony_env_files(dir: &Path, test: bool, process: Option<String>) -> Vec<String> {
+    // Only a plain name: it becomes part of a file name.
+    let plain = |v: String| {
+        (!v.is_empty()
+            && v.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .then_some(v)
+    };
+    let from = |f: &str| {
+        crate::resources::dotenv_file(&dir.join(f))
+            .remove("APP_ENV")
+            .and_then(plain)
+    };
+    let process = process.and_then(plain);
+    let app_env = match (test, process) {
+        (true, _) => "test".to_string(),
+        (false, Some(p)) => p,
+        (false, None) => match from(".env").unwrap_or_else(|| "dev".into()) {
+            e if e == "test" => e,
+            e => from(".env.local").unwrap_or(e),
+        },
     };
     let mut out = vec![".env".to_string()];
     if app_env != "test" {
@@ -3917,6 +3933,60 @@ pub(crate) mod tests {
             "{}",
             read(".env.local")
         );
+    }
+
+    #[test]
+    fn symfonys_app_env_comes_from_the_process_then_env_then_env_local() {
+        let dir = tmp("symfony-app-env");
+        let files =
+            |process: Option<&str>| symfony_env_files(&dir, false, process.map(String::from));
+        assert_eq!(
+            files(None),
+            [".env", ".env.local", ".env.dev", ".env.dev.local"]
+        );
+        // `.env` says test: `.env.local` is skipped, whatever it says.
+        fs::write(dir.join(".env"), "APP_ENV=test\n").unwrap();
+        fs::write(dir.join(".env.local"), "APP_ENV=dev\n").unwrap();
+        assert_eq!(files(None), [".env", ".env.test", ".env.test.local"]);
+        // `.env.local` over `.env` otherwise.
+        fs::write(dir.join(".env"), "APP_ENV=prod\n").unwrap();
+        assert_eq!(
+            files(None),
+            [".env", ".env.local", ".env.dev", ".env.dev.local"]
+        );
+        // The process env wins over both.
+        assert_eq!(
+            files(Some("staging")),
+            [".env", ".env.local", ".env.staging", ".env.staging.local"]
+        );
+        assert_eq!(
+            symfony_env_files(&dir, true, Some("prod".into())),
+            [".env", ".env.test", ".env.test.local"]
+        );
+    }
+
+    #[test]
+    fn mains_database_named_in_any_of_its_env_files_is_mains() {
+        let (_, site) = worktree_site("every-env", "DB_CONNECTION=pgsql\nDB_DATABASE=shop\n");
+        let main = main_of(&site.path).unwrap();
+        fs::write(
+            main.join(".env.prod"),
+            "DATABASE_URL=postgresql://h/shop_prod\n",
+        )
+        .unwrap();
+        fs::write(
+            main.join(".env.test"),
+            "DATABASE_URL=postgresql://h/shop_test\n",
+        )
+        .unwrap();
+        fs::write(main.join(".env.example"), "DB_DATABASE=example\n").unwrap();
+        fs::write(main.join(".env.dist"), "DB_DATABASE=dist\n").unwrap();
+        for db in ["shop", "shop_prod", "shop_test"] {
+            assert!(is_mains_database(&site, db), "{db}");
+        }
+        for db in ["example", "dist"] {
+            assert!(!is_mains_database(&site, db), "{db}");
+        }
     }
 
     #[test]
