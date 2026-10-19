@@ -27,6 +27,8 @@ export const url = (s) => {
   return `${scheme}://${s.host}${port === std ? "" : `:${port}`}`;
 };
 
+const BRANCH = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 2.5-3.5 2-7 4"/></svg>`;
+
 const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
 let snapAt = 0; // when the last snapshot arrived
@@ -246,9 +248,10 @@ export function listSection(key, title, rows, count) {
   h.append(head);
   return [h, fold];
 }
+const wtFolded = new Set(JSON.parse(localStorage.getItem("wt-folded") ?? "[]")); // apps whose many worktrees were folded once
 const collapsed = new Set(JSON.parse(localStorage.getItem("collapsed") ?? "[]"));
 
-// Fold a site's linked domains in place (no re-render), so the slide can animate.
+// Fold an app's worktrees in place (no re-render), so the slide can animate.
 export function toggle(name, open = collapsed.has(name)) {
   if (open) collapsed.delete(name);
   else collapsed.add(name);
@@ -256,7 +259,7 @@ export function toggle(name, open = collapsed.has(name)) {
   const parent = $(`.item[data-name="${CSS.escape(name)}"]`);
   if (!parent) return;
   parent.setAttribute("aria-expanded", String(open));
-  $(".disclosure", parent).title = open ? "Hide linked domains" : "Show linked domains";
+  $(".disclosure", parent).title = open ? "Hide worktrees" : "Show worktrees";
   parent.nextElementSibling?.classList.toggle("closed", !open);
 }
 
@@ -281,17 +284,16 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   b.dataset.name = s.name;
   b.setAttribute("aria-current", String(s.name === selected));
   if (child) {
-    const branch = document.createElement("span");
-    branch.className = "branch";
-    branch.setAttribute("aria-hidden", "true");
-    branch.textContent = "↪";
-    b.append(branch);
+    // A worktree: green while it runs, hollow when stopped.
+    const run = ["running", "starting"].includes(snap.app_states[s.name]);
+    b.append(el("span", `dot${run ? " on" : ""}`));
   }
   const text = document.createElement("span");
   text.className = "text";
   text.innerHTML = `<span class="name"></span><span class="sub"></span>`;
   // The folder's name: not every project is a site, so no address in the list.
-  $(".name", text).textContent = s.name;
+  // A worktree is named by its branch.
+  $(".name", text).textContent = child ? (s.branch ?? s.name) : s.name;
   // HTTPS shows as a lock after the name; it's turned on and off from the right-click menu.
   // While it changes only a spinner shows: words would be cut off here; the header says them.
   // Folders and Compose projects have no address: a leftover HTTPS flag means nothing there.
@@ -324,7 +326,6 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
     ver.textContent = `PHP ${s.php}`;
     end.append(ver);
   }
-  if (child) end.append(el("span", "alias", "alias"));
   // A plain PHP app shows only its pinned version, not "PHP" twice.
   // Under a type heading the type would only repeat it.
   if (s.hiddenApp) end.append(el("span", "kind", "hidden"));
@@ -338,8 +339,8 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   if (kids) {
     const open = !collapsed.has(s.name);
     b.setAttribute("aria-expanded", String(open));
-    d.title = open ? "Hide linked domains" : "Show linked domains";
-    d.innerHTML = `<span class="count"></span><span class="chevron" aria-hidden="true">›</span>`;
+    d.title = open ? "Hide worktrees" : "Show worktrees";
+    d.innerHTML = `${BRANCH}<span class="count"></span><span class="chevron" aria-hidden="true">›</span>`;
     $(".count", d).textContent = kids;
     d.onclick = (e) => {
       e.stopPropagation();
@@ -489,11 +490,13 @@ function renderList() {
     return;
   }
 
-  // A linked name pointing at a parked project's folder is an extra domain for that project.
-  const parked = [...snap.sites.filter((s) => !s.linked), ...hiddenApps];
-  const byPath = new Map(parked.map((s) => [s.path, []]));
-  const linked: any[] = [];
-  for (const s of snap.sites.filter((s) => s.linked)) (byPath.get(s.path) ?? linked).push(s);
+  // Worktrees nest under their app. A linked name pointing at a parked project's folder is
+  // an alias: it shows in that app's header, not as a row.
+  const parked = [...snap.sites.filter((s) => !s.linked && !s.worktree_of), ...hiddenApps];
+  const wts = new Map<string, any[]>();
+  for (const s of snap.sites) if (s.worktree_of) wts.set(s.worktree_of, [...(wts.get(s.worktree_of) ?? []), s]);
+  const parkedPaths = new Set(parked.map((s) => s.path));
+  const linked = snap.sites.filter((s) => s.linked && !parkedPaths.has(s.path));
 
   const order = sortBy === "modified" ? (a, b) => b.modified - a.modified : (a, b) => a.name.localeCompare(b.name);
 
@@ -510,7 +513,14 @@ function renderList() {
   const section = (title, sites, withChildren, path = true, kind = true, key = `apps:${title}`) => {
     const rows: any[] = [];
     for (const s of [...sites].sort(order)) {
-      const kids = withChildren ? (byPath.get(s.path) ?? []) : [];
+      const kids = withChildren ? (wts.get(s.name) ?? []).sort(order) : [];
+      // More than five worktrees start folded; after that the toggle is remembered.
+      if (kids.length > 5 && !wtFolded.has(s.name)) {
+        wtFolded.add(s.name);
+        collapsed.add(s.name);
+        localStorage.setItem("wt-folded", JSON.stringify([...wtFolded]));
+        localStorage.setItem("collapsed", JSON.stringify([...collapsed]));
+      }
       const parentHit = hit(s);
       const shownKids = kids.filter((k) => parentHit || hit(k));
       if (!parentHit && !shownKids.length) continue;
@@ -867,8 +877,13 @@ export function drawMeta() {
       busy.prepend(el("span", "spin-dot"));
       addr.append(busy);
     }
-    // Aliases are linked names for the same folder (the rows under it in the list).
-    const aliases = s.linked ? [] : snap.sites.filter((k) => k.linked && k.path === s.path);
+    // Aliases are linked names for the same folder.
+    // A worktree's are the hosts derived from its app's aliases.
+    const aliases = s.worktree_of
+      ? s.aliases.map((host) => ({ host, secure: s.secure }))
+      : s.linked
+        ? []
+        : snap.sites.filter((k) => k.linked && k.path === s.path);
     if (aliases.length) {
       const chip = el("button", "alias-chip", `+${aliases.length}`);
       chip.title = "All addresses";
@@ -1635,6 +1650,7 @@ export async function open(target, site = selected) {
 
 /** Applications served, each folder once: an alias shares its app's folder. */
 function servedCount() {
+  // Worktrees count as apps; aliases share their app's folder.
   const parked = new Set(snap.sites.filter((s) => !s.linked).map((s) => s.path));
   return snap.sites.filter((s) => !s.linked || !parked.has(s.path)).length;
 }

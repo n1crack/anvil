@@ -1754,3 +1754,59 @@ describe("worktrees", () => {
     }
   });
 });
+
+describe("sidebar worktrees", () => {
+  const mk = (slug: string, branch: string) =>
+    w.mockSite(`shop--${slug}`, "laravel", {
+      worktree_of: "shop",
+      branch,
+      path: `/Users/x/Sites/shop--${slug}`,
+      aliases: [`admin--${slug}.test`],
+    });
+  let saved: any[];
+  const refresh = async () => {
+    await (await import("../src/app")).call("state");
+    await wait(60);
+  };
+  beforeAll(async () => {
+    saved = w.mockSnap.sites;
+    w.mockSnap.sites = [...saved.filter((s) => !s.worktree_of), mk("feature-login", "feature/login"), mk("agent-1a2b", "agent/1a2b")];
+    w.mockSnap.app_states = { "shop--feature-login": "running" };
+    await refresh();
+  });
+
+  test("aliases leave the list; worktrees nest under their app with a dot and the branch", () => {
+    expect($$("#list .alias").length).toBe(0);
+    expect($(`#list [data-name="admin.shop"]`)).toBeNull();
+    const kids = $$("#list .kids .item.child");
+    expect(kids.map((k) => k.querySelector(".name")!.textContent)).toEqual(["agent/1a2b", "feature/login"]);
+    expect(kids.map((k) => k.querySelector(".dot")!.classList.contains("on"))).toEqual([false, true]);
+    const disc = $(`#list [data-name="shop"] .disclosure`);
+    expect(disc.querySelector("svg")).toBeTruthy();
+    expect(disc.querySelector(".count")!.textContent).toBe("2");
+  });
+
+  test("the header chip still lists an app's aliases, and a worktree's derived hosts", async () => {
+    await select("shop");
+    const chip = $("#site .alias-chip");
+    expect(chip.textContent).toBe("+2");
+    chip.click();
+    expect($$(".alias-pop .alias-url").map((e) => e.textContent!.replace(/^https?:\/\//, ""))).toEqual([
+      "shop.test",
+      "admin.shop.test",
+      "api.shop.test",
+    ]);
+    document.querySelector(".pop")?.remove();
+    await select("shop--feature-login");
+    $("#site .alias-chip").click();
+    expect($$(".alias-pop .alias-url").map((e) => e.textContent)).toContain("admin--feature-login.test");
+    document.querySelector(".pop")?.remove();
+  });
+
+  test("more than five worktrees start collapsed", async () => {
+    w.mockSnap.sites = [...w.mockSnap.sites, ...[1, 2, 3, 4].map((n) => mk(`b${n}`, `b${n}`))];
+    await refresh();
+    expect($(`#list [data-name="shop"] + .kids`).classList.contains("closed")).toBe(true);
+    expect($(`#list [data-name="shop"] .count`).textContent).toBe("6");
+  });
+});

@@ -306,7 +306,7 @@ button, select, input { font: inherit; color: inherit; }
 .kids.closed,
 .fold.closed { grid-template-rows: 0fr; }
 
-/* An alias: the arrow, the name and "alias"; no mark, so two columns. */
+/* A worktree: a dot, then the branch; no mark, so two columns. */
 .item.child {
   --indent: 26px;
   grid-template-columns: 1fr auto;
@@ -314,15 +314,8 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 .item.child .name { font-weight: 400; }
-.item .alias { color: var(--muted); font-size: 11px; }
+.item.child > .dot { position: absolute; left: 17px; top: calc(50% - 4px); }
 .item.compact { min-height: 40px; padding-top: 4px; padding-bottom: 4px; }
-
-.item .branch {
-  position: absolute;
-  left: 16px;
-  color: var(--muted);
-  font-size: 13px;
-}
 
 .item:hover { background: var(--steel-hover); }
 
@@ -408,14 +401,14 @@ button, select, input { font: inherit; color: inherit; }
   font-variant-numeric: tabular-nums;
 }
 
-/* Fold control for a site's linked domains: a fixed trailing slot on every row
- * (empty without aliases), so the kind labels before it share one column. */
+/* Fold control for an app's worktrees (branch icon, count, chevron): a fixed trailing slot
+ * on every row (empty without worktrees), so the kind labels before it share one column. */
 .item .disclosure {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   gap: 3px;
-  width: 30px;
+  width: 46px;
   height: 22px;
   padding-right: 4px;
   border-radius: 11px;
