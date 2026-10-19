@@ -734,17 +734,15 @@ fn main_db_at(cfg: &Config, main: &Path, wt: &Path) -> MainDb {
     };
     let (kind, host, port, database) = match get("DB_URL").or(get("DATABASE_URL")) {
         Some(url) => {
-            let Some((scheme, rest)) = url.split_once("://") else {
+            let Some((scheme, _)) = url.split_once("://") else {
                 return MainDb::None; // `file:`, SQLite through a URL
             };
             let Some((kind, default)) = kind(scheme) else {
                 return MainDb::External;
             };
-            let path = rest[..rest.find(['?', '#']).unwrap_or(rest.len())]
-                .split_once('/')
-                .map(|(_, db)| db.to_string());
             let port = url_port(url).unwrap_or(default);
-            (kind, url_host(url), port, path)
+            // The one the app uses: a query parameter's over the path's, decoded.
+            (kind, url_host(url), port, url_database(url))
         }
         None => {
             let Some(c) = conn else {
@@ -2860,6 +2858,18 @@ pub(crate) mod tests {
             }
         );
         assert_eq!(db.choices(), [DbChoice::Copy, DbChoice::Empty]);
+        // The copy is of the database the app uses: a URL's query one wins over its path.
+        let (cfg, site) = worktree_site(
+            "copy-query",
+            "DATABASE_URL=postgresql://u@127.0.0.1:5433/other?dbname=sh%6Fp\n",
+        );
+        assert_eq!(
+            main_db(&with_postgres(cfg), &site),
+            MainDb::Anvil {
+                service: "postgres-x".into(),
+                database: "shop".into()
+            }
+        );
     }
 
     #[test]
