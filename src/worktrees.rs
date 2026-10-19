@@ -605,6 +605,8 @@ fn url_databases(url: &str) -> Vec<String> {
         .map(|(_, db)| decoded(db, false))
         .into_iter()
         .collect();
+    // Laravel and Doctrine `rawurldecode` the query, then `parse_str` it: decoded twice.
+    let query = decoded(query, false);
     out.extend(query.split('&').filter_map(|p| {
         let (k, v) = p.split_once('=')?;
         is_db_param(&decoded(k, true)).then(|| decoded(v, true))
@@ -1089,17 +1091,20 @@ pub(crate) fn with_db(url: &str, db: &str, main: &Path, wt: &Path) -> Option<Str
     let query = query
         .split('&')
         .map(|p| match p.trim_start_matches('?').split_once('=') {
-            Some((k, _)) if is_db_param(&decoded(k, true)) => {
+            Some((k, _)) if is_db_param(&decoded(&decoded(k, false), true)) => {
                 format!("{}{k}={db}", if p.starts_with('?') { "?" } else { "" })
             }
             _ => p.to_string(),
         })
         .collect::<Vec<_>>()
         .join("&");
-    Some(format!(
-        "{scheme}://{}/{db}{query}{fragment}",
-        &rest[..host_end],
-    ))
+    let url = format!("{scheme}://{}/{db}{query}{fragment}", &rest[..host_end]);
+    // A database it still names that isn't the worktree's (`?x=1%26database=shop`, a `&`
+    // encoded): it can't be rewritten.
+    url_databases(&url)
+        .iter()
+        .all(|d| d == &decoded(&db, false))
+        .then_some(url)
 }
 
 /// The worktree's own copy of an absolute SQLite path: the same place inside the
@@ -2365,6 +2370,44 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_url_query_is_decoded_twice_as_laravel_and_doctrine_do() {
+        // `rawurldecode` of the query, then `parse_str`.
+        for url in [
+            "mysql://r@h/app?data%2562ase=shop",
+            "mysql://r@h/app?x=1%26database=shop",
+            "mysql://r@h/app?database%3Dshop",
+            "mysql://r@h/app?database=sh%256Fp",
+        ] {
+            assert_eq!(url_database(url).as_deref(), Some("shop"), "{url}");
+        }
+        // Main's `.env`: rewritten where Anvil can, else nothing runs.
+        let (cfg, site) = worktree_site(
+            "url-twice",
+            "DB_CONNECTION=mysql\nDB_URL=mysql://root@127.0.0.1/app?data%2562ase=shop\n",
+        );
+        assert_eq!(
+            get(&env(&cfg, &site).unwrap(), "DB_URL"),
+            Some("mysql://root@127.0.0.1/shop_feature_x?data%2562ase=shop_feature_x")
+        );
+        let main = main_of(&site.path).unwrap();
+        fs::write(
+            main.join(".env"),
+            "DB_CONNECTION=mysql\nDB_URL=mysql://root@127.0.0.1/app?x=1%26database=shop\n",
+        )
+        .unwrap();
+        assert!(env(&cfg, &site).is_err());
+        // A team value naming main's twice-encoded: refused.
+        fs::write(main.join(".env"), "DB_CONNECTION=mysql\nDB_DATABASE=shop\n").unwrap();
+        fs::write(
+            main.join(".anvil.toml"),
+            "[worktree]\nkeys = { DB_URL = \"mysql://root@127.0.0.1/x?database=sh%256Fp\" }\n",
+        )
+        .unwrap();
+        let err = env(&cfg, &site).unwrap_err();
+        assert!(err.contains("names shop's database"), "{err}");
+    }
+
+    #[test]
     fn a_percent_encoded_database_is_read_decoded() {
         assert_eq!(url_database("mysql://r@h/sh%6Fp").as_deref(), Some("shop"));
         assert_eq!(
@@ -3356,7 +3399,12 @@ pub(crate) mod tests {
     fn whatever_the_config_anvils_database_is_never_mains() {
         // `{MAIN}`: the main checkout's folder. Each with every database main could use,
         // written out here rather than asked of `is_mains_database`.
-        let mains: [(&str, &[&str]); 16] = [
+        let mains: [(&str, &[&str]); 17] = [
+            // Encoded twice, which the query is decoded.
+            (
+                "DB_CONNECTION=mysql\nDB_URL=mysql://root@127.0.0.1/app?data%2562ase=shop\n",
+                &["shop", "app", "laravel"],
+            ),
             // Percent-encoded, as Laravel and Doctrine decode it.
             (
                 "DB_CONNECTION=mysql\nDB_URL=mysql://root@127.0.0.1/sh%6Fp?data%62ase=shop\n",
