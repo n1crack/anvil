@@ -270,6 +270,27 @@ describe("dev", () => {
     expect(lines()).toEqual([]);
   });
 
+  test("Edit Address… is the prompt sheet: the label, what it opens, Save", async () => {
+    item("proc:docs-dev").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait();
+    (w.mockMenu as any[]).find((i) => i.text === "Edit Address…").action();
+    await wait();
+    expect(($("#ask") as HTMLDialogElement).open).toBe(true);
+    expect([$("#ask-label").textContent, $("#ask-name").textContent, $("#ask-ok").textContent]).toEqual([
+      "Address of docs:dev",
+      "Label",
+      "Save",
+    ]);
+    const input = $("#ask-input") as HTMLInputElement;
+    input.value = "manual";
+    input.dispatchEvent(new Event("input"));
+    expect($("#ask-hint").textContent).toMatch(/^Opens vuefinder--manual\./);
+    $("#ask-form").dispatchEvent(new Event("submit"));
+    await wait(80);
+    expect(calls("set_process").at(-1)![1]).toEqual({ site: "vuefinder", id: "docs-dev", host: "manual" });
+    expect(($("#ask") as HTMLDialogElement).open).toBe(false);
+  });
+
   test("↓ moves the selection; a stopped process says Not running, with a small ▶", async () => {
     $(".dev-list").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     await wait(600);
@@ -1565,6 +1586,7 @@ describe("project file", () => {
 
 describe("worktrees", () => {
   const wt = "shop--feature-x";
+  const sheetOpen = () => ($("#ask") as HTMLDialogElement).open;
   const view = (o = {}) => ({
     db: "copy",
     choices: ["copy"],
@@ -1578,7 +1600,8 @@ describe("worktrees", () => {
     error: null,
     copies: ["shop_feature_x"],
     adopted: false,
-    missing: { env: false, installs: [] },
+    missing: { copy: [], installs: [] },
+    same: [],
     ...o,
   });
   const ovText = () => $('[data-panel="overview"]').textContent!;
@@ -1613,26 +1636,27 @@ describe("worktrees", () => {
     expect(dbRow().querySelector("button")).toBeNull(); // made already: no Prepare
   });
 
-  test("before its database is made both choices show; a refused one says why inline", async () => {
-    await show({ pending: true, prepared: false, copies: [], choices: ["copy", "empty"] });
-    const choice = () => dbRow().querySelector("select") as HTMLSelectElement;
-    expect([...choice().options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty"]);
-    w.mockDbFail = "shop--feature-x can't use that database (its own database is made already)";
+  test("the database row says which it is, with no choice to make; check warns with Rewrite, confirmed first", async () => {
+    await show({ pending: true, prepared: false, copies: [], db: "empty", choices: ["copy", "empty"] });
+    expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop_feature_x (empty)");
+    expect(dbRow().querySelector("select")).toBeNull();
+    const env = () => $$('[data-panel="overview"] .row').find((r) => r.querySelector("dt")?.textContent === "Env");
+    expect(env()).toBeUndefined();
+    w.mockRewriteFail = "shop--feature-x has none of the env files its hooks copy";
     try {
-      choice().value = "empty";
-      choice().dispatchEvent(new Event("change"));
+      await show({ same: ["DB_DATABASE", "SESSION_COOKIE"] });
+      expect(env()!.textContent).toContain("DB_DATABASE, SESSION_COOKIE have shop's value in its env files");
+      (env()!.querySelector("button") as HTMLButtonElement).click();
+      await wait();
+      expect($(".pop-confirm").textContent).toContain("Only those lines change");
+      expect(calls("worktree_rewrite").length).toBe(0);
+      ($(".pop-confirm .primary") as HTMLButtonElement).click();
       await wait(80);
-      expect(dbRow().textContent).toContain("its own database is made already");
+      expect(calls("worktree_rewrite").at(-1)![1]).toEqual({ site: wt });
+      expect(env()!.textContent).toContain("has none of the env files its hooks copy");
     } finally {
-      delete w.mockDbFail;
+      delete w.mockRewriteFail;
     }
-    // Main on a server Anvil doesn't manage: the default Copy shows, but can't be picked.
-    await show({ choices: ["empty"], prepared: false, pending: false, copies: [] });
-    const opts = [...choice().options];
-    expect(opts.map((o) => [o.textContent, o.disabled])).toEqual([
-      ["Copy of main", true],
-      ["Empty", false],
-    ]);
   });
 
   test("Docker services and a cached config each get one line", async () => {
@@ -1694,7 +1718,7 @@ describe("worktrees", () => {
     expect(setup()).toBeUndefined();
     await show({
       missing: {
-        env: true,
+        copy: [".env"],
         installs: [
           ["composer", "composer install"],
           ["js", "pnpm install"],
@@ -1704,7 +1728,7 @@ describe("worktrees", () => {
     const btn = (t: string) => [...setup().querySelectorAll("button")].find((b) => b.textContent === t) as HTMLButtonElement;
     btn("Copy .env from shop").click();
     await wait(60);
-    expect(calls("worktree_copy_env").at(-1)![1]).toEqual({ site: wt });
+    expect(calls("worktree_copy_files").at(-1)![1]).toEqual({ site: wt });
     btn("composer install").click();
     await wait();
     expect($(".pop-confirm").textContent).toContain(`Run composer install in ${wt}?`);
@@ -1722,9 +1746,10 @@ describe("worktrees", () => {
     expect(gitButtons()).toContain("New Worktree…");
     ($$('[data-panel="git"] button').find((b) => b.textContent === "New Worktree…") as HTMLButtonElement).click();
     await wait();
-    expect($("#ask").hidden).toBe(false);
+    expect(sheetOpen()).toBe(true);
     expect($("#ask-label").textContent).toBe("New worktree of shop");
-    $("#ask-new").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); // Esc from the checkbox too
+    $("#ask-cancel").click();
+    expect(sheetOpen()).toBe(false);
     await select(wt);
     await wait(80);
     expect(gitButtons()).not.toContain("New Worktree…");
@@ -1768,60 +1793,149 @@ describe("worktrees", () => {
     }
   });
 
-  test("New Worktree… asks for the branch and whether it's new", async () => {
-    await show({}, "shop");
+  const menuItem = (items: any[], text: string): any => {
+    for (const i of items) {
+      if (i.text === text) return i;
+      const found = i.items && menuItem(i.items, text);
+      if (found) return found;
+    }
+  };
+  const openMenu = async (text: string) => {
     $('#list [data-name="shop"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     await wait(80);
-    const texts = (w.mockMenu as any[]).map((i) => i.text);
-    expect(texts).toContain("New Worktree…");
-    expect(texts).not.toContain("Remove Worktree…");
-    (w.mockMenu as any[]).find((i) => i.text === "New Worktree…").action();
+    menuItem(w.mockMenu, text).action();
     await wait();
-    expect($("#ask").hidden).toBe(false);
-    expect($("#ask-check").hidden).toBe(false);
-    expect($("#ask-check").textContent).toContain("New branch");
-    ($("#ask-input") as HTMLInputElement).value = "feature/login";
-    ($("#ask-new") as HTMLInputElement).checked = true;
-    // The database: what main's allows, Settings' default picked.
-    const db = $("#ask-db") as HTMLSelectElement;
-    expect($("#ask-db-row").hidden).toBe(false);
-    expect([...db.options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty"]);
-    expect(db.value).toBe("copy");
-    db.value = "empty";
-    $("#ask").dispatchEvent(new Event("submit"));
-    await wait(60);
-    expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "feature/login", new: true, db: "empty" });
-    expect($("#ask-check").hidden).toBe(true);
-    expect($("#ask-db-row").hidden).toBe(true);
-  });
+  };
+  const openNew = async () => {
+    await show({}, "shop");
+    await openMenu("New Worktree…");
+  };
+  const checks = () => $$("#ask-checks input") as HTMLInputElement[];
+  const submit = async () => {
+    $("#ask-form").dispatchEvent(new Event("submit"));
+    await wait(80);
+  };
 
-  test("New Worktree… offers only what main's database allows, and nothing without one", async () => {
-    const open = async () => {
-      await show({}, "shop");
-      $('#list [data-name="shop"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-      await wait(80);
-      (w.mockMenu as any[]).find((i) => i.text === "New Worktree…").action();
-      await wait();
-    };
+  test("New Worktree… is a sheet: the branch, new or not, Copy the database too as the hooks set it", async () => {
+    w.mockNewDb = { can_copy: true, copy: true, main_database: "shop", after_create: [] };
     try {
-      w.mockNewDb = { choices: ["empty"], default: "empty", main_database: "shop" };
-      await open();
-      const db = $("#ask-db") as HTMLSelectElement;
-      expect([...db.options].map((o) => o.value)).toEqual(["empty"]);
-      expect(db.value).toBe("empty");
-      $("#ask-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      await wait();
-      expect($("#ask-db-row").hidden).toBe(true);
-      w.mockNewDb = { choices: ["copy", "empty"], default: "copy", main_database: null };
-      await open();
-      expect($("#ask-db-row").hidden).toBe(true);
-      ($("#ask-input") as HTMLInputElement).value = "x";
-      $("#ask").dispatchEvent(new Event("submit"));
-      await wait(60);
-      expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "x", new: false, db: null });
+      await openNew();
+      expect(sheetOpen()).toBe(true);
+      expect($("#ask").classList.contains("sheet")).toBe(true);
+      expect($("#ask-label").textContent).toBe("New worktree of shop");
+      expect($("#ask-ok").textContent).toBe("Create");
+      expect($$("#ask-checks label").map((l) => l.textContent!.trim())).toEqual([
+        "New branch, from the app’s current one",
+        "Copy the database too",
+      ]);
+      expect(checks().map((c) => c.checked)).toEqual([false, true]);
+      const input = $("#ask-input") as HTMLInputElement;
+      input.value = "feature/login";
+      input.dispatchEvent(new Event("input"));
+      expect($("#ask-hint").textContent).toBe("Its address: shop--feature-login.test");
+      checks()[0].checked = true;
+      checks()[1].checked = false;
+      // Refused: said in the sheet, which stays open.
+      w.mockAddFail = "/Users/x/Sites/shop--feature-login already exists";
+      await submit();
+      expect(sheetOpen()).toBe(true);
+      expect($("#ask-error").hidden).toBe(false);
+      expect($("#ask-error").textContent).toContain("already exists");
+      delete w.mockAddFail;
+      await submit();
+      expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "feature/login", new: true, copyDb: false });
+      expect(sheetOpen()).toBe(false);
     } finally {
       delete w.mockNewDb;
+      delete w.mockAddFail;
+      w.mockSnap.sites = w.mockSnap.sites.filter((x) => x.name !== "shop--feature-login");
     }
+  });
+
+  test("New Worktree… shows the database checkbox only when main's can be copied", async () => {
+    try {
+      w.mockNewDb = { can_copy: false, copy: false, main_database: "shop", after_create: [] };
+      await openNew();
+      expect(checks().length).toBe(1);
+      $("#ask-cancel").click();
+      w.mockNewDb = { can_copy: true, copy: false, main_database: null, after_create: [] };
+      await openNew();
+      expect(checks().length).toBe(1);
+      ($("#ask-input") as HTMLInputElement).value = "x";
+      await submit();
+      expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "x", new: false, copyDb: null });
+    } finally {
+      delete w.mockNewDb;
+      w.mockSnap.sites = w.mockSnap.sites.filter((x) => x.name !== "shop--x");
+    }
+  });
+
+  test("after New Worktree, its after-create commands are offered and run only on Run", async () => {
+    w.mockNewDb = { can_copy: true, copy: false, main_database: "shop", after_create: ["composer install", "php artisan migrate"] };
+    try {
+      await openNew();
+      ($("#ask-input") as HTMLInputElement).value = "hooks";
+      await submit();
+      expect(sheetOpen()).toBe(true);
+      expect($("#ask-label").textContent).toBe("shop--hooks is ready");
+      expect($$("#ask-body li").map((l) => l.textContent)).toEqual(["composer install", "php artisan migrate"]);
+      expect($("#ask-field").hidden).toBe(true);
+      expect(calls("worktree_after_create").length).toBe(0);
+      expect($("#ask-ok").textContent).toBe("Run");
+      await submit();
+      expect(calls("worktree_after_create").at(-1)![1]).toEqual({ site: "shop--hooks" });
+      expect(sheetOpen()).toBe(false);
+    } finally {
+      delete w.mockNewDb;
+      w.mockSnap.sites = w.mockSnap.sites.filter((x) => x.name !== "shop--hooks");
+    }
+  });
+
+  test("Add Alias and New Group are the same sheet, with their errors inline", async () => {
+    await show({}, "shop");
+    const cases: [string, string, string, string][] = [
+      ["Add Alias…", "New domain for shop", "add_alias", "alias"],
+      ["New Group…", "Group for shop", "set_group", "group"],
+    ];
+    for (const [item, title, cmd, arg] of cases) {
+      await openMenu(item);
+      expect(sheetOpen()).toBe(true);
+      expect([$("#ask-label").textContent, $("#ask-ok").textContent]).toEqual([title, "Add"]);
+      expect(checks().length).toBe(0);
+      ($("#ask-input") as HTMLInputElement).value = "admin.shop";
+      w.mockAskFail = "That name is taken";
+      await submit();
+      expect(sheetOpen()).toBe(true);
+      expect($("#ask-error").textContent).toBe("That name is taken");
+      delete w.mockAskFail;
+      await submit();
+      expect(calls(cmd).at(-1)![1]).toEqual({ site: "shop", [arg]: "admin.shop" });
+      expect(sheetOpen()).toBe(false);
+    }
+  });
+
+  test("the Settings tab's Worktrees section: each hook, where it comes from, Use preset", async () => {
+    await show({}, "shop");
+    await wait(80);
+    const box = $('[data-panel="settings"] .wt-hooks');
+    expect(box.hidden).toBe(false);
+    const rows = [...box.querySelectorAll(".row")].map((r) => r.querySelector("dt")!.textContent);
+    expect(rows).toEqual(["Worktrees", "Copy files", "Copy the database too", "Env keys", "Check keys", "After create"]);
+    expect(box.textContent).toContain("Laravel preset, edited in Settings › Worktrees");
+    expect(box.textContent).toContain("Set for this app");
+    expect(box.textContent).toContain("From .anvil.toml");
+    const keys = box.querySelectorAll("textarea")[1] as HTMLTextAreaElement;
+    expect(keys.value).toBe("APP_URL={url}\nDB_DATABASE={db}");
+    keys.value = "APP_URL={url}";
+    w.mockHooksFail = "A: {nope} isn't one of {db}, {url}, {prefix}, {port}, {name}";
+    keys.dispatchEvent(new Event("change"));
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "keys", value: { APP_URL: "{url}" } });
+    expect(box.textContent).toContain("isn't one of");
+    delete w.mockHooksFail;
+    ([...box.querySelectorAll("button")].find((b) => b.textContent === "Use preset") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: null, value: null });
   });
 
   test("Remove Worktree… says what's uncommitted, offers to delete its database, and removes anyway", async () => {

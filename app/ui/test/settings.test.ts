@@ -38,7 +38,19 @@ describe("sidebar", () => {
     const head = $$(".nav-head")[0];
     expect(head.textContent).toBe("Languages");
     expect(head.tagName).not.toBe("BUTTON");
-    expect(text(".nav button")).toEqual(["General", "PHP", "Node.js", "Go", "Rust", ".NET", "Python", "Storage", "Shortcuts", "About"]);
+    expect(text(".nav button")).toEqual([
+      "General",
+      "PHP",
+      "Node.js",
+      "Go",
+      "Rust",
+      ".NET",
+      "Python",
+      "Worktrees",
+      "Storage",
+      "Shortcuts",
+      "About",
+    ]);
     expect($$(".nav button").every((b) => b.querySelector("svg"))).toBe(true);
     expect($("[data-page='languages']")).toBeNull();
     // Each language its own glyph, drawn in currentColor by the stylesheet (no fill of its own).
@@ -185,15 +197,37 @@ describe("about", () => {
   });
 });
 
-describe("general", () => {
-  test("Database for new worktrees shows the stored default and stores a new one", async () => {
-    await open("general");
-    const sel = $("#worktree-db") as HTMLSelectElement;
-    expect([...sel.options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty"]);
-    expect(sel.value).toBe("copy");
-    sel.value = "empty";
-    sel.dispatchEvent(new Event("change"));
+describe("worktrees", () => {
+  test("Copy the database too shows the stored default and stores a new one", async () => {
+    await open("worktrees");
+    const box = $("#worktree-db") as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
     await wait();
     expect(w.mockCalls.at(-1)).toEqual(["set_worktree_db", { choice: "empty" }]);
+  });
+
+  test("each preset is a row with Edit; an edited one opens its fields and offers Reset to default", async () => {
+    await open("worktrees");
+    const rows = () => $$("#presets > .row:not(.preset-field)");
+    expect(rows().map((r) => r.querySelector("span")!.firstChild!.textContent)).toEqual(["Laravel", "Other"]);
+    expect(rows()[0].querySelector("small")!.textContent).toBe("Laravel · edited");
+    expect(rows()[1].querySelector("small")!.textContent).toBe("Any other type");
+    expect($$("#presets textarea").length).toBe(0);
+    (rows()[0].querySelector("button") as HTMLButtonElement).click();
+    await wait();
+    const areas = $$("#presets textarea") as HTMLTextAreaElement[];
+    expect(areas.map((a) => a.value)).toEqual([".env", "APP_URL={url}", "", "composer install"]);
+    areas[3].value = "composer install\nphp artisan migrate";
+    areas[3].dispatchEvent(new Event("change"));
+    await wait();
+    expect(w.mockCalls.at(-1)).toEqual([
+      "set_worktree_preset",
+      { id: "laravel", field: "after_create", value: ["composer install", "php artisan migrate"] },
+    ]);
+    ($$("#presets button").find((b) => b.textContent === "Reset to default") as HTMLButtonElement).click();
+    await wait();
+    expect(w.mockCalls.at(-1)).toEqual(["set_worktree_preset", { id: "laravel", field: null, value: null }]);
   });
 });

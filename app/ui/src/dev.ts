@@ -163,17 +163,15 @@ async function editAddress(name: string, r: ProcessRow) {
   const host = new URL(r.address!).hostname;
   // <app>--<label>.<tld>: only the label is editable.
   const [from, to] = labelSpan(name, host);
-  const row = $(`.dev-list [data-key="${CSS.escape(r.main ? name : `${name}@${r.id}`)}"]`);
-  const first = await ask(
-    `Address of ${r.name}`,
-    host.slice(from, to),
-    (v) => `${host.slice(0, from)}${v.trim() || "…"}${host.slice(to)}`,
-    undefined,
-    row,
-  );
-  if (typeof first !== "string") return;
-  const v = first.trim();
-  await loadProcs(name, "set_process", { id: r.id, ...(v ? { host: v } : { resetHost: true }) });
+  const done = await ask({
+    title: `Address of ${r.name}`,
+    field: "Label",
+    placeholder: host.slice(from, to),
+    preview: (v) => `Opens ${host.slice(0, from)}${v || host.slice(from, to)}${host.slice(to)}`,
+    ok: "Save",
+    submit: (v) => askProcs(name, "set_process", { id: r.id, host: v }),
+  });
+  if (done) await loadProcs(name);
 }
 
 /** Right-click on an entry: what can be done to it. */

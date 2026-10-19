@@ -615,22 +615,53 @@ const mockHandle = (cmd, a) => {
   switch (cmd) {
     case "state":
     case "app_run":
-    case "worktree_add":
     case "worktree_adopt":
-    case "worktree_copy_env":
+    case "worktree_copy_files":
+    case "worktree_after_create":
     case "worktree_install":
     case "leftover_drop":
     case "leftover_keep":
       return mockSnap;
+    case "worktree_add":
+      if (window.mockAddFail) throw window.mockAddFail;
+      if (!mockSnap.sites.some((x) => x.worktree_of === a.site && x.branch === a.branch))
+        mockSnap.sites.push(
+          mockSite(`${a.site}--${a.branch.replace(/[^a-z0-9.-]/g, "-")}`, "laravel", { worktree_of: a.site, branch: a.branch }),
+        );
+      return mockSnap;
+    case "worktree_rewrite":
+      if (window.mockRewriteFail) throw window.mockRewriteFail;
+      return mockSnap;
+    case "add_alias":
+    case "set_group":
+      if (window.mockAskFail) throw window.mockAskFail;
+      return mockSnap;
+    case "worktree_hooks":
+    case "set_app_hooks":
+      if (window.mockHooksFail && cmd === "set_app_hooks") throw window.mockHooksFail;
+      return {
+        hooks: {
+          copy: [".env"],
+          copy_database: false,
+          keys: { APP_URL: "{url}", DB_DATABASE: "{db}" },
+          check: ["DB_DATABASE"],
+          after_create: ["composer install"],
+          from: {
+            copy: "Laravel preset",
+            copy_database: "Settings",
+            keys: "this app",
+            check: "Laravel preset",
+            after_create: ".anvil.toml",
+          },
+          preset: "Laravel",
+        },
+        own: { keys: { APP_URL: "{url}", DB_DATABASE: "{db}" } },
+      };
     case "worktree_remove":
       if (window.mockRemoveFail && !a.force) throw window.mockRemoveFail;
       return mockSnap;
     case "worktree_new_db":
-      return window.mockNewDb ?? { choices: ["copy", "empty"], default: "copy", main_database: "shop" };
-    case "worktree_db":
-      if (window.mockDbFail) throw window.mockDbFail;
-      mockSnap.worktrees[a.site].db = a.choice;
-      return mockSnap;
+      return window.mockNewDb ?? { can_copy: true, copy: false, main_database: "shop", after_create: [] };
     case "worktree_prepare":
       if (window.mockPrepareFail) throw window.mockPrepareFail;
       return mockSnap;
@@ -862,6 +893,16 @@ const mockHandle = (cmd, a) => {
         notifications: true,
         https_default: true,
         worktree_db: "copy",
+        worktree_presets: [
+          {
+            id: "laravel",
+            name: "Laravel",
+            kinds: ["Laravel"],
+            hooks: { copy: [".env"], keys: { APP_URL: "{url}" }, check: [], after_create: ["composer install"] },
+            edited: true,
+          },
+          { id: "other", name: "Other", kinds: [], hooks: { copy: [".env"], keys: {}, check: [], after_create: [] }, edited: false },
+        ],
         login: false,
         config_dir: "/Users/x/Library/Application Support/Anvil",
       };

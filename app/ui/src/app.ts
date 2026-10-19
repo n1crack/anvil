@@ -1,6 +1,7 @@
 import type { Snapshot } from "./types";
 import { late } from "./late";
 import { ownError, shown } from "./live";
+import { FIELDS, control } from "./hooksform";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -670,74 +671,99 @@ function setShowHidden(on) {
   renderSite();
 }
 
-/** A text prompt in a popover under `anchor` (else the selected app's row). Resolves to the
- * text, or null when cancelled: Esc anywhere in it, or a click outside. `preview` turns the
- * text into what it will create; `check` adds a checkbox with that label, read from
- * `#ask-new` afterwards. */
-export function ask(label: string, placeholder?: string, preview?: (v: string) => string, check?: string, anchor?: Element | null) {
-  const form = $("#ask");
+export type Ask = {
+  title: string;
+  /** The text field's name; none: a sheet that only confirms (`body`). */
+  field?: string;
+  placeholder?: string;
+  value?: string;
+  /** What the text will make, under the field. */
+  preview?: (v: string) => string;
+  /** Checkboxes under the field, each with a line about it. */
+  checks?: { label: string; checked?: boolean; note?: string }[];
+  body?: Node;
+  ok: string;
+  /** Does the work: a failure shows in the sheet, which stays open. */
+  submit: (value: string, checked: boolean[]) => Promise<unknown>;
+};
+
+/** A prompt as a sheet, the New application sheet sized to what it asks: its title, a text
+ * field and checkboxes, an inline error, Cancel and `ok`. Enter runs `submit`; Esc and Cancel
+ * close it. Resolves to the text and checkboxes once `submit` succeeded, else null. */
+export function ask(o: Ask): Promise<{ value: string; checked: boolean[] } | null> {
+  const dlg = $("#ask");
   const input = $("#ask-input");
   const hint = $("#ask-hint");
-  const box = $("#ask-check");
-  box.hidden = !check;
-  $("#ask-db-row").hidden = true; // newWorktree shows it
-
-  $("span", box).textContent = check ?? "";
-  $("#ask-new").checked = false;
-  const base = "Return to add, Esc to cancel";
-  $("#ask-label").textContent = label;
-  input.placeholder = placeholder;
-  input.value = "";
-  hint.textContent = base;
-  form.hidden = false;
-  place(form, anchor ?? $("#list [aria-current='true']") ?? $("#search"));
-  input.focus();
-  input.oninput = () => {
-    const v = input.value.trim();
-    hint.textContent = v && preview ? `${preview(v)}. ${base}` : base;
-  };
+  const error = $("#ask-error");
+  $("#ask-label").textContent = o.title;
+  $("#ask-body").replaceChildren(...(o.body ? [o.body] : []));
+  $("#ask-field").hidden = !o.field;
+  $("#ask-name").textContent = o.field ?? "";
+  input.placeholder = o.placeholder ?? "";
+  input.value = o.value ?? "";
+  const boxes = (o.checks ?? []).map((c) => Object.assign(el("input"), { type: "checkbox", checked: !!c.checked }));
+  $("#ask-checks").replaceChildren(
+    ...(o.checks ?? []).map((c, i) => {
+      const row = el("div", "field");
+      const label = el("label", "opt-check");
+      label.append(boxes[i], ` ${c.label}`);
+      row.append(el("span"), label);
+      if (c.note) row.append(el("small", null, c.note));
+      return row;
+    }),
+  );
+  const ok = $("#ask-ok");
+  ok.textContent = o.ok;
+  error.hidden = true;
+  const show = () => (hint.textContent = o.preview ? o.preview(input.value.trim()) : "");
+  input.oninput = show;
+  show();
+  dlg.showModal();
+  (o.field ? input : ok).focus();
   return new Promise((resolve) => {
-    const outside = (e) => !form.contains(e.target) && done(null);
-    const done = (value) => {
-      form.hidden = box.hidden = $("#ask-db-row").hidden = true;
-      form.onsubmit = form.onkeydown = input.oninput = null;
-      document.removeEventListener("mousedown", outside, true);
-      resolve(value);
+    const finish = (answer: { value: string; checked: boolean[] } | null) => {
+      dlg.onclose = null;
+      dlg.close();
+      resolve(answer);
     };
-    document.addEventListener("mousedown", outside, true);
-    form.onsubmit = (e) => {
+    // Esc closes the dialog by itself.
+    dlg.onclose = () => resolve(null);
+    $("#ask-cancel").onclick = () => finish(null);
+    $("#ask-form").onsubmit = async (e) => {
       e.preventDefault();
-      done(input.value.trim() || null);
-    };
-    // On the form, so Esc works from the checkbox and the select too. A block body:
-    // returning false from an on-handler would cancel every keystroke.
-    form.onkeydown = (e) => {
-      if (e.key === "Escape") done(null);
+      const value = input.value.trim();
+      if (o.field && !value) return input.focus();
+      const checked = boxes.map((b) => b.checked);
+      ok.disabled = true;
+      try {
+        await o.submit(value, checked);
+        finish({ value, checked });
+      } catch (err) {
+        error.textContent = String(err);
+        error.hidden = false;
+      } finally {
+        ok.disabled = false;
+      }
     };
   });
 }
 
-/** Under `anchor`, left-aligned and kept in the window; above it when there's no room below. */
-function place(pop: HTMLElement, anchor: Element | null) {
-  const r = anchor?.getBoundingClientRect() ?? new DOMRect(16, 48, 0, 0);
-  const w = pop.offsetWidth || 300;
-  const h = pop.offsetHeight || 120;
-  const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
-  const top = r.bottom + 6 + h > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6;
-  Object.assign(pop.style, { left: `${left}px`, top: `${top}px` });
+/** `call` that throws instead of showing the banner: for a sheet that says it itself. */
+export async function callOrThrow(cmd: string, args?: Record<string, unknown>) {
+  if (!(await askSnap(cmd, args))) return;
+  showError(null, cmd);
+  render();
 }
 
-const rowOf = (s) => $(`#list [data-name="${CSS.escape(s.name)}"]`);
-
 async function addAlias(s) {
-  const alias = await ask(
-    `New domain for ${s.name}.${snap.tld}`,
-    `e.g. admin.${s.name}`,
-    (v) => `Opens ${v.replace(new RegExp(`\\.${snap.tld}$`), "")}.${snap.tld}`,
-    undefined,
-    rowOf(s),
-  );
-  if (alias) await call("add_alias", { site: s.name, alias });
+  await ask({
+    title: `New domain for ${s.name}`,
+    field: "Domain",
+    placeholder: `e.g. admin.${s.name}`,
+    preview: (v) => `Opens ${(v || `admin.${s.name}`).replace(new RegExp(`\\.${snap.tld}$`), "")}.${snap.tld}`,
+    ok: "Add",
+    submit: (alias) => callOrThrow("add_alias", { site: s.name, alias }),
+  });
 }
 
 /** An app's own folder, linked or parked; not a worktree, nor an alias (a link to another app's folder). */
@@ -745,19 +771,62 @@ const mayHaveWorktrees = (s) =>
   !s.worktree_of && !(s.linked && snap.sites.some((o) => o.name !== s.name && !o.linked && o.path === s.path));
 late.mayHaveWorktrees = mayHaveWorktrees;
 
-/** Asks for the branch, whether it's new, and its database: what main's allows, Settings'
- * default picked (none to pick when main has no database settings). */
-async function newWorktree(s, anchor?: Element | null) {
+const afterRunning = new Set<string>(); // worktrees whose after-create commands run
+const afterErrors = new Map<string, string>(); // the last run's failure, across re-renders
+
+/** The New worktree sheet: the branch, whether it's new, and "Copy the database too" as the
+ * app's hooks set it (only when main's database can be copied). Once it's made, its hooks'
+ * after-create commands are offered in a second sheet and run only on Run. */
+async function newWorktree(s) {
   const db = await invoke("worktree_new_db", { site: s.name }).catch(() => null);
-  const answer = ask(`New worktree of ${s.name}`, "Branch, e.g. feature/login", undefined, "New branch", anchor ?? rowOf(s));
-  const sel = $("#ask-db");
-  if (db?.main_database) {
-    sel.replaceChildren(...db.choices.map((c) => new Option(DB_CHOICES[c], c)));
-    sel.value = db.default;
-    $("#ask-db-row").hidden = false;
-  }
-  const branch = await answer;
-  if (branch) await call("worktree_add", { site: s.name, branch, new: $("#ask-new").checked, db: db?.main_database ? sel.value : null });
+  const copyable = !!db?.main_database && db.can_copy;
+  let made: string | null = null;
+  const answer = await ask({
+    title: `New worktree of ${s.name}`,
+    field: "Branch",
+    placeholder: "feature/login",
+    preview: (v) => `Its address: ${s.name}--${(v || "feature/login").toLowerCase().replace(/[^a-z0-9.-]/g, "-")}.${snap.tld}`,
+    checks: [
+      { label: "New branch, from the app’s current one" },
+      ...(copyable
+        ? [
+            {
+              label: "Copy the database too",
+              checked: db.copy,
+              note: `Off: an empty database of its own. On: a copy of ${db.main_database}.`,
+            },
+          ]
+        : []),
+    ],
+    ok: "Create",
+    submit: async (branch, [isNew, copy]) => {
+      await callOrThrow("worktree_add", { site: s.name, branch, new: isNew, copyDb: copyable ? copy : null });
+      made = snap.sites.find((x) => x.worktree_of === s.name && x.branch === branch)?.name ?? null;
+    },
+  });
+  if (!answer || !made) return;
+  const site: string = made;
+  select(site);
+  const commands: string[] = db?.after_create ?? [];
+  if (!commands.length) return;
+  const list = el("ol", "ask-list");
+  list.append(...commands.map((c) => el("li", null, c)));
+  const body = el("div");
+  body.append(el("p", null, "Run these in it now?"), list);
+  // Started here and left to run: the Overview says it runs, and how it ended if it failed.
+  const run = () => {
+    afterRunning.add(site);
+    afterErrors.delete(site);
+    renderSite();
+    invoke("worktree_after_create", { site })
+      .catch((e) => afterErrors.set(site, String(e)))
+      .finally(() => {
+        afterRunning.delete(site);
+        call("state");
+      });
+    return Promise.resolve();
+  };
+  await ask({ title: `${site} is ready`, body, ok: "Run", submit: run });
 }
 late.newWorktree = newWorktree;
 
@@ -811,8 +880,13 @@ async function removeWorktree(s) {
 }
 
 async function newGroup(s) {
-  const group = await ask(`Group for ${s.name}.${snap.tld}`, "Group name", undefined, undefined, rowOf(s));
-  if (group) await call("set_group", { site: s.name, group });
+  await ask({
+    title: `Group for ${s.name}`,
+    field: "Group",
+    placeholder: "Group name",
+    ok: "Add",
+    submit: (group) => callOrThrow("set_group", { site: s.name, group }),
+  });
 }
 
 export let tab = (localStorage.getItem("tab") ?? "overview").replace(/^watch$/, "dev");
@@ -1178,6 +1252,46 @@ export function renderSite() {
   window.renderProcesses?.(s);
   window.renderSiteServices?.(s, root);
   window.renderPackages?.(s, root);
+  if (mayHaveWorktrees(s)) renderHooks(s, root);
+}
+
+const FROM = (from: string) => (from === "this app" ? "Set for this app" : `From ${from === "Settings" ? "Settings › Worktrees" : from}`);
+
+/** The Settings tab's Worktrees section, for a git repository: each hook as it applies, where
+ * it comes from, changed here for this app only; Use preset drops this app's own. */
+async function renderHooks(s, root) {
+  const box = $(".wt-hooks", root);
+  let v;
+  try {
+    v = await invoke("worktree_hooks", { site: s.name });
+  } catch {
+    return; // not a git repository: no worktrees to set up
+  }
+  if (box.contains(document.activeElement)) return; // being typed in
+  const head = el("dd", "muted", `${v.hooks.preset} preset, edited in Settings › Worktrees`);
+  if (Object.keys(v.own).length) {
+    const reset = el("button", "inline-action", "Use preset");
+    reset.onclick = () =>
+      invoke("set_app_hooks", { site: s.name, field: null, value: null }).then(
+        () => renderHooks(s, root),
+        (e) => showError(String(e)),
+      );
+    head.append(" ", reset);
+  }
+  const top = el("div", "row");
+  top.append(el("dt", null, "Worktrees"), head);
+  const rows = FIELDS.map(([field, name]) => {
+    const row = el("div", "row row-top");
+    const dd = el("dd");
+    const fail = el("small", "error-text");
+    fail.hidden = true;
+    const save = (value: unknown) => invoke("set_app_hooks", { site: s.name, field, value }).then(() => renderHooks(s, root));
+    dd.append(control(field, v.hooks, save, fail), el("small", null, FROM(v.hooks.from[field])), fail);
+    row.append(el("dt", null, name), dd);
+    return row;
+  });
+  box.replaceChildren(top, ...rows);
+  box.hidden = false;
 }
 
 /** Django checks the host name and, behind HTTPS, the scheme: two settings it needs once. */
@@ -1233,12 +1347,11 @@ function projectNeeds(s, root) {
   else $('[data-panel="overview"] .group', root).prepend(row);
 }
 
-const DB_CHOICES = { copy: "Copy of main", empty: "Empty" };
 const prepareErrors = new Map<string, string>(); // a failed Prepare database, across re-renders
 const preparing = new Set<string>();
-const dbErrors = new Map<string, string>(); // a refused database choice, across re-renders
+const rewriteErrors = new Map<string, string>(); // a failed Rewrite with the hooks
 
-/** A worktree's Overview: what it's a worktree of, its database with the choice, and one
+/** A worktree's Overview: what it's a worktree of, its database and which it is, and one
  * line for each thing it shares with or lacks from its app. */
 function worktreeLines(s, root) {
   const v = s.worktree_of ? snap.worktrees?.[s.name] : null;
@@ -1261,28 +1374,6 @@ function worktreeLines(s, root) {
           ? `copy of ${v.main_database ?? main}`
           : "empty";
     const dd = el("dd", null, `${v.database} (${how})`);
-    // Until it's made, what main's database allows; a choice it no longer allows shows, not offered.
-    if (v.choices.length > 1 || !v.choices.includes(v.db)) {
-      const sel = el("select");
-      sel.setAttribute("aria-label", "Database");
-      for (const c of v.choices) sel.add(new Option(DB_CHOICES[c], c));
-      if (!v.choices.includes(v.db)) {
-        const now = new Option(DB_CHOICES[v.db], v.db);
-        now.disabled = true;
-        sel.prepend(now);
-      }
-      sel.value = v.db;
-      sel.onchange = async () => {
-        dbErrors.delete(s.name);
-        try {
-          await invoke("worktree_db", { site: s.name, choice: sel.value });
-        } catch (e) {
-          dbErrors.set(s.name, String(e));
-        }
-        call("state");
-      };
-      dd.append(" ", sel);
-    }
     if (v.preparing) dd.append(el("div", "muted", v.preparing));
     else if (v.pending) {
       const b = el("button", "inline-action", preparing.has(s.name) ? "Preparing…" : "Prepare database");
@@ -1303,7 +1394,7 @@ function worktreeLines(s, root) {
       };
       dd.append(" ", b);
     }
-    const fails = [dbErrors.get(s.name), v.error, prepareErrors.get(s.name), ...startErrors(s.name)];
+    const fails = [v.error, prepareErrors.get(s.name), ...startErrors(s.name)];
     for (const fail of new Set(fails)) {
       if (!fail) continue;
       const line = el("div", "muted", fail);
@@ -1322,6 +1413,27 @@ function worktreeLines(s, root) {
     }
     add("Database", dd);
   }
+  // The hooks' check: keys its env files still give main's value (bun or an IDE read them).
+  if (v.same.length) {
+    const dd = el("dd", "muted", `${v.same.join(", ")} ${v.same.length === 1 ? "has" : "have"} ${main}'s value in its env files `);
+    const b = el("button", "inline-action", "Rewrite with the hooks");
+    b.onclick = () =>
+      late.confirmPop(b, "Write the hooks' keys into its env files? Only those lines change.", "Rewrite", async () => {
+        rewriteErrors.delete(s.name);
+        try {
+          await invoke("worktree_rewrite", { site: s.name });
+        } catch (e) {
+          rewriteErrors.set(s.name, String(e));
+        }
+        call("state");
+      });
+    dd.append(b);
+    const fail = rewriteErrors.get(s.name);
+    if (fail) dd.append(el("div", "muted", fail));
+    add("Env", dd);
+  }
+  if (afterRunning.has(s.name)) add("After create", el("dd", "muted", "Running its after-create commands…"));
+  else if (afterErrors.has(s.name)) add("After create", el("dd", "muted", afterErrors.get(s.name)));
   setupLines(s, v, main, add);
   add("Shared", el("dd", "muted", `S3 buckets and search indexes are shared with ${main}`));
   if (v.compose) add("Docker", el("dd", "muted", "Anvil doesn't start this worktree's Docker services"));
@@ -1340,23 +1452,23 @@ const startErrors = (name: string) =>
 const setupErrors = new Map<string, string>(); // a failed copy or install, across re-renders
 const wtInstalling = new Set<string>(); // "<site> <id>" while it runs
 
-/** What a worktree opened outside Anvil lacks: main's .env, its packages. Installs are confirmed first. */
+/** What a worktree opened outside Anvil lacks: the files its hooks copy, its packages. Installs are confirmed first. */
 function setupLines(s, v, main, add) {
   const m = v.missing;
-  if (!m || (!m.env && !m.installs.length)) return;
+  if (!m || (!m.copy.length && !m.installs.length)) return;
   const dd = el("dd");
-  if (m.env) {
-    const b = el("button", "inline-action", `Copy .env from ${main}`);
+  if (m.copy.length) {
+    const b = el("button", "inline-action", `Copy ${m.copy.join(", ")} from ${main}`);
     b.onclick = async () => {
       setupErrors.delete(s.name);
       try {
-        await invoke("worktree_copy_env", { site: s.name });
+        await invoke("worktree_copy_files", { site: s.name });
       } catch (e) {
         setupErrors.set(s.name, String(e));
       }
       call("state");
     };
-    dd.append(el("span", "muted", "No .env "), b);
+    dd.append(el("span", "muted", `No ${m.copy.join(", ")} `), b);
   }
   for (const [id, command] of m.installs) {
     const key = `${s.name} ${id}`;

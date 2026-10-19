@@ -63,6 +63,15 @@ export interface Snapshot {
 
 export type DbChoice = "copy" | "empty";
 
+/** One layer of an app's worktree hooks (worktrees::Hooks): a field left out is the next layer's. */
+export interface Hooks {
+  copy?: string[];
+  copy_database?: boolean;
+  keys?: Record<string, string>;
+  check?: string[];
+  after_create?: string[];
+}
+
 export interface WorktreeView {
   db: DbChoice;
   /** What it may choose now: what main's database allows (external: empty only)
@@ -87,8 +96,10 @@ export interface WorktreeView {
   copies: string[];
   /** Its database was there already; the user chose to use it. */
   adopted: boolean;
-  /** What it lacks to run: main's .env, and packages to install as [id, command]. */
-  missing: { env: boolean; installs: [string, string][] };
+  /** What it lacks to run: the files its hooks copy, and packages to install as [id, command]. */
+  missing: { copy: string[]; installs: [string, string][] };
+  /** The hooks' check keys its env files still give main's value. */
+  same: string[];
 }
 
 export interface Leftover {
@@ -247,6 +258,8 @@ export interface Settings {
   notifications: boolean;
   https_default: boolean;
   worktree_db: DbChoice;
+  /** Settings › Worktrees: each preset as it applies. */
+  worktree_presets: { id: string; name: string; kinds: string[]; hooks: Hooks; edited: boolean }[];
   login: boolean;
   config_dir: string;
 }

@@ -164,6 +164,7 @@
           <dd><input id="app-autostart" type="checkbox" role="switch"></dd>
         </div>
       </dl>
+      <dl class="group wt-hooks" hidden></dl>
     </section>
 
     <section role="tabpanel" data-panel="packages" hidden>
@@ -327,13 +328,24 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-  <form id="ask" class="ask" hidden>
-      <label id="ask-label" for="ask-input"></label>
-      <input id="ask-input" autocomplete="off" spellcheck="false">
-      <label id="ask-check" hidden><input id="ask-new" type="checkbox"> <span></span></label>
-      <label id="ask-db-row" hidden>Database <select id="ask-db"></select></label>
-      <small id="ask-hint">Return to add, Esc to cancel</small>
+  <dialog id="ask" class="sheet ask-sheet" aria-labelledby="ask-label">
+    <form method="dialog" id="ask-form">
+      <h2 id="ask-label"></h2>
+      <div id="ask-body"></div>
+      <label class="field" id="ask-field">
+        <span id="ask-name"></span>
+        <input id="ask-input" autocomplete="off" spellcheck="false">
+        <small id="ask-hint"></small>
+      </label>
+      <div id="ask-checks"></div>
+      <p id="ask-error" class="error" hidden></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" id="ask-cancel">Cancel</button>
+        <button type="submit" id="ask-ok" class="primary"></button>
+      </div>
     </form>
+  </dialog>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

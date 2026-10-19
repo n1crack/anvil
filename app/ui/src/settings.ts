@@ -1,5 +1,6 @@
 import type { Settings } from "./types";
 import { ownError } from "./live";
+import { FIELDS, control } from "./hooksform";
 import { restart, type Release } from "./update";
 
 export const { invoke } = window.__TAURI__.core;
@@ -570,7 +571,8 @@ export function render() {
   const [scheme, port, std] = s.https_default ? ["https", s.https_port, 443] : ["http", s.http_port, 80];
   $("#address").textContent = `${scheme}://name.${s.tld}${port === std ? "" : `:${port}`}`;
   $("#https-default").checked = s.https_default;
-  $("#worktree-db").value = s.worktree_db;
+  $("#worktree-db").checked = s.worktree_db === "copy";
+  renderPresets();
   // .localhost works without setup; another suffix needs the resolver step once.
   const tld = $("#tld");
   tld.replaceChildren(new Option(".test", "test"), new Option(".localhost (no password needed)", "localhost"));
@@ -615,6 +617,71 @@ export function render() {
   }
 }
 
+/* ---------- Worktrees ---------- */
+
+const editing = new Set<string>(); // presets open for editing
+
+/** One row per preset with Edit; an open one shows its fields, saved as they change, and
+ * Reset to default once it differs from Anvil's. */
+function renderPresets() {
+  const box = $("#presets");
+  // A field being typed in stays as it is.
+  if (box.contains(document.activeElement) && document.activeElement?.tagName === "TEXTAREA") return;
+  box.replaceChildren(
+    ...s.worktree_presets.flatMap((p) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("span");
+      label.textContent = p.name;
+      const small = document.createElement("small");
+      small.textContent = [p.kinds.join(", ") || "Any other type", p.edited ? "edited" : ""].filter(Boolean).join(" · ");
+      label.append(small);
+      const open = editing.has(p.id);
+      row.append(
+        label,
+        button(open ? "Done" : "Edit", () => {
+          if (open) editing.delete(p.id);
+          else editing.add(p.id);
+          renderPresets();
+        }),
+      );
+      if (!open) return [row];
+      const save = (field: string | null, value?: unknown) =>
+        invoke("set_worktree_preset", { id: p.id, field, value: value ?? null }).then((next) => {
+          if (next) s = next;
+          render();
+        });
+      const fields: HTMLElement[] = FIELDS.map(([field, name, hint]) => {
+        const r = document.createElement("label");
+        r.className = "row row-top preset-field";
+        const t = document.createElement("span");
+        t.textContent = name;
+        const h = document.createElement("small");
+        h.textContent = hint;
+        const fail = document.createElement("small");
+        fail.className = "error-text";
+        fail.hidden = true;
+        t.append(h, fail);
+        r.append(
+          t,
+          control(field, p.hooks, (v) => save(field, v), fail),
+        );
+        return r;
+      });
+      if (p.edited) {
+        const reset = document.createElement("div");
+        reset.className = "row preset-field";
+        reset.append(
+          document.createElement("span"),
+          button("Reset to default", () => save(null).catch((e) => showError(String(e)))),
+        );
+        fields.push(reset);
+      }
+      return [row, ...fields];
+    }),
+  );
+}
+
 export function button(text, onclick) {
   const b = document.createElement("button");
   b.textContent = text;
@@ -631,7 +698,7 @@ $("#dock").onchange = (e) => call("set_dock_icon", { on: e.target.checked });
 $("#trim-logs").onchange = (e) => call("set_trim_app_logs", { on: e.target.checked });
 $("#notifications").onchange = (e) => call("set_notifications", { on: e.target.checked });
 $("#https-default").onchange = (e) => call("set_https_default", { on: e.target.checked });
-$("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.value });
+$("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.checked ? "copy" : "empty" });
 $("#theme").onchange = (e) => call("set_theme", { theme: e.target.value || null });
 $("#editor").onchange = (e) => call("set_editor", { editor: e.target.value || null });
 $("#terminal").onchange = (e) => call("set_terminal", { terminal: e.target.value || null });
