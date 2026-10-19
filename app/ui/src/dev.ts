@@ -1,5 +1,6 @@
 import type { CommandChip, ProcessRow } from "./types";
 import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, popAt, seg, selected, showError, showTab, snap, tab } from "./app";
+import { type Item as Proc, apply, items, plan } from "./confplan";
 import { type Tail, readTail, tail } from "./console";
 import { late } from "./late";
 import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache } from "./processes";
@@ -65,6 +66,10 @@ let view: View | null = null;
 let configuring: string | null = null; // the site whose processes are being configured
 let draft: { name: string; command: string } | null = null; // a process being added
 let confError = "";
+/** Configure's changes until Done saves them and Cancel drops them: the processes as
+ * items, and `base`, them as saved (JSON). Follows the app's processes while unchanged. */
+let edits: { site: string; base: string; items: Proc[] } | null = null;
+let saving = false;
 
 /** An entry's output began again (a restart, Clear): its lines go, and so does its reader. */
 function forget(v: View, key: string) {
@@ -291,18 +296,19 @@ function drawBar(name: string) {
   cfg.setAttribute("aria-pressed", String(configuring === name));
   cfg.title = "Choose the processes Dev runs and their commands";
   cfg.onclick = () => {
-    configuring = configuring === name ? null : name;
-    draft = null;
-    confError = "";
-    drawDev(name);
-    devTick();
+    if (configuring !== name) {
+      configuring = name;
+      drawDev(name);
+      return;
+    }
+    // Closing from the toolbar is Cancel; changes not saved are asked about first.
+    if (changed(name)) confirmPop(cfg, "Discard the changes?", "Discard", () => closeConf(name));
+    else closeConf(name);
   };
-  // Configure on the left (with Table | JSON while configuring), Start or Stop on the right.
-  bar.append(cfg);
-  if (configuring === name) bar.append(modeSeg);
-  bar.append(el("span", "spacer"));
-  const all = configuring === name ? null : devButton(name);
-  if (all) bar.append(all);
+  // Configure on the left; on the right Start or Stop, or Table | JSON while configuring.
+  bar.append(cfg, el("span", "spacer"));
+  const right = configuring === name ? modeSeg : devButton(name);
+  if (right) bar.append(right);
 }
 
 /** Below the processes, a small box of their own for one-off scripts: Run ▾ and each
@@ -446,23 +452,90 @@ async function devTick() {
   );
 }
 
-/* ---------- Configure: the processes as a table ---------- */
+/* ---------- Configure ---------- */
 
-/** Save one change to a process; a failure shows below the table. */
-async function save(name: string, args: Record<string, unknown>, cmd = "set_process") {
-  try {
-    await askProcs(name, cmd, args);
-    confError = "";
-    return true;
-  } catch (e) {
-    confError = String(e);
-    return false;
-  } finally {
-    if (selected === name) {
-      drawProcs(name);
-      drawConf(name, true);
+const rowsOf = (name: string) => devRows(procCache.get(name));
+const mainOf = (name: string) => rowsOf(name).find((r) => r.main)?.name;
+const asJson = (xs: Proc[]) => JSON.stringify(xs, null, 2);
+
+/** Configure's changes for `name`, made afresh from its processes while none are pending. */
+function editsFor(name: string) {
+  const base = asJson(items(rowsOf(name)));
+  if (!edits || edits.site !== name || (!saving && !changed(name) && edits.base !== base))
+    edits = { site: name, base, items: JSON.parse(base) };
+  return edits;
+}
+
+/** Changes not saved yet: the table's, or the JSON being typed. */
+function changed(name: string) {
+  if (!edits || edits.site !== name) return false;
+  const now = confMode === "json" && js.ed && js.site === name ? js.ed.text : asJson(edits.items);
+  return now !== edits.base;
+}
+
+/** Close Configure; whatever wasn't saved is dropped. */
+function closeConf(name: string) {
+  configuring = null;
+  draft = null;
+  confError = "";
+  edits = null;
+  js.ed?.view.destroy();
+  js.ed = null;
+  js.site = "";
+  drawDev(name);
+  devTick();
+}
+
+/** Done: save the changes (the JSON's when editing JSON), then close. A failure stays
+ * open with the changes and says why. */
+async function finish(name: string) {
+  const e = editsFor(name);
+  let next = e.items;
+  if (confMode === "json" && js.ed) {
+    const m = await (mods ??= Promise.all([import("./jsoneditor"), import("./confjson")]));
+    const got = m[1].check(js.ed.text, mainOf(name)).items;
+    if (!got) return;
+    next = got;
+  }
+  const empty = next.find((x) => !x.command.trim());
+  if (empty) {
+    confError = `${empty.name}: a command is needed`;
+    return drawConf(name, true);
+  }
+  if (asJson(next) !== e.base) {
+    saving = true;
+    drawConf(name, true);
+    try {
+      await apply(
+        plan(rowsOf(name), next),
+        ([cmd, args]) => askProcs(name, cmd, args),
+        () => rowsOf(name),
+      );
+    } catch (err) {
+      confError = String(err);
+      e.items = next;
+      await loadProcs(name);
+      return drawConf(name, true);
+    } finally {
+      saving = false;
+      if (selected === name) drawProcs(name);
     }
   }
+  closeConf(name);
+}
+
+/** Configure's foot, the same in both modes: what the mode has on the left, then Cancel
+ * and Done. */
+function confFoot(name: string, left: HTMLElement[]) {
+  const foot = el("div", "dev-conf-foot");
+  const cancel = el("button", null, "Cancel");
+  cancel.title = "Close without saving the changes";
+  cancel.onclick = () => closeConf(name);
+  const done = el("button", "primary", "Done");
+  done.onclick = () => finish(name);
+  cancel.disabled = done.disabled = saving;
+  foot.append(...left, el("span", "spacer"), cancel, done);
+  return { foot, done };
 }
 
 function check(checked: boolean, aria: string, onchange: (on: boolean) => void) {
@@ -481,18 +554,19 @@ function cell(...kids: (Node | string)[]) {
   return td;
 }
 
-/** A one-line field: Return saves, Esc puts back what it was. */
-function field(value: string, aria: string, placeholder: string, onsave: ((v: string) => void) | null) {
+/** A one-line field that changes `set` as it's typed; Esc puts back what it was. */
+function field(value: string, aria: string, placeholder: string, set: (v: string) => void) {
   const input = el("input", "dev-conf-input");
   input.value = input.defaultValue = value;
   input.spellcheck = false;
   input.placeholder = placeholder;
   input.setAttribute("aria-label", aria);
+  input.oninput = () => set(input.value);
   input.onkeydown = (e) => {
-    if (e.key === "Escape") input.value = input.defaultValue;
-    if (onsave && (e.key === "Enter" || e.key === "Escape")) input.blur();
+    if (e.key !== "Escape") return;
+    input.value = input.defaultValue;
+    set(input.value);
   };
-  if (onsave) input.onchange = () => input.value.trim() !== input.defaultValue && onsave(input.value.trim());
   return input;
 }
 
@@ -506,10 +580,27 @@ const modeSeg = seg(
     ["json", "JSON"],
   ],
   "table",
-  (m) => {
-    confMode = m as "table" | "json";
+  async (m) => {
+    const name = configuring;
+    if (!name || m === confMode) return;
     confError = "";
-    if (selected) drawConf(selected, true);
+    if (m === "table" && js.ed) {
+      // The JSON's changes carry over to the table; JSON with mistakes stays JSON.
+      const [, cj] = await mods!;
+      const got = cj.check(js.ed.text, mainOf(name)).items;
+      if (!got) {
+        confError = "Fix the JSON first, or Cancel";
+        return drawConf(name, true);
+      }
+      editsFor(name).items = got;
+    }
+    confMode = m as "table" | "json";
+    if (m === "json") {
+      js.ed?.view.destroy();
+      js.ed = null;
+      js.site = "";
+    }
+    drawConf(name, true);
   },
 );
 modeSeg.classList.add("dev-conf-mode");
@@ -517,49 +608,45 @@ type Mods = [typeof import("./jsoneditor"), typeof import("./confjson")];
 let mods: Promise<Mods> | null = null; // CodeMirror, loaded on the first JSON
 const js = {
   site: "",
-  base: "", // the JSON of the processes as they are
   ed: null as null | ReturnType<Mods[0]["jsonEditor"]>,
-  busy: false,
   wrap: el("div", "dev-json"),
   host: el("div", "dev-json-editor"),
   msg: el("p", "dev-json-msg"),
   format: el("button", null, "Format"),
-  cancel: el("button", null, "Cancel"),
-  apply: el("button", "primary", "Apply"),
+  done: null as HTMLButtonElement | null,
 };
-{
-  const foot = el("div", "dev-conf-foot");
-  foot.append(js.format, el("span", "spacer"), js.cancel, js.apply);
-  js.wrap.append(js.host, js.msg, foot);
-}
+js.wrap.append(js.host, js.msg);
 
 /** The line a position is on, 1-based. */
 const lineOf = (text: string, at: number) => text.slice(0, at).split("\n").length;
 
-/** Apply's and Format's state and the line under the editor, after every edit. */
+/** Done's and Format's state and the line under the editor, after every edit. */
 function syncJson(m: Mods[1], name: string) {
   if (!js.ed) return;
   const text = js.ed.text;
-  const main = devRows(procCache.get(name)).find((r) => r.main)?.name;
-  const { problems } = m.check(text, main);
+  const { problems } = m.check(text, mainOf(name));
   const p = problems[0];
   const more = problems.length > 1 ? ` (${problems.length - 1} more)` : "";
   js.msg.className = `dev-json-msg${p || confError ? " error-text" : ""}`;
-  js.msg.textContent = confError || (p ? `Line ${lineOf(text, p.from)}: ${p.message}${more}` : text === js.base ? "" : "Ready to apply");
-  js.apply.disabled = js.busy || !!problems.length || text === js.base;
-  js.cancel.disabled = js.busy;
+  js.msg.textContent =
+    confError || (p ? `Line ${lineOf(text, p.from)}: ${p.message}${more}` : changed(name) ? "Done saves the changes" : "");
+  if (js.done) js.done.disabled = saving || !!problems.length;
   let parses = true;
   try {
     JSON.parse(text);
   } catch {
     parses = false;
   }
-  js.format.disabled = js.busy || !parses;
+  js.format.disabled = saving || !parses;
 }
 
 async function drawJson(name: string) {
+  const e = editsFor(name);
+  const { foot, done } = confFoot(name, [js.format]);
+  js.done = done;
+  js.wrap.querySelector(".dev-conf-foot")?.remove();
+  js.wrap.append(foot);
   if (!conf.contains(js.wrap)) conf.replaceChildren(js.wrap);
-  const rows = devRows(procCache.get(name));
   if (js.site !== name) {
     js.ed?.view.destroy();
     js.ed = null;
@@ -567,70 +654,37 @@ async function drawJson(name: string) {
     js.host.replaceChildren(el("span", "dev-json-loading", "Loading the editor…"));
   }
   const [ed, m] = await (mods ??= Promise.all([import("./jsoneditor"), import("./confjson")]));
-  if (js.site !== name) return;
-  const text = m.toJson(rows);
-  const main = () => devRows(procCache.get(name)).find((r) => r.main)?.name;
+  if (js.site !== name || configuring !== name) return;
   if (!js.ed) {
-    js.base = text;
     js.host.replaceChildren();
     js.ed = ed.jsonEditor(
       js.host,
-      text,
-      (t) => m.check(t, main()).problems,
+      asJson(e.items),
+      (t) => m.check(t, mainOf(name)).problems,
       () => {
         confError = "";
         syncJson(m, name);
       },
     );
-  } else if (!js.busy && js.ed.text === js.base && text !== js.base) {
-    // Not edited here: follows changes made elsewhere.
-    js.base = text;
-    js.ed.set(text);
-  } else js.base = text;
+  } else if (!saving && !changed(name) && js.ed.text !== e.base) js.ed.set(e.base); // follows changes made elsewhere
   syncJson(m, name);
   js.format.onclick = () => {
     try {
       js.ed!.set(JSON.stringify(JSON.parse(js.ed!.text), null, 2));
     } catch {}
   };
-  js.cancel.onclick = () => {
-    js.ed!.set(js.base);
-    confError = "";
-    confMode = "table";
-    drawConf(name, true);
-  };
-  js.apply.onclick = async () => {
-    const { items } = m.check(js.ed!.text, main());
-    if (!items) return;
-    js.busy = true;
-    syncJson(m, name);
-    try {
-      await m.apply(
-        m.plan(devRows(procCache.get(name)), items),
-        ([cmd, args]) => askProcs(name, cmd, args),
-        () => devRows(procCache.get(name)),
-      );
-      confError = "";
-      js.base = m.toJson(devRows(procCache.get(name)));
-      js.ed!.set(js.base);
-    } catch (e) {
-      confError = String(e);
-      await loadProcs(name);
-    } finally {
-      js.busy = false;
-      if (selected === name) drawProcs(name);
-      syncJson(m, name);
-    }
-  };
 }
+
+/* ---------- Configure: the processes as a table ---------- */
 
 function drawConf(name: string, force = false) {
   for (const b of modeSeg.children) b.setAttribute("aria-pressed", String((b as HTMLElement).dataset.id === confMode));
   if (confMode === "json") return void drawJson(name);
   // Someone is typing: a poll doesn't wipe it.
   const active = document.activeElement as HTMLInputElement | null;
-  if (!force && active && conf.contains(active) && active.value !== active.defaultValue) return;
-  const rows = devRows(procCache.get(name));
+  if (!force && active && conf.contains(active) && active.tagName === "INPUT" && active.type !== "checkbox") return;
+  const e = editsFor(name);
+  const rows = rowsOf(name);
   const table = el("table", "dev-conf-table");
   const headRow = el("tr");
   for (const [h, tip] of [
@@ -647,24 +701,30 @@ function drawConf(name: string, force = false) {
   const thead = el("thead");
   thead.append(headRow);
   const body = el("tbody");
-  for (const r of rows) {
+  for (const x of e.items) {
+    const r = rows.find((r) => r.name === x.name);
+    const main = !!r?.main;
     const tr = el("tr");
-    const id = r.main ? "" : r.id;
-    const dev = check(r.main || !r.manual, `${r.name} in Dev start`, (on) => save(name, { id, manual: !on }));
-    if (r.main) {
+    const dev = check(main || x.devStart, `${x.name} in Dev start`, (on) => (x.devStart = on));
+    if (main) {
       dev.disabled = true;
       dev.title = "The app itself always starts with Dev";
     }
-    const remove = r.main ? "" : procBtn("×", `Remove ${r.name}`, () => save(name, { id, hidden: true }));
+    const remove = main
+      ? ""
+      : procBtn("×", `Remove ${x.name}`, () => {
+          e.items = e.items.filter((y) => y !== x);
+          drawConf(name, true);
+        });
     if (remove) {
       remove.className = "icon-btn dev-conf-remove";
-      remove.title = r.added ? "Remove" : "Remove (Reset to detected brings it back)";
+      remove.title = !r || r.added ? "Remove" : "Remove (Reset to detected brings it back)";
     }
     tr.append(
-      cell(el("span", "dev-conf-name", r.name)),
-      cell(field(r.command, `Command for ${r.name}`, "command", (c) => save(name, { id, command: c }))),
+      cell(el("span", "dev-conf-name", x.name)),
+      cell(field(x.command, `Command for ${x.name}`, "command", (c) => (x.command = c))),
       cell(dev),
-      cell(check(r.autostart, `Start ${r.name} with Anvil`, (on) => save(name, { id, autostart: on }))),
+      cell(check(x.withAnvil, `Start ${x.name} with Anvil`, (on) => (x.withAnvil = on))),
       cell(remove),
     );
     body.append(tr);
@@ -672,29 +732,35 @@ function drawConf(name: string, force = false) {
   if (draft) {
     const d = draft;
     const tr = el("tr", "dev-conf-draft");
-    const n = field(d.name, "Name of the new process", "name", null);
-    const c = field(d.command, "Command of the new process", "command", null);
-    n.oninput = () => (d.name = n.value);
-    c.oninput = () => (d.command = c.value);
-    const add = async () => {
-      if (await save(name, { name: d.name.trim(), command: d.command.trim() }, "process_add")) draft = null;
+    const n = field(d.name, "Name of the new process", "name", (v) => (d.name = v));
+    const c = field(d.command, "Command of the new process", "command", (v) => (d.command = v));
+    const add = () => {
+      const nm = d.name.trim();
+      const cm = d.command.trim();
+      confError =
+        !nm || !cm
+          ? "A new process needs a name and a command"
+          : e.items.some((y) => y.name === nm)
+            ? `There is a process named ${nm} already`
+            : "";
+      if (!confError) {
+        e.items.push({ name: nm, command: cm, devStart: true, withAnvil: false });
+        draft = null;
+      }
       drawConf(name, true);
     };
-    for (const i of [n, c])
-      i.onkeydown = (e) => {
-        if (e.key === "Enter") add();
-        if (e.key === "Escape") {
-          draft = null;
-          confError = "";
-          drawConf(name, true);
-        }
-      };
-    const addBtn = procBtn("Add", "Add the process", add);
-    const cancel = procBtn("×", "Cancel adding", () => {
+    const drop = () => {
       draft = null;
       confError = "";
       drawConf(name, true);
-    });
+    };
+    for (const i of [n, c])
+      i.onkeydown = (ev) => {
+        if (ev.key === "Enter") add();
+        if (ev.key === "Escape") drop();
+      };
+    const addBtn = procBtn("Add", "Add the process", add);
+    const cancel = procBtn("×", "Cancel adding", drop);
     cancel.className = "icon-btn dev-conf-remove";
     tr.append(cell(n), cell(c), cell(), cell(), cell(addBtn, cancel));
     body.append(tr);
@@ -702,9 +768,8 @@ function drawConf(name: string, force = false) {
   table.append(thead, body);
   const error = el("p", "error-text dev-conf-error", confError);
   error.hidden = !confError;
-  const foot = el("div", "dev-conf-foot");
   const plus = el("button", null, "+ Add process");
-  plus.disabled = !!draft;
+  plus.disabled = !!draft || saving;
   plus.onclick = () => {
     draft = { name: "", command: "" };
     drawConf(name, true);
@@ -712,17 +777,21 @@ function drawConf(name: string, force = false) {
   };
   const reset = el("button", null, "Reset to detected");
   reset.title = "What the app’s dev script (php artisan dev, package.json) starts";
-  reset.onclick = () => confirmPop(reset, "Reset to the detected processes?", "Reset", () => save(name, {}, "processes_reset"));
-  const done = el("button", null, "Done");
-  done.onclick = () => {
-    configuring = null;
-    draft = null;
-    confError = "";
-    drawDev(name);
-    devTick();
-  };
-  foot.append(plus, reset, el("span", "spacer"), done);
-  conf.replaceChildren(table, error, foot);
+  reset.disabled = saving;
+  reset.onclick = () =>
+    confirmPop(reset, "Reset to the detected processes?", "Reset", async () => {
+      edits = null;
+      draft = null;
+      try {
+        await askProcs(name, "processes_reset", {});
+        confError = "";
+      } catch (err) {
+        confError = String(err);
+      }
+      if (selected === name) drawProcs(name);
+      drawConf(name, true);
+    });
+  conf.replaceChildren(table, error, confFoot(name, [plus, reset]).foot);
 }
 
 late.drawDev = drawDev;

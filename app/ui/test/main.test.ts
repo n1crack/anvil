@@ -334,75 +334,97 @@ describe("dev", () => {
     expect(item("once:preview")).toBeNull();
   });
 
-  test("Configure: edit a command, leave one out of Dev start, add a process, reset", async () => {
-    $(".dev-bar .dev-configure").click();
-    await wait();
-    expect($(".dev-main").hidden).toBe(true);
+  test("Configure: changes wait for Done; Cancel drops them and closes", async () => {
+    const open = async () => {
+      $(".dev-bar .dev-configure").click();
+      await wait();
+    };
     const names = () => $$(".dev-conf-table .dev-conf-name").map((n) => n.textContent);
-    expect(names()).toEqual(["dev", "docs:dev", "docs:site"]);
     const box = (aria: string) => $(`.dev-conf [aria-label="${aria}"]`) as HTMLInputElement;
+    const foot = (t: string) => $$(".dev-conf-foot button").find((b) => b.textContent === t)! as HTMLButtonElement;
+    const type = (aria: string, v: string) => {
+      box(aria).value = v;
+      box(aria).dispatchEvent(new Event("input"));
+    };
+    const saved = () => calls("set_process").length + calls("process_add").length;
+
+    await open();
+    expect($(".dev-main").hidden).toBe(true);
+    // Table | JSON at the right end of the toolbar, where Start or Stop was.
+    expect($(".dev-bar").lastElementChild!.classList.contains("dev-conf-mode")).toBe(true);
+    expect(names()).toEqual(["dev", "docs:dev", "docs:site"]);
     expect(box("dev in Dev start").disabled).toBe(true);
     expect($('.dev-conf [aria-label="Remove dev"]')).toBeNull();
 
-    const cmd = box("Command for docs:dev");
-    cmd.value = "npm run docs:dev -- --open";
-    cmd.dispatchEvent(new Event("change"));
-    await wait();
-    expect(calls("set_process").at(-1)![1]).toEqual({ site: "vuefinder", id: "docs-dev", command: "npm run docs:dev -- --open" });
-
+    // Edits, a switch and a new process: nothing is saved until Done.
+    const before = saved();
+    type("Command for docs:dev", "npm run docs:dev -- --open");
     box("docs:site in Dev start").click();
+    foot("+ Add process").click();
+    type("Name of the new process", "worker");
+    type("Command of the new process", "node worker.js");
+    box("Command of the new process").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     await wait();
-    expect(calls("set_process").at(-1)![1]).toEqual({ site: "vuefinder", id: "docs-site", manual: true });
-    expect(box("docs:site in Dev start").checked).toBe(false);
-
-    // An empty command is refused inline, not in a toast.
-    const empty = box("Command for docs:site");
-    empty.value = " ";
-    empty.dispatchEvent(new Event("change"));
-    await wait();
-    expect($(".dev-conf-error").textContent).toBe("The command can't be empty");
-    expect($("#toast").hidden).toBe(true);
-
-    $$(".dev-conf-foot button")
-      .find((b) => b.textContent === "+ Add process")!
-      .click();
-    const n = box("Name of the new process");
-    const c = box("Command of the new process");
-    n.value = "worker";
-    n.dispatchEvent(new Event("input"));
-    c.value = "node worker.js";
-    c.dispatchEvent(new Event("input"));
-    c.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
-    await wait();
-    expect(calls("process_add").at(-1)![1]).toEqual({ site: "vuefinder", name: "worker", command: "node worker.js" });
     expect(names()).toEqual(["dev", "docs:dev", "docs:site", "worker"]);
-    expect($(".dev-conf-draft")).toBeNull();
+    expect(saved()).toBe(before);
+    foot("Done").click();
+    await wait();
+    expect(
+      calls("set_process")
+        .slice(-2)
+        .map((c) => c[1]),
+    ).toEqual([
+      { site: "vuefinder", id: "docs-dev", command: "npm run docs:dev -- --open" },
+      { site: "vuefinder", id: "docs-site", manual: true },
+    ]);
+    expect(calls("process_add").at(-1)![1]).toEqual({ site: "vuefinder", name: "worker", command: "node worker.js" });
+    expect($(".dev-conf").hidden).toBe(true);
 
-    const reset = $$(".dev-conf-foot button").find((b) => b.textContent === "Reset to detected")!;
+    // Cancel drops the changes and closes Configure.
+    await open();
+    const after = saved();
+    type("Command for docs:site", "something else");
+    foot("Cancel").click();
+    await wait();
+    expect($(".dev-conf").hidden).toBe(true);
+    expect(saved()).toBe(after);
+
+    // Closing from the toolbar with changes asks first.
+    await open();
+    type("Command for docs:site", "something else");
+    $(".dev-bar .dev-configure").click();
+    expect($(".dev-conf").hidden).toBe(false);
+    ($(".pop-confirm .primary") as HTMLElement).click();
+    await wait();
+    expect($(".dev-conf").hidden).toBe(true);
+    expect(saved()).toBe(after);
+
+    // An empty command is refused inline, not in a toast, and Configure stays open.
+    await open();
+    type("Command for docs:site", " ");
+    foot("Done").click();
+    await wait();
+    expect($(".dev-conf-error").textContent).toBe("docs:site: a command is needed");
+    expect($("#toast").hidden).toBe(true);
+    expect(saved()).toBe(after);
+
+    const reset = foot("Reset to detected");
     reset.click();
     expect(calls("processes_reset")).toHaveLength(0);
     ($(".pop-confirm .primary") as HTMLElement).click();
     await wait();
     expect(calls("processes_reset")).toHaveLength(1);
     expect(names()).toEqual(["dev", "docs:dev", "docs:site"]);
-    expect(box("docs:site in Dev start").checked).toBe(true);
 
-    // JSON: the same processes in an editor; Apply waits for a change without errors.
+    // JSON: the same processes in an editor, the same Cancel and Done.
     ($('.dev-conf-mode [data-id="json"]') as HTMLElement).click();
     await wait(400);
     expect($(".dev-conf-table")).toBeNull();
     const editor = $(".dev-json-editor .cm-content");
     expect(editor).toBeTruthy();
     expect(JSON.parse(editor.textContent!.replace(/\s+/g, " ")).map((x) => x.name)).toEqual(["dev", "docs:dev", "docs:site"]);
-    const jsonBtn = (t: string) => $$(".dev-json button").find((b) => b.textContent === t)! as HTMLButtonElement;
-    expect(jsonBtn("Apply").disabled).toBe(true);
-    jsonBtn("Cancel").click();
-    await wait();
-    expect($(".dev-conf-table")).toBeTruthy();
-
-    $$(".dev-conf-foot button")
-      .find((b) => b.textContent === "Done")!
-      .click();
+    expect($$(".dev-json .dev-conf-foot button").map((b) => b.textContent)).toEqual(["Format", "Cancel", "Done"]);
+    foot("Cancel").click();
     await wait();
     expect($(".dev-main").hidden).toBe(false);
     expect($(".dev-conf").hidden).toBe(true);
