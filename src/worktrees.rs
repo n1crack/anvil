@@ -1132,10 +1132,22 @@ fn env_with(
             match fill(template, &vars).filter(|v| !v.is_empty()) {
                 Some(v) => env.push((key.clone(), v)),
                 // Left out, the worktree's `.env` (main's) would win: nothing of it runs.
-                None if names_db(key) => {
+                None if DB_KEYS.contains(&key.as_str()) => {
                     return Err(format!(
                         "{key} has no value from the worktree keys; give it one, or take it out to share main's database"
                     ));
+                }
+                // Named like a database (a Redis index, say): its own reason.
+                None if names_db(key) => {
+                    let empty = vars
+                        .iter()
+                        .find(|(n, v)| v.is_none() && template.contains(&format!("{{{n}}}")));
+                    return Err(match empty {
+                        Some((n, _)) => {
+                            format!("{key} has no value: {{{n}}} has none for this worktree")
+                        }
+                        None => format!("{key} is empty in the worktree keys"),
+                    });
                 }
                 // A placeholder without a value (`{port}` of an app Anvil serves) leaves it out.
                 None => {}
@@ -2168,6 +2180,31 @@ pub(crate) mod tests {
         // The main app itself gets nothing.
         let main = crate::tests::site("shop", "/s/shop", None);
         assert!(super::env(&cfg, &main).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unfillable_key_says_which_placeholder_has_no_value() {
+        let (cfg, mut site) =
+            worktree_site("unfillable", "DB_CONNECTION=mysql\nDB_DATABASE=shop\n");
+        site.port = None;
+        let mut keys = shipped("laravel").keys.unwrap();
+        // A Redis index named like a database: not a database key, no "share" offered.
+        keys.insert("REDIS_DB".into(), "{port}".into());
+        let err = env_with(&cfg, &site, &keys, false).unwrap_err();
+        assert_eq!(
+            err,
+            "REDIS_DB has no value: {port} has none for this worktree"
+        );
+        keys.insert("REDIS_DB".into(), "".into());
+        let err = env_with(&cfg, &site, &keys, false).unwrap_err();
+        assert_eq!(err, "REDIS_DB is empty in the worktree keys");
+        keys.remove("REDIS_DB");
+        keys.insert("DB_DATABASE".into(), "{port}".into());
+        let err = env_with(&cfg, &site, &keys, false).unwrap_err();
+        assert!(
+            err.contains("take it out to share main's database"),
+            "{err}"
+        );
     }
 
     #[test]
