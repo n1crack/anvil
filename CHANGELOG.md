@@ -80,11 +80,14 @@ Until 1.0.0, minor versions may contain breaking changes.
   and installs or adds it. Anvil never writes the file.
 - Git worktrees run side by side. Each worktree of an app appears under it in
   the sidebar and answers at `<app>--<name>.test`, with its own processes (Dev
-  tab, queue, Vite). Its database is a copy of the app's, made the first time it
-  is used and never shared with the main app, and its Redis and cache keys get
-  their own prefix. Removing a worktree stops its processes and drops its
-  database; databases left behind by worktrees that are gone are listed with
-  Delete and Keep. Create and remove them in the app (right-click) or with
+  tab, queue, Vite). Its database is a copy of the app's (or an empty one), made
+  the first time it is used; "Share main's" uses the app's own database instead.
+  A database Anvil didn't make is only used after "Use existing". Its Redis and
+  cache keys get their own prefix. Removing a worktree stops its processes and
+  drops its database only when you ask; databases left behind by worktrees that
+  are gone are listed with Delete and Keep. A worktree made outside Anvil gets
+  inline offers to copy the app's `.env` and install its packages. Create and
+  remove them in the app (right-click, or the Git tab) or with
   `anvil worktree list|add|remove`.
 
 ### Changed
