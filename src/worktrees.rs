@@ -491,6 +491,24 @@ fn main_databases(main: &Path) -> Vec<String> {
         None if get("DB_CONNECTION").is_some() && !sqlite => out.push("laravel".into()),
         _ => {}
     }
+    // The other env files its processes may load (Next.js', Symfony's), not the test ones.
+    let mut others = runtime_env(main, false, false);
+    others.extend(runtime_env(main, true, false));
+    for f in others.iter().filter(|f| *f != ".env") {
+        let env = crate::resources::dotenv_file(&main.join(f));
+        let get = |k: &str| env.get(k).map(String::as_str).filter(|v| !v.is_empty());
+        out.extend(
+            ["DB_URL", "DATABASE_URL"]
+                .into_iter()
+                .flat_map(|k| get(k).map(url_databases).unwrap_or_default()),
+        );
+        let sqlite = sqlite || get("DB_CONNECTION") == Some("sqlite");
+        if let Some(db) = get("DB_DATABASE").filter(|db| !sqlite || Path::new(db).is_absolute()) {
+            out.push(db.into());
+        }
+    }
+    out.sort();
+    out.dedup();
     out
 }
 
@@ -1054,7 +1072,7 @@ fn real_file(file: &Path) -> PathBuf {
 /// `Err(reason)` when Anvil can't work out the worktree's own database: then nothing
 /// of the worktree runs (`checked_env`, no PHP-FPM pool).
 pub fn env(cfg: &Config, site: &Site) -> Result<Vec<(String, String)>, String> {
-    env_with(cfg, site, &hooks(cfg, site).keys)
+    env_with(cfg, site, &hooks(cfg, site).keys, false)
 }
 
 /// `template` with each `{name}` of `vars` filled in; `None` when one has no value.
@@ -1069,11 +1087,12 @@ fn fill(template: &str, vars: &[(&str, Option<&str>)]) -> Option<String> {
     Some(out)
 }
 
-/// `env` with the keys `keys`.
+/// `env` with the keys `keys`, for a test run when `test` (its env files differ).
 fn env_with(
     cfg: &Config,
     site: &Site,
     keys: &BTreeMap<String, String>,
+    test: bool,
 ) -> Result<Vec<(String, String)>, String> {
     if site.worktree_of.is_none() {
         return Ok(Vec::new());
@@ -1082,12 +1101,9 @@ fn env_with(
     let db = db_name(site);
     let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
     // What its processes would load: main's `.env` (copied in), then its own files
-    // over it, in Next.js' order (the last one wins).
-    let mut files = vec![
-        crate::resources::dotenv(&main),
-        crate::resources::dotenv(&site.path),
-    ];
-    for f in &RUNTIME_ENV[1..] {
+    // over it, in the order its framework loads them (the last one wins).
+    let mut files = vec![crate::resources::dotenv(&main)];
+    for f in runtime_env(&site.path, site.kind == "symfony", test) {
         files.push(crate::resources::dotenv_file(&site.path.join(f)));
     }
     let last = |k: &str| {
@@ -1272,7 +1288,7 @@ pub fn run_env(cfg: &Config, site: &Site, test: bool) -> Result<Vec<(String, Str
             keys.insert(k.into(), "{db}".into());
         }
     }
-    let mut env = env_with(cfg, site, &keys)?;
+    let mut env = env_with(cfg, site, &keys, test)?;
     let vars = test_config(&site.path);
     // Main's, or a URL Anvil can't read the database of.
     let mains = |v: &TestVar| match v.key {
@@ -1540,8 +1556,46 @@ const RUNTIME_ENV: [&str; 4] = [
     ".env.development.local",
 ];
 
-fn is_env_file(f: &Path) -> bool {
-    RUNTIME_ENV.iter().any(|r| f == Path::new(r))
+/// The env files at `dir`'s root a process loads, in its order (the last one wins): `RUNTIME_ENV`,
+/// or Symfony's `.env`, `.env.local` (not for tests), `.env.<APP_ENV>`, `.env.<APP_ENV>.local`.
+/// APP_ENV is `test` for a test run, else what `.env.local` or `.env` sets, else `dev`.
+fn runtime_env(dir: &Path, symfony: bool, test: bool) -> Vec<String> {
+    if !symfony {
+        return RUNTIME_ENV.map(String::from).to_vec();
+    }
+    let app_env = if test {
+        "test".to_string()
+    } else {
+        [".env.local", ".env"]
+            .iter()
+            .find_map(|f| {
+                crate::resources::dotenv_file(&dir.join(f))
+                    .remove("APP_ENV")
+                    .filter(|v| {
+                        !v.is_empty()
+                            && v.chars()
+                                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                    })
+            })
+            .unwrap_or_else(|| "dev".into())
+    };
+    let mut out = vec![".env".to_string()];
+    if app_env != "test" {
+        out.push(".env.local".into());
+    }
+    if app_env != "local" {
+        out.push(format!(".env.{app_env}"));
+        out.push(format!(".env.{app_env}.local"));
+    }
+    out
+}
+
+/// Whether `f` (relative) is one of `site`'s env files its processes read outside test runs:
+/// the ones Rewrite writes. Never a test env file.
+fn is_env_file(site: &Site, f: &Path) -> bool {
+    runtime_env(&site.path, site.kind == "symfony", false)
+        .iter()
+        .any(|r| f == Path::new(r) && !r.starts_with(".env.test"))
 }
 
 /// `text` with each line setting one of `values`' keys (`KEY=…`, `export KEY=…`) set to its
@@ -1616,7 +1670,7 @@ fn write_keys(cfg: &Config, site: &Site, files: &[PathBuf]) -> anyhow::Result<()
     let values = env(cfg, site).map_err(anyhow::Error::msg)?;
     let keys = hooks(cfg, site).keys;
     let (db, main) = (db_name(site), main_of(&site.path).unwrap_or_default());
-    for (i, f) in files.iter().filter(|f| is_env_file(f)).enumerate() {
+    for (i, f) in files.iter().filter(|f| is_env_file(site, f)).enumerate() {
         let file = site.path.join(f);
         let text = fs::read_to_string(&file)?;
         // A `{db}` key gets this file's own value pointed at the worktree's database (its
@@ -1657,7 +1711,7 @@ fn env_files(cfg: &Config, site: &Site) -> Vec<PathBuf> {
     };
     expand(&main, &hooks(cfg, site).copy)
         .into_iter()
-        .filter(|f| is_env_file(f) && site.path.join(f).is_file())
+        .filter(|f| is_env_file(site, f) && site.path.join(f).is_file())
         .collect()
 }
 
@@ -2147,7 +2201,7 @@ pub(crate) mod tests {
         ] {
             let mut keys = shipped("laravel").keys.unwrap();
             keys.insert("DB_URL".into(), url.into());
-            let err = env_with(&cfg, &site, &keys).unwrap_err();
+            let err = env_with(&cfg, &site, &keys, false).unwrap_err();
             assert!(err.contains("names shop's database"), "{url}: {err}");
         }
     }
@@ -3147,11 +3201,24 @@ pub(crate) mod tests {
             "DB_URL" | "DATABASE_URL" => Some(url_databases(v)),
             _ => None,
         };
-        for (n, (dotenv, names)) in mains.iter().enumerate() {
-            let (mut cfg, site) = worktree_site(&format!("prop-{n}"), "");
+        let cases = mains
+            .iter()
+            .enumerate()
+            .flat_map(|(n, m)| [(n, m, false), (n, m, true)]);
+        for (n, (dotenv, names), symfony) in cases {
+            let (mut cfg, mut site) = worktree_site(&format!("prop-{n}-{symfony}"), "");
             let main = main_of(&site.path).unwrap();
             let fill = |t: &str| t.replace("{MAIN}", &main.display().to_string());
-            fs::write(main.join(".env"), fill(dotenv)).unwrap();
+            if symfony {
+                // Symfony: main's settings in the committed `.env.dev`, and `.env.test` for tests.
+                site.kind = "symfony".into();
+                for f in [".env.dev", ".env.test"] {
+                    fs::write(main.join(f), fill(dotenv)).unwrap();
+                    fs::write(site.path.join(f), fill(dotenv)).unwrap();
+                }
+            } else {
+                fs::write(main.join(".env"), fill(dotenv)).unwrap();
+            }
             // Main's: one of its names, its SQLite file by canonical path, or a file in its
             // checkout (the worktree is next to it, not inside).
             let canon = |p: &str| {
@@ -3199,8 +3266,9 @@ pub(crate) mod tests {
                         fs::write(site.path.join(file), fill(text)).unwrap();
                     }
                     for test in [false, true] {
-                        let case =
-                            format!("{dotenv:?} {file} {text:?} keys={variant:?} test={test}");
+                        let case = format!(
+                            "{dotenv:?} symfony={symfony} {file} {text:?} keys={variant:?} test={test}"
+                        );
                         let got = checked_env(&cfg, &site, test);
                         // A DB key with no value never lets `.env` (main's) win: nothing runs.
                         if !test && ["", "{port}"].contains(&variant) {
@@ -3652,6 +3720,73 @@ pub(crate) mod tests {
             "{}",
             read(".env.local")
         );
+    }
+
+    #[test]
+    fn a_symfony_worktree_reads_its_app_env_files() {
+        let (cfg, mut site) = worktree_site("symfony-env", "");
+        site.kind = "symfony".into();
+        let main = main_of(&site.path).unwrap();
+        let url = |k: &str, e: &[(String, String)]| get(e, k).map(String::from);
+        let both = |f: &str, text: &str| {
+            fs::write(main.join(f), text).unwrap();
+            fs::write(site.path.join(f), text).unwrap();
+        };
+        // The committed `.env.dev` (APP_ENV defaults to dev), and `.env.dev.local` over it.
+        both(
+            ".env.dev",
+            "DATABASE_URL=postgresql://dev@127.0.0.1:5432/shop\n",
+        );
+        let dev = env(&cfg, &site).unwrap();
+        assert_eq!(
+            url("DATABASE_URL", &dev).as_deref(),
+            Some("postgresql://dev@127.0.0.1:5432/shop_feature_x")
+        );
+        // Main's database named in `.env.dev` only is still main's.
+        assert!(is_mains_database(&site, "shop"));
+        both(
+            ".env.dev.local",
+            "DATABASE_URL=postgresql://devlocal@h/shop\n",
+        );
+        assert_eq!(
+            url("DATABASE_URL", &env(&cfg, &site).unwrap()).as_deref(),
+            Some("postgresql://devlocal@h/shop_feature_x")
+        );
+        // APP_ENV from the files: `.env.staging` then.
+        both(".env.local", "APP_ENV=staging\n");
+        both(".env.staging", "DATABASE_URL=postgresql://staging@h/shop\n");
+        assert_eq!(
+            url("DATABASE_URL", &env(&cfg, &site).unwrap()).as_deref(),
+            Some("postgresql://staging@h/shop_feature_x")
+        );
+        // A test run: `.env`, `.env.test`, `.env.test.local`; never `.env.local`.
+        fs::remove_file(site.path.join(".env.local")).unwrap();
+        both(".env", "DATABASE_URL=postgresql://base@h/shop\n");
+        both(".env.local", "DATABASE_URL=postgresql://local@h/shop\n");
+        let test = run_env(&cfg, &site, true).unwrap();
+        assert_eq!(
+            url("DATABASE_URL", &test).as_deref(),
+            Some("postgresql://base@h/shop_feature_x")
+        );
+        both(".env.test", "DATABASE_URL=postgresql://test@h/shop\n");
+        let test = run_env(&cfg, &site, true).unwrap();
+        assert_eq!(
+            url("DATABASE_URL", &test).as_deref(),
+            Some("postgresql://test@h/shop_feature_x")
+        );
+        // Rewrite writes the dev files, never the test ones; check sees `.env.dev.local`.
+        fs::write(main.join(".worktreeinclude"), ".env*\n").unwrap();
+        both(".env.test.local", "DATABASE_URL=postgresql://tl@h/shop\n");
+        assert!(same_as_main(&cfg, &site).contains(&"DATABASE_URL".to_string()));
+        rewrite(&cfg, &site).unwrap();
+        for f in [".env.dev", ".env.dev.local"] {
+            let text = fs::read_to_string(site.path.join(f)).unwrap();
+            assert!(text.contains("/shop_feature_x"), "{f}: {text}");
+        }
+        for f in [".env.test", ".env.test.local"] {
+            let text = fs::read_to_string(site.path.join(f)).unwrap();
+            assert!(text.ends_with("/shop\n"), "{f}: {text}");
+        }
     }
 
     #[test]
