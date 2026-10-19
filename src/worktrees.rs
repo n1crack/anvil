@@ -3414,20 +3414,30 @@ pub(crate) mod tests {
         let cases = mains
             .iter()
             .enumerate()
-            .flat_map(|(n, m)| [(n, m, false), (n, m, true)]);
+            .flat_map(|(n, m)| [(n, m, "laravel"), (n, m, "symfony"), (n, m, "symfony-test")]);
         for (n, (dotenv, names), symfony) in cases {
             let (mut cfg, mut site) = worktree_site(&format!("prop-{n}-{symfony}"), "");
             let main = main_of(&site.path).unwrap();
             let fill = |t: &str| t.replace("{MAIN}", &main.display().to_string());
-            if symfony {
+            let both = |f: &str, text: &str| {
+                fs::write(main.join(f), text).unwrap();
+                fs::write(site.path.join(f), text).unwrap();
+            };
+            match symfony {
                 // Symfony: main's settings in the committed `.env.dev`, and `.env.test` for tests.
-                site.kind = "symfony".into();
-                for f in [".env.dev", ".env.test"] {
-                    fs::write(main.join(f), fill(dotenv)).unwrap();
-                    fs::write(site.path.join(f), fill(dotenv)).unwrap();
+                "symfony" => {
+                    site.kind = "symfony".into();
+                    both(".env.dev", &fill(dotenv));
+                    both(".env.test", &fill(dotenv));
                 }
-            } else {
-                fs::write(main.join(".env"), fill(dotenv)).unwrap();
+                // `.env` says test, so Symfony skips `.env.local` (which says dev): only in `.env.test`.
+                "symfony-test" => {
+                    site.kind = "symfony".into();
+                    both(".env", "APP_ENV=test\n");
+                    fs::write(site.path.join(".env.local"), "APP_ENV=dev\n").unwrap();
+                    both(".env.test", &fill(dotenv));
+                }
+                _ => fs::write(main.join(".env"), fill(dotenv)).unwrap(),
             }
             // Main's: one of its names, its SQLite file by canonical path, or a file in its
             // checkout (the worktree is next to it, not inside).
@@ -3492,6 +3502,13 @@ pub(crate) mod tests {
                         if test || variant != "removed" {
                             for (k, _) in own.iter().filter(|(k, v)| db_of(k, v).is_some()) {
                                 assert!(env.iter().any(|(key, _)| key == k), "{k} unset: {case}");
+                            }
+                            // Main names a database: a database key is set, so no file's wins.
+                            if !names.is_empty() {
+                                assert!(
+                                    env.iter().any(|(k, _)| DB_KEYS.contains(&k.as_str())),
+                                    "no database key set: {case}"
+                                );
                             }
                         } else {
                             assert!(
