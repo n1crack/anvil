@@ -8,13 +8,43 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-19
+
+The first public release of Anvil, a macOS development environment. It comes as
+a native macOS app that carries the `anvil` CLI.
+
 ### Added
 
-- Addresses work without a port number: `anvil setup` (one password prompt)
-  forwards ports 80 and 443 on this Mac to Anvil, trusts the HTTPS certificate
-  and puts the terminal commands on PATH. `anvil uninstall` removes it.
-- HTTPS per application: right-click › HTTPS in the app, `anvil https <site>
-  [--off]` in the CLI. With HTTPS on, the http:// address redirects to https://.
+- Local domains: every application answers at `<name>.test` through a built-in
+  DNS server and a one-time `/etc/resolver` entry (`anvil tld localhost` uses
+  `<name>.localhost` instead, with no setup).
+- `anvil setup` (one password prompt) forwards ports 80 and 443 on this Mac to
+  Anvil, so addresses need no port number, trusts the HTTPS certificate and
+  puts the terminal commands, `anvil` among them, on PATH. `anvil uninstall`
+  lists and removes everything Anvil changed.
+- HTTPS per application through Caddy and a local certificate authority:
+  right-click › HTTPS in the app, `anvil https <site> [--off]` in the CLI. With
+  HTTPS on, the http:// address redirects to https://. New applications are
+  served over plain HTTP; Settings › "HTTPS for new applications" changes that.
+- Parking a folder makes every sub-folder an application; linking serves any
+  single folder; extra domains can be added to an application and show in its
+  header.
+- Automatic detection of Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt,
+  Vite, Node.js, Rust, Go, .NET, Django, FastAPI, Flask and Docker Compose
+  projects, with a manual override per app.
+- Isolated PHP 8.0 to 8.5 from portable builds, a default version and a pinned
+  version per application.
+- php.ini settings for all applications or for one; an application with its own
+  settings gets its own PHP-FPM pool.
+- Node.js, Go, Rust, .NET and Python toolchains installed into `~/.anvil`, with
+  their package and build caches kept there too. Node.js follows `.nvmrc` or
+  `.node-version`, and every app can be pinned to an installed version. Python
+  apps run through uv with the project's own Python and `.venv`.
+- Applications with their own dev server run on a private port behind the
+  proxy and also answer at `<name>.localhost`. Extra package.json dev servers
+  get their own address, `<app>--<script>.test`. Next.js apps open at
+  `<name>.localhost` until their `next.config` allows the domain suffix; the app
+  adds `allowedDevOrigins` on request.
 - A Dev tab (⌘3) runs an app's dev processes (for Laravel the queue, log tailer
   and Vite from `php artisan dev`, otherwise package.json dev servers) and
   shows their live, colored output, one at a time or all merged. The toolbar
@@ -23,160 +53,80 @@ Until 1.0.0, minor versions may contain breaking changes.
   all, c clear; ⌘-click opens a link in the output.
 - Configure edits an app's processes as a table: command, "Dev start", "With
   Anvil", processes of your own, and "Reset to detected". It is stored in
-  `~/.anvil/config.toml`; the project's files are never changed. A project's
-  own `.anvil.toml` is read when present.
-- Extra package.json dev servers get their own address,
-  `<script>.<app>.<tld>` (for example `docs.vuefinder.test`).
-- Docker Compose projects are detected as their own kind. A Containers tab
-  shows each container's state and live log, with Start, Stop and Restart.
-  Stop never removes containers.
+  `~/.anvil/config.toml`; the project's files are never changed.
+- Processes Anvil starts get color (`FORCE_COLOR`, `--ansi` for artisan) and
+  the PATH your terminal has, so Homebrew tools such as pnpm are found. A
+  process that needs `node_modules` installs it first, with the package manager
+  the lock file names.
+- Docker Compose projects: a Containers tab shows each container's state and
+  live log, with Start, Stop and Restart. Stop never removes containers.
 - A Processes window (the pulse icon in the toolbar) lists everything Anvil
   runs in three tabs, Apps, Services and Anvil, with port, PID, CPU, memory and
   a live, colored log.
-- New applications show their setup live: the steps tick off over the colored
-  output, and Open selects the new app. Options per template: Laravel's
-  starter kit, database and package manager, Next.js's TypeScript and Tailwind,
-  the PHP or Node.js version and Git.
-- Settings lists each language (PHP, Node.js, Go, Rust, .NET, Python) on its
-  own page with its versions. The Node.js page shows which npm, pnpm, yarn and
-  bun apps and your terminal get, and installs a missing one into Anvil's
-  folder.
-- Log retention: Anvil's own logs stay under 5 MB. Settings › Storage › "Trim
-  app logs weekly" (on by default) cuts an app's `storage/logs/*.log` over
-  10 MB to its last 1 MB and deletes daily logs older than 14 days.
-- The CLI uses color on a terminal; `NO_COLOR` turns it off.
-- The macOS app carries the `anvil` CLI: setup puts it on PATH with the other
-  terminal commands, so the CLI needs no separate install.
-- Updates: Anvil checks for a new release daily and shows "Update available" in
-  the titlebar (Settings › About › "Check for updates" asks now). "Restart to
-  update" installs it and brings back the dev processes that were running.
-- macOS notifications while Anvil isn't in front: a dev process, Caddy or
-  PHP-FPM stopping unexpectedly, and a new application's setup ending.
-  Settings › General › Notifications turns them off.
-- `anvil new` takes the New application sheet's options as flags, e.g.
-  `anvil new laravel shop --starter react --db pgsql --pm pnpm --php 8.4
-  --no-git --https`; also `--framework`, `--node`, `--[no-]ts` and
-  `--[no-]tailwind`. A flag the template doesn't offer is refused, and
-  `anvil new --help` lists which templates each one applies to.
-- S3 storage as a service: the Versity S3 Gateway (Apache-2.0), downloaded and
-  checked against its release's SHA-256 list. Buckets are folders in
-  `~/.anvil/data/<name>`; the first start makes an `anvil` bucket. Connect
-  shows the keys and the Laravel `.env` lines (`AWS_ENDPOINT`,
-  `AWS_USE_PATH_STYLE_ENDPOINT=true`, `AWS_BUCKET`), and the header opens its
-  web console.
-- SILO (AGPL-3.0), the maintained MinIO fork, as a second S3 storage service:
-  ports 9000 and 9001 for its web console, the same keys, `anvil` bucket and
-  `.env` lines, downloaded and checked against its release's SHA-256 list.
-- Security check in the Packages tab: "Check security" on the Composer or Node
-  tab runs that package manager's own audit (`composer audit`, or `npm`,
-  `pnpm`, `yarn` or `bun audit`, picked by the lock file) with the app's PHP and
-  Node.js versions, and lists each advisory with its package, installed
-  version, severity and fix. `anvil packages --audit` does the same in the CLI.
+- Services: MySQL (9.7, 8.4, 8.0), PostgreSQL (18 to 14), Redis (8.10, 7.4, 7.2,
+  built from source), Mailpit, and S3 storage with the Versity S3 Gateway
+  (Apache-2.0) or SILO (AGPL-3.0, the maintained MinIO fork), both checked
+  against their release's SHA-256 list. Add any number of each, each with its
+  own name, port, data folder, log, tags and attached applications. Services
+  keep the version they were added with; removing one keeps its data unless
+  asked.
+- See inside a running service: databases with sizes (create and drop), Redis
+  keys and memory, Mailpit messages, S3 keys and the Laravel `.env` lines with
+  a link to the web console.
+- For each application, where the database, cache and mail server named in its
+  `.env` come from: an Anvil service, Docker, another local program or a remote
+  host.
 - A project's `.anvil.toml` can ask for its PHP and Node.js versions and the
   services it needs, so whoever clones it gets the same setup:
   `php = "8.4"`, `node = "22"`, `[services] mysql = "8.4"` (`""` for any
   version). A version you pick in Anvil still wins. What's missing shows as one
   line in the Overview with Install and Add; `anvil project [--apply]` lists it
   and installs or adds it. Anvil never writes the file.
+- New applications from templates for every supported type, in the app with
+  their setup shown live, or with `anvil new` and the same options as flags
+  (`anvil new laravel shop --starter react --db pgsql --pm pnpm --php 8.4
+  --no-git --https`; `anvil new --help` lists which templates each applies to).
 - Git worktrees run side by side. Each worktree of an app appears under it in
-  the sidebar and answers at `<app>--<name>.test`, with its own processes (Dev
-  tab, queue, Vite). It always has a database of its own, a copy of the app's
-  or an empty one, picked when you create it (`--db copy|empty`) and made the
-  first time it is used. Settings › Database for new worktrees sets the
-  default, also for worktrees made outside Anvil. A test run (`php artisan
-  test`, PHPUnit, Pest, or a `test`/`test:*` script from the Scripts tab) uses
-  the database its test config names (`:memory:` too) unless that is the app's;
-  everything else uses the worktree's own, so tests started from a terminal
-  `composer test` use the worktree's own database. A test config whose setting for the
-  app's database would win stops the worktree until it names one of its own. A
-  database Anvil didn't make is only used after "Use existing"
-  (`anvil worktree use-db`). Its Redis and
-  cache keys get their own prefix. Removing a worktree stops its processes and
-  drops its database only when you ask; databases left behind by worktrees that
-  are gone are listed with Delete and Keep. A worktree made outside Anvil gets
-  inline offers to copy the app's `.env` and install its packages. Create and
-  remove them in the app (right-click, or the Git tab) or with
-  `anvil worktree list|add|remove`.
-
-### Changed
-
-- Aliases moved out of the sidebar into the app's header, as a "+N" chip that
-  lists them; worktrees now take the place under the app.
-- Extra dev servers answer at `<app>--<script>.test` (was `<script>.<app>.test`,
-  which redirects there until the next release), so `*.<app>.test` stays free.
-- The Overview is a summary: one "Dev · 3 of 4 running" (or "Containers")
-  line that opens the tab, then where the app runs and its folders. The header
-  shows the state; Start and Stop live in the Dev tab.
-- A process's output shows only its current run: it is cleared when the
-  process starts and when Anvil starts.
-- Processes Anvil starts get color (`FORCE_COLOR`, `--ansi` for artisan) and
-  the PATH your terminal has, so Homebrew tools such as pnpm are found.
-- A dev process or script that needs `node_modules` installs it first, with
-  the package manager the lock file names.
-- The Logs tab follows new entries, groups repeated entries (×24), shows the
-  app's own stack frames first with vendor frames folded, opens a frame in
-  your editor, and shows plain-text logs as a terminal.
-- The Packages tab has one tab per package manager, shows updates inline
-  (11.36.1 → 12.4.0) and checks for them only when asked.
-- New applications are served over plain HTTP; Settings › "HTTPS for new
-  applications" changes that. Applications that existed before keep HTTPS.
-- Next.js apps open at `<name>.localhost` until their `next.config` allows the
-  domain suffix; the app adds `allowedDevOrigins` on request.
-- Apps with their own dev server also answer at `<name>.localhost`.
-- A light theme that follows macOS.
-
-### Fixed
-
-- The Add Alias and New Group prompts and the new-database field took no typing.
-- Next.js dev servers listened on every network interface; they now listen on
-  127.0.0.1 only.
-- Progress counters that use backspaces showed as escape-code fragments.
-
-## [0.1.0] - 2026-10-17
-
-The first public release of Anvil, a macOS development environment.
-
-### Added
-
-- Local domains: every application answers at `<name>.test` through a built-in
-  DNS server and a one-time `/etc/resolver` entry.
-- Local HTTPS through Caddy with a local certificate authority that `anvil trust`
-  adds to your login keychain. Default ports are 8080 (HTTP) and 8443 (HTTPS).
-- Parking a folder makes every sub-folder an application; linking serves any
-  single folder; extra domains can be added to an application.
-- Automatic detection of Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt,
-  Vite, Node.js, Rust, Go and .NET projects, with a manual override per app.
-- Isolated PHP 8.0 to 8.5 from portable builds, a default version and a pinned
-  version per application.
-- php.ini settings for all applications or for one; an application with its own
-  settings gets its own PHP-FPM pool.
-- Node.js, Go, Rust and .NET toolchains installed into `~/.anvil`, with their
-  package and build caches kept there too. Node.js follows `.nvmrc` or
-  `.node-version`, and every app can be pinned to an installed version.
-- Applications with their own dev server run on a private port behind the
-  proxy, with a configurable start command and port, start with Anvil, and a
-  "not running" page while stopped.
-- Services: MySQL (9.7, 8.4, 8.0), PostgreSQL (18 to 14), Redis (8.10, 7.4, 7.2,
-  built from source) and Mailpit. Add any number of each, each with its own
-  name, port, data folder, log, tags and attached applications. Services keep
-  the version they were added with; removing one keeps its data unless asked.
-- See inside a running service: databases with sizes (create and drop), Redis
-  keys and memory, Mailpit messages.
-- For each application, where the database, cache and mail server named in its
-  `.env` come from: an Anvil service, Docker, another local program or a remote
-  host.
-- New applications from templates for every supported type (`anvil new`).
+  the sidebar and answers at `<app>--<name>.test`, with its own processes and
+  its own database: a copy of the app's or an empty one, picked when you create
+  it (`--db copy|empty`); Settings › Database for new worktrees sets the
+  default, also for worktrees made outside Anvil. Its Redis and cache keys get
+  their own prefix. Tests use the database their test config names (`:memory:`
+  too) unless that is the app's; a worktree whose test config would reach the
+  app's database is stopped until it names one of its own. A database Anvil
+  didn't make is only used after "Use existing" (`anvil worktree use-db`).
+  Removing a worktree stops its processes and drops its database only when you
+  ask; databases left behind by worktrees that are gone are listed with Delete
+  and Keep. A worktree made outside Anvil gets offers to copy the app's `.env`
+  and install its packages. Create and remove them in the app (right-click, or
+  the Git tab) or with `anvil worktree list|add|remove`.
 - Disk usage per application split into safe, rebuildable and keep, with
   clean-up that never touches your code or data (`anvil usage`, `anvil clean`).
-- Git status per application (`anvil git`), a log viewer for Laravel, Symfony,
-  app output and PHP-FPM logs (`anvil logs`), and each application's
-  dependencies with locked versions and an optional update check
-  (`anvil packages`).
+- Log retention: Anvil's own logs stay under 5 MB. Settings › Storage › "Trim
+  app logs weekly" (on by default) cuts an app's `storage/logs/*.log` over
+  10 MB to its last 1 MB and deletes daily logs older than 14 days.
+- Git status per application (`anvil git`). A Logs tab for Laravel, Symfony,
+  app output and PHP-FPM logs (`anvil logs`) that follows new entries, groups
+  repeated ones, shows the app's own stack frames first and opens a frame in
+  your editor.
+- Each application's dependencies with locked versions, one tab per package
+  manager, with updates checked only when asked (`anvil packages`). "Check
+  security" runs the package manager's own audit (`composer audit`, or `npm`,
+  `pnpm`, `yarn` or `bun audit`) and lists each advisory with its fix
+  (`anvil packages --audit`).
 - Native macOS app with a menu bar icon: applications and services side by
-  side, an application panel with Overview, Git, Logs, Packages, Resources and
-  Settings tabs, a Settings window (General, PHP, Languages, Storage, Shortcuts,
-  About), keyboard shortcuts and launch at login.
-- `anvil --version` prints the release version.
+  side, an application panel with Overview, Git, Dev or Containers, Logs,
+  Packages, Resources and Settings tabs, a Settings window (General, a page per
+  language, Storage, Shortcuts, About), keyboard shortcuts, launch at login and
+  a light and dark theme that follows macOS.
+- Updates: Anvil checks for a new release daily and shows "Update available" in
+  the titlebar (Settings › About › "Check for updates" asks now). "Restart to
+  update" installs it and brings back the dev processes that were running.
+- macOS notifications while Anvil isn't in front: a dev process, Caddy or
+  PHP-FPM stopping unexpectedly, and a new application's setup ending.
+  Settings › General › Notifications turns them off.
+- The CLI uses color on a terminal; `NO_COLOR` turns it off. `anvil --version`
+  prints the release version.
 
 ### Security
 
