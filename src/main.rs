@@ -278,6 +278,17 @@ enum WorktreeCmd {
         /// Create the branch, from the app's current one
         #[arg(long)]
         new: bool,
+        /// Its database: copy (of main's), share (main's) or empty; unset follows
+        /// Settings' default
+        #[arg(long)]
+        db: Option<worktrees::DbChoice>,
+    },
+    /// Use the database a worktree would get that is there already and Anvil didn't make
+    UseDb {
+        name: String,
+        /// Don't ask first
+        #[arg(long)]
+        yes: bool,
     },
     /// Remove a worktree: its folder, and with --drop-db its database copies
     Remove {
@@ -487,22 +498,25 @@ fn print_resolver_step(cfg: &Config) {
 /// missing: resolver file, ports daemon and the certificate authority.
 /// Ask on a terminal whether the service's license is accepted; elsewhere say how to.
 fn ask_license(kind: &str, version: &str) -> Result<bool> {
-    use std::io::{BufRead, IsTerminal, Write};
     let l = services::license(kind, version);
-    if !std::io::stdin().is_terminal() {
-        anyhow::bail!(
-            "{} {version} comes under {}: read {} and add --accept-license",
-            services::name(kind),
-            l.name,
-            l.url
-        );
-    }
-    print!(
-        "{} {version} comes under {}.\nRead it at {}\nAccept the license? [y/N] ",
+    let question = format!(
+        "{} {version} comes under {}.\nRead it at {}\nAccept the license?",
         services::name(kind),
         l.name,
         cyan(l.url)
     );
+    let elsewhere = format!("read {} and add --accept-license", l.url);
+    confirm(&question, &elsewhere)
+}
+
+/// Ask `question` [y/N] on a terminal; elsewhere refuse with "<question>: <elsewhere>".
+fn confirm(question: &str, elsewhere: &str) -> Result<bool> {
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        let first = question.lines().next().unwrap_or(question);
+        anyhow::bail!("{}: {elsewhere}", first.trim_end_matches(['?', '.']));
+    }
+    print!("{question} [y/N] ");
     std::io::stdout().flush()?;
     let mut answer = String::new();
     std::io::stdin().lock().read_line(&mut answer)?;
@@ -785,7 +799,12 @@ fn run() -> Result<()> {
                         );
                     }
                 }
-                WorktreeCmd::Add { branch, app, new } => {
+                WorktreeCmd::Add {
+                    branch,
+                    app,
+                    new,
+                    db,
+                } => {
                     let cwd = std::env::current_dir()?;
                     let found = match &app {
                         Some(a) => all.iter().find(|s| s.name == site_name(a)),
@@ -794,8 +813,27 @@ fn run() -> Result<()> {
                     let app = found
                         .filter(|s| s.worktree_of.is_none())
                         .context("Name an app with --app, or run this inside one")?;
-                    let folder = worktrees::add(&cfg, app, &branch, new)?;
+                    let folder = worktrees::add(&cfg, app, &branch, new, db)?;
+                    if let Some(choice) = db {
+                        edit(&mut cfg, |c| worktrees::set_db_at(c, &folder, choice))?;
+                    }
                     println!("Added {}", folder.display());
+                }
+                WorktreeCmd::UseDb { name, yes } => {
+                    let s = all
+                        .iter()
+                        .find(|s| s.name == site_name(&name) && s.worktree_of.is_some())
+                        .with_context(|| format!("No worktree named {name}"))?;
+                    let db = worktrees::db_name(s);
+                    let question = format!(
+                        "Use {db} for {}? Anvil didn't make it; its migrations and tests then change it.",
+                        s.name
+                    );
+                    if !yes && !confirm(&question, "add --yes to use it")? {
+                        bail!("Nothing changed");
+                    }
+                    edit(&mut cfg, |c| worktrees::adopt(c, s))?;
+                    println!("{} uses {db}", s.name);
                 }
                 WorktreeCmd::Remove {
                     name,
@@ -1418,6 +1456,23 @@ mod tests {
                 app: Some(_),
                 ..
             }
+        ));
+        assert!(matches!(
+            parse(&["add", "x", "--db", "share"]),
+            WorktreeCmd::Add {
+                db: Some(worktrees::DbChoice::Share),
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse(&["add", "x"]),
+            WorktreeCmd::Add { db: None, .. }
+        ));
+        let bad = Cli::try_parse_from(["anvil", "worktree", "add", "x", "--db", "main"]);
+        assert!(bad.is_err());
+        assert!(matches!(
+            parse(&["use-db", "shop--x", "--yes"]),
+            WorktreeCmd::UseDb { yes: true, .. }
         ));
         assert!(matches!(
             parse(&["remove", "shop--x", "--drop-db", "--force"]),

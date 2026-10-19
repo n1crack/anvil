@@ -95,6 +95,9 @@ pub struct Config {
     /// Service licenses the user accepted before installing: license id -> date.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub accepted_licenses: BTreeMap<String, String>,
+    /// Settings › Database for new worktrees: what one opened outside Anvil uses, and the
+    /// New Worktree dialog's preselection.
+    pub worktree_db: worktrees::DbChoice,
     /// Per worktree site (`<app>--<name>`): its database choice and copies made.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub worktrees: BTreeMap<String, worktrees::WorktreeConfig>,
@@ -181,6 +184,7 @@ impl Default for Config {
             trim_app_logs: true,
             notifications: true,
             accepted_licenses: BTreeMap::new(),
+            worktree_db: worktrees::DbChoice::Copy,
             worktrees: BTreeMap::new(),
         }
     }
