@@ -139,6 +139,12 @@ keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
 /// The keys pointing at a database. Test runs always get them (`run_env`).
 const DB_KEYS: [&str; 3] = ["DB_DATABASE", "DB_URL", "DATABASE_URL"];
 
+/// Whether the env key `k` names a database: `DB_KEYS`, and names like `PGDATABASE`,
+/// `MONGO_DB`, `DB_NAME` (a value of main's there is refused, a missing one stops the worktree).
+fn names_db(k: &str) -> bool {
+    DB_KEYS.contains(&k) || k.contains("DATABASE") || k.ends_with("_DB") || k.ends_with("DB_NAME")
+}
+
 /// Anvil's own preset `id`.
 fn shipped(id: &str) -> Hooks {
     static ALL: std::sync::OnceLock<BTreeMap<String, Hooks>> = std::sync::OnceLock::new();
@@ -283,6 +289,11 @@ pub fn check_hooks(h: &Hooks) -> Result<(), String> {
     for (k, v) in h.keys.iter().flatten() {
         if !key(k) {
             return Err(format!("\"{k}\" isn't an env key name"));
+        }
+        if v.trim().is_empty() {
+            return Err(format!(
+                "{k} has no value: give it one, or take the key out (taking a database key out shares main's database)"
+            ));
         }
         if let Some(p) = placeholders(v).find(|p| !PLACEHOLDERS.contains(p)) {
             return Err(format!(
@@ -1011,9 +1022,16 @@ fn env_with(
     ];
     for (key, template) in keys {
         if template != "{db}" {
-            // A placeholder without a value (`{port}` of an app Anvil serves) leaves it out.
-            if let Some(v) = fill(template, &vars).filter(|v| !v.is_empty()) {
-                env.push((key.clone(), v));
+            match fill(template, &vars).filter(|v| !v.is_empty()) {
+                Some(v) => env.push((key.clone(), v)),
+                // Left out, the worktree's `.env` (main's) would win: nothing of it runs.
+                None if names_db(key) => {
+                    return Err(format!(
+                        "{key} has no value from the worktree keys; give it one, or take it out to share main's database"
+                    ));
+                }
+                // A placeholder without a value (`{port}` of an app Anvil serves) leaves it out.
+                None => {}
             }
             continue;
         }
@@ -1047,7 +1065,7 @@ fn env_with(
         }
     }
     // A database key the user set by hand to main's database: sharing it is taking the key out.
-    let is_db = |k: &str| DB_KEYS.contains(&k) || keys.get(k).is_some_and(|t| t == "{db}");
+    let is_db = |k: &str| names_db(k) || keys.get(k).is_some_and(|t| t == "{db}");
     let mains = |v: &str| match url_database(v) {
         Some(d) => is_mains_database(site, &d),
         None => is_mains_database(site, v),
@@ -1153,8 +1171,9 @@ pub fn run_env(cfg: &Config, site: &Site, test: bool) -> Result<Vec<(String, Str
     }
     let mut keys = hooks(cfg, site).keys;
     if test {
+        // Whatever is stored (taken out, empty, another value): the worktree's own.
         for k in DB_KEYS {
-            keys.entry(k.into()).or_insert_with(|| "{db}".into());
+            keys.insert(k.into(), "{db}".into());
         }
     }
     let mut env = env_with(cfg, site, &keys)?;
@@ -2903,7 +2922,7 @@ pub(crate) mod tests {
             _ => None,
         };
         for (n, (dotenv, names)) in mains.iter().enumerate() {
-            let (cfg, site) = worktree_site(&format!("prop-{n}"), "");
+            let (mut cfg, site) = worktree_site(&format!("prop-{n}"), "");
             let main = main_of(&site.path).unwrap();
             let fill = |t: &str| t.replace("{MAIN}", &main.display().to_string());
             fs::write(main.join(".env"), fill(dotenv)).unwrap();
@@ -2923,36 +2942,71 @@ pub(crate) mod tests {
                                 Path::new(&fill(m)).is_absolute() && canon(&fill(m)) == canon(db)
                             })))
             };
-            // What it gets with no test config: its own.
+            // What it gets with no test config and the preset's keys: its own.
             let own = checked_env(&cfg, &site, false).unwrap();
-            for (file, text) in configs {
-                for f in [
-                    ".env.testing",
-                    "phpunit.xml",
-                    "phpunit.dist.xml",
-                    "phpunit.xml.dist",
-                ] {
-                    let _ = fs::remove_file(site.path.join(f));
-                }
-                if !file.is_empty() {
-                    fs::write(site.path.join(file), fill(text)).unwrap();
-                }
-                for test in [false, true] {
-                    let case = format!("{dotenv:?} {file} {text:?} test={test}");
-                    let Ok(env) = checked_env(&cfg, &site, test) else {
-                        continue; // refused: nothing runs
-                    };
-                    // Anvil's database keys are never removed.
-                    for (k, _) in own.iter().filter(|(k, v)| db_of(k, v).is_some()) {
-                        assert!(env.iter().any(|(key, _)| key == k), "{k} unset: {case}");
+            // The worktree keys as the user may leave them: the preset's, DB_DATABASE empty, one
+            // whose placeholder has no value, main's name typed in, or taken out (sharing).
+            for variant in ["preset", "", "{port}", "shop", "removed"] {
+                let mut keys = shipped("laravel").keys.unwrap();
+                match variant {
+                    "preset" => {}
+                    "removed" => {
+                        for k in DB_KEYS {
+                            keys.remove(k);
+                        }
                     }
-                    for (k, v) in &env {
-                        let Some(db) = db_of(k, v) else { continue };
-                        // A relative SQLite name resolves inside the worktree.
-                        assert!(!is_mains(&db), "{k}={v}: {case}");
-                        // Not a test run (or one misdetected): only ever its own.
-                        if !test {
-                            assert_eq!(Some(v), get(&own, k).map(String::from).as_ref(), "{case}");
+                    v => {
+                        keys.insert("DB_DATABASE".into(), v.into());
+                    }
+                }
+                cfg.sites.entry("shop".into()).or_default().worktree.keys = Some(keys);
+                for (file, text) in configs {
+                    for f in [
+                        ".env.testing",
+                        "phpunit.xml",
+                        "phpunit.dist.xml",
+                        "phpunit.xml.dist",
+                    ] {
+                        let _ = fs::remove_file(site.path.join(f));
+                    }
+                    if !file.is_empty() {
+                        fs::write(site.path.join(file), fill(text)).unwrap();
+                    }
+                    for test in [false, true] {
+                        let case =
+                            format!("{dotenv:?} {file} {text:?} keys={variant:?} test={test}");
+                        let got = checked_env(&cfg, &site, test);
+                        // A DB key with no value never lets `.env` (main's) win: nothing runs.
+                        if !test && ["", "{port}"].contains(&variant) {
+                            assert!(got.is_err(), "{case}");
+                        }
+                        let Ok(env) = got else {
+                            continue; // refused: nothing runs
+                        };
+                        // Anvil's database keys are never removed, except by taking them out, and a
+                        // test run gets them even then.
+                        if test || variant != "removed" {
+                            for (k, _) in own.iter().filter(|(k, v)| db_of(k, v).is_some()) {
+                                assert!(env.iter().any(|(key, _)| key == k), "{k} unset: {case}");
+                            }
+                        } else {
+                            assert!(
+                                env.iter().all(|(k, _)| !DB_KEYS.contains(&k.as_str())),
+                                "{case}"
+                            );
+                        }
+                        for (k, v) in &env {
+                            let Some(db) = db_of(k, v) else { continue };
+                            // A relative SQLite name resolves inside the worktree.
+                            assert!(!is_mains(&db), "{k}={v}: {case}");
+                            // Not a test run (or one misdetected): only ever its own.
+                            if !test && variant == "preset" {
+                                assert_eq!(
+                                    Some(v),
+                                    get(&own, k).map(String::from).as_ref(),
+                                    "{case}"
+                                );
+                            }
                         }
                     }
                 }
@@ -3151,7 +3205,17 @@ pub(crate) mod tests {
             e.unwrap_err().to_string(),
             "A: {nope} isn't one of {db}, {url}, {prefix}, {port}, {name}"
         );
-        assert!(set_field(&mut h, "keys", Some(serde_json::json!({ "A B": "" }))).is_err());
+        assert!(set_field(&mut h, "keys", Some(serde_json::json!({ "A B": "x" }))).is_err());
+        // A key left empty (a form line with no `=`) isn't taken out: refused, saying how.
+        let e = set_field(
+            &mut h,
+            "keys",
+            Some(serde_json::json!({ "DB_DATABASE": "" })),
+        );
+        assert_eq!(
+            e.unwrap_err().to_string(),
+            "DB_DATABASE has no value: give it one, or take the key out (taking a database key out shares main's database)"
+        );
         assert!(set_field(&mut h, "colour", Some(serde_json::json!(1))).is_err());
         assert!(h.keys.is_some(), "a refused change changes nothing");
         set_field(&mut h, "keys", None).unwrap();
@@ -3207,6 +3271,11 @@ pub(crate) mod tests {
             env_err(&cfg, &site),
             "DB_DATABASE names shop's database; take it out of the worktree keys to share that database"
         );
+        // Any key naming a database, not only Laravel's.
+        let mut other = shipped("laravel").keys.unwrap();
+        other.insert("PGDATABASE".into(), "shop".into());
+        cfg.sites.entry("shop".into()).or_default().worktree.keys = Some(other);
+        assert!(env_err(&cfg, &site).starts_with("PGDATABASE names shop's database"));
         // Taken out: main's database by the user's choice, and `check` says so.
         for k in DB_KEYS {
             keys.remove(k);
