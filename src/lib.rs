@@ -1062,7 +1062,8 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             for row in processes::server_rows(cfg, site) {
                 let mut names = vec![row.host.clone()];
                 if cfg.tld != "localhost" {
-                    names.push(row.host.replace(&format!(".{}", cfg.tld), ".localhost"));
+                    let stem = row.host.strip_suffix(&format!(".{}", cfg.tld));
+                    names.push(format!("{}.localhost", stem.unwrap_or(&row.host)));
                 }
                 s += &format!(
                     "\n{} {{\n\treverse_proxy 127.0.0.1:{}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
@@ -2229,17 +2230,6 @@ mod tests {
             "\nvuefinder--docs.test, vuefinder--docs.localhost {{\n\treverse_proxy 127.0.0.1:{port}"
         )));
         assert!(out.contains("\nhttp://vuefinder--docs.test, http://vuefinder--docs.localhost {\n\tredir https://{host}"));
-        // The old address redirects to the new one.
-        let to = site_url(
-            &cfg,
-            &Site {
-                host: "vuefinder--docs.test".into(),
-                ..vf.clone()
-            },
-        );
-        let redir = format!("\n\tredir {to}{{uri}} 308\n}}\n");
-        assert!(out.contains(&format!("\ndocs.vuefinder.test {{{redir}")));
-        assert!(out.contains(&format!("\nhttp://docs.vuefinder.test {{{redir}")));
         vf.secure = false;
         let out = caddyfile(&cfg, &[vf.clone()]);
         assert!(out.contains(&format!(
@@ -2258,6 +2248,61 @@ mod tests {
             "\nhttp://docs.vuefinder.test {{\n\tredir {to}{{uri}} 308\n}}\n"
         )));
         assert_eq!(out.matches("\tredir ").count(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn vite_rows_site(tag: &str, name: &str) -> (PathBuf, Site) {
+        let dir = std::env::temp_dir().join(format!("anvil-caddy-{tag}-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            r#"{"scripts":{"dev":"vite","docs:dev":"vitepress dev docs"}}"#,
+        )
+        .unwrap();
+        let mut s = site(name, dir.to_str().unwrap(), None);
+        s.kind = "vite".into();
+        s.port = Some(41002);
+        (dir, s)
+    }
+
+    #[test]
+    fn old_row_hosts_redirect_for_one_release() {
+        let cfg = Config::default();
+        let (dir, mut vf) = vite_rows_site("old", "vuefinder");
+        let port = processes::server_rows(&cfg, &vf)[0].port;
+        for secure in [true, false] {
+            vf.secure = secure;
+            let to = site_url(
+                &cfg,
+                &Site {
+                    host: "vuefinder--docs.test".into(),
+                    ..vf.clone()
+                },
+            );
+            assert_eq!(to.starts_with("https://"), secure);
+            let out = caddyfile(&cfg, &[vf.clone()]);
+            let redir = format!("\n\tredir {to}{{uri}} 308\n}}\n");
+            let scheme = if secure { "" } else { "http://" };
+            assert!(out.contains(&format!("\n{scheme}docs.vuefinder.test {{{redir}")));
+            if secure {
+                assert!(out.contains(&format!("\nhttp://docs.vuefinder.test {{{redir}")));
+            }
+            assert!(out.contains(&format!(
+                "\n{scheme}vuefinder--docs.test, {scheme}vuefinder--docs.localhost {{\n\treverse_proxy 127.0.0.1:{port}"
+            )));
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn localhost_row_host_keeps_a_name_that_contains_the_tld() {
+        let cfg = Config::default();
+        let (dir, vf) = vite_rows_site("dot", "my.test.app");
+        let out = caddyfile(&cfg, &[vf]);
+        assert!(
+            out.contains("\nmy.test.app--docs.test, my.test.app--docs.localhost {"),
+            "{out}"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

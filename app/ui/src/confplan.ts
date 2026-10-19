@@ -52,3 +52,10 @@ export async function apply(p: ReturnType<typeof plan>, ask: (c: Call) => Promis
     if (Object.keys(args).length) await ask(["set_process", { id: r.id, ...args }]);
   }
 }
+
+/** An extra dev server's host `<app>--<label>.<tld>` as [start, end) of the label; the app name may itself hold "--" or ".". */
+export function labelSpan(app: string, host: string): [number, number] {
+  const head = `${app}--`;
+  const from = host.startsWith(head) ? head.length : 0;
+  return [from, host.indexOf(".", from)];
+}

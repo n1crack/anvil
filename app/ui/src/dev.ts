@@ -1,6 +1,6 @@
 import type { CommandChip, ProcessRow } from "./types";
 import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, popAt, seg, selected, showError, showTab, snap, tab } from "./app";
-import { type Item as Proc, apply, items, plan } from "./confplan";
+import { type Item as Proc, apply, items, labelSpan, plan } from "./confplan";
 import { type Tail, readTail, tail } from "./console";
 import { late } from "./late";
 import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache } from "./processes";
@@ -162,8 +162,7 @@ async function clearOutput(name: string, x: Item) {
 async function editAddress(name: string, r: ProcessRow) {
   const host = new URL(r.address!).hostname;
   // <app>--<label>.<tld>: only the label is editable.
-  const from = host.indexOf("--") + 2;
-  const to = host.indexOf(".");
+  const [from, to] = labelSpan(name, host);
   const first = await ask(`Address of ${r.name}`, host.slice(from, to), (v) => `${host.slice(0, from)}${v.trim() || "…"}${host.slice(to)}`);
   if (typeof first !== "string") return;
   const v = first.trim();

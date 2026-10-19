@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vite-plus/test";
+import { labelSpan } from "../src/confplan";
 import { type Call, apply, check, plan, toJson } from "../src/confjson";
 
 const row = (o: Record<string, unknown>): any => ({ id: "", name: "", command: "", main: false, manual: false, autostart: false, ...o });
@@ -101,5 +102,19 @@ describe("plan and apply", () => {
     seen.length = 0;
     await expect(apply(plan(rows, items.slice(0, 1)), failing, () => now)).rejects.toBe("The command can't be empty");
     expect(seen).toHaveLength(1);
+  });
+});
+
+describe("labelSpan", () => {
+  test("finds the label after the exact <app>-- prefix", () => {
+    for (const [app, host] of [
+      ["vuefinder", "vuefinder--docs.test"],
+      ["my--app", "my--app--docs.test"],
+      ["my.app", "my.app--docs.test"],
+    ]) {
+      const [from, to] = labelSpan(app, host);
+      expect(host.slice(from, to)).toBe("docs");
+      expect(host.slice(to)).toBe(".test");
+    }
   });
 });
