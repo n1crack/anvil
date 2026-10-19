@@ -252,7 +252,7 @@ pub fn resolve(cfg: &Config, app: &str, main: &Path, kind: &str) -> Resolved {
         ("Settings".into(), settings),
     ];
     // A layer with a mistake (a typo in config.toml, say): said, its good fields still used.
-    let problems = layers
+    let mut problems: Vec<String> = layers
         .iter()
         .flat_map(|(layer, h)| {
             let mut out: Vec<String> = h
@@ -290,13 +290,22 @@ pub fn resolve(cfg: &Config, app: &str, main: &Path, kind: &str) -> Resolved {
         .is_some_and(|s| s.worktree.keys.is_some())
         && let Some(keys) = keys.as_mut()
     {
+        let mut back = Vec::new();
         for k in DB_KEYS {
             let below = layers.iter().skip(1).filter_map(|(_, h)| h.keys.as_ref());
             if let Some(v) = below.filter_map(|l| l.get(k)).next()
                 && !keys.contains_key(k)
             {
                 keys.insert(k.into(), v.clone());
+                back.push(k);
             }
+        }
+        if !back.is_empty() {
+            problems.push(format!(
+                "{}: keys leave out {}, so the layers below give them; only the app's own worktree keys can take them out",
+                layers.iter().find(|(_, h)| h.keys.is_some()).map_or("", |l| l.0.as_str()),
+                back.join(", ")
+            ));
         }
     }
     let check = pick("check", |h| h.check.is_some()).check;
@@ -2297,8 +2306,17 @@ pub(crate) mod tests {
         let (mut cfg, site) = worktree_site("team-keys", "DB_CONNECTION=mysql\nDB_DATABASE=shop\n");
         let main = main_of(&site.path).unwrap();
         let url_only = BTreeMap::from([("APP_URL".to_string(), "{url}".to_string())]);
-        let db_keys_are_the_worktrees = |cfg: &Config| {
-            let keys = hooks(cfg, &site).keys;
+        let db_keys_are_the_worktrees = |cfg: &Config, layer: &str| {
+            let resolved = hooks(cfg, &site);
+            // Said, in the app's Settings tab and `anvil worktree hooks`.
+            assert!(
+                resolved.problems.contains(&format!(
+                    "{layer}: keys leave out DB_DATABASE, DB_URL, DATABASE_URL, so the layers below give them; only the app's own worktree keys can take them out"
+                )),
+                "{:?}",
+                resolved.problems
+            );
+            let keys = resolved.keys;
             assert_eq!(keys.get("APP_URL").map(String::as_str), Some("{url}"));
             for k in DB_KEYS {
                 assert_eq!(keys.get(k).map(String::as_str), Some("{db}"), "{k}");
@@ -2314,7 +2332,7 @@ pub(crate) mod tests {
             "[worktree]\nkeys = { APP_URL = \"{url}\" }\n",
         )
         .unwrap();
-        db_keys_are_the_worktrees(&cfg);
+        db_keys_are_the_worktrees(&cfg, ".anvil.toml");
         // A preset edited that way.
         fs::remove_file(main.join(".anvil.toml")).unwrap();
         cfg.worktree_presets.insert(
@@ -2324,10 +2342,12 @@ pub(crate) mod tests {
                 ..Hooks::default()
             },
         );
-        db_keys_are_the_worktrees(&cfg);
+        db_keys_are_the_worktrees(&cfg, "Laravel preset");
         // The user's own app settings can: the worktree shares main's database.
         cfg.sites.entry("shop".into()).or_default().worktree.keys = Some(url_only);
-        let keys = hooks(&cfg, &site).keys;
+        let resolved = hooks(&cfg, &site);
+        assert!(resolved.problems.is_empty(), "{:?}", resolved.problems);
+        let keys = resolved.keys;
         assert!(DB_KEYS.iter().all(|k| !keys.contains_key(*k)), "{keys:?}");
         assert_eq!(get(&env(&cfg, &site).unwrap(), "DB_DATABASE"), None);
     }
