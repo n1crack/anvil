@@ -2994,7 +2994,7 @@ body.activity {
   border-radius: 1px;
   transition: background 0.12s;
 }
-.split-handle:hover::after, .col-resizing .split-handle::after { background: color-mix(in srgb, var(--text) 22%, transparent); }
+.split-handle:hover::after, .split-handle.dragging::after { background: color-mix(in srgb, var(--text) 22%, transparent); }
 .col-resizing, .col-resizing * { cursor: col-resize !important; -webkit-user-select: none !important; user-select: none !important; }
 /* Over the sidebar's border, the window's full height. */
 .sidebar-split { position: fixed; top: 0; bottom: 0; left: calc(var(--sidebar) - 4px); z-index: 5; width: 8px; }

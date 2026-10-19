@@ -32,4 +32,13 @@ describe("splitter", () => {
     expect(localStorage.getItem("t-width")).toBeNull();
     expect(document.documentElement.classList.contains("col-resizing")).toBe(false);
   });
+  test("only the divider being dragged lights up", () => {
+    const a = make().h;
+    const b = make().h;
+    a.dispatchEvent(new PointerEvent("pointerdown", { button: 0, clientX: 0 }));
+    expect(a.classList.contains("dragging")).toBe(true);
+    expect(b.classList.contains("dragging")).toBe(false);
+    a.dispatchEvent(new PointerEvent("pointerup", { clientX: 0 }));
+    expect(a.classList.contains("dragging")).toBe(false);
+  });
 });

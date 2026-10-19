@@ -23,10 +23,12 @@ export function splitter(handle: HTMLElement, o: Opts) {
     e.preventDefault();
     handle.setPointerCapture?.(e.pointerId);
     document.documentElement.classList.add("col-resizing");
+    handle.classList.add("dragging");
     handle.onpointermove = (m) => o.apply((width = fit(o.at(m))));
     handle.onpointerup = handle.onlostpointercapture = () => {
       handle.onpointermove = handle.onpointerup = handle.onlostpointercapture = null;
       document.documentElement.classList.remove("col-resizing");
+      handle.classList.remove("dragging");
       if (width) localStorage.setItem(o.key, String(width));
     };
   };
