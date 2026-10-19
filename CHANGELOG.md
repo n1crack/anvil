@@ -18,12 +18,16 @@ Until 1.0.0, minor versions may contain breaking changes.
   `php artisan migrate` for Laravel), run only when you say Run. Anvil ships a
   preset per framework, editable in Settings › Worktrees with Reset to
   default; an app changes any of it in its Settings tab, and a project can
-  share its own in `.anvil.toml`'s `[worktree]`. The keys go into the env
-  files Anvil copies and into everything Anvil starts; a worktree whose env
-  file still has the app's value for a checked key says so on its Overview,
-  with "Rewrite with the hooks". Taking the database keys out shares the
-  app's database; tests still get the worktree's own. `anvil worktree hooks`
-  prints an app's hooks and where each comes from.
+  share its own in `.anvil.toml`'s `[worktree]`. The keys go into everything
+  Anvil starts and into the env files it reads (`.env`, `.env.local`,
+  `.env.development`, `.env.development.local`; never `.env.example` or
+  `.env.testing`) when Anvil copies them; a worktree whose env file still has
+  the app's value for a checked key says so on its Overview, with "Rewrite
+  with the hooks", which changes only those lines. Taking the database keys
+  out shares the app's database; a database key left empty, or one whose
+  placeholder has no value, stops the worktree instead, and tests always get
+  the worktree's own. `anvil worktree hooks` prints an app's hooks, where each
+  comes from, and any mistake in them.
 
 ### Changed
 
