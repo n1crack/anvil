@@ -1178,10 +1178,21 @@ fn env_with(
     // Symfony Runtime's `dotenv_overload`: its env files win over the process env, so
     // Anvil's keys can't keep it off main's database.
     let composer = fs::read_to_string(site.path.join("composer.json")).unwrap_or_default();
-    let overload = serde_json::from_str::<serde_json::Value>(&composer)
-        .ok()
-        .and_then(|c| c.pointer("/extra/runtime/dotenv_overload")?.as_bool());
-    if overload == Some(true) {
+    let composer = serde_json::from_str::<serde_json::Value>(&composer).unwrap_or_default();
+    // Set as PHP reads it: anything but false, null, 0, "", "0" (and an empty array) is on.
+    let set = |option: &str| {
+        use serde_json::Value;
+        composer
+            .pointer(&format!("/extra/runtime/{option}"))
+            .is_some_and(|v| match v {
+                Value::Null | Value::Bool(false) => false,
+                Value::Number(n) => n.as_f64() != Some(0.0),
+                Value::String(s) => !s.is_empty() && s != "0",
+                Value::Array(a) => !a.is_empty(),
+                _ => true,
+            })
+    };
+    if set("dotenv_overload") {
         return Err("its composer.json sets extra.runtime.dotenv_overload, so its env files win over the worktree's own settings and could reach main's database: turn it off to run it".into());
     }
     let mut env: Vec<(String, String)> = Vec::new();
@@ -4139,19 +4150,24 @@ pub(crate) mod tests {
     fn symfonys_dotenv_overload_stops_the_worktree() {
         let (cfg, mut site) = worktree_site("overload", "DATABASE_URL=postgresql://h/shop\n");
         site.kind = "symfony".into();
-        let composer = |on: bool| {
+        let composer = |option: &str, value: &str| {
             fs::write(
                 site.path.join("composer.json"),
-                format!(r#"{{"extra": {{"runtime": {{"dotenv_overload": {on}}}}}}}"#),
+                format!(r#"{{"extra": {{"runtime": {{"{option}": {value}}}}}}}"#),
             )
             .unwrap()
         };
-        composer(false);
-        assert!(env(&cfg, &site).is_ok());
-        composer(true);
-        for test in [false, true] {
-            let err = run_env(&cfg, &site, test).unwrap_err();
-            assert!(err.contains("extra.runtime.dotenv_overload"), "{err}");
+        // PHP's falsy values leave it off.
+        for off in ["false", "null", "0", r#""""#, r#""0""#] {
+            composer("dotenv_overload", off);
+            assert!(env(&cfg, &site).is_ok(), "{off}");
+        }
+        for on in ["true", r#""true""#, "1", r#""1""#] {
+            composer("dotenv_overload", on);
+            for test in [false, true] {
+                let err = run_env(&cfg, &site, test).unwrap_err();
+                assert!(err.contains("extra.runtime.dotenv_overload"), "{on}: {err}");
+            }
         }
     }
 
