@@ -83,7 +83,7 @@ pub(crate) fn run<S: AsRef<std::ffi::OsStr>>(dir: &Path, args: &[S]) -> anyhow::
 }
 
 /// The repository folder: `.git` itself, or where a `.git` file points to.
-pub(crate) fn git_dir(dir: &Path) -> Option<PathBuf> {
+pub fn git_dir(dir: &Path) -> Option<PathBuf> {
     let dot = dir.join(".git");
     if dot.is_dir() {
         return Some(dot);

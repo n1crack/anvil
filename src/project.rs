@@ -11,6 +11,9 @@
 //!
 //! [processes]
 //! queue = "php artisan queue:work"
+//!
+//! [worktree]      # see `worktrees::Hooks`
+//! copy = [".env"]
 //! ```
 
 use crate::{Config, PHP_VERSIONS, Site, services};
@@ -31,6 +34,9 @@ pub struct ProjectFile {
     pub services: BTreeMap<String, String>,
     #[serde(default)]
     pub processes: BTreeMap<String, String>,
+    /// Worktree hooks shared with the team (`worktrees::Hooks`).
+    #[serde(default)]
+    pub worktree: Option<crate::worktrees::Hooks>,
 }
 
 /// The file's text checked: TOML, known keys, kinds and versions.
@@ -63,6 +69,9 @@ pub fn parse(text: &str) -> Result<ProjectFile, String> {
                 services::versions(kind).join(", ")
             ));
         }
+    }
+    if let Some(h) = &f.worktree {
+        crate::worktrees::check_hooks(h).map_err(|e| format!("[worktree] {e}"))?;
     }
     Ok(f)
 }

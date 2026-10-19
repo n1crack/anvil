@@ -101,8 +101,10 @@ struct WorktreeView {
     copies: Vec<String>,
     /// Its database was there already and the user chose to use it.
     adopted: bool,
-    /// What it lacks to run: main's `.env`, its packages (`worktrees::missing`).
+    /// What it lacks to run: the files its hooks copy, its packages (`worktrees::missing`).
     missing: anvil::worktrees::Missing,
+    /// The hooks' `check` keys its env files still give main's value (`worktrees::same_as_main`).
+    same: Vec<String>,
 }
 
 fn worktree_view(
@@ -136,7 +138,8 @@ fn worktree_view(
         error: w::checked_env(cfg, s, false).err().map(err),
         copies: rec.copies.into_iter().map(|(_, d)| d).collect(),
         adopted: rec.adopted,
-        missing: w::missing(s),
+        missing: w::missing(cfg, s),
+        same: w::same_as_main(cfg, s),
     }
 }
 
@@ -2133,14 +2136,15 @@ fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) ->
 /// Set once at setup: what `prepare` tells the window through while a copy runs.
 static HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
-/// The New Worktree dialog's Database choice for a worktree of the app `site`.
+/// What New Worktree offers for a worktree of the app `site`: "Copy the database too", and
+/// the commands to offer once it's made.
 #[tauri::command(async)]
 fn worktree_new_db(site: String) -> Res<anvil::worktrees::NewDb> {
     let cfg = anvil::load().map_err(err)?;
     Ok(anvil::worktrees::new_db(&cfg, &site_in(&cfg, &site)?))
 }
 
-/// A new worktree of the app `site`, next to it (`worktrees::add`), with the database `db`.
+/// A new worktree of the app `site`, next to it (`worktrees::add`); `copy_db` unset follows the hooks.
 #[tauri::command(async)]
 fn worktree_add(
     handle: AppHandle,
@@ -2148,7 +2152,7 @@ fn worktree_add(
     site: String,
     branch: String,
     new: bool,
-    db: Option<anvil::worktrees::DbChoice>,
+    copy_db: Option<bool>,
 ) -> Res<Snapshot> {
     let mut cfg = anvil::load().map_err(err)?;
     let main = site_in(&cfg, &site)?;
@@ -2160,13 +2164,86 @@ fn worktree_add(
     if main.worktree_of.is_some() || alias {
         return Err(format!("{site} isn't an app's own folder"));
     }
-    let folder = anvil::worktrees::add(&cfg, &main, &branch, new, db).map_err(err)?;
-    if let Some(choice) = db {
-        // Before anything of it runs: its first use makes the database chosen.
-        cfg = edit(|c| anvil::worktrees::set_db_at(c, &folder, choice))?.0;
-    }
+    let (folder, choice) =
+        anvil::worktrees::add(&cfg, &main, &branch, new, copy_db).map_err(err)?;
+    // Before anything of it runs: its first use makes the database chosen.
+    cfg = edit(|c| anvil::worktrees::set_db_at(c, &folder, choice))?.0;
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
+}
+
+/// Run the worktree's `after_create` commands, once the user said so: its database first,
+/// then each command in turn; the first that fails stops the rest.
+#[tauri::command(async)]
+fn worktree_after_create(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    let s = site_in(&cfg, &site)?;
+    let ran = prepare(&app, &s).and_then(|()| {
+        anvil::worktrees::after_create(&cfg, &s)
+            .iter()
+            .try_for_each(|c| anvil::worktrees::run_after(&cfg, &s, c, true))
+    });
+    changed(&handle);
+    ran.map_err(err)?;
+    snapshot(&app)
+}
+
+/// "Rewrite with the hooks": the hooks' keys into the worktree's env files.
+#[tauri::command(async)]
+fn worktree_rewrite(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    anvil::worktrees::rewrite(&cfg, &site_in(&cfg, &site)?).map_err(err)?;
+    changed(&handle);
+    snapshot(&app)
+}
+
+/// The app's Settings tab, Worktrees: its hooks as they apply, and what it sets itself.
+#[derive(Serialize)]
+struct AppHooks {
+    hooks: anvil::worktrees::Resolved,
+    own: anvil::worktrees::Hooks,
+}
+
+/// `AppHooks` of the app `site`; refused for a folder that isn't a git repository.
+#[tauri::command(async)]
+fn worktree_hooks(site: String) -> Res<AppHooks> {
+    let cfg = anvil::load().map_err(err)?;
+    let s = site_in(&cfg, &site)?;
+    if anvil::git::git_dir(&s.path).is_none() {
+        return Err(format!("{site} isn't a git repository"));
+    }
+    Ok(AppHooks {
+        hooks: anvil::worktrees::hooks(&cfg, &s),
+        own: cfg
+            .sites
+            .get(&site)
+            .map(|c| c.worktree.clone())
+            .unwrap_or_default(),
+    })
+}
+
+/// Set one of the app's own hooks (`value` unset: the next layer's); no `field`: all of
+/// them back ("Use preset"). The worktrees' env follows.
+#[tauri::command(async)]
+fn set_app_hooks(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    field: Option<String>,
+    value: Option<serde_json::Value>,
+) -> Res<AppHooks> {
+    let (cfg, ()) = edit(|c| {
+        let own = &mut c.sites.entry(site.clone()).or_default().worktree;
+        match &field {
+            Some(f) => anvil::worktrees::set_field(own, f, value),
+            None => {
+                *own = Default::default();
+                Ok(())
+            }
+        }
+    })?;
+    sites_changed(&handle, &app, &cfg);
+    worktree_hooks(site)
 }
 
 /// `remove`'s safety check first (unless `force`; refused, nothing is stopped), then stop
@@ -2201,26 +2278,6 @@ fn worktree_remove(
     snapshot(&app)
 }
 
-/// Copy of main or Empty for the worktree `site`.
-#[tauri::command(async)]
-fn worktree_db(
-    handle: AppHandle,
-    app: State<App>,
-    site: String,
-    choice: anvil::worktrees::DbChoice,
-) -> Res<Snapshot> {
-    let (cfg, ()) = edit(|c| {
-        let s = anvil::sites(c)
-            .into_iter()
-            .find(|s| s.name == site && s.worktree_of.is_some())
-            .ok_or_else(|| anyhow::anyhow!("No worktree named {site}"))?;
-        anvil::worktrees::set_db(c, &s, choice)
-    })?;
-    // Its PHP-FPM pool's env follows the choice.
-    sites_changed(&handle, &app, &cfg);
-    snapshot(&app)
-}
-
 /// Make the worktree's own database now (Overview's Prepare database), as its first Start would.
 #[tauri::command(async)]
 fn worktree_prepare(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
@@ -2251,11 +2308,11 @@ fn worktree_adopt(handle: AppHandle, app: State<App>, site: String) -> Res<Snaps
     snapshot(&app)
 }
 
-/// Give a worktree its app's `.env` (Overview's "Copy .env from <app>").
+/// Give a worktree the files its hooks copy (Overview's "Copy .env from <app>").
 #[tauri::command(async)]
-fn worktree_copy_env(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+fn worktree_copy_files(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
-    anvil::worktrees::copy_env(&site_in(&cfg, &site)?).map_err(err)?;
+    anvil::worktrees::copy_files(&cfg, &site_in(&cfg, &site)?).map_err(err)?;
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
 }
@@ -2779,8 +2836,22 @@ struct Settings {
     notifications: bool,
     https_default: bool,
     worktree_db: anvil::worktrees::DbChoice,
+    /// Settings › Worktrees: each preset as it applies.
+    worktree_presets: Vec<PresetView>,
     login: bool,
     config_dir: std::path::PathBuf,
+}
+
+/// A framework preset in Settings › Worktrees.
+#[derive(Serialize)]
+struct PresetView {
+    id: &'static str,
+    name: &'static str,
+    /// The kinds of app that use it, by name.
+    kinds: Vec<&'static str>,
+    hooks: anvil::worktrees::Hooks,
+    /// The user changed it: "Reset to default" is offered.
+    edited: bool,
 }
 
 const TERMINALS: [&str; 8] = [
@@ -2882,6 +2953,16 @@ fn settings(handle: AppHandle) -> Res<Settings> {
     let cfg = anvil::load().map_err(err)?;
     let installed = anvil::installed_php();
     let fwd = anvil::ports_forwarded(&cfg);
+    let worktree_presets = anvil::worktrees::PRESETS
+        .iter()
+        .map(|(id, name, kinds)| PresetView {
+            id,
+            name,
+            kinds: kinds.iter().map(|k| anvil::apps::label(k)).collect(),
+            hooks: anvil::worktrees::preset(&cfg, id),
+            edited: cfg.worktree_presets.contains_key(*id),
+        })
+        .collect();
     Ok(Settings {
         php: anvil::PHP_VERSIONS
             .iter()
@@ -2904,6 +2985,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         notifications: cfg.notifications,
         https_default: cfg.https_default == Some(true),
         worktree_db: cfg.worktree_db,
+        worktree_presets,
         hidden: cfg.hidden.clone(),
         paths: cfg.paths,
         tld: cfg.tld,
@@ -3044,14 +3126,43 @@ fn set_dock_icon(handle: AppHandle, on: bool) -> Res<Settings> {
     s
 }
 
-/// Settings › General › Database for new worktrees: also what one opened outside Anvil
-/// uses until it has its own, so the PHP-FPM pools follow.
+/// Settings › Worktrees › Copy the database: the hooks' last `copy_database` layer, also
+/// what one opened outside Anvil uses until it has its own, so the PHP-FPM pools follow.
 #[tauri::command(async)]
 fn set_worktree_db(handle: AppHandle, choice: anvil::worktrees::DbChoice) -> Res<Settings> {
     apply(
         &handle,
         |cfg| {
             cfg.worktree_db = choice;
+            Ok(())
+        },
+        true,
+    )
+}
+
+/// Settings › Worktrees: one field of a preset (`value` unset: Anvil's); no `field`:
+/// the whole preset back to Anvil's ("Reset to default"). The worktrees' env follows.
+#[tauri::command(async)]
+fn set_worktree_preset(
+    handle: AppHandle,
+    id: String,
+    field: Option<String>,
+    value: Option<serde_json::Value>,
+) -> Res<Settings> {
+    if !anvil::worktrees::PRESETS.iter().any(|p| p.0 == id) {
+        return Err(format!("No preset named {id}"));
+    }
+    apply(
+        &handle,
+        |cfg| {
+            if let Some(f) = &field {
+                let mut h = cfg.worktree_presets.get(&id).cloned().unwrap_or_default();
+                anvil::worktrees::set_field(&mut h, f, value)?;
+                cfg.worktree_presets.insert(id.clone(), h);
+            }
+            if field.is_none() || cfg.worktree_presets.get(&id).is_some_and(|h| h.is_empty()) {
+                cfg.worktree_presets.remove(&id);
+            }
             Ok(())
         },
         true,
@@ -3572,10 +3683,13 @@ fn main() {
             worktree_add,
             worktree_new_db,
             worktree_remove,
-            worktree_db,
+            worktree_after_create,
+            worktree_rewrite,
+            worktree_hooks,
+            set_app_hooks,
             worktree_prepare,
             worktree_adopt,
-            worktree_copy_env,
+            worktree_copy_files,
             worktree_install,
             leftover_drop,
             leftover_keep,
@@ -3617,6 +3731,7 @@ fn main() {
             set_trim_app_logs,
             set_notifications,
             set_worktree_db,
+            set_worktree_preset,
             set_login,
             open_config_dir,
             services,

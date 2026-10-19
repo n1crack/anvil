@@ -32,8 +32,298 @@ pub fn worktree_name(app: &str, folder: &Path) -> String {
 
 use crate::{Config, Site};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+/// One layer of an app's worktree hooks (`resolve`): each field set, or left to the next layer.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Hooks {
+    /// Files or folders copied from the main checkout into a new worktree (git leaves out
+    /// ignored ones); a `*` in the last part matches any run of characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy: Option<Vec<String>>,
+    /// New Worktree's "Copy the database too": on, a copy of main's; off, an empty one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy_database: Option<bool>,
+    /// Env keys set per worktree, `{db}` `{url}` `{prefix}` `{port}` `{name}` filled in. A
+    /// key that is just `{db}` points at the worktree's database: a URL's database part
+    /// is replaced, a SQLite file maps into the worktree.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keys: Option<BTreeMap<String, String>>,
+    /// Keys whose value in the worktree's env files must differ from main's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check: Option<Vec<String>>,
+    /// Commands for a new worktree, run when the user says so; `{install}` is the JS
+    /// install its lock file asks for (left out without package.json).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_create: Option<Vec<String>>,
+}
+
+impl Hooks {
+    pub fn is_empty(&self) -> bool {
+        *self == Hooks::default()
+    }
+}
+
+/// The framework presets: id, name, the kinds (`apps::KINDS`) that use it. Any other kind uses `other`.
+pub const PRESETS: [(&str, &str, &[&str]); 8] = [
+    ("laravel", "Laravel", &["laravel"]),
+    ("statamic", "Statamic", &["statamic"]),
+    ("symfony", "Symfony", &["symfony"]),
+    ("next", "Next.js", &["next"]),
+    ("nuxt", "Nuxt", &["nuxt"]),
+    ("node", "Node.js", &["node", "vite"]),
+    (
+        "python",
+        "Django, FastAPI, Flask",
+        &["django", "fastapi", "flask"],
+    ),
+    ("other", "Other", &[]),
+];
+
+/// The presets as Anvil ships them. Each sets the database keys, which do nothing where
+/// no env file names a database: no preset lets a worktree reach main's database, only
+/// the user taking them out does. `copy_database` is left to Settings.
+const SHIPPED: &str = r#"
+[laravel]
+copy = [".env"]
+check = ["DB_DATABASE", "DB_URL", "DATABASE_URL", "REDIS_PREFIX", "CACHE_PREFIX", "SESSION_COOKIE"]
+after_create = ["composer install", "{install}", "php artisan migrate"]
+keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", APP_URL = "{url}", REDIS_PREFIX = "{prefix}", CACHE_PREFIX = "{prefix}" }
+
+[statamic]
+copy = [".env"]
+check = ["DB_DATABASE", "DB_URL", "DATABASE_URL", "REDIS_PREFIX", "CACHE_PREFIX", "SESSION_COOKIE"]
+after_create = ["composer install", "{install}", "php artisan migrate"]
+keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", APP_URL = "{url}", REDIS_PREFIX = "{prefix}", CACHE_PREFIX = "{prefix}" }
+
+[symfony]
+copy = [".env.local"]
+check = ["DATABASE_URL"]
+after_create = ["composer install", "php bin/console doctrine:migrations:migrate --no-interaction"]
+keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", DEFAULT_URI = "{url}" }
+
+[next]
+copy = [".env", ".env.local"]
+check = ["DATABASE_URL"]
+after_create = ["{install}"]
+keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
+
+[nuxt]
+copy = [".env", ".env.local"]
+check = ["DATABASE_URL"]
+after_create = ["{install}"]
+keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
+
+[node]
+copy = [".env", ".env.local"]
+check = ["DATABASE_URL"]
+after_create = ["{install}"]
+keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
+
+[python]
+copy = [".env"]
+check = ["DATABASE_URL"]
+after_create = []
+keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
+
+[other]
+copy = [".env"]
+check = ["DB_DATABASE", "DB_URL", "DATABASE_URL"]
+after_create = []
+keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
+"#;
+
+/// The keys pointing at a database. Test runs always get them (`run_env`).
+const DB_KEYS: [&str; 3] = ["DB_DATABASE", "DB_URL", "DATABASE_URL"];
+
+/// Anvil's own preset `id`.
+fn shipped(id: &str) -> Hooks {
+    static ALL: std::sync::OnceLock<BTreeMap<String, Hooks>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| toml::from_str(SHIPPED).expect("the shipped presets parse"))
+        .get(id)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The preset a kind of app uses.
+pub fn preset_of(kind: &str) -> &'static str {
+    PRESETS
+        .iter()
+        .find(|(_, _, kinds)| kinds.contains(&kind))
+        .map_or("other", |p| p.0)
+}
+
+/// A preset as it applies: the user's edits (Settings › Worktrees) over Anvil's, field by field.
+pub fn preset(cfg: &Config, id: &str) -> Hooks {
+    let edited = cfg.worktree_presets.get(id).cloned().unwrap_or_default();
+    let shipped = shipped(id);
+    Hooks {
+        copy: edited.copy.or(shipped.copy),
+        copy_database: edited.copy_database.or(shipped.copy_database),
+        keys: edited.keys.or(shipped.keys),
+        check: edited.check.or(shipped.check),
+        after_create: edited.after_create.or(shipped.after_create),
+    }
+}
+
+/// An app's worktree hooks, every field filled in.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct Resolved {
+    pub copy: Vec<String>,
+    pub copy_database: bool,
+    pub keys: BTreeMap<String, String>,
+    pub check: Vec<String>,
+    pub after_create: Vec<String>,
+    /// Where each field came from: "this app", ".anvil.toml", ".worktreeinclude",
+    /// "<preset> preset", or "Settings" (`copy_database`).
+    pub from: BTreeMap<&'static str, String>,
+    /// The name of the preset its kind uses.
+    pub preset: &'static str,
+}
+
+/// The hooks of the app `app` (main checkout `main`, of kind `kind`), field by field, the
+/// first layer that sets it: the app's own settings, `.anvil.toml`'s `[worktree]`,
+/// `.worktreeinclude` (`copy` only), the preset of its kind, Settings (`copy_database`).
+pub fn resolve(cfg: &Config, app: &str, main: &Path, kind: &str) -> Resolved {
+    let id = preset_of(kind);
+    let name = PRESETS.iter().find(|p| p.0 == id).map_or("Other", |p| p.1);
+    let mut settings = shipped("other");
+    settings.copy_database = Some(cfg.worktree_db == DbChoice::Copy);
+    let layers = [
+        (
+            "this app".to_string(),
+            cfg.sites
+                .get(app)
+                .map(|s| s.worktree.clone())
+                .unwrap_or_default(),
+        ),
+        (
+            ".anvil.toml".into(),
+            crate::project::load(main)
+                .and_then(|p| p.worktree)
+                .unwrap_or_default(),
+        ),
+        (
+            ".worktreeinclude".into(),
+            Hooks {
+                copy: worktreeinclude(main),
+                ..Hooks::default()
+            },
+        ),
+        (format!("{name} preset"), preset(cfg, id)),
+        ("Settings".into(), settings),
+    ];
+    let mut from = BTreeMap::new();
+    let mut pick = |field: &'static str, has: fn(&Hooks) -> bool| {
+        let (layer, hooks) = layers
+            .iter()
+            .find(|(_, h)| has(h))
+            .expect("the last layer sets every field");
+        from.insert(field, layer.clone());
+        hooks.clone()
+    };
+    let copy = pick("copy", |h| h.copy.is_some()).copy;
+    let copy_database = pick("copy_database", |h| h.copy_database.is_some()).copy_database;
+    let keys = pick("keys", |h| h.keys.is_some()).keys;
+    let check = pick("check", |h| h.check.is_some()).check;
+    let after_create = pick("after_create", |h| h.after_create.is_some()).after_create;
+    Resolved {
+        copy: copy.unwrap_or_default(),
+        copy_database: copy_database.unwrap_or_default(),
+        keys: keys.unwrap_or_default(),
+        check: check.unwrap_or_default(),
+        after_create: after_create.unwrap_or_default(),
+        from,
+        preset: name,
+    }
+}
+
+/// `resolve` for `site`: a worktree's are its app's, read from the main checkout.
+pub fn hooks(cfg: &Config, site: &Site) -> Resolved {
+    match &site.worktree_of {
+        Some(app) => {
+            let main = main_of(&site.path).unwrap_or_else(|| site.path.clone());
+            resolve(cfg, app, &main, &site.kind)
+        }
+        None => resolve(cfg, &site.name, &site.path, &site.kind),
+    }
+}
+
+/// The paths a project's `.worktreeinclude` lists (gitignore-like; `!` lines are left out).
+fn worktreeinclude(main: &Path) -> Option<Vec<String>> {
+    let text = fs::read_to_string(main.join(".worktreeinclude")).ok()?;
+    Some(
+        text.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with(['#', '!']))
+            .map(String::from)
+            .collect(),
+    )
+}
+
+const PLACEHOLDERS: [&str; 5] = ["db", "url", "prefix", "port", "name"];
+
+/// The `{…}` names in `s`.
+fn placeholders(s: &str) -> impl Iterator<Item = &str> {
+    s.split('{')
+        .skip(1)
+        .filter_map(|p| p.split_once('}').map(|(n, _)| n))
+}
+
+/// What's wrong with a hooks layer, if anything: for the forms and `.anvil.toml`.
+pub fn check_hooks(h: &Hooks) -> Result<(), String> {
+    let key = |k: &str| {
+        !k.is_empty()
+            && !k.starts_with(|c: char| c.is_ascii_digit())
+            && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    for (k, v) in h.keys.iter().flatten() {
+        if !key(k) {
+            return Err(format!("\"{k}\" isn't an env key name"));
+        }
+        if let Some(p) = placeholders(v).find(|p| !PLACEHOLDERS.contains(p)) {
+            return Err(format!(
+                "{k}: {{{p}}} isn't one of {{db}}, {{url}}, {{prefix}}, {{port}}, {{name}}"
+            ));
+        }
+    }
+    if let Some(k) = h.check.iter().flatten().find(|k| !key(k)) {
+        return Err(format!("\"{k}\" isn't an env key name"));
+    }
+    if let Some(f) = h.copy.iter().flatten().find(|f| inside(f).is_none()) {
+        return Err(format!("\"{f}\" isn't a path inside the project"));
+    }
+    Ok(())
+}
+
+/// `entry` as a relative path inside the project; `None` for an absolute one or one with `..`.
+fn inside(entry: &str) -> Option<PathBuf> {
+    let p = Path::new(entry.trim().trim_start_matches('/').trim_end_matches('/'));
+    let ok = p.components().next().is_some()
+        && p.components().all(|c| matches!(c, Component::Normal(_)));
+    ok.then(|| p.to_path_buf())
+}
+
+/// Set one field of a hooks layer from a form (`None`: back to the next layer), checked.
+pub fn set_field(
+    h: &mut Hooks,
+    field: &str,
+    value: Option<serde_json::Value>,
+) -> anyhow::Result<()> {
+    let mut v = serde_json::to_value(&*h)?;
+    let map = v.as_object_mut().expect("Hooks is a map");
+    match value {
+        Some(x) => map.insert(field.into(), x),
+        None => map.remove(field),
+    };
+    let new: Hooks = serde_json::from_value(v).map_err(|e| anyhow::anyhow!("{e}"))?;
+    check_hooks(&new).map_err(anyhow::Error::msg)?;
+    *h = new;
+    Ok(())
+}
 
 /// Which database a worktree uses.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
@@ -46,18 +336,6 @@ pub enum DbChoice {
     /// main's was removed loads as this: a worktree never uses main's database.
     #[serde(alias = "share")]
     Empty,
-}
-
-impl std::str::FromStr for DbChoice {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, String> {
-        match s {
-            "copy" => Ok(DbChoice::Copy),
-            "empty" => Ok(DbChoice::Empty),
-            "share" => Err("a worktree always has its own database: copy or empty".into()),
-            _ => Err(format!("\"{s}\" isn't one of copy, empty")),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -178,21 +456,30 @@ pub fn is_mains_database(site: &Site, db: &str) -> bool {
             .any(|m| Path::new(m).is_absolute() && real_file(Path::new(m)) == file)
 }
 
-/// The worktree's record; for one Anvil has none of (opened outside Anvil, say), Settings'
-/// default choice.
+/// The worktree's record; for one Anvil has none of (opened outside Anvil, say), the
+/// choice its hooks' `copy_database` makes.
 fn record(cfg: &Config, site: &Site) -> WorktreeConfig {
     cfg.worktrees
         .get(&site.name)
         .cloned()
         .unwrap_or_else(|| WorktreeConfig {
-            db: cfg.worktree_db,
+            db: hooks_choice(cfg, site),
             ..Default::default()
         })
 }
 
+/// `copy_database` as a choice.
+fn hooks_choice(cfg: &Config, site: &Site) -> DbChoice {
+    if hooks(cfg, site).copy_database {
+        DbChoice::Copy
+    } else {
+        DbChoice::Empty
+    }
+}
+
 /// `record`, kept in `cfg`.
 fn entry<'a>(cfg: &'a mut Config, site: &Site) -> &'a mut WorktreeConfig {
-    let db = cfg.worktree_db;
+    let db = hooks_choice(cfg, site);
     cfg.worktrees
         .entry(site.name.clone())
         .or_insert_with(|| WorktreeConfig {
@@ -353,25 +640,24 @@ pub fn choices(cfg: &Config, site: &Site) -> Vec<DbChoice> {
     main_db(cfg, site).choices().to_vec()
 }
 
-/// The New Worktree dialog's Database choice for a new worktree of an app.
+/// What New Worktree offers for a new worktree of an app: "Copy the database too", and
+/// the commands to offer once it is made.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct NewDb {
-    /// What main's database allows (`choices`' rules).
-    pub choices: Vec<DbChoice>,
-    /// Settings' default when allowed, else the first choice.
-    pub default: DbChoice,
+    /// Main's database can be copied (it isn't on a server Anvil doesn't manage).
+    pub can_copy: bool,
+    /// The checkbox as the hooks' `copy_database` sets it; off when it can't be copied.
+    pub copy: bool,
     /// Main's database by name; `None` when main has no database settings (nothing to choose).
     pub main_database: Option<String>,
+    /// The hooks' `after_create` (`after_create`), asked about once the worktree is there.
+    pub after_create: Vec<String>,
 }
 
 pub fn new_db(cfg: &Config, app: &Site) -> NewDb {
     let found = main_db_at(cfg, &app.path, &app.path);
-    let choices = found.choices().to_vec();
-    let default = if choices.contains(&cfg.worktree_db) {
-        cfg.worktree_db
-    } else {
-        choices[0]
-    };
+    let can_copy = found.choices().contains(&DbChoice::Copy);
+    let hooks = hooks(cfg, app);
     let main_database = match found {
         MainDb::None => None,
         MainDb::Anvil { database, .. } => Some(database),
@@ -380,14 +666,15 @@ pub fn new_db(cfg: &Config, app: &Site) -> NewDb {
         }
     };
     NewDb {
-        choices,
-        default,
+        can_copy,
+        copy: can_copy && hooks.copy_database,
         main_database,
+        after_create: commands(&hooks.after_create, &app.path),
     }
 }
 
 /// Record `choice` for the worktree, refusing one `choices` doesn't offer.
-pub fn set_db(cfg: &mut Config, site: &Site, choice: DbChoice) -> anyhow::Result<()> {
+fn set_db(cfg: &mut Config, site: &Site, choice: DbChoice) -> anyhow::Result<()> {
     let allowed = choices(cfg, site);
     if !allowed.contains(&choice) {
         let why = if prepared(cfg, site) {
@@ -403,12 +690,17 @@ pub fn set_db(cfg: &mut Config, site: &Site, choice: DbChoice) -> anyhow::Result
 
 /// `set_db` for the worktree in `folder` (one `add` just made).
 pub fn set_db_at(cfg: &mut Config, folder: &Path, choice: DbChoice) -> anyhow::Result<()> {
-    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    let site = crate::sites(cfg)
-        .into_iter()
-        .find(|s| s.worktree_of.is_some() && real(&s.path) == real(folder))
+    let site = site_at(cfg, folder)
         .ok_or_else(|| anyhow::anyhow!("Anvil doesn't see {} as a worktree", folder.display()))?;
     set_db(cfg, &site, choice)
+}
+
+/// The worktree Anvil serves from `folder`.
+fn site_at(cfg: &Config, folder: &Path) -> Option<Site> {
+    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    crate::sites(cfg)
+        .into_iter()
+        .find(|s| s.worktree_of.is_some() && real(&s.path) == real(folder))
 }
 
 /// `prepare` with the server reached through `run(cfg, service, op)`, and `marker`
@@ -654,12 +946,33 @@ fn real_file(file: &Path) -> PathBuf {
         .unwrap_or_else(|| file.to_path_buf())
 }
 
-/// What a worktree's processes get on top of their usual environment, so they never
-/// reach the main app's database or Redis keys. Empty for anything but a worktree.
-/// Set variables win over the worktree's `.env` (Laravel, dotenv, Next.js, Prisma).
+/// What a worktree's processes get on top of their usual environment: its hooks' `keys`,
+/// so they never reach the main app's database or Redis keys. Empty for anything but a
+/// worktree. Set variables win over the worktree's `.env` (Laravel, dotenv, Next.js, Prisma).
 /// `Err(reason)` when Anvil can't work out the worktree's own database: then nothing
 /// of the worktree runs (`checked_env`, no PHP-FPM pool).
 pub fn env(cfg: &Config, site: &Site) -> Result<Vec<(String, String)>, String> {
+    env_with(cfg, site, &hooks(cfg, site).keys)
+}
+
+/// `template` with each `{name}` of `vars` filled in; `None` when one has no value.
+fn fill(template: &str, vars: &[(&str, Option<&str>)]) -> Option<String> {
+    let mut out = template.to_string();
+    for (name, value) in vars {
+        let p = format!("{{{name}}}");
+        if out.contains(&p) {
+            out = out.replace(&p, (*value)?);
+        }
+    }
+    Some(out)
+}
+
+/// `env` with the keys `keys`.
+fn env_with(
+    cfg: &Config,
+    site: &Site,
+    keys: &BTreeMap<String, String>,
+) -> Result<Vec<(String, String)>, String> {
     if site.worktree_of.is_none() {
         return Ok(Vec::new());
     }
@@ -687,32 +1000,64 @@ pub fn env(cfg: &Config, site: &Site) -> Result<Vec<(String, String)>, String> {
             .is_some_and(|c| !c.is_empty() && c != "sqlite")
     });
     let sqlite = last("DB_CONNECTION").map(String::as_str) == Some("sqlite");
-    if server || (!sqlite && files.iter().any(|f| f.contains_key("DB_DATABASE"))) {
-        // Laravel falls back to `laravel` without DB_DATABASE: never main's.
-        env.push(("DB_DATABASE".into(), db.clone()));
-    } else if sqlite
-        && let Some(file) = last("DB_DATABASE").and_then(|f| sqlite_file(&main, &site.path, f))
-    {
-        env.push(("DB_DATABASE".into(), file));
-    }
-    for key in ["DB_URL", "DATABASE_URL"] {
-        // Every one of them must be rewritable, whichever file wins.
-        for url in files
+    let (url, prefix) = (crate::site_url(cfg, site), format!("{db}_"));
+    let port = site.port.map(|p| p.to_string());
+    let vars = [
+        ("db", Some(db.as_str())),
+        ("url", Some(url.as_str())),
+        ("prefix", Some(prefix.as_str())),
+        ("port", port.as_deref()),
+        ("name", Some(site.name.as_str())),
+    ];
+    for (key, template) in keys {
+        if template != "{db}" {
+            // A placeholder without a value (`{port}` of an app Anvil serves) leaves it out.
+            if let Some(v) = fill(template, &vars).filter(|v| !v.is_empty()) {
+                env.push((key.clone(), v));
+            }
+            continue;
+        }
+        // The worktree's own database, as `key` names it: a URL's database part, a SQLite
+        // file in the worktree, or its name.
+        let values: Vec<&String> = files
             .iter()
             .filter_map(|f| f.get(key))
-            .filter(|u| !u.is_empty())
+            .filter(|v| !v.is_empty())
+            .collect();
+        if key.ends_with("URL")
+            || values
+                .iter()
+                .any(|v| v.contains("://") || v.starts_with("file:"))
         {
-            with_db(url, &db, &main, &site.path)
-                .ok_or_else(|| format!("{key} uses a kind of database Anvil can't rewrite"))?;
-        }
-        if let Some(url) = last(key).and_then(|u| with_db(u, &db, &main, &site.path)) {
-            env.push((key.into(), url));
+            // Every one of them must be rewritable, whichever file wins.
+            for v in values {
+                with_db(v, &db, &main, &site.path)
+                    .ok_or_else(|| format!("{key} uses a kind of database Anvil can't rewrite"))?;
+            }
+            if let Some(v) = last(key).and_then(|v| with_db(v, &db, &main, &site.path)) {
+                env.push((key.clone(), v));
+            }
+        } else if server || (!sqlite && files.iter().any(|f| f.contains_key(key))) {
+            // Laravel falls back to `laravel` without DB_DATABASE: never main's.
+            env.push((key.clone(), db.clone()));
+        } else if sqlite
+            && let Some(file) = last(key).and_then(|f| sqlite_file(&main, &site.path, f))
+        {
+            env.push((key.clone(), file));
         }
     }
-    let prefix = format!("{db}_");
-    env.push(("APP_URL".into(), crate::site_url(cfg, site)));
-    env.push(("REDIS_PREFIX".into(), prefix.clone()));
-    env.push(("CACHE_PREFIX".into(), prefix));
+    // A database key the user set by hand to main's database: sharing it is taking the key out.
+    let is_db = |k: &str| DB_KEYS.contains(&k) || keys.get(k).is_some_and(|t| t == "{db}");
+    let mains = |v: &str| match url_database(v) {
+        Some(d) => is_mains_database(site, &d),
+        None => is_mains_database(site, v),
+    };
+    if let Some((k, _)) = env.iter().find(|(k, v)| is_db(k) && mains(v)) {
+        return Err(format!(
+            "{k} names {}'s database; take it out of the worktree keys to share that database",
+            site.worktree_of.as_deref().unwrap_or("main")
+        ));
+    }
     if site.php.is_some()
         && let Some((k, _)) = env.iter().find(|(k, v)| !fpm_safe(k, v))
     {
@@ -796,16 +1141,23 @@ pub(crate) fn test_config(dir: &Path) -> Vec<TestVar> {
 }
 
 /// `env` checked against the project's test config, for every Anvil start path (`test`: a
-/// test run). Anvil's database keys are always set, never removed: a removed one lets the
+/// test run). Anvil's database keys are never removed by it: a removed one lets the
 /// worktree's `.env`, a copy of main's, win. A test run gets the test config's database when
 /// none of it is main's (`:memory:` as SQLite), other keys keeping the worktree's own;
-/// anything else gets the worktree's own. `Err` when a test config setting naming main's
-/// would win over Anvil's (forced, or a key Anvil doesn't set).
+/// anything else gets the worktree's own. A test run gets the database keys even when the
+/// user took them out of the hooks to share main's database. `Err` when a test config
+/// setting naming main's would win over Anvil's (forced, or a key Anvil doesn't set).
 pub fn run_env(cfg: &Config, site: &Site, test: bool) -> Result<Vec<(String, String)>, String> {
-    let mut env = env(cfg, site)?;
     if site.worktree_of.is_none() {
-        return Ok(env);
+        return Ok(Vec::new());
     }
+    let mut keys = hooks(cfg, site).keys;
+    if test {
+        for k in DB_KEYS {
+            keys.entry(k.into()).or_insert_with(|| "{db}".into());
+        }
+    }
+    let mut env = env_with(cfg, site, &keys)?;
     let vars = test_config(&site.path);
     // Main's, or a URL Anvil can't read the database of.
     let mains = |v: &TestVar| match v.key {
@@ -929,22 +1281,23 @@ pub fn main_of(dir: &Path) -> Option<PathBuf> {
 }
 
 /// Create a worktree of `app` for `branch` (a new branch with `new_branch`) in
-/// `<parent of the app>/<app>--<site name of the branch>`, and give it the app's `.env` when it
-/// has none (git ignores it, so a fresh checkout lacks it). The app's own files are not touched.
-/// A `db` choice main's database doesn't allow is refused first; the caller records it
-/// (`set_db_at`) once the worktree is there.
+/// `<parent of the app>/<app>--<site name of the branch>`, and give it the files of its hooks'
+/// `copy` (git ignores them, so a fresh checkout lacks them), with the hooks' `keys` written
+/// into the env files among them. The app's own files are not touched. `copy_db` (unset: the
+/// hooks' `copy_database`) is refused first when main's database can't be copied; the caller
+/// records the choice returned (`set_db_at`). `after_create` isn't run: the caller asks first.
 pub fn add(
     cfg: &Config,
     app: &Site,
     branch: &str,
     new_branch: bool,
-    db: Option<DbChoice>,
-) -> anyhow::Result<PathBuf> {
-    if let Some(choice) = db
-        && !new_db(cfg, app).choices.contains(&choice)
-    {
+    copy_db: Option<bool>,
+) -> anyhow::Result<(PathBuf, DbChoice)> {
+    let offer = new_db(cfg, app);
+    let copy = copy_db.unwrap_or(offer.copy);
+    if copy && !offer.can_copy {
         anyhow::bail!(
-            "A worktree of {} can't use that database (main's database is on a server Anvil doesn't manage; choose Empty)",
+            "A worktree of {} can't copy its database (main's database is on a server Anvil doesn't manage)",
             app.name
         );
     }
@@ -971,24 +1324,280 @@ pub fn add(
         args.push(o(branch));
     }
     crate::git::run(&app.path, &args)?;
-    let (from, to) = (app.path.join(".env"), folder.join(".env"));
-    if from.is_file() && !to.exists() {
-        fs::copy(from, to)?;
+    let copied = copy_in(&app.path, &folder, &hooks(cfg, app).copy)?;
+    // Not worked out (a URL Anvil can't rewrite): the copy stays as made, and nothing of the
+    // worktree runs until it is (`checked_env`).
+    if let Some(site) = site_at(cfg, &folder) {
+        let _ = write_keys(cfg, &site, &copied);
     }
-    Ok(folder)
+    let db = if copy {
+        DbChoice::Copy
+    } else {
+        DbChoice::Empty
+    };
+    Ok((folder, db))
 }
 
-/// What a worktree (one made outside Anvil, say) lacks to run: main's `.env`, which git
-/// ignores, and its packages: `(id, command)` for `install`.
+/// `list`'s entries that `main` has, relative: a `*` in the last part matches any run of
+/// characters there; an entry outside the project is left out.
+// ponytail: `*` only, in the last part; full gitignore globs if `.worktreeinclude`s need them.
+fn expand(main: &Path, list: &[String]) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for rel in list.iter().filter_map(|e| inside(e)) {
+        let name = rel.file_name().unwrap_or_default().to_string_lossy();
+        let found = if name.contains('*') {
+            let dir = rel.parent().unwrap_or(Path::new(""));
+            let mut names: Vec<PathBuf> = fs::read_dir(main.join(dir))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|e| star(&name, &e.file_name().to_string_lossy()))
+                .map(|e| dir.join(e.file_name()))
+                .collect();
+            names.sort();
+            names
+        } else {
+            vec![rel.clone()]
+        };
+        for f in found {
+            if main.join(&f).exists() && !out.contains(&f) {
+                out.push(f);
+            }
+        }
+    }
+    out
+}
+
+/// Whether `name` matches `pattern`, whose `*`s match any run of characters.
+fn star(pattern: &str, name: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    if name.len() < first.len() + last.len() || !name.starts_with(first) || !name.ends_with(last) {
+        return false;
+    }
+    let mut rest = &name[first.len()..name.len() - last.len()];
+    for mid in &parts[1..parts.len() - 1] {
+        match rest.find(mid) {
+            Some(i) => rest = &rest[i + mid.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+/// Copy `list`'s entries (`expand`) from `main` into `wt`, folders whole, never over what is
+/// there: what was copied, relative.
+fn copy_in(main: &Path, wt: &Path, list: &[String]) -> anyhow::Result<Vec<PathBuf>> {
+    fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+        if from.is_dir() {
+            fs::create_dir_all(to)?;
+            for e in fs::read_dir(from)?.flatten() {
+                copy_all(&e.path(), &to.join(e.file_name()))?;
+            }
+        } else if !to.exists() {
+            if let Some(dir) = to.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::copy(from, to)?;
+        }
+        Ok(())
+    }
+    let todo: Vec<PathBuf> = expand(main, list)
+        .into_iter()
+        .filter(|f| !wt.join(f).exists())
+        .collect();
+    for f in &todo {
+        copy_all(&main.join(f), &wt.join(f))?;
+    }
+    Ok(todo)
+}
+
+/// An env file: `.env`, `.env.local`, `config/.env.testing`…
+fn is_env_file(f: &Path) -> bool {
+    f.file_name()
+        .is_some_and(|n| n.to_string_lossy().starts_with(".env"))
+}
+
+/// `text` with each line setting one of `values`' keys (`KEY=…`, `export KEY=…`) set to its
+/// value, its quotes kept, every other byte as it was; and the keys no line sets.
+fn set_keys(text: &str, values: &[(String, String)]) -> (String, Vec<String>) {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\n', '\r']);
+        let hit = body
+            .split_once('=')
+            .filter(|_| !body.trim_start().starts_with('#'))
+            .and_then(|(k, old)| {
+                let key = k.trim();
+                let key = key.strip_prefix("export ").unwrap_or(key).trim();
+                let (name, v) = values.iter().find(|(name, _)| name == key)?;
+                Some((k, old, name, v))
+            });
+        let Some((k, old, name, v)) = hit else {
+            out.push_str(line);
+            continue;
+        };
+        seen.insert(name.clone());
+        let quote = old
+            .trim_start()
+            .chars()
+            .next()
+            .filter(|c| ['"', '\''].contains(c))
+            .or_else(|| v.contains([' ', '\t', '#']).then_some('"'));
+        let v = quote.map_or_else(|| v.clone(), |q| format!("{q}{v}{q}"));
+        out.push_str(&format!("{k}={v}{}", &line[body.len()..]));
+    }
+    let missing = values
+        .iter()
+        .filter(|(k, _)| !seen.contains(k))
+        .map(|(k, _)| k.clone())
+        .collect();
+    (out, missing)
+}
+
+/// Write the worktree's `keys` (as `env` works them out) into its env files among `files`
+/// (relative): a line setting one changes, a key none sets is added to the first; nothing
+/// else changes.
+fn write_keys(cfg: &Config, site: &Site, files: &[PathBuf]) -> anyhow::Result<()> {
+    let values = env(cfg, site).map_err(anyhow::Error::msg)?;
+    for (i, f) in files.iter().filter(|f| is_env_file(f)).enumerate() {
+        let file = site.path.join(f);
+        let (mut text, missing) = set_keys(&fs::read_to_string(&file)?, &values);
+        if i == 0 && !missing.is_empty() {
+            if !text.is_empty() && !text.ends_with('\n') {
+                text.push('\n');
+            }
+            for (k, v) in values.iter().filter(|(k, _)| missing.contains(k)) {
+                text.push_str(&format!("{k}={v}\n"));
+            }
+        }
+        fs::write(&file, text)?;
+    }
+    Ok(())
+}
+
+/// The worktree's env files from its hooks' `copy`, relative: the ones main and it both have.
+fn env_files(cfg: &Config, site: &Site) -> Vec<PathBuf> {
+    let Some(main) = main_of(&site.path) else {
+        return Vec::new();
+    };
+    expand(&main, &hooks(cfg, site).copy)
+        .into_iter()
+        .filter(|f| is_env_file(f) && site.path.join(f).is_file())
+        .collect()
+}
+
+/// "Rewrite with the hooks": the hooks' `keys` into the worktree's env files (`write_keys`).
+pub fn rewrite(cfg: &Config, site: &Site) -> anyhow::Result<()> {
+    let files = env_files(cfg, site);
+    if files.is_empty() {
+        anyhow::bail!("{} has none of the env files its hooks copy", site.name);
+    }
+    write_keys(cfg, site, &files)
+}
+
+/// The hooks' `check` keys whose value in one of the worktree's env files is main's in
+/// the same file. Unset or empty in either isn't the same.
+pub fn same_as_main(cfg: &Config, site: &Site) -> Vec<String> {
+    let Some(main) = main_of(&site.path) else {
+        return Vec::new();
+    };
+    let check = hooks(cfg, site).check;
+    let mut out: Vec<String> = Vec::new();
+    for f in env_files(cfg, site) {
+        let mine = crate::resources::dotenv_file(&site.path.join(&f));
+        let theirs = crate::resources::dotenv_file(&main.join(&f));
+        for k in &check {
+            let same = mine
+                .get(k)
+                .is_some_and(|v| !v.is_empty() && theirs.get(k) == Some(v));
+            if same && !out.contains(k) {
+                out.push(k.clone());
+            }
+        }
+    }
+    out
+}
+
+/// `list` (`after_create`) for a worktree in `dir`: `{install}` is the JS install its lock
+/// file asks for (`npm ci` with package-lock.json), a command with it left out without package.json.
+fn commands(list: &[String], dir: &Path) -> Vec<String> {
+    let install = dir.join("package.json").is_file().then(|| {
+        match crate::apps::js_manager(dir) {
+            "npm" if dir.join("package-lock.json").is_file() => "npm ci".to_string(),
+            // pnpm 11 fails an install whose dependencies' build scripts it skipped (`js_install`).
+            "pnpm" => "pnpm install --config.strict-dep-builds=false".into(),
+            m => format!("{m} install"),
+        }
+    });
+    list.iter()
+        .filter_map(|c| match &install {
+            _ if !c.contains("{install}") => Some(c.clone()),
+            Some(i) => Some(c.replace("{install}", i)),
+            None => None,
+        })
+        .collect()
+}
+
+/// The worktree's `after_create` commands, ready to run (`commands`).
+pub fn after_create(cfg: &Config, site: &Site) -> Vec<String> {
+    commands(&hooks(cfg, site).after_create, &site.path)
+}
+
+/// Run one of the worktree's `after_create` commands in it, with what its processes get
+/// (Anvil's PHP and Node.js, its own database) and Anvil's shims first on PATH, so
+/// `composer` is Anvil's. Only when the user said so; its database is prepared first by the
+/// caller. `quiet`: the output is kept, its last lines in the error; else it shows.
+pub fn run_after(cfg: &Config, site: &Site, command: &str, quiet: bool) -> anyhow::Result<()> {
+    use std::process::{Command, Stdio};
+    let mut env = crate::processes::env(cfg, site, false)?;
+    let shims = crate::home().join("shims");
+    if shims.is_dir()
+        && let Some((_, path)) = env.iter_mut().find(|(k, _)| k == "PATH")
+    {
+        *path = crate::prepend_path(&shims, path);
+    }
+    let mut cmd = Command::new("/bin/sh");
+    cmd.args(["-c", command])
+        .envs(env)
+        .current_dir(&site.path)
+        .stdin(Stdio::null());
+    if !quiet {
+        if !cmd.status()?.success() {
+            anyhow::bail!("{command} failed");
+        }
+        return Ok(());
+    }
+    let out = cmd.output()?;
+    if !out.status.success() {
+        let text = String::from_utf8_lossy(&out.stderr);
+        let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        anyhow::bail!(
+            "{command} failed: {}",
+            tail[tail.len().saturating_sub(3)..].join("\n")
+        );
+    }
+    Ok(())
+}
+
+/// What a worktree (one made outside Anvil, say) lacks to run: the files of its hooks'
+/// `copy` that main has (git ignores them), and its packages: `(id, command)` for `install`.
 #[derive(Serialize, Debug, Default, PartialEq)]
 pub struct Missing {
-    pub env: bool,
+    pub copy: Vec<String>,
     pub installs: Vec<(String, String)>,
 }
 
-pub fn missing(site: &Site) -> Missing {
+pub fn missing(cfg: &Config, site: &Site) -> Missing {
     let (dir, mut out) = (&site.path, Missing::default());
-    out.env = !dir.join(".env").exists() && main_of(dir).is_some_and(|m| m.join(".env").is_file());
+    if let Some(main) = main_of(dir) {
+        out.copy = expand(&main, &hooks(cfg, site).copy)
+            .into_iter()
+            .filter(|f| !dir.join(f).exists())
+            .map(|f| f.display().to_string())
+            .collect();
+    }
     if dir.join("composer.json").is_file() && !dir.join("vendor").exists() {
         out.installs
             .push(("composer".into(), "composer install".into()));
@@ -1001,16 +1610,16 @@ pub fn missing(site: &Site) -> Missing {
     out
 }
 
-/// Give the worktree main's `.env`; never over one it has.
-pub fn copy_env(site: &Site) -> anyhow::Result<()> {
+/// Give the worktree the files of its hooks' `copy` it lacks (`missing`), with the hooks'
+/// `keys` written into them, as a new worktree gets them; never over what it has.
+pub fn copy_files(cfg: &Config, site: &Site) -> anyhow::Result<()> {
     let main =
         main_of(&site.path).ok_or_else(|| anyhow::anyhow!("{} isn't a git worktree", site.name))?;
-    let to = site.path.join(".env");
-    if to.exists() {
-        anyhow::bail!("{} has a .env already", site.name);
+    let copied = copy_in(&main, &site.path, &hooks(cfg, site).copy)?;
+    if copied.is_empty() {
+        anyhow::bail!("{} has every file its hooks copy", site.name);
     }
-    fs::copy(main.join(".env"), to)?;
-    Ok(())
+    write_keys(cfg, site, &copied)
 }
 
 /// Install the worktree's packages (`missing`'s ids): `composer install` through Anvil's
@@ -1281,16 +1890,20 @@ pub(crate) mod tests {
         (main, root.join("x"))
     }
 
-    /// `shop--feature-x`, a worktree of `shop` whose main checkout has `dotenv` as its `.env`.
+    /// `shop--feature-x`, a worktree of the Laravel app `shop` whose main checkout has
+    /// `dotenv` as its `.env`: its keys are the Laravel preset's.
     pub(crate) fn worktree_site(name: &str, dotenv: &str) -> (Config, Site) {
         let (main, x) = repo(name);
         fs::write(main.join(".env"), dotenv).unwrap();
         let mut site = crate::tests::site("shop--feature-x", x.to_str().unwrap(), Some("8.4"));
+        site.kind = "laravel".into();
         site.path = x;
         site.secure = false;
         site.worktree_of = Some("shop".into());
         let cfg = Config {
             http_port: 80,
+            // "Copy the database too" on: most tests here are about the copy.
+            worktree_db: DbChoice::Copy,
             ..Config::default()
         };
         (cfg, site)
@@ -1335,8 +1948,11 @@ pub(crate) mod tests {
                 .unwrap();
         assert_eq!(cfg.worktree_db, DbChoice::Empty);
         assert_eq!(cfg.worktrees["shop--x"].db, DbChoice::Empty);
-        let e = "share".parse::<DbChoice>().unwrap_err();
-        assert_eq!(e, "a worktree always has its own database: copy or empty");
+        // "Copy the database too" is off unless the user turned it on; a stored copy keeps it on.
+        let unset: Config = toml::from_str("tld = \"test\"\n").unwrap();
+        assert_eq!(unset.worktree_db, DbChoice::Empty);
+        let copy: Config = toml::from_str("worktree_db = \"copy\"\n").unwrap();
+        assert_eq!(copy.worktree_db, DbChoice::Copy);
     }
 
     #[test]
@@ -1347,7 +1963,7 @@ pub(crate) mod tests {
             .into_iter()
             .map(|(k, _)| k)
             .collect();
-        assert_eq!(keys, ["APP_URL", "REDIS_PREFIX", "CACHE_PREFIX"]);
+        assert_eq!(keys, ["APP_URL", "CACHE_PREFIX", "REDIS_PREFIX"]);
     }
 
     #[test]
@@ -1955,7 +2571,7 @@ pub(crate) mod tests {
         app.path = shop.clone();
         fs::write(shop.join(".env"), "A=1\n").unwrap();
         let cfg = Config::default();
-        let folder = add(&cfg, &app, "feature/login", true, None).unwrap();
+        let (folder, _) = add(&cfg, &app, "feature/login", true, None).unwrap();
         assert_eq!(folder, root.join("shop--feature-login"));
         assert_eq!(fs::read(folder.join(".env")).unwrap(), b"A=1\n");
         assert_eq!(fs::read(shop.join(".env")).unwrap(), b"A=1\n");
@@ -1964,6 +2580,7 @@ pub(crate) mod tests {
         assert!(
             add(&cfg, &app, "old", false, None)
                 .unwrap()
+                .0
                 .ends_with("shop--old")
         );
         let e = add(&cfg, &app, "old", false, None).unwrap_err().to_string();
@@ -2018,30 +2635,34 @@ pub(crate) mod tests {
 
     #[test]
     fn a_worktree_says_what_it_lacks_and_gets_mains_env() {
-        let (_, site) = worktree_site("missing", "A=1\n");
+        let (cfg, site) = worktree_site("missing", "A=1\nREDIS_PREFIX=shop_\n");
         assert_eq!(
-            missing(&site),
+            missing(&cfg, &site),
             Missing {
-                env: true,
+                copy: vec![".env".into()],
                 installs: vec![]
             }
         );
         fs::write(site.path.join("composer.json"), "{}").unwrap();
         fs::write(site.path.join("package.json"), "{}").unwrap();
         fs::write(site.path.join("pnpm-lock.yaml"), "").unwrap();
-        let ids: Vec<_> = missing(&site)
+        let ids: Vec<_> = missing(&cfg, &site)
             .installs
             .into_iter()
             .map(|(_, c)| c)
             .collect();
         assert_eq!(ids, ["composer install", "pnpm install"]);
-        copy_env(&site).unwrap();
-        assert_eq!(fs::read_to_string(site.path.join(".env")).unwrap(), "A=1\n");
-        assert!(!missing(&site).env);
-        assert!(copy_env(&site).is_err(), "never over its own");
+        // Anvil made the copy: the hooks' keys go into it, the rest as main has it.
+        copy_files(&cfg, &site).unwrap();
+        assert_eq!(
+            fs::read_to_string(site.path.join(".env")).unwrap(),
+            "A=1\nREDIS_PREFIX=shop_feature_x_\nAPP_URL=http://shop--feature-x.test\nCACHE_PREFIX=shop_feature_x_\n"
+        );
+        assert!(missing(&cfg, &site).copy.is_empty());
+        assert!(copy_files(&cfg, &site).is_err(), "never over its own");
         fs::create_dir(site.path.join("vendor")).unwrap();
         fs::create_dir(site.path.join("node_modules")).unwrap();
-        assert_eq!(missing(&site), Missing::default());
+        assert_eq!(missing(&cfg, &site), Missing::default());
     }
 
     #[test]
@@ -2365,29 +2986,46 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_new_worktree_gets_the_database_chosen_for_it() {
+    fn the_checkbox_off_makes_an_empty_database_on_a_copy() {
         let (mut cfg, app) = parked_app("add-db", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
-        cfg.worktree_db = DbChoice::Empty;
+        // Anvil's default: off.
         let new = new_db(&cfg, &app);
-        assert_eq!(new.choices, [DbChoice::Copy, DbChoice::Empty]);
-        assert_eq!(new.default, DbChoice::Empty);
+        assert!(new.can_copy && !new.copy);
         assert_eq!(new.main_database.as_deref(), Some("laravel"));
-        let folder = add(&cfg, &app, "feat", true, Some(DbChoice::Copy)).unwrap();
-        set_db_at(&mut cfg, &folder, DbChoice::Copy).unwrap();
-        assert_eq!(cfg.worktrees["shop--feat"].db, DbChoice::Copy);
+        let srv = Server::default();
+        for (branch, copy_db, want) in [
+            ("off", None, "create shop_off"),
+            ("on", Some(true), "clone laravel shop_on"),
+        ] {
+            let (folder, choice) = add(&cfg, &app, branch, true, copy_db).unwrap();
+            set_db_at(&mut cfg, &folder, choice).unwrap();
+            let site = site_at(&cfg, &folder).unwrap();
+            let (made, log) = prep(&mut cfg, &site, &srv).unwrap();
+            assert!(made);
+            assert_eq!(log.last().unwrap(), &format!("postgres-x {want}"));
+        }
+        // Settings (or a preset, or the app) turned on: the checkbox starts on.
+        cfg.worktree_db = DbChoice::Copy;
+        assert!(new_db(&cfg, &app).copy);
+        cfg.sites
+            .entry("shop".into())
+            .or_default()
+            .worktree
+            .copy_database = Some(false);
+        assert!(!new_db(&cfg, &app).copy);
     }
 
     #[test]
     fn a_new_worktree_refuses_a_choice_main_doesnt_allow() {
-        let (cfg, app) = parked_app("add-ext", "DB_CONNECTION=mysql\nDB_HOST=db.example.com\n");
+        let (mut cfg, app) = parked_app("add-ext", "DB_CONNECTION=mysql\nDB_HOST=db.example.com\n");
+        cfg.worktree_db = DbChoice::Copy;
         let new = new_db(&cfg, &app);
-        assert_eq!(new.choices, [DbChoice::Empty]);
-        // Copy, Settings' default, isn't offered: the first one is.
-        assert_eq!(new.default, DbChoice::Empty);
-        let e = add(&cfg, &app, "feat", true, Some(DbChoice::Copy)).unwrap_err();
+        // Copy, Settings' default, isn't offered.
+        assert!(!new.can_copy && !new.copy);
+        let e = add(&cfg, &app, "feat", true, Some(true)).unwrap_err();
         assert_eq!(
             e.to_string(),
-            "A worktree of shop can't use that database (main's database is on a server Anvil doesn't manage; choose Empty)"
+            "A worktree of shop can't copy its database (main's database is on a server Anvil doesn't manage)"
         );
         assert!(!app.path.with_file_name("shop--feat").exists());
         // No database settings: nothing to choose.
@@ -2403,5 +3041,261 @@ pub(crate) mod tests {
         fs::create_dir(main.parent().unwrap().join("main--b")).unwrap();
         let e = add(&Config::default(), &app, "b", true, None).unwrap_err();
         assert!(e.to_string().contains("already exists"));
+    }
+
+    #[test]
+    fn the_shipped_presets_parse_and_cover_every_kind() {
+        for (id, _, _) in PRESETS {
+            let h = shipped(id);
+            assert!(
+                h.copy.is_some()
+                    && h.keys.is_some()
+                    && h.check.is_some()
+                    && h.after_create.is_some(),
+                "{id}"
+            );
+            assert_eq!(h.copy_database, None, "{id}: left to Settings");
+            assert_eq!(check_hooks(&h), Ok(()), "{id}");
+            // No preset shares main's database: only the user taking the keys out does.
+            for k in DB_KEYS {
+                assert_eq!(
+                    h.keys.as_ref().unwrap().get(k).map(String::as_str),
+                    Some("{db}"),
+                    "{id} {k}"
+                );
+            }
+        }
+        assert_eq!(preset_of("vite"), "node");
+        assert_eq!(preset_of("flask"), "python");
+        assert_eq!(preset_of("go"), "other");
+        let laravel = shipped("laravel");
+        assert_eq!(laravel.keys.unwrap()["REDIS_PREFIX"], "{prefix}");
+        assert_eq!(shipped("symfony").copy.unwrap(), [".env.local"]);
+    }
+
+    #[test]
+    fn each_field_comes_from_the_first_layer_that_sets_it() {
+        let (main, _) = repo("layers");
+        let r = |cfg: &Config| resolve(cfg, "shop", &main, "laravel");
+        let mut cfg = Config::default();
+        let all = r(&cfg);
+        assert_eq!(all.preset, "Laravel");
+        for f in ["copy", "keys", "check", "after_create"] {
+            assert_eq!(all.from[f], "Laravel preset", "{f}");
+        }
+        assert_eq!(
+            (all.copy_database, all.from["copy_database"].as_str()),
+            (false, "Settings")
+        );
+        // Settings › Worktrees: the preset edited, and the database checkbox.
+        cfg.worktree_db = DbChoice::Copy;
+        cfg.worktree_presets.insert(
+            "laravel".into(),
+            Hooks {
+                check: Some(vec!["APP_KEY".into()]),
+                ..Hooks::default()
+            },
+        );
+        assert!(r(&cfg).copy_database);
+        assert_eq!(r(&cfg).check, ["APP_KEY"]);
+        assert_eq!(
+            r(&cfg).after_create,
+            shipped("laravel").after_create.unwrap()
+        );
+        // `.worktreeinclude` beats the preset's copy; `.anvil.toml` beats both.
+        fs::write(
+            main.join(".worktreeinclude"),
+            "# secrets\n.env\nconfig/local.php\n!x\n",
+        )
+        .unwrap();
+        assert_eq!(r(&cfg).copy, [".env", "config/local.php"]);
+        assert_eq!(r(&cfg).from["copy"], ".worktreeinclude");
+        fs::write(
+            main.join(".anvil.toml"),
+            "[worktree]\ncopy = [\".env.team\"]\ncopy_database = false\n",
+        )
+        .unwrap();
+        assert_eq!(r(&cfg).copy, [".env.team"]);
+        assert_eq!(
+            (
+                r(&cfg).copy_database,
+                r(&cfg).from["copy_database"].as_str()
+            ),
+            (false, ".anvil.toml")
+        );
+        // The app's own settings beat everything, field by field.
+        cfg.sites.entry("shop".into()).or_default().worktree.copy = Some(vec![]);
+        assert!(r(&cfg).copy.is_empty());
+        assert_eq!(r(&cfg).from["copy"], "this app");
+        assert_eq!(r(&cfg).from["keys"], "Laravel preset");
+        // A `[worktree]` with a mistake is the file's error, not silently ignored.
+        fs::write(main.join(".anvil.toml"), "[worktree]\ncopy = [\"../x\"]\n").unwrap();
+        assert_eq!(
+            crate::project::error(&main).unwrap(),
+            ".anvil.toml: [worktree] \"../x\" isn't a path inside the project"
+        );
+    }
+
+    #[test]
+    fn a_form_sets_one_field_checked() {
+        let mut h = Hooks::default();
+        set_field(
+            &mut h,
+            "keys",
+            Some(serde_json::json!({ "APP_URL": "{url}/x" })),
+        )
+        .unwrap();
+        assert_eq!(h.keys.as_ref().unwrap()["APP_URL"], "{url}/x");
+        let e = set_field(&mut h, "keys", Some(serde_json::json!({ "A": "{nope}" })));
+        assert_eq!(
+            e.unwrap_err().to_string(),
+            "A: {nope} isn't one of {db}, {url}, {prefix}, {port}, {name}"
+        );
+        assert!(set_field(&mut h, "keys", Some(serde_json::json!({ "A B": "" }))).is_err());
+        assert!(set_field(&mut h, "colour", Some(serde_json::json!(1))).is_err());
+        assert!(h.keys.is_some(), "a refused change changes nothing");
+        set_field(&mut h, "keys", None).unwrap();
+        assert!(h.is_empty());
+    }
+
+    #[test]
+    fn keys_fill_their_placeholders_and_point_urls_at_the_worktrees_database() {
+        let dotenv =
+            "DB_CONNECTION=pgsql\nDB_DATABASE=shop\nPRISMA_URL=postgres://u@h:5433/shop?x=1\n";
+        let (mut cfg, mut site) = worktree_site("fill", dotenv);
+        site.port = Some(5173);
+        let keys = [
+            ("APP_NAME", "Shop {name}"),
+            ("VITE_PORT", "{port}"),
+            ("SESSION_PREFIX", "{prefix}s"),
+            ("LITERAL", "x"),
+            ("PRISMA_URL", "{db}"),
+            ("NAME", "{db}"),
+        ];
+        cfg.sites.entry("shop".into()).or_default().worktree.keys = Some(
+            keys.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        );
+        let env = env(&cfg, &site).unwrap();
+        assert_eq!(get(&env, "APP_NAME"), Some("Shop shop--feature-x"));
+        assert_eq!(get(&env, "VITE_PORT"), Some("5173"));
+        assert_eq!(get(&env, "SESSION_PREFIX"), Some("shop_feature_x_s"));
+        assert_eq!(get(&env, "LITERAL"), Some("x"));
+        assert_eq!(
+            get(&env, "PRISMA_URL"),
+            Some("postgres://u@h:5433/shop_feature_x?x=1")
+        );
+        // A server connection: a database name key gets the worktree's own name.
+        assert_eq!(get(&env, "NAME"), Some("shop_feature_x"));
+        // Only the listed keys: DB_DATABASE was taken out.
+        assert_eq!(get(&env, "DB_DATABASE"), None);
+        // No port to give: the key is left out.
+        site.port = None;
+        assert_eq!(get(&super::env(&cfg, &site).unwrap(), "VITE_PORT"), None);
+    }
+
+    #[test]
+    fn a_key_naming_mains_database_refuses_but_taking_the_keys_out_shares() {
+        let dotenv = "DB_CONNECTION=pgsql\nDB_DATABASE=shop\n";
+        let (mut cfg, site) = worktree_site("share", dotenv);
+        fs::write(site.path.join(".env"), dotenv).unwrap();
+        let mut keys = shipped("laravel").keys.unwrap();
+        keys.insert("DB_DATABASE".into(), "shop".into());
+        cfg.sites.entry("shop".into()).or_default().worktree.keys = Some(keys.clone());
+        assert_eq!(
+            env_err(&cfg, &site),
+            "DB_DATABASE names shop's database; take it out of the worktree keys to share that database"
+        );
+        // Taken out: main's database by the user's choice, and `check` says so.
+        for k in DB_KEYS {
+            keys.remove(k);
+        }
+        cfg.sites.entry("shop".into()).or_default().worktree.keys = Some(keys);
+        let env = checked_env(&cfg, &site, false).unwrap();
+        assert_eq!(get(&env, "DB_DATABASE"), None);
+        assert_eq!(same_as_main(&cfg, &site), ["DB_DATABASE"]);
+        // A test run still never gets main's: its own database.
+        let test = checked_env(&cfg, &site, true).unwrap();
+        assert_eq!(get(&test, "DB_DATABASE"), Some("shop_feature_x"));
+    }
+
+    #[test]
+    fn copy_takes_worktreeinclude_and_stars_and_never_overwrites() {
+        let (main, wt) = repo("copy");
+        fs::write(main.join(".env"), "A=1\n").unwrap();
+        fs::write(main.join(".env.local"), "B=1\n").unwrap();
+        fs::write(main.join(".envrc"), "x").unwrap();
+        fs::create_dir_all(main.join("config/local")).unwrap();
+        fs::write(main.join("config/local/keys.json"), "{}").unwrap();
+        fs::write(wt.join(".env.local"), "mine").unwrap();
+        fs::write(
+            main.join(".worktreeinclude"),
+            ".env*\nconfig/local/\n../outside\nnot-there\n",
+        )
+        .unwrap();
+        let list = worktreeinclude(&main).unwrap();
+        let copied = copy_in(&main, &wt, &list).unwrap();
+        let shown: Vec<_> = copied.iter().map(|p| p.display().to_string()).collect();
+        assert_eq!(shown, [".env", ".envrc", "config/local"]);
+        assert_eq!(
+            fs::read_to_string(wt.join("config/local/keys.json")).unwrap(),
+            "{}"
+        );
+        assert_eq!(fs::read_to_string(wt.join(".env.local")).unwrap(), "mine");
+        assert!(copy_in(&main, &wt, &list).unwrap().is_empty());
+        assert!(star("a*b*c", "aXbYc") && !star("a*b*c", "aXc") && star(".env*", ".env"));
+    }
+
+    #[test]
+    fn rewrite_changes_only_the_listed_keys() {
+        let text = "# main's\nDB_DATABASE=shop\nexport APP_URL=\"http://shop.test\"\nOTHER = keep me \r\nDB_DATABASE=again\n#DB_DATABASE=shop\nno newline";
+        let values = [
+            ("DB_DATABASE".to_string(), "shop_x".to_string()),
+            ("APP_URL".into(), "http://shop--x.test".into()),
+            ("REDIS_PREFIX".into(), "shop_x_".into()),
+        ];
+        let (out, missing) = set_keys(text, &values);
+        assert_eq!(
+            out,
+            "# main's\nDB_DATABASE=shop_x\nexport APP_URL=\"http://shop--x.test\"\nOTHER = keep me \r\nDB_DATABASE=shop_x\n#DB_DATABASE=shop\nno newline"
+        );
+        assert_eq!(missing, ["REDIS_PREFIX"]);
+        // Through the worktree's files: `check` warns while a value is main's, not after.
+        let dotenv = "APP_NAME=Shop\nDB_CONNECTION=pgsql\nDB_DATABASE=shop\nSESSION_COOKIE=s\nREDIS_PREFIX=\n";
+        let (cfg, site) = worktree_site("rewrite", dotenv);
+        assert!(rewrite(&cfg, &site).is_err(), "no .env to rewrite");
+        fs::write(site.path.join(".env"), dotenv).unwrap();
+        assert_eq!(same_as_main(&cfg, &site), ["DB_DATABASE", "SESSION_COOKIE"]);
+        rewrite(&cfg, &site).unwrap();
+        assert_eq!(
+            fs::read_to_string(site.path.join(".env")).unwrap(),
+            "APP_NAME=Shop\nDB_CONNECTION=pgsql\nDB_DATABASE=shop_feature_x\nSESSION_COOKIE=s\nREDIS_PREFIX=shop_feature_x_\nAPP_URL=http://shop--feature-x.test\nCACHE_PREFIX=shop_feature_x_\n"
+        );
+        // SESSION_COOKIE isn't one of the keys: still main's.
+        assert_eq!(same_as_main(&cfg, &site), ["SESSION_COOKIE"]);
+    }
+
+    #[test]
+    fn after_create_runs_only_when_asked() {
+        let (mut cfg, app) = parked_app("after", "APP_NAME=Shop\n");
+        fs::write(app.path.join("package.json"), "{}").unwrap();
+        fs::write(app.path.join("package-lock.json"), "{}").unwrap();
+        cfg.sites
+            .entry("shop".into())
+            .or_default()
+            .worktree
+            .after_create = Some(vec!["{install}".into(), "touch ran".into()]);
+        assert_eq!(new_db(&cfg, &app).after_create, ["npm ci", "touch ran"]);
+        let (folder, _) = add(&cfg, &app, "feat", true, None).unwrap();
+        // `add` made it and ran nothing: the caller asks first.
+        assert!(!folder.join("ran").exists());
+        let site = site_at(&cfg, &folder).unwrap();
+        // No package.json in the new worktree (untracked in main): no install to offer.
+        assert_eq!(after_create(&cfg, &site), ["touch ran"]);
+        run_after(&cfg, &site, "touch ran", true).unwrap();
+        assert!(folder.join("ran").exists());
+        let e = run_after(&cfg, &site, "echo no >&2; exit 3", true).unwrap_err();
+        assert_eq!(e.to_string(), "echo no >&2; exit 3 failed: no");
     }
 }

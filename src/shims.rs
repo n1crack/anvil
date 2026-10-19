@@ -514,7 +514,10 @@ mod tests {
         let shop = root.join("shop");
         fs::create_dir(&shop).unwrap();
         git(&shop, &["init", "-q", "-b", "main"]);
-        git(&shop, &["commit", "-q", "--allow-empty", "-m", "i"]);
+        // A Laravel app: its worktree gets the Laravel preset's keys.
+        fs::write(shop.join("artisan"), "").unwrap();
+        git(&shop, &["add", "artisan"]);
+        git(&shop, &["commit", "-q", "-m", "i"]);
         fs::write(shop.join(".env"), "DB_DATABASE=shop\n").unwrap();
         let wt = shop.join(".claude/worktrees/feature-x");
         git(

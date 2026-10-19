@@ -95,9 +95,13 @@ pub struct Config {
     /// Service licenses the user accepted before installing: license id -> date.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub accepted_licenses: BTreeMap<String, String>,
-    /// Settings › Database for new worktrees: what one opened outside Anvil uses, and the
-    /// New Worktree dialog's preselection.
+    /// Settings › Worktrees › Copy the database: the last layer of the hooks'
+    /// `copy_database` (`worktrees::resolve`), so New Worktree's checkbox and what a
+    /// worktree opened outside Anvil uses, unless a preset or the app says otherwise.
     pub worktree_db: worktrees::DbChoice,
+    /// Settings › Worktrees: the user's changes to Anvil's presets, by preset id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub worktree_presets: BTreeMap<String, worktrees::Hooks>,
     /// Per worktree site (`<app>--<name>`): its database choice and copies made.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub worktrees: BTreeMap<String, worktrees::WorktreeConfig>,
@@ -130,6 +134,9 @@ pub struct SiteConfig {
     /// Per-process settings of the app's other processes, by process id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub processes: BTreeMap<String, ProcessConfig>,
+    /// The app's own worktree hooks (its Settings tab), over `.anvil.toml`'s and the preset's.
+    #[serde(default, skip_serializing_if = "worktrees::Hooks::is_empty")]
+    pub worktree: worktrees::Hooks,
 }
 
 /// What the user changed about one process of an app (see `processes::set_process`).
@@ -184,7 +191,9 @@ impl Default for Config {
             trim_app_logs: true,
             notifications: true,
             accepted_licenses: BTreeMap::new(),
-            worktree_db: worktrees::DbChoice::Copy,
+            // The owner's "default off": a new worktree gets an empty database of its own.
+            worktree_db: worktrees::DbChoice::Empty,
+            worktree_presets: BTreeMap::new(),
             worktrees: BTreeMap::new(),
         }
     }
@@ -587,6 +596,8 @@ fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
         port: o.and_then(|s| s.port),
         autostart: false,
         processes: BTreeMap::new(),
+        // The app's, read through `worktree_of` (`worktrees::hooks`).
+        worktree: worktrees::Hooks::default(),
     }
 }
 

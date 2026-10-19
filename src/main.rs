@@ -278,10 +278,12 @@ enum WorktreeCmd {
         /// Create the branch, from the app's current one
         #[arg(long)]
         new: bool,
-        /// Its own database: copy (of main's) or empty; unset follows Settings' default
-        #[arg(long)]
-        db: Option<worktrees::DbChoice>,
+        /// Its own database a copy of main's (--copy-db=false: empty); unset follows the hooks
+        #[arg(long, num_args = 0..=1, require_equals = true, default_missing_value = "true")]
+        copy_db: Option<bool>,
     },
+    /// Print an app's worktree hooks and where each field comes from
+    Hooks { app: Option<String> },
     /// Use the database a worktree would get that is there already and Anvil didn't make
     UseDb {
         name: String,
@@ -520,6 +522,61 @@ fn confirm(question: &str, elsewhere: &str) -> Result<bool> {
     let mut answer = String::new();
     std::io::stdin().lock().read_line(&mut answer)?;
     Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "Yes"))
+}
+
+/// The new worktree's `after_create` commands, run when the user says yes on a terminal
+/// (its database prepared first); elsewhere only listed.
+fn after_create(cfg: &Config, folder: &std::path::Path) -> Result<()> {
+    use std::io::IsTerminal;
+    let real = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let Some(site) = sites(cfg)
+        .into_iter()
+        .find(|s| s.worktree_of.is_some() && real(&s.path) == real(folder))
+    else {
+        return Ok(());
+    };
+    let commands = worktrees::after_create(cfg, &site);
+    if commands.is_empty() {
+        return Ok(());
+    }
+    let list = commands.join("; ");
+    if !std::io::stdin().is_terminal() {
+        println!("Not run (no terminal to ask): {list}");
+        return Ok(());
+    }
+    if !confirm(&format!("Run {list} in {}?", site.name), "")? {
+        return Ok(());
+    }
+    worktrees::prepare_site(&site, &mut |line| eprintln!("  {line}"))?;
+    for c in &commands {
+        println!("{}", bold(c));
+        worktrees::run_after(cfg, &site, c, false)?;
+    }
+    Ok(())
+}
+
+/// `anvil worktree hooks`: each field, and the layer it comes from.
+fn print_hooks(h: &worktrees::Resolved) {
+    let from = |f: &str| dim(format!("({})", h.from[f]));
+    let list = |v: &[String]| {
+        if v.is_empty() {
+            dim("none")
+        } else {
+            v.join(", ")
+        }
+    };
+    let on = if h.copy_database { "on" } else { "off" };
+    println!("{}", bold(format!("{} preset", h.preset)));
+    println!("copy           {}  {}", list(&h.copy), from("copy"));
+    println!("copy_database  {on}  {}", from("copy_database"));
+    let keys: Vec<String> = h.keys.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    println!("keys           {}  {}", list(&keys), from("keys"));
+    println!("check          {}  {}", list(&h.check), from("check"));
+    println!(
+        "after_create   {}  {}",
+        list(&h.after_create),
+        from("after_create")
+    );
 }
 
 fn print_setup(cfg: &Config) -> Result<()> {
@@ -802,7 +859,7 @@ fn run() -> Result<()> {
                     branch,
                     app,
                     new,
-                    db,
+                    copy_db,
                 } => {
                     let cwd = std::env::current_dir()?;
                     let found = match &app {
@@ -812,11 +869,22 @@ fn run() -> Result<()> {
                     let app = found
                         .filter(|s| s.worktree_of.is_none())
                         .context("Name an app with --app, or run this inside one")?;
-                    let folder = worktrees::add(&cfg, app, &branch, new, db)?;
-                    if let Some(choice) = db {
-                        edit(&mut cfg, |c| worktrees::set_db_at(c, &folder, choice))?;
-                    }
+                    let (folder, choice) = worktrees::add(&cfg, app, &branch, new, copy_db)?;
+                    edit(&mut cfg, |c| worktrees::set_db_at(c, &folder, choice))?;
                     println!("Added {}", folder.display());
+                    after_create(&cfg, &folder)?;
+                }
+                WorktreeCmd::Hooks { app } => {
+                    let cwd = std::env::current_dir()?;
+                    let found = match &app {
+                        Some(a) => all.iter().find(|s| s.name == site_name(a)),
+                        None => all
+                            .iter()
+                            .filter(|s| cwd.starts_with(&s.path))
+                            .max_by_key(|s| s.path.as_os_str().len()),
+                    };
+                    let s = found.context("Name an app, or run this inside one")?;
+                    print_hooks(&worktrees::hooks(&cfg, s));
                 }
                 WorktreeCmd::UseDb { name, yes } => {
                     let s = all
@@ -1457,20 +1525,29 @@ mod tests {
             }
         ));
         assert!(matches!(
-            parse(&["add", "x", "--db", "empty"]),
+            parse(&["add", "x", "--copy-db"]),
             WorktreeCmd::Add {
-                db: Some(worktrees::DbChoice::Empty),
+                copy_db: Some(true),
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse(&["add", "x", "--copy-db=false"]),
+            WorktreeCmd::Add {
+                copy_db: Some(false),
                 ..
             }
         ));
         assert!(matches!(
             parse(&["add", "x"]),
-            WorktreeCmd::Add { db: None, .. }
+            WorktreeCmd::Add { copy_db: None, .. }
         ));
-        for bad in ["main", "share"] {
-            let argv = ["anvil", "worktree", "add", "x", "--db", bad];
-            assert!(Cli::try_parse_from(argv).is_err(), "{bad}");
-        }
+        // `--db` (copy|empty) is gone: the checkbox's flag replaces it.
+        assert!(Cli::try_parse_from(["anvil", "worktree", "add", "x", "--db", "copy"]).is_err());
+        assert!(matches!(
+            parse(&["hooks", "shop"]),
+            WorktreeCmd::Hooks { app: Some(_) }
+        ));
         assert!(matches!(
             parse(&["use-db", "shop--x", "--yes"]),
             WorktreeCmd::UseDb { yes: true, .. }
