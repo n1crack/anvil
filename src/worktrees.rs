@@ -458,7 +458,7 @@ pub fn db_name(site: &Site) -> String {
     let mains = main_of(&site.path)
         .map(|m| main_databases(&m))
         .unwrap_or_default();
-    if mains.contains(&name) {
+    if mains.iter().any(|m| m.trim().eq_ignore_ascii_case(&name)) {
         name = format!("{name}_wt_{}", crate::short_hash(&name));
     }
     fit(name)
@@ -567,8 +567,10 @@ pub fn is_mains_database(site: &Site, db: &str) -> bool {
         return false;
     };
     let mains = main_databases(&main);
-    // A relative SQLite path resolves inside the worktree: only a server name counts.
-    if mains.iter().any(|m| m == db) {
+    let db = db.trim();
+    // A relative SQLite path resolves inside the worktree: only a server name counts, in any
+    // case (MySQL on macOS takes `SHOP` for `shop`).
+    if mains.iter().any(|m| m.trim().eq_ignore_ascii_case(db)) {
         return true;
     }
     if !Path::new(db).is_absolute() {
@@ -3406,6 +3408,9 @@ pub(crate) mod tests {
     fn mains_own_database_is_known_by_name() {
         let (_, site) = worktree_site("is-mains", "DB_CONNECTION=pgsql\nDB_DATABASE=shop\n");
         assert!(is_mains_database(&site, "shop"));
+        // MySQL on macOS takes names in any case.
+        assert!(is_mains_database(&site, "SHOP"));
+        assert!(is_mains_database(&site, " Shop "));
         assert!(!is_mains_database(&site, "shop_testing"));
         assert!(!is_mains_database(&site, ":memory:"));
     }
