@@ -1195,6 +1195,10 @@ fn env_with(
     if set("dotenv_overload") {
         return Err("its composer.json sets extra.runtime.dotenv_overload, so its env files win over the worktree's own settings and could reach main's database: turn it off to run it".into());
     }
+    // Its env files elsewhere: Anvil reads the ones at the root, so it can't tell their database.
+    if set("dotenv_path") {
+        return Err("its composer.json sets extra.runtime.dotenv_path, so its env files aren't the ones Anvil reads and could reach main's database: take it out to run it".into());
+    }
     let mut env: Vec<(String, String)> = Vec::new();
     let db = db_name(site);
     let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
@@ -4169,6 +4173,10 @@ pub(crate) mod tests {
                 assert!(err.contains("extra.runtime.dotenv_overload"), "{on}: {err}");
             }
         }
+        // Env files moved (`config/.env`): Anvil reads the root ones only.
+        composer("dotenv_path", r#""config/.env""#);
+        let err = env(&cfg, &site).unwrap_err();
+        assert!(err.contains("extra.runtime.dotenv_path"), "{err}");
     }
 
     #[test]
