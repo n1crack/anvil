@@ -20,13 +20,16 @@ Until 1.0.0, minor versions may contain breaking changes.
   default; an app changes any of it in its Settings tab, and a project can
   share its own in `.anvil.toml`'s `[worktree]`. The keys go into everything
   Anvil starts and into the env files it reads (`.env`, `.env.local`,
-  `.env.development`, `.env.development.local`; never `.env.example` or
-  `.env.testing`) when Anvil copies them; a worktree whose env file still has
-  the app's value for a checked key says so on its Overview, with "Rewrite
-  with the hooks", which changes only those lines. Taking the database keys
-  out shares the app's database; a database key left empty, or one whose
-  placeholder has no value, stops the worktree instead, and tests always get
-  the worktree's own. `anvil worktree hooks` prints an app's hooks, where each
+  `.env.development`, `.env.development.local`, and Symfony's
+  `.env.<APP_ENV>` and `.env.<APP_ENV>.local`; never `.env.example`,
+  `.env.testing` or `.env.test`) when Anvil copies them; a worktree whose env
+  file still has the app's value for a checked key says so on its Overview,
+  with "Rewrite with the hooks", which changes only those lines. A database
+  named in a URL's query (`?database=`, `?dbname=`) becomes the worktree's
+  too. Taking the database keys out of an app's own settings shares the app's
+  database; a `.anvil.toml` or a preset that leaves them out still gets them.
+  A database key left empty, or one whose placeholder has no value, stops the
+  worktree instead, and tests always get the worktree's own. `anvil worktree hooks` prints an app's hooks, where each
   comes from, and any mistake in them.
 
 ### Changed
