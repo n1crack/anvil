@@ -293,7 +293,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   text.innerHTML = `<span class="name"></span><span class="sub"></span>`;
   // The folder's name: not every project is a site, so no address in the list.
   // A worktree is named by its branch.
-  $(".name", text).textContent = child ? (s.branch ?? s.name) : s.name;
+  $(".name", text).textContent = child || s.worktree_of ? (s.branch ?? s.name) : s.name;
   // HTTPS shows as a lock after the name; it's turned on and off from the right-click menu.
   // While it changes only a spinner shows: words would be cut off here; the header says them.
   // Folders and Compose projects have no address: a leftover HTTPS flag means nothing there.
@@ -492,11 +492,14 @@ function renderList() {
 
   // Worktrees nest under their app. A linked name pointing at a parked project's folder is
   // an alias: it shows in that app's header, not as a row.
-  const parked = [...snap.sites.filter((s) => !s.linked && !s.worktree_of), ...hiddenApps];
+  const apps = new Set(snap.sites.filter((s) => !s.linked && !s.worktree_of).map((s) => s.name));
+  // A worktree whose app is gone stands alone, in its folder's section else Linked.
+  const orphan = (s) => s.worktree_of && !apps.has(s.worktree_of);
+  const parked = [...snap.sites.filter((s) => (!s.linked && !s.worktree_of) || (orphan(s) && s.parked_in)), ...hiddenApps];
   const wts = new Map<string, any[]>();
-  for (const s of snap.sites) if (s.worktree_of) wts.set(s.worktree_of, [...(wts.get(s.worktree_of) ?? []), s]);
+  for (const s of snap.sites) if (s.worktree_of && !orphan(s)) wts.set(s.worktree_of, [...(wts.get(s.worktree_of) ?? []), s]);
   const parkedPaths = new Set(parked.map((s) => s.path));
-  const linked = snap.sites.filter((s) => s.linked && !parkedPaths.has(s.path));
+  const linked = snap.sites.filter((s) => (s.linked && !parkedPaths.has(s.path)) || (orphan(s) && !s.parked_in));
 
   const order = sortBy === "modified" ? (a, b) => b.modified - a.modified : (a, b) => a.name.localeCompare(b.name);
 

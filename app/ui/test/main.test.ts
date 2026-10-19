@@ -1803,7 +1803,21 @@ describe("sidebar worktrees", () => {
     document.querySelector(".pop")?.remove();
   });
 
+  test("a worktree whose app is gone still shows, as a plain row with its branch", async () => {
+    w.mockSnap.sites = [
+      ...w.mockSnap.sites,
+      w.mockSite("lost--fix", "laravel", { worktree_of: "lost", branch: "fix/it", path: "/Users/x/Sites/lost--fix" }),
+    ];
+    await refresh();
+    const r = $(`#list [data-name="lost--fix"]`);
+    expect(r.classList.contains("child")).toBe(false);
+    expect(r.querySelector(".name")!.textContent).toBe("fix/it");
+    w.mockSnap.sites = w.mockSnap.sites.filter((s: any) => s.name !== "lost--fix");
+  });
+
   test("more than five worktrees start collapsed", async () => {
+    localStorage.removeItem("wt-folded");
+    localStorage.removeItem("collapsed");
     w.mockSnap.sites = [...w.mockSnap.sites, ...[1, 2, 3, 4].map((n) => mk(`b${n}`, `b${n}`))];
     await refresh();
     expect($(`#list [data-name="shop"] + .kids`).classList.contains("closed")).toBe(true);
