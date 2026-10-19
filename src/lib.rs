@@ -1502,28 +1502,71 @@ pub(crate) fn remove_pid_file(file: &Path, pid: u32) {
 /// reap it. A child started as a process-group leader (`process_group(0)`) is stopped
 /// with its whole group, so `npm run dev` leaves no node behind; any other child alone.
 pub(crate) fn terminate(child: &mut Child, grace: std::time::Duration) {
+    terminate_all(std::slice::from_mut(child), grace);
+}
+
+/// `terminate` for many at once: SIGTERM to all, one shared `grace` for them to exit,
+/// then SIGKILL what is left. Stopping N takes one grace, not N.
+pub(crate) fn terminate_all(children: &mut [Child], grace: std::time::Duration) {
     use nix::sys::signal::{kill, killpg};
-    let pid = Pid::from_raw(child.id() as i32);
-    let group = killpg(pid, Signal::SIGTERM).is_ok();
-    if !group {
-        let _ = kill(pid, Signal::SIGTERM);
-    }
+    let pid = |c: &Child| Pid::from_raw(c.id() as i32);
+    let groups: Vec<bool> = children
+        .iter()
+        .map(|c| {
+            let group = killpg(pid(c), Signal::SIGTERM).is_ok();
+            if !group {
+                let _ = kill(pid(c), Signal::SIGTERM);
+            }
+            group
+        })
+        .collect();
     let deadline = std::time::Instant::now() + grace;
-    let mut exited = false;
-    while !exited && std::time::Instant::now() < deadline {
-        exited = matches!(child.try_wait(), Ok(Some(_)));
-        if !exited {
+    let mut exited = vec![false; children.len()];
+    while exited.contains(&false) && std::time::Instant::now() < deadline {
+        for (c, e) in children.iter_mut().zip(&mut exited) {
+            *e = *e || matches!(c.try_wait(), Ok(Some(_)));
+        }
+        if exited.contains(&false) {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
-    // Anything in the group still alive gets killed, even after its leader ended.
-    if group {
-        let _ = killpg(pid, Signal::SIGKILL);
+    for ((c, group), exited) in children.iter_mut().zip(groups).zip(exited) {
+        // Anything in the group still alive gets killed, even after its leader ended.
+        if group {
+            let _ = killpg(pid(c), Signal::SIGKILL);
+        }
+        if !exited {
+            let _ = c.kill();
+        }
+        let _ = c.wait();
     }
-    if !exited {
-        let _ = child.kill();
+}
+
+/// A process taken out of `Apps`, `Services` or `Server` (`take`, `take_all`), still to
+/// be stopped: a shutdown takes seconds, so it happens once their lock is released.
+pub struct Stopping {
+    child: Child,
+    /// Removed once it has stopped, if they still name it (`remove_pid_file`).
+    pid_files: Vec<PathBuf>,
+}
+
+impl Stopping {
+    pub fn wait(self, grace: std::time::Duration) {
+        stop_all(vec![self], grace);
     }
-    let _ = child.wait();
+}
+
+/// Stop them all at once against one shared deadline (`terminate_all`), then remove
+/// their pid files.
+pub fn stop_all(list: Vec<Stopping>, grace: std::time::Duration) {
+    let (mut children, files): (Vec<Child>, Vec<Vec<PathBuf>>) =
+        list.into_iter().map(|s| (s.child, s.pid_files)).unzip();
+    terminate_all(&mut children, grace);
+    for (c, files) in children.iter().zip(files) {
+        for f in files {
+            remove_pid_file(&f, c.id());
+        }
+    }
 }
 
 /// Running PHP-FPM pools and the web server.
@@ -1657,14 +1700,21 @@ impl Server {
     }
 
     pub fn stop(&mut self) {
-        if self.children.is_empty() {
-            return;
-        }
-        for c in &mut self.children {
-            terminate(c, std::time::Duration::from_secs(3));
-        }
-        self.children.clear();
-        let _ = fs::remove_file(pid_file());
+        stop_all(self.take_all(), std::time::Duration::from_secs(3));
+    }
+
+    /// Hand back every process to stop with `stop_all`; the pid file goes with the
+    /// first, the pid it names.
+    pub fn take_all(&mut self) -> Vec<Stopping> {
+        self.labels.clear();
+        let mut files = vec![pid_file()];
+        self.children
+            .drain(..)
+            .map(|child| Stopping {
+                child,
+                pid_files: std::mem::take(&mut files),
+            })
+            .collect()
     }
 }
 
@@ -1722,6 +1772,45 @@ mod tests {
         terminate(&mut stubborn, std::time::Duration::from_millis(300));
         assert!(matches!(stubborn.try_wait(), Ok(Some(_))));
         assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    /// Quit stops everything against one deadline: three groups that ignore SIGTERM and
+    /// three that don't take one grace in total, not three, and none is left behind.
+    #[test]
+    fn stop_all_shares_one_deadline() {
+        use std::os::unix::process::CommandExt;
+        let spawn = |script: &str| {
+            Command::new("sh")
+                .args(["-c", script])
+                .process_group(0)
+                .spawn()
+                .unwrap()
+        };
+        let mut children: Vec<Child> = (0..3)
+            .map(|_| spawn("trap '' TERM; sleep 30"))
+            .chain((0..3).map(|_| spawn("sleep 30")))
+            .collect();
+        let pids: Vec<i32> = children.iter().map(|c| c.id() as i32).collect();
+        std::thread::sleep(std::time::Duration::from_millis(200)); // let the traps be set
+        let grace = std::time::Duration::from_secs(1);
+        let start = std::time::Instant::now();
+        terminate_all(&mut children, grace);
+        let took = start.elapsed();
+        eprintln!("stop_all: 6 groups, {grace:?} grace, took {took:?}");
+        assert!(
+            took >= grace,
+            "the stubborn ones were killed early: {took:?}"
+        );
+        assert!(took < grace * 2, "not one shared deadline: {took:?}");
+        for (c, pid) in children.iter_mut().zip(pids) {
+            assert!(matches!(c.try_wait(), Ok(Some(_))));
+            // The whole group is gone, its sleep too (launchd reaps it; give it a moment).
+            let gone = (0..50).any(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                nix::sys::signal::killpg(Pid::from_raw(pid), None).is_err()
+            });
+            assert!(gone, "group {pid} survived");
+        }
     }
 
     #[test]

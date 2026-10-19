@@ -5,6 +5,7 @@ use anvil::{Config, Server, Site};
 use serde::Serialize;
 use std::process::Command;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{
@@ -1161,6 +1162,10 @@ fn relaunch(handle: AppHandle) -> Res<()> {
         .filter(|k| !k.contains('#'))
         .collect();
     save_keys(&restore_file(), &keys).map_err(|e| e.to_string())?;
+    // Stopped here, off the main thread, before the new Anvil starts: a restart's
+    // `ExitRequested` can't be held back to wait for a stop.
+    stop_everything(&handle.state::<App>());
+    STOPPED.store(true, Ordering::SeqCst);
     handle.restart()
 }
 
@@ -1214,16 +1219,35 @@ fn restore_processes(app: &App, cfg: &Config, keys: &[String]) {
 fn stop_app(app: &App, key: &str) {
     let stopping = anvil::lock(&app.apps).take(key);
     if let Some(s) = stopping {
-        s.wait();
+        s.wait(anvil::apps::GRACE);
     }
 }
 
 /// Stop a service without keeping `services` locked while it shuts down (up to 10 s).
 fn stop_service(app: &App, id: &str) {
-    let child = anvil::lock(&app.services).take(id);
-    if let Some(c) = child {
-        anvil::services::halt(id, c);
+    let stopping = anvil::lock(&app.services).take(id);
+    if let Some(s) = stopping {
+        s.wait(anvil::services::GRACE);
     }
+}
+
+/// Set once `stop_everything` ran for Quit or Relaunch: the exit may go ahead.
+static STOPPED: AtomicBool = AtomicBool::new(false);
+/// Set when Quit starts stopping, so a second Quit meanwhile doesn't stop again.
+static QUITTING: AtomicBool = AtomicBool::new(false);
+
+/// Stop everything Anvil runs (dev processes, the web server, services, container log
+/// streams) at once: SIGTERM to all, one shared deadline (a service's, the longest
+/// grace), then SIGKILL what's left. Takes up to 10 s; call it off the main thread.
+fn stop_everything(app: &App) {
+    anvil::lock(&app.container_logs).stop();
+    let mut all = anvil::lock(&app.apps).take_all();
+    // Held through the stop, like `stop`, so a web server start can't interleave.
+    let _one = anvil::lock(&app.restarting);
+    let server = anvil::lock(&app.server).take();
+    all.extend(server.into_iter().flat_map(|mut s| s.take_all()));
+    all.extend(anvil::lock(&app.services).take_all());
+    anvil::stop_all(all, anvil::services::GRACE);
 }
 
 fn run_app(app: &App, cfg: &Config, site: &str, action: &str) {
@@ -3286,14 +3310,29 @@ fn main() {
                 api.prevent_exit();
                 hide_windows(handle);
             }
-            RunEvent::Exit => {
-                let app = handle.state::<App>();
-                anvil::lock(&app.container_logs).stop();
-                *anvil::lock(&app.apps) = Default::default();
-                stop(&app);
-                // Databases shut down cleanly before Anvil exits.
-                *anvil::lock(&app.services) = Default::default();
+            // Quit (tray, menu, Cmd-Q): stop everything in a thread so the UI doesn't
+            // freeze, then exit for real. Relaunch stops first and sets STOPPED itself.
+            RunEvent::ExitRequested {
+                code: Some(code),
+                api,
+                ..
+            } if code != tauri::RESTART_EXIT_CODE && !STOPPED.load(Ordering::SeqCst) => {
+                api.prevent_exit();
+                hide_windows(handle);
+                if !QUITTING.swap(true, Ordering::SeqCst) {
+                    let handle = handle.clone();
+                    std::thread::spawn(move || {
+                        // Exit even if a stop panicked: Quit must never hang.
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            stop_everything(&handle.state::<App>())
+                        }));
+                        STOPPED.store(true, Ordering::SeqCst);
+                        handle.exit(code);
+                    });
+                }
             }
+            // Normally nothing is left by now; this catches whatever started since.
+            RunEvent::Exit => stop_everything(&handle.state::<App>()),
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => show(handle),
             _ => {}

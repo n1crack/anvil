@@ -6,8 +6,8 @@
 //! server, so changing a site never restarts a database.
 
 use crate::{
-    Config, fetch_text, fetch_tgz, home, kill_orphans, platform, published_sum, replace_dir, run,
-    save, terminate,
+    Config, Stopping, fetch_text, fetch_tgz, home, kill_orphans, platform, published_sum,
+    replace_dir, run, save,
 };
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -970,15 +970,25 @@ impl Services {
     }
 
     pub fn stop(&mut self, id: &str) {
-        if let Some(c) = self.take(id) {
-            halt(id, c);
+        if let Some(s) = self.take(id) {
+            s.wait(GRACE);
         }
     }
 
-    /// Forget a running service and hand back its process, to `halt` once the lock on
-    /// `Services` is released.
-    pub fn take(&mut self, id: &str) -> Option<Child> {
-        self.children.remove(id)
+    /// Forget a running service and hand back its process, to stop with
+    /// `Stopping::wait` once the lock on `Services` is released.
+    pub fn take(&mut self, id: &str) -> Option<Stopping> {
+        let child = self.children.remove(id)?;
+        Some(Stopping {
+            child,
+            pid_files: vec![pid_file(id), legacy_pid_file(id)],
+        })
+    }
+
+    /// `take` every service, to stop together with `stop_all`.
+    pub fn take_all(&mut self) -> Vec<Stopping> {
+        let ids: Vec<String> = self.children.keys().cloned().collect();
+        ids.iter().filter_map(|id| self.take(id)).collect()
     }
 
     /// Start every enabled service; returns the ones that failed with why.
@@ -1042,12 +1052,8 @@ pub fn enabled(cfg: &Config) -> Vec<String> {
         .collect()
 }
 
-/// Stop a service taken out of `Services`. Databases get 10 s to flush and shut down cleanly.
-pub fn halt(id: &str, mut c: Child) {
-    terminate(&mut c, Duration::from_secs(10));
-    crate::remove_pid_file(&pid_file(id), c.id());
-    crate::remove_pid_file(&legacy_pid_file(id), c.id());
-}
+/// How long a service gets to exit after SIGTERM: databases flush and shut down cleanly.
+pub const GRACE: Duration = Duration::from_secs(10);
 
 /// Everything of a start but the bookkeeping (`Services::begin`/`finish`): check, init,
 /// spawn and see that it stays up.
@@ -1099,10 +1105,7 @@ pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
 
 impl Drop for Services {
     fn drop(&mut self) {
-        let ids: Vec<String> = self.children.keys().cloned().collect();
-        for id in ids {
-            self.stop(&id);
-        }
+        crate::stop_all(self.take_all(), GRACE);
     }
 }
 

@@ -2,7 +2,7 @@
 //! server (Node, Rust, Go, .NET): Anvil starts them on a private port and Caddy
 //! proxies `<name>.<tld>` to it.
 
-use crate::{Config, Site, home, kill_orphans, runtimes};
+use crate::{Config, Site, Stopping, home, kill_orphans, runtimes};
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 use std::fs;
@@ -475,19 +475,8 @@ fn orphans_in(home: &Path) {
     }
 }
 
-/// A process taken out of `Apps` (`take`), still to be stopped.
-pub struct Stopping {
-    child: Child,
-    pid_file: PathBuf,
-}
-
-impl Stopping {
-    /// Stop its whole group: SIGTERM, then SIGKILL after 5 s.
-    pub fn wait(mut self) {
-        crate::terminate(&mut self.child, Duration::from_secs(5));
-        crate::remove_pid_file(&self.pid_file, self.child.id());
-    }
-}
+/// How long a dev process gets to exit after SIGTERM before it is killed.
+pub const GRACE: Duration = Duration::from_secs(5);
 
 /// Apps started from Anvil, by site name.
 pub struct Apps {
@@ -733,7 +722,7 @@ impl Apps {
 
     pub fn stop(&mut self, name: &str) {
         if let Some(s) = self.take(name) {
-            s.wait();
+            s.wait(GRACE);
         }
     }
 
@@ -746,8 +735,14 @@ impl Apps {
         let child = self.children.remove(name)?;
         Some(Stopping {
             child,
-            pid_file: pid_in(&self.home, name),
+            pid_files: vec![pid_in(&self.home, name)],
         })
+    }
+
+    /// `take` every app and process, to stop together with `stop_all`.
+    pub fn take_all(&mut self) -> Vec<Stopping> {
+        let names: Vec<String> = self.children.keys().cloned().collect();
+        names.iter().filter_map(|n| self.take(n)).collect()
     }
 
     /// Running apps (not their other processes).
@@ -764,10 +759,7 @@ impl Apps {
 
 impl Drop for Apps {
     fn drop(&mut self) {
-        let names: Vec<String> = self.children.keys().cloned().collect();
-        for n in names {
-            self.stop(&n);
-        }
+        crate::stop_all(self.take_all(), GRACE);
     }
 }
 
