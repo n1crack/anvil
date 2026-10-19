@@ -1466,14 +1466,21 @@ fn set_keys(text: &str, values: &[(String, String)]) -> (String, Vec<String>) {
             continue;
         };
         seen.insert(name.clone());
-        let quote = old
-            .trim_start()
-            .chars()
-            .next()
-            .filter(|c| ['"', '\''].contains(c))
-            .or_else(|| v.contains([' ', '\t', '#']).then_some('"'));
-        let v = quote.map_or_else(|| v.clone(), |q| format!("{q}{v}{q}"));
-        out.push_str(&format!("{k}={v}{}", &line[body.len()..]));
+        // The spacing after `=` and a ` # comment` after the value stay.
+        let rest = old.trim_start();
+        let lead = &old[..old.len() - rest.len()];
+        let (quote, tail) = match rest.chars().next() {
+            Some(q @ ('"' | '\'')) => (Some(q), rest[1..].find(q).map_or("", |i| &rest[i + 2..])),
+            _ => {
+                let value = rest[..rest.find(" #").unwrap_or(rest.len())].trim_end();
+                (None, &rest[value.len()..])
+            }
+        };
+        let v = match quote {
+            Some(q) => format!("{q}{v}{q}"),
+            None => quoted(v),
+        };
+        out.push_str(&format!("{k}={lead}{v}{tail}{}", &line[body.len()..]));
     }
     let missing = values
         .iter()
@@ -1483,21 +1490,61 @@ fn set_keys(text: &str, values: &[(String, String)]) -> (String, Vec<String>) {
     (out, missing)
 }
 
+/// `v` in double quotes when an env file would read it otherwise (spaces, `#`).
+fn quoted(v: &str) -> String {
+    if v.contains([' ', '\t', '#']) {
+        format!("\"{v}\"")
+    } else {
+        v.into()
+    }
+}
+
+/// `values` added at the end of `text`, with its line ending.
+fn append_keys(text: &mut String, values: &[(String, String)]) {
+    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push_str(eol);
+    }
+    for (k, v) in values {
+        text.push_str(&format!("{k}={}{eol}", quoted(v)));
+    }
+}
+
 /// Write the worktree's `keys` (as `env` works them out) into its env files among `files`
 /// (relative): a line setting one changes, a key none sets is added to the first; nothing
 /// else changes.
 fn write_keys(cfg: &Config, site: &Site, files: &[PathBuf]) -> anyhow::Result<()> {
     let values = env(cfg, site).map_err(anyhow::Error::msg)?;
+    let keys = hooks(cfg, site).keys;
+    let (db, main) = (db_name(site), main_of(&site.path).unwrap_or_default());
     for (i, f) in files.iter().filter(|f| is_env_file(f)).enumerate() {
         let file = site.path.join(f);
-        let (mut text, missing) = set_keys(&fs::read_to_string(&file)?, &values);
+        let text = fs::read_to_string(&file)?;
+        // A `{db}` key gets this file's own value pointed at the worktree's database (its
+        // host and options kept); the rest what the processes get.
+        let own = crate::resources::dotenv_file(&file);
+        let mine: Vec<(String, String)> = values
+            .iter()
+            .map(|(k, v)| {
+                let from_file = own
+                    .get(k)
+                    .filter(|o| !o.is_empty() && keys.get(k).is_some_and(|t| t == "{db}"));
+                let v = from_file
+                    .and_then(|o| {
+                        with_db(o, &db, &main, &site.path)
+                            .filter(|_| o.contains("://") || o.starts_with("file:"))
+                    })
+                    .unwrap_or_else(|| v.clone());
+                (k.clone(), v)
+            })
+            .collect();
+        let (mut text, missing) = set_keys(&text, &mine);
         if i == 0 && !missing.is_empty() {
-            if !text.is_empty() && !text.ends_with('\n') {
-                text.push('\n');
-            }
-            for (k, v) in values.iter().filter(|(k, _)| missing.contains(k)) {
-                text.push_str(&format!("{k}={v}\n"));
-            }
+            let add: Vec<_> = mine
+                .into_iter()
+                .filter(|(k, _)| missing.contains(k))
+                .collect();
+            append_keys(&mut text, &add);
         }
         fs::write(&file, text)?;
     }
@@ -3351,6 +3398,44 @@ pub(crate) mod tests {
         );
         // SESSION_COOKIE isn't one of the keys: still main's.
         assert_eq!(same_as_main(&cfg, &site), ["SESSION_COOKIE"]);
+    }
+
+    #[test]
+    fn rewrite_keeps_comments_spacing_line_endings_and_each_files_own_value() {
+        let values = [
+            ("A".to_string(), "new".to_string()),
+            ("B".into(), "new".into()),
+            ("C".into(), "new".into()),
+            ("D".into(), "two words".into()),
+        ];
+        let (out, missing) = set_keys("A=old # main db\r\nB = old\nC=\"old\" # q\n", &values);
+        assert_eq!(out, "A=new # main db\r\nB = new\nC=\"new\" # q\n");
+        assert_eq!(missing, ["D"]);
+        // Added to a CRLF file with its line ending, quoted like a replaced value.
+        let mut text = "X=1\r\n".to_string();
+        append_keys(&mut text, &values[3..]);
+        assert_eq!(text, "X=1\r\nD=\"two words\"\r\n");
+        // Each file keeps its own host: only the database part is the worktree's.
+        let dotenv = "DATABASE_URL=postgres://u@localhost/shop\n";
+        let (cfg, site) = worktree_site("own-value", dotenv);
+        let main = main_of(&site.path).unwrap();
+        let local = "DATABASE_URL=postgres://u@staging/shop_staging\n";
+        fs::write(main.join(".worktreeinclude"), ".env\n.env.local\n").unwrap();
+        fs::write(main.join(".env.local"), local).unwrap();
+        fs::write(site.path.join(".env"), dotenv).unwrap();
+        fs::write(site.path.join(".env.local"), local).unwrap();
+        rewrite(&cfg, &site).unwrap();
+        let read = |f: &str| fs::read_to_string(site.path.join(f)).unwrap();
+        assert!(
+            read(".env").starts_with("DATABASE_URL=postgres://u@localhost/shop_feature_x\n"),
+            "{}",
+            read(".env")
+        );
+        assert!(
+            read(".env.local").starts_with("DATABASE_URL=postgres://u@staging/shop_feature_x\n"),
+            "{}",
+            read(".env.local")
+        );
     }
 
     #[test]
