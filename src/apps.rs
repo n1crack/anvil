@@ -489,6 +489,8 @@ pub struct Apps {
     /// Where pid and log files go (Anvil's home; a temp folder in tests).
     home: PathBuf,
     children: BTreeMap<String, Child>,
+    /// The folder each child was started in.
+    dirs: BTreeMap<String, PathBuf>,
     /// Keys of `children` that are an app's other processes, not apps.
     processes: std::collections::BTreeSet<String>,
     /// Keys of `processes` started by `run_once`, with the script's name: they are meant to end.
@@ -518,11 +520,22 @@ impl Default for Apps {
     }
 }
 
+/// Keys whose folder is gone: one `stat` each, the cheap sign that a site vanished.
+pub fn gone_dirs(running: &[(String, PathBuf)]) -> Vec<&str> {
+    let gone = |(_, d): &&(String, PathBuf)| !d.exists();
+    running
+        .iter()
+        .filter(gone)
+        .map(|(k, _)| k.as_str())
+        .collect()
+}
+
 impl Apps {
     fn in_home(home: PathBuf) -> Self {
         Apps {
             home,
             children: BTreeMap::new(),
+            dirs: BTreeMap::new(),
             processes: Default::default(),
             once: Default::default(),
             exits: BTreeMap::new(),
@@ -728,6 +741,7 @@ impl Apps {
             format!("{}\n{} {at}", std::process::id(), child.id()).trim_end(),
         )?;
         self.exits.remove(key);
+        self.dirs.insert(key.to_string(), dir.to_path_buf());
         self.children.insert(key.to_string(), child);
         Ok(())
     }
@@ -749,11 +763,18 @@ impl Apps {
         self.processes.remove(name);
         self.once.remove(name);
         self.exits.remove(name);
+        self.dirs.remove(name);
         let child = self.children.remove(name)?;
         Some(Stopping {
             child,
             pid_files: vec![pid_in(&self.home, name)],
         })
+    }
+
+    /// Running children with the folder they were started in.
+    pub fn running_dirs(&self) -> Vec<(String, PathBuf)> {
+        let dir = |k: &String| self.dirs.get(k).map(|d| (k.clone(), d.clone()));
+        self.children.keys().filter_map(dir).collect()
     }
 
     /// `take` everything (app, processes, one-off scripts, crash records) of a site that is
@@ -1415,5 +1436,26 @@ mod tests {
         assert!(apps.process_keys("shop--x").is_empty());
         assert_eq!(apps.process_keys("shop"), ["shop@w"]);
         apps.stop("shop@w");
+    }
+
+    #[test]
+    fn a_running_child_whose_folder_is_gone_is_reported() {
+        let dir = project(&[("x/y", "")]);
+        let (a, b) = (dir.join("a"), dir.join("b"));
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let mut apps = Apps::in_home(dir.join("home"));
+        let cfg = crate::Config::default();
+        for (name, d) in [("shop--a", &a), ("shop--b", &b)] {
+            let mut s = site_at(&dir);
+            (s.name, s.path) = (name.into(), d.clone());
+            apps.start_process(&s, &proc("w", "sleep 30"), &cfg)
+                .unwrap();
+        }
+        assert!(gone_dirs(&apps.running_dirs()).is_empty());
+        fs::remove_dir_all(&a).unwrap();
+        assert_eq!(gone_dirs(&apps.running_dirs()), ["shop--a@w"]);
+        crate::stop_all(apps.take_all(), GRACE);
+        assert!(apps.running_dirs().is_empty());
     }
 }

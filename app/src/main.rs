@@ -3434,7 +3434,11 @@ fn main() {
                             let crashed = anvil::lock(&state.apps).crashed();
                             notify_crashes(&watch, &new_crashes(&mut seen, crashed));
                             // A worktree deleted in a terminal: its processes stop even with the window hidden.
-                            if let Ok(cfg) = anvil::load() {
+                            // One stat per running child; the full rescan only when one is gone.
+                            let running = anvil::lock(&state.apps).running_dirs();
+                            if !anvil::apps::gone_dirs(&running).is_empty()
+                                && let Ok(cfg) = anvil::load()
+                            {
                                 stop_vanished(&state, &cfg);
                             }
                         }
