@@ -1724,7 +1724,7 @@ describe("worktrees", () => {
     await wait();
     expect($("#ask").hidden).toBe(false);
     expect($("#ask-label").textContent).toBe("New worktree of shop");
-    $("#ask-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    $("#ask-new").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); // Esc from the checkbox too
     await select(wt);
     await wait(80);
     expect(gitButtons()).not.toContain("New Worktree…");
@@ -1809,7 +1809,7 @@ describe("worktrees", () => {
       const db = $("#ask-db") as HTMLSelectElement;
       expect([...db.options].map((o) => o.value)).toEqual(["empty"]);
       expect(db.value).toBe("empty");
-      $("#ask-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      $("#ask-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       await wait();
       expect($("#ask-db-row").hidden).toBe(true);
       w.mockNewDb = { choices: ["copy", "empty"], default: "copy", main_database: null };

@@ -175,13 +175,18 @@ button, select, input { font: inherit; color: inherit; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* A popover next to what asked (ask in app.ts), like the confirm bubbles. */
 .ask {
+  position: fixed;
+  z-index: 60;
   display: grid;
   gap: 6px;
-  margin: 4px 16px 8px;
+  width: 300px;
   padding: 10px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  background: var(--steel-hover);
+  background: var(--steel-raised);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
 .ask[hidden] { display: none; }

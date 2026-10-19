@@ -670,11 +670,11 @@ function setShowHidden(on) {
   renderSite();
 }
 
-/** Inline text prompt under the search field. Resolves to the text, or null when cancelled.
- * `preview` turns the text into what it will create; `check` adds a checkbox with that
- * label, read from `#ask-new` afterwards. Only Return or Esc ends it, so a stray click
- * keeps the typing. */
-export function ask(label: string, placeholder?: string, preview?: (v: string) => string, check?: string) {
+/** A text prompt in a popover under `anchor` (else the selected app's row). Resolves to the
+ * text, or null when cancelled: Esc anywhere in it, or a click outside. `preview` turns the
+ * text into what it will create; `check` adds a checkbox with that label, read from
+ * `#ask-new` afterwards. */
+export function ask(label: string, placeholder?: string, preview?: (v: string) => string, check?: string, anchor?: Element | null) {
   const form = $("#ask");
   const input = $("#ask-input");
   const hint = $("#ask-hint");
@@ -690,33 +690,52 @@ export function ask(label: string, placeholder?: string, preview?: (v: string) =
   input.value = "";
   hint.textContent = base;
   form.hidden = false;
+  place(form, anchor ?? $("#list [aria-current='true']") ?? $("#search"));
   input.focus();
   input.oninput = () => {
     const v = input.value.trim();
     hint.textContent = v && preview ? `${preview(v)}. ${base}` : base;
   };
   return new Promise((resolve) => {
+    const outside = (e) => !form.contains(e.target) && done(null);
     const done = (value) => {
       form.hidden = box.hidden = $("#ask-db-row").hidden = true;
-      form.onsubmit = input.onkeydown = input.oninput = null;
+      form.onsubmit = form.onkeydown = input.oninput = null;
+      document.removeEventListener("mousedown", outside, true);
       resolve(value);
     };
+    document.addEventListener("mousedown", outside, true);
     form.onsubmit = (e) => {
       e.preventDefault();
       done(input.value.trim() || null);
     };
-    // A block body: returning false from an on-handler would cancel every keystroke.
-    input.onkeydown = (e) => {
+    // On the form, so Esc works from the checkbox and the select too. A block body:
+    // returning false from an on-handler would cancel every keystroke.
+    form.onkeydown = (e) => {
       if (e.key === "Escape") done(null);
     };
   });
 }
+
+/** Under `anchor`, left-aligned and kept in the window; above it when there's no room below. */
+function place(pop: HTMLElement, anchor: Element | null) {
+  const r = anchor?.getBoundingClientRect() ?? new DOMRect(16, 48, 0, 0);
+  const w = pop.offsetWidth || 300;
+  const h = pop.offsetHeight || 120;
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+  const top = r.bottom + 6 + h > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+  Object.assign(pop.style, { left: `${left}px`, top: `${top}px` });
+}
+
+const rowOf = (s) => $(`#list [data-name="${CSS.escape(s.name)}"]`);
 
 async function addAlias(s) {
   const alias = await ask(
     `New domain for ${s.name}.${snap.tld}`,
     `e.g. admin.${s.name}`,
     (v) => `Opens ${v.replace(new RegExp(`\\.${snap.tld}$`), "")}.${snap.tld}`,
+    undefined,
+    rowOf(s),
   );
   if (alias) await call("add_alias", { site: s.name, alias });
 }
@@ -728,9 +747,9 @@ late.mayHaveWorktrees = mayHaveWorktrees;
 
 /** Asks for the branch, whether it's new, and its database: what main's allows, Settings'
  * default picked (none to pick when main has no database settings). */
-async function newWorktree(s) {
+async function newWorktree(s, anchor?: Element | null) {
   const db = await invoke("worktree_new_db", { site: s.name }).catch(() => null);
-  const answer = ask(`New worktree of ${s.name}`, "Branch, e.g. feature/login", undefined, "New branch");
+  const answer = ask(`New worktree of ${s.name}`, "Branch, e.g. feature/login", undefined, "New branch", anchor ?? rowOf(s));
   const sel = $("#ask-db");
   if (db?.main_database) {
     sel.replaceChildren(...db.choices.map((c) => new Option(DB_CHOICES[c], c)));
@@ -792,7 +811,7 @@ async function removeWorktree(s) {
 }
 
 async function newGroup(s) {
-  const group = await ask(`Group for ${s.name}.${snap.tld}`, "Group name");
+  const group = await ask(`Group for ${s.name}.${snap.tld}`, "Group name", undefined, undefined, rowOf(s));
   if (group) await call("set_group", { site: s.name, group });
 }
 

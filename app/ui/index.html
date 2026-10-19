@@ -28,13 +28,6 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
     </div>
-    <form id="ask" class="ask" hidden>
-      <label id="ask-label" for="ask-input"></label>
-      <input id="ask-input" autocomplete="off" spellcheck="false">
-      <label id="ask-check" hidden><input id="ask-new" type="checkbox"> <span></span></label>
-      <label id="ask-db-row" hidden>Database <select id="ask-db"></select></label>
-      <small id="ask-hint">Return to add, Esc to cancel</small>
-    </form>
     <nav id="list" class="list" aria-label="Applications"></nav>
   </aside>
 
@@ -334,6 +327,13 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <form id="ask" class="ask" hidden>
+      <label id="ask-label" for="ask-input"></label>
+      <input id="ask-input" autocomplete="off" spellcheck="false">
+      <label id="ask-check" hidden><input id="ask-new" type="checkbox"> <span></span></label>
+      <label id="ask-db-row" hidden>Database <select id="ask-db"></select></label>
+      <small id="ask-hint">Return to add, Esc to cancel</small>
+    </form>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
