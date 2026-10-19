@@ -2,11 +2,13 @@ name: Release
 
 # Push a tag like v0.1.0 (see CONTRIBUTING.md, "Releases"). This builds the
 # macOS app and the anvil CLI and creates a DRAFT GitHub Release; review and
-# publish it by hand.
+# publish it by hand. Run it by hand (Actions › Release › Run workflow) for a
+# dry run: the same signed, notarized build and its checks, no release.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,13 +24,18 @@ jobs:
       contents: write # create the draft release and upload its assets
     env:
       TAG: ${{ github.ref_name }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Check the tag matches the Cargo version
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "anvil") | .version')
-          test "$TAG" = "v$version" || { echo "Tag $TAG does not match Cargo.toml version $version"; exit 1; }
+          if [ "$DRY_RUN" = true ]; then
+            echo "TAG=v$version" >> "$GITHUB_ENV"
+          else
+            test "$TAG" = "v$version" || { echo "Tag $TAG does not match Cargo.toml version $version"; exit 1; }
+          fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Release notes from CHANGELOG.md
@@ -40,7 +47,10 @@ jobs:
             on && /^## \[/ { exit }
             on && !/^\[[^]]*\]: / { print }
           ' CHANGELOG.md > notes.md
-          grep -q '[^[:space:]]' notes.md || { echo "CHANGELOG.md has no section for $VERSION"; exit 1; }
+          if ! grep -q '[^[:space:]]' notes.md; then
+            [ "$DRY_RUN" = true ] || { echo "CHANGELOG.md has no section for $VERSION"; exit 1; }
+            echo "Dry run of $VERSION." > notes.md
+          fi
 
       - name: Install Rust
         run: |
@@ -80,6 +90,8 @@ jobs:
           test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo "TAURI_SIGNING_PRIVATE_KEY is not set"; exit 1; }
           for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
             if [ -z "$(printenv "$name" || true)" ]; then
+              # A dry run is there to check signing and notarization.
+              [ "$DRY_RUN" = true ] && { echo "$name is not set"; exit 1; }
               unset "$name"
               echo "$name is not set"
             else
@@ -91,6 +103,24 @@ jobs:
           # createUpdaterArtifacts adds the signed Anvil.app.tar.gz the updater installs.
           cargo tauri build --target universal-apple-darwin --bundles app,dmg \
             --config tauri.cli.conf.json --config '{"bundle":{"createUpdaterArtifacts":true}}'
+
+      # Signed with the Developer ID, the CLI inside it too, and notarized with the
+      # ticket stapled, so Gatekeeper opens it offline. Skipped for an unsigned build.
+      - name: Check signing and notarization
+        env:
+          SIGNED: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        run: |
+          [ "$SIGNED" = true ] || { echo "Unsigned build: nothing to check"; exit 0; }
+          app=target/universal-apple-darwin/release/bundle/macos/Anvil.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          cli=$(codesign -dv --verbose=2 "$app/Contents/MacOS/anvil" 2>&1)
+          echo "$cli" | grep -q 'Authority=Developer ID Application' || { echo "$cli"; echo "The CLI isn't signed with the Developer ID"; exit 1; }
+          echo "$cli" | grep -q 'runtime' || { echo "$cli"; echo "The CLI lacks the hardened runtime"; exit 1; }
+          spctl --assess --type execute --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          for dmg in target/universal-apple-darwin/release/bundle/dmg/*.dmg; do
+            spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg" || echo "note: $dmg itself is not notarized; the app inside is"
+          done
 
       - name: Build the CLI
         run: |
@@ -121,6 +151,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Create the draft release
+        if: env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
