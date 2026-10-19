@@ -133,15 +133,15 @@ pub(crate) fn url_database(url: &str) -> Option<String> {
         .filter(|db| !db.is_empty())
 }
 
-/// Whether `db` is the main app's own database: its name on a server, main's
-/// `DB_DATABASE` as written, or an absolute SQLite path to main's file or into the main
+/// Whether `db` is the main app's own database: its name on a server, or an absolute SQLite path to main's file or into the main
 /// checkout (not into the worktree, which may sit inside it).
 pub fn is_mains_database(site: &Site, db: &str) -> bool {
     let Some(main) = main_of(&site.path) else {
         return false;
     };
     let mains = crate::resources::dotenv(&main).get("DB_DATABASE").cloned();
-    if main_database(&main).as_deref() == Some(db) || mains.as_deref() == Some(db) {
+    // A relative SQLite path resolves inside the worktree: only a server name counts.
+    if main_database(&main).as_deref() == Some(db) {
         return true;
     }
     if !Path::new(db).is_absolute() {
@@ -704,9 +704,140 @@ pub(crate) fn fpm_safe(k: &str, v: &str) -> bool {
     crate::check_ini(k, v).is_ok() && !v.contains(['"', '$', '\\'])
 }
 
-/// `env`, or the error that refuses to start anything of a worktree it can't separate from main.
-pub fn checked_env(cfg: &Config, site: &Site) -> anyhow::Result<Vec<(String, String)>> {
-    env(cfg, site).map_err(|reason| {
+const DB_KEYS: [&str; 3] = ["DB_DATABASE", "DB_URL", "DATABASE_URL"];
+
+/// A database setting in the project's test config.
+#[derive(Debug)]
+pub(crate) struct TestVar {
+    key: &'static str,
+    value: String,
+    /// It wins over a variable that is set already: `<env force="true">`, `<server>`.
+    forced: bool,
+    from: &'static str,
+}
+
+/// The database settings the project's test config names: `<env>` and `<server>` (not
+/// commented out) in the PHPUnit config PHPUnit picks (the first of phpunit.xml,
+/// phpunit.dist.xml, phpunit.xml.dist), and `.env.testing`. Empty values are left out.
+pub(crate) fn test_config(dir: &Path) -> Vec<TestVar> {
+    let mut out = Vec::new();
+    let xml_file = ["phpunit.xml", "phpunit.dist.xml", "phpunit.xml.dist"]
+        .into_iter()
+        .find(|f| dir.join(f).is_file());
+    if let Some(from) = xml_file {
+        let mut xml = fs::read_to_string(dir.join(from)).unwrap_or_default();
+        while let Some(a) = xml.find("<!--") {
+            let b = xml[a..].find("-->").map_or(xml.len(), |b| a + b + 3);
+            xml.replace_range(a..b, "");
+        }
+        for part in xml.split('<').skip(1) {
+            let server = part.starts_with("server");
+            if !server && !part.starts_with("env") {
+                continue;
+            }
+            let tag = &part[..part.find('>').unwrap_or(part.len())];
+            let attr = |name: &str| {
+                ['"', '\''].iter().find_map(|q| {
+                    let at = tag.find(&format!(" {name}={q}"))? + name.len() + 3;
+                    Some(tag[at..][..tag[at..].find(*q)?].to_string())
+                })
+            };
+            let Some(key) = attr("name").and_then(|n| DB_KEYS.into_iter().find(|k| *k == n)) else {
+                continue;
+            };
+            let Some(value) = attr("value").filter(|v| !v.is_empty()) else {
+                continue;
+            };
+            out.push(TestVar {
+                key,
+                value,
+                forced: server || attr("force").as_deref() == Some("true"),
+                from,
+            });
+        }
+    }
+    let testing = crate::resources::dotenv_file(&dir.join(".env.testing"));
+    for key in DB_KEYS {
+        if let Some(v) = testing.get(key).filter(|v| !v.is_empty()) {
+            out.push(TestVar {
+                key,
+                value: v.clone(),
+                forced: false,
+                from: ".env.testing",
+            });
+        }
+    }
+    out
+}
+
+/// `env` checked against the project's test config, for every Anvil start path (`test`: a
+/// test run). Anvil's database keys are always set, never removed: a removed one lets the
+/// worktree's `.env`, a copy of main's, win. A test run gets the test config's database when
+/// none of it is main's (`:memory:` as SQLite), other keys keeping the worktree's own;
+/// anything else gets the worktree's own. `Err` when a test config setting naming main's
+/// would win over Anvil's (forced, or a key Anvil doesn't set).
+pub fn run_env(cfg: &Config, site: &Site, test: bool) -> Result<Vec<(String, String)>, String> {
+    let mut env = env(cfg, site)?;
+    if site.worktree_of.is_none() {
+        return Ok(env);
+    }
+    let vars = test_config(&site.path);
+    // Main's, or a URL Anvil can't read the database of.
+    let mains = |v: &TestVar| match v.key {
+        "DB_DATABASE" => is_mains_database(site, &v.value),
+        _ => url_database(&v.value).is_none_or(|db| is_mains_database(site, &db)),
+    };
+    let has = |env: &[(String, String)], key: &str| env.iter().any(|(k, _)| k == key);
+    if let Some(v) = vars
+        .iter()
+        .find(|v| mains(v) && (v.forced || !has(&env, v.key)))
+    {
+        return Err(format!(
+            "{}'s {} names {}'s database and wins over Anvil's: name a test database of its own there",
+            v.from,
+            v.key,
+            site.worktree_of.as_deref().unwrap_or("main")
+        ));
+    }
+    if !test || vars.is_empty() || vars.iter().any(mains) {
+        return Ok(env);
+    }
+    let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
+    let set = |env: &mut Vec<(String, String)>, key: &str, value: String| match env
+        .iter_mut()
+        .find(|(k, _)| k == key)
+    {
+        Some((_, v)) => *v = value,
+        None => env.push((key.into(), value)),
+    };
+    for v in &vars {
+        if v.key == "DB_DATABASE" && v.value == ":memory:" {
+            set(&mut env, "DB_CONNECTION", "sqlite".into());
+        }
+        set(&mut env, v.key, v.value.clone());
+    }
+    // A URL's database wins over DB_DATABASE: Anvil's URLs point at the test database too.
+    let db = vars
+        .iter()
+        .find(|v| v.key == "DB_DATABASE")
+        .map(|v| v.value.clone());
+    if let Some(db) = db.filter(|d| d != ":memory:")
+        && vars.iter().all(|v| v.key == "DB_DATABASE")
+    {
+        for key in ["DB_URL", "DATABASE_URL"] {
+            if let Some(url) = env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()) {
+                let url = with_db(&url, &db, &main, &site.path)
+                    .ok_or_else(|| format!("{key} uses a kind of database Anvil can't rewrite"))?;
+                set(&mut env, key, url);
+            }
+        }
+    }
+    Ok(env)
+}
+
+/// `run_env`, or the error that refuses to start anything of a worktree it can't separate from main.
+pub fn checked_env(cfg: &Config, site: &Site, test: bool) -> anyhow::Result<Vec<(String, String)>> {
+    run_env(cfg, site, test).map_err(|reason| {
         anyhow::anyhow!(
             "Anvil can't point {} at its own database ({reason}), so nothing of it runs",
             site.name
@@ -1136,7 +1267,7 @@ pub(crate) mod tests {
         (cfg, site)
     }
 
-    fn get<'a>(env: &'a [(String, String)], k: &str) -> Option<&'a str> {
+    pub(crate) fn get<'a>(env: &'a [(String, String)], k: &str) -> Option<&'a str> {
         env.iter()
             .find(|(key, _)| key == k)
             .map(|(_, v)| v.as_str())
@@ -1224,7 +1355,7 @@ pub(crate) mod tests {
     #[test]
     fn an_unknown_scheme_leaves_the_worktree_without_a_database() {
         let (mut cfg, site) = worktree_site("scheme", "DATABASE_URL=redis://h:6379/0\n");
-        let err = checked_env(&cfg, &site).unwrap_err().to_string();
+        let err = checked_env(&cfg, &site, false).unwrap_err().to_string();
         assert_eq!(
             err,
             "Anvil can't point shop--feature-x at its own database (DATABASE_URL uses a kind of database Anvil can't rewrite), so nothing of it runs"
@@ -1950,6 +2081,167 @@ pub(crate) mod tests {
             get(&env(&cfg, &site).unwrap(), "DB_DATABASE"),
             Some("shop_feature_x")
         );
+    }
+
+    #[test]
+    fn a_test_run_takes_the_test_configs_own_database_by_replacing_anvils() {
+        let (cfg, site) = worktree_site("t-own", "DB_CONNECTION=pgsql\nDB_DATABASE=shop\n");
+        let get = |env: &[(String, String)], k: &str| super::tests::get(env, k).map(String::from);
+        // Laravel's default phpunit.xml on a server-database app.
+        fs::write(
+            site.path.join("phpunit.xml"),
+            r#"<php><env name="DB_CONNECTION" value="sqlite"/><env name="DB_DATABASE" value=":memory:"/></php>"#,
+        )
+        .unwrap();
+        let test = checked_env(&cfg, &site, true).unwrap();
+        assert_eq!(get(&test, "DB_CONNECTION").as_deref(), Some("sqlite"));
+        assert_eq!(get(&test, "DB_DATABASE").as_deref(), Some(":memory:"));
+        let other = checked_env(&cfg, &site, false).unwrap();
+        assert_eq!(
+            get(&other, "DB_DATABASE").as_deref(),
+            Some("shop_feature_x")
+        );
+        fs::remove_file(site.path.join("phpunit.xml")).unwrap();
+        // Its own name, and `.env`'s URL pointed at it rather than dropped.
+        fs::write(
+            site.path.join(".env"),
+            "DB_CONNECTION=pgsql\nDB_URL=pgsql://u@127.0.0.1:5433/shop\n",
+        )
+        .unwrap();
+        fs::write(site.path.join(".env.testing"), "DB_DATABASE=shop_testing\n").unwrap();
+        let test = checked_env(&cfg, &site, true).unwrap();
+        assert_eq!(get(&test, "DB_DATABASE").as_deref(), Some("shop_testing"));
+        assert_eq!(
+            get(&test, "DB_URL").as_deref(),
+            Some("pgsql://u@127.0.0.1:5433/shop_testing")
+        );
+        // Main's in it: the worktree's own, keys all set.
+        fs::write(site.path.join(".env.testing"), "DB_DATABASE=shop\n").unwrap();
+        let test = checked_env(&cfg, &site, true).unwrap();
+        assert_eq!(get(&test, "DB_DATABASE").as_deref(), Some("shop_feature_x"));
+        assert_eq!(
+            get(&test, "DB_URL").as_deref(),
+            Some("pgsql://u@127.0.0.1:5433/shop_feature_x")
+        );
+    }
+
+    #[test]
+    fn the_phpunit_config_phpunit_uses_is_read_and_a_winning_mains_refuses_every_run() {
+        let (cfg, site) = worktree_site("t-dist", "DB_CONNECTION=pgsql\nDB_DATABASE=shop\n");
+        fs::write(
+            site.path.join("phpunit.dist.xml"),
+            r#"<php><server name="DB_DATABASE" value="shop"/></php>"#,
+        )
+        .unwrap();
+        let e = checked_env(&cfg, &site, false).unwrap_err().to_string();
+        assert_eq!(
+            e,
+            "Anvil can't point shop--feature-x at its own database (phpunit.dist.xml's DB_DATABASE names shop's database and wins over Anvil's: name a test database of its own there), so nothing of it runs"
+        );
+        // A phpunit.xml there is the one PHPUnit uses.
+        fs::write(site.path.join("phpunit.xml"), "<php></php>").unwrap();
+        assert!(checked_env(&cfg, &site, false).is_ok());
+        // Empty values aren't settings.
+        fs::write(
+            site.path.join("phpunit.xml"),
+            r#"<php><server name="DB_URL" value=""/></php>"#,
+        )
+        .unwrap();
+        assert!(checked_env(&cfg, &site, true).is_ok());
+    }
+
+    #[test]
+    fn whatever_the_config_anvils_database_is_never_mains() {
+        // `{MAIN}`: the main checkout's folder.
+        let mains = [
+            "DB_CONNECTION=pgsql\nDB_DATABASE=shop\n",
+            "DB_CONNECTION=mysql\nDB_URL=mysql://r@127.0.0.1/shop\n",
+            "DATABASE_URL=postgres://u@127.0.0.1:5433/shop\n",
+            "DB_DATABASE=shop\n",
+            "DB_CONNECTION=pgsql\nDB_DATABASE=shop\nDB_URL=pgsql://u@h/shop\n",
+            "DB_CONNECTION=sqlite\n",
+            "DB_CONNECTION=sqlite\nDB_DATABASE={MAIN}/database/database.sqlite\n",
+        ];
+        let configs = [
+            ("", ""),
+            (".env.testing", "DB_DATABASE=shop\n"),
+            (".env.testing", "DB_DATABASE=shop_testing\n"),
+            (
+                ".env.testing",
+                "DB_DATABASE={MAIN}/database/database.sqlite\n",
+            ),
+            (
+                ".env.testing",
+                "DATABASE_URL=postgres://u@127.0.0.1:5433/shop_t\n",
+            ),
+            (".env.testing", "DB_URL=mysql://r@127.0.0.1/shop\n"),
+            (
+                "phpunit.xml",
+                r#"<env name="DB_CONNECTION" value="sqlite"/><env name="DB_DATABASE" value=":memory:"/>"#,
+            ),
+            (
+                "phpunit.xml",
+                r#"<env name="DB_URL" value="mysql://r@127.0.0.1/shop"/>"#,
+            ),
+            (
+                "phpunit.xml",
+                r#"<env name="DB_DATABASE" value="shop" force="true"/>"#,
+            ),
+            (
+                "phpunit.dist.xml",
+                r#"<server name="DATABASE_URL" value="postgres://h/shop"/>"#,
+            ),
+            (
+                "phpunit.xml.dist",
+                r#"<env name="DB_DATABASE" value="shop_t"/>"#,
+            ),
+        ];
+        let db_of = |k: &str, v: &str| match k {
+            "DB_DATABASE" => Some(v.to_string()),
+            "DB_URL" | "DATABASE_URL" => Some(url_database(v).unwrap_or_default()),
+            _ => None,
+        };
+        for (n, dotenv) in mains.iter().enumerate() {
+            let (cfg, site) = worktree_site(&format!("prop-{n}"), "");
+            let main = main_of(&site.path).unwrap();
+            let fill = |t: &str| t.replace("{MAIN}", &main.display().to_string());
+            fs::write(main.join(".env"), fill(dotenv)).unwrap();
+            // What it gets with no test config: its own.
+            let own = checked_env(&cfg, &site, false).unwrap();
+            for (file, text) in configs {
+                for f in [
+                    ".env.testing",
+                    "phpunit.xml",
+                    "phpunit.dist.xml",
+                    "phpunit.xml.dist",
+                ] {
+                    let _ = fs::remove_file(site.path.join(f));
+                }
+                if !file.is_empty() {
+                    fs::write(site.path.join(file), fill(text)).unwrap();
+                }
+                for test in [false, true] {
+                    let case = format!("{dotenv:?} {file} {text:?} test={test}");
+                    let Ok(env) = checked_env(&cfg, &site, test) else {
+                        continue; // refused: nothing runs
+                    };
+                    // Anvil's database keys are never removed.
+                    for (k, _) in own.iter().filter(|(k, v)| db_of(k, v).is_some()) {
+                        assert!(env.iter().any(|(key, _)| key == k), "{k} unset: {case}");
+                    }
+                    for (k, v) in &env {
+                        let Some(db) = db_of(k, v) else { continue };
+                        // A server main's is `shop` (`is_mains_database` says so); a relative
+                        // SQLite name resolves inside the worktree.
+                        assert!(!is_mains_database(&site, &db), "{k}={v}: {case}");
+                        // Not a test run (or one misdetected): only ever its own.
+                        if !test {
+                            assert_eq!(Some(v), get(&own, k).map(String::from).as_ref(), "{case}");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

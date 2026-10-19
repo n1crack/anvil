@@ -786,6 +786,11 @@ pub struct Script {
     pub run: String,
 }
 
+/// A Scripts-tab script that runs the app's tests: `test` or `test:…`.
+pub fn is_test_script(name: &str) -> bool {
+    name == "test" || name.starts_with("test:")
+}
+
 /// The app's one-off scripts: package.json's commands (see `package_scripts`), then a PHP
 /// app's composer.json scripts other than `dev` and Composer's event hooks.
 pub fn one_off_scripts(site: &Site) -> Vec<Script> {
@@ -1036,8 +1041,8 @@ pub fn address(cfg: &crate::Config, site: &Site, id: &str) -> Option<String> {
 
 /// Anvil's PHP for the app, its Node.js and the package managers installed from
 /// Settings, first on PATH, with Node's caches kept in Anvil's folder; a worktree's
-/// own database and prefixes (`worktrees::env`).
-pub fn env(cfg: &crate::Config, site: &Site) -> anyhow::Result<Vec<(String, String)>> {
+/// own database and prefixes (`worktrees::checked_env`; `test`: a test run's database).
+pub fn env(cfg: &crate::Config, site: &Site, test: bool) -> anyhow::Result<Vec<(String, String)>> {
     let mut env = vec![];
     let mut path = crate::env_path();
     // The project's .nvmrc / .node-version when installed, else the newest.
@@ -1054,7 +1059,7 @@ pub fn env(cfg: &crate::Config, site: &Site) -> anyhow::Result<Vec<(String, Stri
         path = crate::prepend_path(&crate::php_dir(v), &path);
     }
     env.push(("PATH".into(), path));
-    env.extend(crate::worktrees::checked_env(cfg, site)?);
+    env.extend(crate::worktrees::checked_env(cfg, site, test)?);
     Ok(env)
 }
 

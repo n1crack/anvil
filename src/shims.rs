@@ -111,9 +111,8 @@ pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result
     resolve_run(tool, &[], cwd, cfg, fetch)
 }
 
-/// `resolve` for a shim run with `args`. In a worktree, a test config that would put a
-/// test run on main's database refuses every run (`check_test_config`); a test run
-/// (`artisan test`, PHPUnit, Pest, ParaTest) whose test config names its own keeps it.
+/// `resolve` for a shim run with `args`: a test run (`is_test_run`) gets the project's
+/// test database when it isn't main's (`worktrees::checked_env`).
 pub fn resolve_run(
     tool: &str,
     args: &[String],
@@ -125,11 +124,8 @@ pub fn resolve_run(
     let site = site_for(&all, cwd);
     // First: a worktree Anvil can't separate from main runs nothing, whatever the tool.
     known_worktree(cfg, site, cwd)?;
-    let (extra, own_tests) = extra_env(cfg, site, tool, args)?;
-    if fetch
-        && !own_tests
-        && let Some(s) = site.filter(|s| s.worktree_of.is_some())
-    {
+    let extra = extra_env(cfg, site, tool, args)?;
+    if fetch && let Some(s) = site.filter(|s| s.worktree_of.is_some()) {
         // Its own database on first use, as a Start would; the line shows while it's made.
         // Refused when that fails: never run against a missing or half-made database.
         crate::worktrees::prepare(&mut crate::load()?, s, &mut |line| eprintln!("{line}"))?;
@@ -140,9 +136,9 @@ pub fn resolve_run(
 }
 
 /// `php artisan test`, `php vendor/bin/phpunit` (or pest, paratest; `./vendor/bin/pest`
-/// reaches the shim the same way, through its `#!/usr/bin/env php`). Only to let a test
-/// config's own database through: a test run this misses (`composer test`, a named
-/// script) keeps the worktree's own database, never main's.
+/// reaches the shim the same way, through its `#!/usr/bin/env php`). Only to give it a test
+/// config's own database: a test run this misses (`composer test`, a named script) keeps
+/// the worktree's own database, never main's.
 fn is_test_run(tool: &str, args: &[String]) -> bool {
     if tool != "php" {
         return false;
@@ -172,65 +168,6 @@ fn is_test_run(tool: &str, args: &[String]) -> bool {
         .any(|t| script.ends_with(Path::new("vendor/bin").join(t)))
 }
 
-const DB_KEYS: [&str; 3] = ["DB_DATABASE", "DB_URL", "DATABASE_URL"];
-
-/// A database setting in the project's test config.
-#[derive(Debug)]
-struct TestVar {
-    key: &'static str,
-    value: String,
-    /// It wins over a variable that is set already: `<env force="true">`, `<server>`.
-    forced: bool,
-    from: &'static str,
-}
-
-/// The database settings the project's test config names: `<env>` and `<server>` in
-/// phpunit.xml(.dist) (not commented out), and `.env.testing`.
-fn test_config(dir: &Path) -> Vec<TestVar> {
-    let mut out = Vec::new();
-    for from in ["phpunit.xml", "phpunit.xml.dist"] {
-        let mut xml = fs::read_to_string(dir.join(from)).unwrap_or_default();
-        while let Some(a) = xml.find("<!--") {
-            let b = xml[a..].find("-->").map_or(xml.len(), |b| a + b + 3);
-            xml.replace_range(a..b, "");
-        }
-        for part in xml.split('<').skip(1) {
-            let server = part.starts_with("server");
-            if !server && !part.starts_with("env") {
-                continue;
-            }
-            let tag = &part[..part.find('>').unwrap_or(part.len())];
-            let attr = |name: &str| {
-                ['"', '\''].iter().find_map(|q| {
-                    let at = tag.find(&format!(" {name}={q}"))? + name.len() + 3;
-                    Some(tag[at..][..tag[at..].find(*q)?].to_string())
-                })
-            };
-            let Some(key) = attr("name").and_then(|n| DB_KEYS.into_iter().find(|k| *k == n)) else {
-                continue;
-            };
-            out.push(TestVar {
-                key,
-                value: attr("value").unwrap_or_default(),
-                forced: server || attr("force").as_deref() == Some("true"),
-                from,
-            });
-        }
-    }
-    let testing = crate::resources::dotenv_file(&dir.join(".env.testing"));
-    for key in DB_KEYS {
-        if let Some(v) = testing.get(key).filter(|v| !v.is_empty()) {
-            out.push(TestVar {
-                key,
-                value: v.clone(),
-                forced: false,
-                from: ".env.testing",
-            });
-        }
-    }
-    out
-}
-
 /// Refuses a folder in a git worktree of an Anvil app (a hidden one too) that isn't
 /// that worktree's site: it would run with no worktree env, on main's database.
 fn known_worktree(cfg: &Config, site: Option<&Site>, cwd: &Path) -> Result<()> {
@@ -255,70 +192,18 @@ fn known_worktree(cfg: &Config, site: Option<&Site>, cwd: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A worktree's own database and prefixes (`worktrees::env`), so a terminal `php artisan
-/// migrate` stays off the main app's; `true` when a test run keeps its own test database
-/// (one its test config names that isn't main's).
+/// A worktree's own database and prefixes (`worktrees::checked_env`), so a terminal
+/// `php artisan migrate` stays off the main app's; a test run's test database.
 fn extra_env(
     cfg: &Config,
     site: Option<&Site>,
     tool: &str,
     args: &[String],
-) -> Result<(Vec<(String, String)>, bool)> {
-    use crate::worktrees::{is_mains_database, url_database, with_db};
-    let Some(s) = site else {
-        return Ok((Vec::new(), false));
-    };
-    let mut env = crate::worktrees::checked_env(cfg, s)?;
-    if s.worktree_of.is_none() {
-        return Ok((env, false));
+) -> Result<Vec<(String, String)>> {
+    match site {
+        Some(s) => crate::worktrees::checked_env(cfg, s, is_test_run(tool, args)),
+        None => Ok(Vec::new()),
     }
-    let vars = test_config(&s.path);
-    // Main's, or a URL Anvil can't read the database of.
-    let mains = |v: &TestVar| match v.key {
-        "DB_DATABASE" => is_mains_database(s, &v.value),
-        _ => url_database(&v.value).is_none_or(|db| is_mains_database(s, &db)),
-    };
-    // Any run may be a test run (`composer test`, a named script): main's database in the
-    // test config refuses them all when it would win over what Anvil sets.
-    if let Some(v) = vars
-        .iter()
-        .find(|v| mains(v) && (v.forced || !env.iter().any(|(k, _)| k == v.key)))
-    {
-        bail!(
-            "{} sets {} to {}'s database, so tests here would run on it: name a test database of its own there",
-            v.from,
-            v.key,
-            s.worktree_of.as_deref().unwrap_or("main")
-        );
-    }
-    let own_tests = is_test_run(tool, args) && !vars.is_empty() && !vars.iter().any(mains);
-    if own_tests {
-        // PHPUnit's <env> and .env.testing don't replace a variable that is set already: Anvil's
-        // DB_DATABASE goes. Its URLs go too when the test config has its own, else they point
-        // at the test config's database (a URL's database wins over DB_DATABASE).
-        let main = crate::worktrees::main_of(&s.path).context("its main checkout wasn't found")?;
-        env.retain(|(k, _)| k != "DB_DATABASE");
-        let own_url = vars.iter().any(|v| v.key != "DB_DATABASE");
-        let db = vars
-            .iter()
-            .find(|v| v.key == "DB_DATABASE")
-            .map(|v| &v.value);
-        for (k, v) in env.iter_mut() {
-            if k != "DB_URL" && k != "DATABASE_URL" {
-                continue;
-            }
-            match db.filter(|_| !own_url) {
-                Some(db) => {
-                    *v = with_db(v, db, &main, &s.path).with_context(|| {
-                        format!("{k} uses a kind of database Anvil can't rewrite")
-                    })?;
-                }
-                None => k.clear(),
-            }
-        }
-        env.retain(|(k, _)| !k.is_empty());
-    }
-    Ok((env, own_tests))
 }
 
 fn resolve_for(
@@ -650,11 +535,11 @@ mod tests {
             let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
             extra_env(&cfg, s, "php", &args).unwrap()
         };
-        assert!(has_db(&extra(Some(site), &["artisan", "migrate"]).0));
-        assert!(extra(site_for(&all, &shop), &[]).0.is_empty());
-        // A test run keeps the database its own test config names; the prefixes stay.
+        assert!(has_db(&extra(Some(site), &["artisan", "migrate"])));
+        assert!(extra(site_for(&all, &shop), &[]).is_empty());
+        // A test run gets the database its own test config names; the prefixes stay.
         assert!(
-            has_db(&extra(Some(site), &["artisan", "test"]).0),
+            has_db(&extra(Some(site), &["artisan", "test"])),
             "no test config yet"
         );
         fs::write(
@@ -662,10 +547,13 @@ mod tests {
             r#"<phpunit><php><env name="DB_DATABASE" value=":memory:"/></php></phpunit>"#,
         )
         .unwrap();
-        let (env, own) = extra(Some(site), &["artisan", "test"]);
-        assert!(own && !has_db(&env));
+        let env = extra(Some(site), &["artisan", "test"]);
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "DB_DATABASE" && v == ":memory:")
+        );
         assert!(env.iter().any(|(k, _)| k == "REDIS_PREFIX"));
-        assert!(has_db(&extra(Some(site), &["artisan", "migrate:fresh"]).0));
+        assert!(has_db(&extra(Some(site), &["artisan", "migrate:fresh"])));
         // Through the real shim when this machine has an Anvil PHP (CI has none).
         if !installed_php().is_empty() {
             let (_, _, env) = resolve_with("php", &wt.join("app"), &cfg, false).unwrap();
@@ -674,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn test_runs_and_their_own_test_database() {
+    fn test_runs_are_told_apart() {
         let run = |args: &[&str]| {
             let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
             is_test_run("php", &args)
@@ -690,162 +578,40 @@ mod tests {
         // Package managers' test scripts aren't told apart: they keep the worktree's own.
         assert!(!is_test_run("composer", &["test".into()]));
         assert!(!is_test_run("npm", &["test".into()]));
-
-        let d = crate::worktrees::tests::tmp("testdb");
-        let vars = |d: &Path| -> Vec<(String, String, bool)> {
-            test_config(d)
-                .into_iter()
-                .map(|v| (v.key.to_string(), v.value, v.forced))
-                .collect()
-        };
-        assert!(vars(&d).is_empty());
-        // Laravel's own phpunit.xml ships the line commented out.
-        let xml = "<php>\n<!-- <env name=\"DB_DATABASE\" value=\":memory:\"/> -->\n<env name=\"APP_ENV\" value=\"testing\"/>\n</php>";
-        fs::write(d.join("phpunit.xml"), xml).unwrap();
-        assert!(vars(&d).is_empty());
-        fs::write(
-            d.join("phpunit.xml.dist"),
-            "<env name='DB_DATABASE' value='t'/>",
-        )
-        .unwrap();
-        assert_eq!(vars(&d), [("DB_DATABASE".into(), "t".into(), false)]);
-        // `force` and `<server>` win over a variable that is set already.
-        fs::write(
-            d.join("phpunit.xml.dist"),
-            r#"<env force="true" name="DB_DATABASE" value="shop_t"/><server name="DB_URL" value="mysql://h/x"/>"#,
-        )
-        .unwrap();
-        assert_eq!(
-            vars(&d),
-            [
-                ("DB_DATABASE".into(), "shop_t".into(), true),
-                ("DB_URL".into(), "mysql://h/x".into(), true)
-            ]
-        );
-        fs::remove_file(d.join("phpunit.xml.dist")).unwrap();
-        fs::write(
-            d.join(".env.testing"),
-            "DB_DATABASE=shop_testing\nDATABASE_URL=postgres://h/t\n",
-        )
-        .unwrap();
-        assert_eq!(
-            vars(&d),
-            [
-                ("DB_DATABASE".into(), "shop_testing".into(), false),
-                ("DATABASE_URL".into(), "postgres://h/t".into(), false)
-            ]
-        );
     }
 
     #[test]
-    fn test_runs_never_use_mains_database() {
-        use crate::worktrees::tests::worktree_site;
+    fn shims_give_a_test_run_its_test_database_and_everything_else_its_own() {
+        use crate::worktrees::tests::{get, worktree_site};
         let (cfg, site) = worktree_site("shims-tests", "DB_CONNECTION=pgsql\nDB_DATABASE=shop\n");
-        let get = |env: &[(String, String)], key: &str| {
-            env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
-        };
         let run = |tool: &str, args: &[&str]| {
             let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-            extra_env(&cfg, Some(&site), tool, &args)
+            extra_env(&cfg, Some(&site), tool, &args).unwrap()
         };
-        let testing = |text: &str| fs::write(site.path.join(".env.testing"), text).unwrap();
-        // Every run, tests too however they're started, gets the worktree's own database.
+        fs::write(site.path.join(".env.testing"), "DB_DATABASE=shop_testing\n").unwrap();
+        assert_eq!(
+            get(&run("php", &["artisan", "test"]), "DB_DATABASE"),
+            Some("shop_testing")
+        );
         for (tool, args) in [
-            ("php", &["artisan", "test"][..]),
+            ("php", &["artisan", "migrate"][..]),
             ("composer", &["test"]),
             ("npm", &["run", "test:unit"]),
         ] {
-            let (env, own) = run(tool, args).unwrap();
-            assert!(!own);
             assert_eq!(
-                get(&env, "DB_DATABASE").as_deref(),
+                get(&run(tool, args), "DB_DATABASE"),
                 Some("shop_feature_x"),
                 "{tool}"
             );
         }
-        // A test config naming main's database doesn't win over Anvil's.
-        testing("DB_DATABASE=shop\n");
-        let (env, own) = run("php", &["artisan", "test"]).unwrap();
-        assert!(!own);
-        assert_eq!(get(&env, "DB_DATABASE").as_deref(), Some("shop_feature_x"));
-        // One of its own does, for a test run only.
-        testing("DB_DATABASE=shop_testing\n");
-        let (env, own) = run("php", &["artisan", "test"]).unwrap();
-        assert!(own && get(&env, "DB_DATABASE").is_none());
-        let (env, _) = run("php", &["artisan", "migrate"]).unwrap();
-        assert_eq!(get(&env, "DB_DATABASE").as_deref(), Some("shop_feature_x"));
-        // A URL of main's (or one naming no database) that nothing of Anvil's overrides
-        // would win: every run refuses.
-        for url in [
-            "DB_URL=pgsql://u@127.0.0.1:5433/shop\n",
-            "DB_URL=redis://h\n",
-        ] {
-            testing(url);
-            let e = run("composer", &["test"]).unwrap_err().to_string();
-            assert_eq!(
-                e,
-                ".env.testing sets DB_URL to shop's database, so tests here would run on it: name a test database of its own there"
-            );
-        }
-        fs::remove_file(site.path.join(".env.testing")).unwrap();
-        // So does main's in a variable that wins over a set one.
+        // A winning main's setting refuses the shim too (`worktrees::checked_env`).
         fs::write(
             site.path.join("phpunit.xml"),
             r#"<php><server name="DB_DATABASE" value="shop"/></php>"#,
         )
         .unwrap();
-        let e = run("php", &["artisan", "migrate"]).unwrap_err().to_string();
-        assert!(
-            e.starts_with("phpunit.xml sets DB_DATABASE to shop's database"),
-            "{e}"
-        );
-        fs::remove_file(site.path.join("phpunit.xml")).unwrap();
-
-        // Its own DB_DATABASE while `.env` has a URL with main's: the URL is pointed at it.
-        fs::write(
-            site.path.join(".env"),
-            "DB_CONNECTION=pgsql\nDB_URL=pgsql://u@127.0.0.1:5433/shop\n",
-        )
-        .unwrap();
-        testing("DB_DATABASE=shop_testing\n");
-        let (env, own) = run("php", &["artisan", "test"]).unwrap();
-        assert!(own && get(&env, "DB_DATABASE").is_none());
-        assert_eq!(
-            get(&env, "DB_URL").as_deref(),
-            Some("pgsql://u@127.0.0.1:5433/shop_testing")
-        );
-        // A URL of main's that Anvil's own DB_URL overrides is fine.
-        testing("DB_URL=pgsql://u@127.0.0.1:5433/shop\n");
-        let (env, own) = run("composer", &["test"]).unwrap();
-        assert!(!own);
-        assert_eq!(
-            get(&env, "DB_URL").as_deref(),
-            Some("pgsql://u@127.0.0.1:5433/shop_feature_x")
-        );
-    }
-
-    #[test]
-    fn a_test_sqlite_file_that_is_mains_isnt_the_tests_own() {
-        use crate::worktrees::tests::worktree_site;
-        // Main's SQLite path is relative: Anvil sets no DB_DATABASE, so `.env.testing` would win.
-        let (cfg, site) = worktree_site("shims-sqlite", "DB_CONNECTION=sqlite\n");
-        let main = crate::worktrees::main_of(&site.path).unwrap();
-        let args = vec!["artisan".to_string(), "test".to_string()];
-        let mains = main.join("database/database.sqlite");
-        fs::create_dir_all(mains.parent().unwrap()).unwrap();
-        fs::write(&mains, "").unwrap();
-        let testing = format!("DB_DATABASE={}\n", mains.display());
-        fs::write(site.path.join(".env.testing"), testing).unwrap();
-        let e = extra_env(&cfg, Some(&site), "php", &args).unwrap_err();
-        assert!(
-            e.to_string()
-                .starts_with(".env.testing sets DB_DATABASE to shop's database"),
-            "{e}"
-        );
-        // One in the worktree is its own.
-        let testing = format!("DB_DATABASE={}\n", site.path.join("t.sqlite").display());
-        fs::write(site.path.join(".env.testing"), testing).unwrap();
-        assert!(extra_env(&cfg, Some(&site), "php", &args).unwrap().1);
+        let args = vec!["artisan".to_string(), "migrate".to_string()];
+        assert!(extra_env(&cfg, Some(&site), "php", &args).is_err());
     }
 
     #[test]

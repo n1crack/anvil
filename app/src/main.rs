@@ -133,7 +133,7 @@ fn worktree_view(
         preparing: preparing.get(&s.name).cloned(),
         compose: anvil::compose::file(&s.path).is_some(),
         cached_config: s.path.join("bootstrap/cache/config.php").exists(),
-        error: w::checked_env(cfg, s).err().map(err),
+        error: w::checked_env(cfg, s, false).err().map(err),
         copies: rec.copies.into_iter().map(|(_, d)| d).collect(),
         adopted: rec.adopted,
         missing: w::missing(s),

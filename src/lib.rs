@@ -1117,7 +1117,7 @@ fn fpm_conf(cfg: &Config, v: &str, sites: &[Site]) -> String {
         .filter(|s| s.php.as_deref() == Some(v) && own_pool(s))
     {
         // A worktree Anvil can't separate from main gets no pool (Caddy shows why).
-        let Ok(env) = worktrees::env(cfg, site) else {
+        let Ok(env) = worktrees::run_env(cfg, site, false) else {
             continue;
         };
         s += &pool_conf(&pool(site), &fpm_socket(site).unwrap(), 8);
@@ -1303,7 +1303,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         {
             continue;
         }
-        if let Err(reason) = worktrees::env(cfg, site) {
+        if let Err(reason) = worktrees::run_env(cfg, site, false) {
             s += &format!(
                 "\n{} {{\n\theader Content-Type \"text/html; charset=utf-8\"\n\trespond `{}` 502\n}}\n",
                 addresses(site, &names),

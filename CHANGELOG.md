@@ -83,9 +83,11 @@ Until 1.0.0, minor versions may contain breaking changes.
   tab, queue, Vite). It always has a database of its own, a copy of the app's
   or an empty one, picked when you create it (`--db copy|empty`) and made the
   first time it is used. Settings › Database for new worktrees sets the
-  default, also for worktrees made outside Anvil. A test config (phpunit.xml,
-  `.env.testing`) that would put tests on the app's database stops the
-  worktree's terminal commands until it names a test database of its own. A
+  default, also for worktrees made outside Anvil. A test run (`php artisan
+  test`, PHPUnit, Pest, or a `test`/`test:*` script from the Scripts tab) uses
+  the database its test config names (`:memory:` too) unless that is the app's;
+  everything else uses the worktree's own. A test config whose setting for the
+  app's database would win stops the worktree until it names one of its own. A
   database Anvil didn't make is only used after "Use existing"
   (`anvil worktree use-db`). Its Redis and
   cache keys get their own prefix. Removing a worktree stops its processes and
