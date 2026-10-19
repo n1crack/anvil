@@ -383,7 +383,10 @@ fn start(cfg: &Config) -> Result<()> {
     let mut server = Server::start(cfg)?;
     let mut apps = apps::Apps::default();
     for site in sites(cfg).iter().filter(|s| s.autostart) {
-        match apps.start(site, cfg) {
+        // Its own database first, when it's a worktree (`worktrees::prepare_site`).
+        let started = worktrees::prepare_site(site, &mut |line| eprintln!("  {line}"))
+            .and_then(|()| apps.start(site, cfg));
+        match started {
             Ok(()) => println!(
                 "  {} ({}) on {}",
                 green(&site.name),

@@ -823,6 +823,38 @@ pub fn check_command(command: &str) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// Every Start, process and script of an app, in the CLI and the app, makes a
+    /// worktree's own database first (`worktrees::prepare_site`, outside the Apps lock).
+    #[test]
+    fn every_start_path_prepares_the_worktree_database_first() {
+        let sources = [
+            ("src/main.rs", include_str!("main.rs")),
+            ("app/src/main.rs", include_str!("../app/src/main.rs")),
+        ];
+        let mut calls = 0;
+        for (file, text) in sources {
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                let is_call = [".start(", ".start_process(", ".run_once("]
+                    .iter()
+                    .any(|c| line.contains(c))
+                    && (line.contains("apps") || lines[i.saturating_sub(1)].contains("app.apps"));
+                if !is_call {
+                    continue;
+                }
+                calls += 1;
+                let before = lines[i.saturating_sub(3)..=i].join("\n");
+                assert!(
+                    before.contains("prepare"),
+                    "{file}:{}: starts without prepare first: {line}",
+                    i + 1
+                );
+            }
+        }
+        // start_app, process_run, command_run, start_process, process_settings, CLI start.
+        assert_eq!(calls, 6, "a start path was added or the scan lost one");
+    }
+
     #[test]
     fn node_is_the_project_file_then_nvmrc_then_the_newest() {
         let dir = std::env::temp_dir().join(format!("anvil-node-pick-{}", std::process::id()));

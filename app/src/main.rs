@@ -1068,6 +1068,7 @@ fn command_run(
         .into_iter()
         .find(|c| c.id == id)
         .ok_or_else(|| format!("{site} has no script {id}"))?;
+    prepare(&app, &s).map_err(err)?;
     anvil::lock(&app.apps)
         .run_once(&s, &script, &cfg)
         .map_err(err)?;
@@ -1155,17 +1156,14 @@ fn autostart_processes(app: &App, cfg: &Config) {
     }
 }
 
-/// A worktree's own database before anything of it starts (`worktrees::prepare`), and
+/// A worktree's own database before anything of it starts (`worktrees::prepare_site`),
 /// outside `app.apps`: a copy can take minutes. Its line is in `app.preparing` meanwhile.
 fn prepare(app: &App, site: &Site) -> anyhow::Result<()> {
-    if site.worktree_of.is_none() {
-        return Ok(());
-    }
-    let made = anvil::worktrees::prepare(&mut anvil::load()?, site, &mut |line| {
+    let made = anvil::worktrees::prepare_site(site, &mut |line| {
         anvil::lock(&app.preparing).insert(site.name.clone(), line.into());
     });
     anvil::lock(&app.preparing).remove(&site.name);
-    made.map(drop)
+    made
 }
 
 fn start_process(app: &App, cfg: &Config, site: &Site, p: &anvil::processes::Process) {

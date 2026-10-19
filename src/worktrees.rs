@@ -284,6 +284,16 @@ fn on_server(cfg: &Config, id: &str, op: Op) -> anyhow::Result<bool> {
     }
 }
 
+/// `prepare` on the config as saved, for any Start, process or script of `site` (a no-op
+/// for anything but a worktree): what's recorded on disk is what counts. Run it before
+/// taking any lock, such as the app's on `Apps`.
+pub fn prepare_site(site: &Site, say: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
+    if site.worktree_of.is_some() {
+        prepare(&mut crate::load()?, site, say)?;
+    }
+    Ok(())
+}
+
 /// Make a worktree's own database on its first use (a Start, a terminal shim): a copy
 /// of main's, or an empty one, as chosen. `say` gets the line to show before the work
 /// starts; `true` when it made one. What it made on a server is recorded in
