@@ -34,22 +34,9 @@ pub struct Commit {
 /// projects inside a bigger repository get `None` rather than a third git process.
 pub fn info(dir: &Path) -> Option<GitInfo> {
     let git_dir = git_dir(dir)?;
-    let git = |args: &[&str]| {
-        Command::new("git")
-            // A repo's own config could otherwise run a program (fsmonitor) on status.
-            .args(["-c", "core.fsmonitor=false"])
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-    };
     // Both run at the same time.
-    let status = git(&["status", "--porcelain=v2", "--branch", "-z"]).ok()?;
-    let log = git(&["log", "-1", "--format=%h%x00%s%x00%an%x00%ct"]).ok()?;
+    let status = spawn(dir, &["status", "--porcelain=v2", "--branch", "-z"]).ok()?;
+    let log = spawn(dir, &["log", "-1", "--format=%h%x00%s%x00%an%x00%ct"]).ok()?;
     let status = status.wait_with_output().ok()?;
     let log = log.wait_with_output().ok()?;
     if !status.status.success() {
@@ -66,8 +53,35 @@ pub fn info(dir: &Path) -> Option<GitInfo> {
     Some(info)
 }
 
+fn spawn(dir: &Path, args: &[&str]) -> std::io::Result<std::process::Child> {
+    #[cfg(test)]
+    SPAWNS.with(|c| c.set(c.get() + 1));
+    Command::new("git")
+        // A repo's own config could otherwise run a program (fsmonitor) on status.
+        .args(["-c", "core.fsmonitor=false"])
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+}
+
+#[cfg(test)]
+thread_local!(pub(crate) static SPAWNS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) });
+
+/// Stdout of one git command, `None` when git is missing or the command fails.
+pub(crate) fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = spawn(dir, args).ok()?.wait_with_output().ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 /// The repository folder: `.git` itself, or where a `.git` file points to.
-fn git_dir(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn git_dir(dir: &Path) -> Option<PathBuf> {
     let dot = dir.join(".git");
     if dot.is_dir() {
         return Some(dot);
