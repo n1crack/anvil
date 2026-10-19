@@ -7,10 +7,10 @@ pub fn joined(first: &str, rest: &str) -> String {
 
 /// A worktree's own part of its name: the folder slugged like site names, less a
 /// leading `<app>--` (an Anvil-made `myapp--feature-x` is `feature-x`).
-pub fn worktree_name(folder: &Path) -> String {
+pub fn worktree_name(app: &str, folder: &Path) -> String {
     let name = crate::site_name(&folder.file_name().unwrap_or_default().to_string_lossy());
-    match name.split_once("--") {
-        Some((_, rest)) if !rest.is_empty() => rest.into(),
+    match name.strip_prefix(&format!("{app}--")) {
+        Some(rest) if !rest.is_empty() => rest.into(),
         _ => name,
     }
 }

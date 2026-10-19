@@ -483,23 +483,28 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     let mut taken: BTreeSet<String> = sites.iter().map(|s| s.name.clone()).collect();
     let tld = format!(".{}", cfg.tld);
     for (main, main_path, list) in &mains {
-        let Some(app) = sites.iter().find(|s| &s.name == main) else {
+        if !sites.iter().any(|s| &s.name == main) {
             continue;
-        };
-        // The app's extra dev servers keep their `<app>--<row>` names.
-        taken.extend(
-            processes::server_rows(cfg, app)
-                .into_iter()
-                .map(|r| r.host.strip_suffix(&tld).unwrap_or(&r.host).to_string()),
-        );
+        }
         let aliases: Vec<&String> = cfg
             .links
             .iter()
             .filter(|(n, p)| *p == main_path && *n != main)
             .map(|(n, _)| n)
             .collect();
+        // The extra dev servers of the app and its aliases keep their `<app>--<row>` names.
+        for s in sites
+            .iter()
+            .filter(|s| &s.name == main || aliases.contains(&&s.name))
+        {
+            taken.extend(
+                processes::server_rows(cfg, s)
+                    .into_iter()
+                    .map(|r| r.host.strip_suffix(&tld).unwrap_or(&r.host).to_string()),
+            );
+        }
         for w in list {
-            let base = worktrees::worktree_name(&w.path);
+            let base = worktrees::worktree_name(main, &w.path);
             let (mut label, mut n) = (base.clone(), 2);
             while taken.contains(&worktrees::joined(main, &label)) {
                 label = format!("{base}-{n}");
@@ -507,39 +512,47 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             }
             let name = worktrees::joined(main, &label);
             taken.insert(name.clone());
-            // Without its own settings a worktree runs as its app does, on its own port,
-            // not with Anvil, and with the versions its own `.anvil.toml` asks for.
-            let inherited = cfg
-                .sites
-                .get(main)
-                .filter(|_| !cfg.sites.contains_key(&name))
-                .map(|m| {
-                    let file = project::load(&w.path);
-                    let asks = |f: fn(&project::ProjectFile) -> bool| file.as_ref().is_some_and(f);
-                    SiteConfig {
-                        php: m.php.clone().filter(|_| !asks(|f| f.php.is_some())),
-                        runtime: m.runtime.clone().filter(|_| !asks(|f| f.node.is_some())),
-                        port: None,
-                        autostart: false,
-                        processes: BTreeMap::new(),
-                        ..m.clone()
-                    }
-                });
-            let own = cfg.sites.get(&name).or(inherited.as_ref());
-            let mut site = site_at(cfg, &installed, name, w.path.clone(), None, own);
+            let own = worktree_settings(cfg, main, &name);
+            let mut site = site_at(cfg, &installed, name, w.path.clone(), None, Some(&own));
             site.linked = false;
             site.worktree_of = Some(main.clone());
             site.branch = w.branch.clone();
-            site.aliases = aliases
-                .iter()
-                .map(|a| format!("{}{tld}", worktrees::joined(a, &label)))
-                .collect();
+            // A derived alias address another app, dev server or worktree has is left out.
+            for a in &aliases {
+                let host = worktrees::joined(a, &label);
+                if taken.insert(host.clone()) {
+                    site.aliases.push(format!("{host}{tld}"));
+                }
+            }
             sites.push(site);
         }
     }
     sites.sort_by(|a, b| a.name.cmp(&b.name));
     apps::assign_ports(cfg, &mut sites);
     sites
+}
+
+/// A worktree's settings, field by field its own else its app's: a pin of either beats the
+/// worktree's `.anvil.toml`, as for apps. Its own port; never with Anvil. Process settings
+/// stay the app's (`processes::settings_of`).
+fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
+    let (o, m) = (cfg.sites.get(name), cfg.sites.get(main));
+    let pick = |f: fn(&SiteConfig) -> Option<String>| o.and_then(f).or_else(|| m.and_then(f));
+    SiteConfig {
+        php: pick(|s| s.php.clone()),
+        runtime: pick(|s| s.runtime.clone()),
+        kind: pick(|s| s.kind.clone()),
+        command: pick(|s| s.command.clone()),
+        https: o.and_then(|s| s.https).or_else(|| m.and_then(|s| s.https)),
+        ini: o
+            .filter(|s| !s.ini.is_empty())
+            .or(m)
+            .map(|s| s.ini.clone())
+            .unwrap_or_default(),
+        port: o.and_then(|s| s.port),
+        autostart: false,
+        processes: BTreeMap::new(),
+    }
 }
 
 /// The site for the folder at `path` served as `name`, with the settings `own`.
@@ -1153,6 +1166,10 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             // Dev servers that only trust localhost (Next.js) work at <name>.localhost too.
             if cfg.tld != "localhost" {
                 names.push(format!("{}.localhost", site.name));
+                for a in &site.aliases {
+                    let stem = a.strip_suffix(&format!(".{}", cfg.tld)).unwrap_or(a);
+                    names.push(format!("{stem}.localhost"));
+                }
             }
             s += &format!(
                 "\n{} {{\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
@@ -2207,12 +2224,136 @@ mod tests {
     }
 
     #[test]
+    fn derived_alias_addresses_yield_and_get_localhost() {
+        let root = crate::worktrees::tests::tmp("alias-clash");
+        let shop = root.join("sites/shop");
+        app_repo(&shop);
+        fs::write(
+            shop.join("package.json"),
+            r#"{"scripts":{"dev":"vite","docs":"vitepress dev docs"}}"#,
+        )
+        .unwrap();
+        fs::create_dir(root.join("sites/admin--z")).unwrap();
+        for w in ["x", "y", "z"] {
+            add_worktree(&shop, &root.join(w), w);
+        }
+        let mut cfg = Config::default();
+        cfg.paths.push(root.join("sites"));
+        cfg.links.insert("admin".into(), shop.clone());
+        cfg.sites.entry("shop".into()).or_default().kind = Some("vite".into());
+        let admin = cfg.sites.entry("admin".into()).or_default();
+        admin.kind = Some("vite".into());
+        // The alias's docs server answers at admin--x.
+        admin.processes.insert(
+            "docs".into(),
+            ProcessConfig {
+                host: Some("x".into()),
+                ..Default::default()
+            },
+        );
+        let all = sites(&cfg);
+        let aliases = |n: &str| all.iter().find(|s| s.name == n).unwrap().aliases.clone();
+        assert!(aliases("shop--x").is_empty(), "a dev server keeps admin--x");
+        assert!(
+            aliases("shop--z").is_empty(),
+            "a separate app keeps admin--z"
+        );
+        assert_eq!(aliases("shop--y"), ["admin--y.test"]);
+        let c = caddyfile(&cfg, &all);
+        let blocks = c
+            .lines()
+            .filter(|l| l.ends_with('{') && l.contains("admin--x.test"));
+        assert_eq!(blocks.count(), 1, "{c}");
+        assert!(c.contains("http://admin--y.localhost"), "{c}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_worktree_pins_its_app_pin_then_its_anvil_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("index.php"), "").unwrap();
+        fs::write(dir.path().join(".anvil.toml"), "php = \"8.4\"\n").unwrap();
+        let php = |main_pin: Option<&str>, own_pin: Option<&str>, installed: &[&str]| {
+            let mut cfg = Config {
+                php: Some("8.2".into()),
+                ..Default::default()
+            };
+            cfg.sites.entry("shop".into()).or_default().php = main_pin.map(Into::into);
+            if let Some(p) = own_pin {
+                cfg.sites.entry("shop--x".into()).or_default().php = Some(p.into());
+            }
+            let own = worktree_settings(&cfg, "shop", "shop--x");
+            let installed: Vec<String> = installed.iter().map(|v| v.to_string()).collect();
+            let path = dir.path().to_path_buf();
+            site_at(&cfg, &installed, "shop--x".into(), path, None, Some(&own)).php
+        };
+        let all = ["8.2", "8.3", "8.4", "8.5"];
+        assert_eq!(php(Some("8.3"), None, &all).as_deref(), Some("8.3"));
+        assert_eq!(php(Some("8.3"), Some("8.5"), &all).as_deref(), Some("8.5"));
+        assert_eq!(php(None, None, &all).as_deref(), Some("8.4"));
+        // The file's version isn't installed: the app's pin, else the default.
+        assert_eq!(
+            php(Some("8.3"), None, &["8.2", "8.3"]).as_deref(),
+            Some("8.3")
+        );
+        assert_eq!(php(None, None, &["8.2", "8.3"]).as_deref(), Some("8.2"));
+    }
+
+    #[test]
+    fn a_worktree_with_its_own_entry_still_follows_its_app() {
+        let root = crate::worktrees::tests::tmp("own-entry");
+        let shop = root.join("sites/shop");
+        app_repo(&shop);
+        add_worktree(&shop, &root.join("x"), "x");
+        let mut cfg = Config::default();
+        cfg.paths.push(root.join("sites"));
+        let main = cfg.sites.entry("shop".into()).or_default();
+        main.autostart = true;
+        main.php = Some("8.3".into());
+        main.processes.insert(
+            "queue".into(),
+            ProcessConfig {
+                command: Some("php artisan queue:work".into()),
+                added: true,
+                autostart: true,
+                ..Default::default()
+            },
+        );
+        let own = cfg.sites.entry("shop--x".into()).or_default();
+        own.https = Some(true);
+        own.autostart = true;
+        let all = sites(&cfg);
+        let w = all.iter().find(|s| s.name == "shop--x").unwrap();
+        assert!(w.secure && !w.autostart);
+        let own = worktree_settings(&cfg, "shop", "shop--x");
+        assert_eq!(own.php.as_deref(), Some("8.3"));
+        let q = processes::detect_with(w, Some(&cfg))
+            .into_iter()
+            .find(|p| p.id == "queue")
+            .expect("the app's own process");
+        assert!(!q.autostart);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn odd_paths_are_quoted_or_skipped() {
         use crate::worktrees::worktree_name;
-        assert_eq!(worktree_name(Path::new("/tmp/my app--x")), "x");
-        assert_eq!(worktree_name(Path::new("/s/myapp--feature-x")), "feature-x");
+        assert_eq!(worktree_name("my-app", Path::new("/tmp/my app--x")), "x");
         assert_eq!(
-            worktree_name(Path::new("/s/.claude/worktrees/agent-1a2b")),
+            worktree_name("shop", Path::new("/s/shop--feature-x")),
+            "feature-x"
+        );
+        assert_eq!(
+            worktree_name("shop", Path::new("/s/fix--typo")),
+            "fix--typo"
+        );
+        assert_eq!(
+            worktree_name("my--app", Path::new("/s/my--app--feat")),
+            "feat"
+        );
+        assert_eq!(worktree_name("shop", Path::new("/s/shop--")), "shop--");
+        assert_eq!(
+            worktree_name("shop", Path::new("/s/.claude/worktrees/agent-1a2b")),
             "agent-1a2b"
         );
         let mut w = site("m--x", "/tmp/my app--x", None);
