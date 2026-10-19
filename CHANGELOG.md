@@ -86,7 +86,8 @@ Until 1.0.0, minor versions may contain breaking changes.
   default, also for worktrees made outside Anvil. A test run (`php artisan
   test`, PHPUnit, Pest, or a `test`/`test:*` script from the Scripts tab) uses
   the database its test config names (`:memory:` too) unless that is the app's;
-  everything else uses the worktree's own. A test config whose setting for the
+  everything else uses the worktree's own, so tests started from a terminal
+  `composer test` use the worktree's own database. A test config whose setting for the
   app's database would win stops the worktree until it names one of its own. A
   database Anvil didn't make is only used after "Use existing"
   (`anvil worktree use-db`). Its Redis and
