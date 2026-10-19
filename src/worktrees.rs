@@ -1161,6 +1161,15 @@ fn env_with(
     if site.worktree_of.is_none() {
         return Ok(Vec::new());
     }
+    // Symfony Runtime's `dotenv_overload`: its env files win over the process env, so
+    // Anvil's keys can't keep it off main's database.
+    let composer = fs::read_to_string(site.path.join("composer.json")).unwrap_or_default();
+    let overload = serde_json::from_str::<serde_json::Value>(&composer)
+        .ok()
+        .and_then(|c| c.pointer("/extra/runtime/dotenv_overload")?.as_bool());
+    if overload == Some(true) {
+        return Err("its composer.json sets extra.runtime.dotenv_overload, so its env files win over the worktree's own settings and could reach main's database: turn it off to run it".into());
+    }
     let mut env: Vec<(String, String)> = Vec::new();
     let db = db_name(site);
     let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
@@ -3411,10 +3420,9 @@ pub(crate) mod tests {
             "DB_URL" | "DATABASE_URL" => Some(url_databases(v)),
             _ => None,
         };
-        let cases = mains
-            .iter()
-            .enumerate()
-            .flat_map(|(n, m)| [(n, m, "laravel"), (n, m, "symfony"), (n, m, "symfony-test")]);
+        let cases = mains.iter().enumerate().flat_map(|(n, m)| {
+            ["laravel", "symfony", "symfony-test", "symfony-overload"].map(|k| (n, m, k))
+        });
         for (n, (dotenv, names), symfony) in cases {
             let (mut cfg, mut site) = worktree_site(&format!("prop-{n}-{symfony}"), "");
             let main = main_of(&site.path).unwrap();
@@ -3437,6 +3445,15 @@ pub(crate) mod tests {
                     fs::write(site.path.join(".env.local"), "APP_ENV=dev\n").unwrap();
                     both(".env.test", &fill(dotenv));
                 }
+                // Its env files win over the process env: nothing of it runs.
+                "symfony-overload" => {
+                    site.kind = "symfony".into();
+                    both(".env.dev", &fill(dotenv));
+                    both(
+                        "composer.json",
+                        r#"{"extra": {"runtime": {"dotenv_overload": true}}}"#,
+                    );
+                }
                 _ => fs::write(main.join(".env"), fill(dotenv)).unwrap(),
             }
             // Main's: one of its names, its SQLite file by canonical path, or a file in its
@@ -3456,7 +3473,10 @@ pub(crate) mod tests {
                             })))
             };
             // What it gets with no test config and the preset's keys: its own.
-            let own = checked_env(&cfg, &site, false).unwrap();
+            let own = checked_env(&cfg, &site, false).unwrap_or_else(|e| {
+                assert_eq!(symfony, "symfony-overload", "{e}");
+                Vec::new()
+            });
             // The worktree keys as the user may leave them: the preset's, DB_DATABASE empty, one
             // whose placeholder has no value, main's name typed in, or taken out (sharing).
             for variant in ["preset", "", "{port}", "shop", "removed"] {
@@ -3490,6 +3510,9 @@ pub(crate) mod tests {
                             "{dotenv:?} symfony={symfony} {file} {text:?} keys={variant:?} test={test}"
                         );
                         let got = checked_env(&cfg, &site, test);
+                        if symfony == "symfony-overload" {
+                            assert!(got.is_err(), "{case}");
+                        }
                         // A DB key with no value never lets `.env` (main's) win: nothing runs.
                         if !test && ["", "{port}"].contains(&variant) {
                             assert!(got.is_err(), "{case}");
@@ -4003,6 +4026,26 @@ pub(crate) mod tests {
         }
         for db in ["example", "dist"] {
             assert!(!is_mains_database(&site, db), "{db}");
+        }
+    }
+
+    #[test]
+    fn symfonys_dotenv_overload_stops_the_worktree() {
+        let (cfg, mut site) = worktree_site("overload", "DATABASE_URL=postgresql://h/shop\n");
+        site.kind = "symfony".into();
+        let composer = |on: bool| {
+            fs::write(
+                site.path.join("composer.json"),
+                format!(r#"{{"extra": {{"runtime": {{"dotenv_overload": {on}}}}}}}"#),
+            )
+            .unwrap()
+        };
+        composer(false);
+        assert!(env(&cfg, &site).is_ok());
+        composer(true);
+        for test in [false, true] {
+            let err = run_env(&cfg, &site, test).unwrap_err();
+            assert!(err.contains("extra.runtime.dotenv_overload"), "{err}");
         }
     }
 
