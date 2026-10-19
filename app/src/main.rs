@@ -80,7 +80,10 @@ struct Snapshot {
 #[derive(Serialize)]
 struct WorktreeView {
     db: anvil::worktrees::DbChoice,
-    choices: &'static [anvil::worktrees::DbChoice],
+    /// What it may choose now (`worktrees::choices`).
+    choices: Vec<anvil::worktrees::DbChoice>,
+    /// Its own database is made: the choice is then that one or Share.
+    prepared: bool,
     /// Its own database (a name, or a SQLite file in it); `None` when there's none to give it.
     database: Option<String>,
     /// Main's, as "copy of …" names it.
@@ -118,7 +121,8 @@ fn worktree_view(
     };
     WorktreeView {
         db: rec.db,
-        choices: found.choices(),
+        choices: w::choices(cfg, s),
+        prepared: w::prepared(cfg, s),
         database,
         main_database,
         pending: w::pending(cfg, s).is_some(),
@@ -2142,8 +2146,9 @@ fn worktree_add(
     snapshot(&app)
 }
 
-/// Stop everything of the worktree (one shared deadline), then `worktrees::remove`. The
-/// config is saved after a failure too: a failed drop has forgotten the databases that went.
+/// `remove`'s safety check first (unless `force`; refused, nothing is stopped), then stop
+/// everything of the worktree (one shared deadline), then `worktrees::remove`. The config is
+/// saved after a failure too: a failed drop has forgotten the databases that went.
 #[tauri::command(async)]
 fn worktree_remove(
     handle: AppHandle,
@@ -2161,8 +2166,11 @@ fn worktree_remove(
         .into_iter()
         .filter(|s| s.name != site)
         .collect();
-    let stopping = anvil::lock(&app.apps).take_vanished(&others);
-    anvil::stop_all(stopping, anvil::apps::GRACE);
+    anvil::worktrees::stop_if_clean(&wt, force, || {
+        let stopping = anvil::lock(&app.apps).take_vanished(&others);
+        anvil::stop_all(stopping, anvil::apps::GRACE);
+    })
+    .map_err(err)?;
     anvil::lock(&app.app_errors).retain(|k, _| k.split(['@', '#']).next() != Some(&site));
     let (cfg, removed) = edit(|c| Ok(anvil::worktrees::remove(c, &wt, drop_db, force)))?;
     sites_changed(&handle, &app, &cfg);
@@ -2183,8 +2191,7 @@ fn worktree_db(
             .into_iter()
             .find(|s| s.name == site && s.worktree_of.is_some())
             .ok_or_else(|| anyhow::anyhow!("No worktree named {site}"))?;
-        c.worktrees.entry(s.name).or_default().db = choice;
-        Ok(())
+        anvil::worktrees::set_db(c, &s, choice)
     })?;
     // Its PHP-FPM pool's env follows the choice.
     sites_changed(&handle, &app, &cfg);

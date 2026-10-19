@@ -621,6 +621,7 @@ const mockHandle = (cmd, a) => {
     case "leftover_keep":
       return mockSnap;
     case "worktree_db":
+      if (window.mockDbFail) throw window.mockDbFail;
       mockSnap.worktrees[a.site].db = a.choice;
       return mockSnap;
     case "worktree_prepare":

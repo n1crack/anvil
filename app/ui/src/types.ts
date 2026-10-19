@@ -65,8 +65,11 @@ export type DbChoice = "copy" | "empty" | "share";
 
 export interface WorktreeView {
   db: DbChoice;
-  /** What it can choose (an external database: share or empty). */
+  /** What it may choose now: what main's database allows (external: empty or share)
+   * until its own is made, then that one or share. */
   choices: DbChoice[];
+  /** Its own database is made. */
+  prepared: boolean;
   /** Its own database (a name, or a SQLite file in it); null when there's none to give it. */
   database: string | null;
   /** Main's, as "copy of …" names it. */

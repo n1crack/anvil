@@ -194,6 +194,42 @@ pub fn pending(cfg: &Config, site: &Site) -> Option<(DbChoice, MainDb)> {
     }
 }
 
+/// Its own database is made: a copy or empty one recorded, or its SQLite file there.
+pub fn prepared(cfg: &Config, site: &Site) -> bool {
+    cfg.worktrees
+        .get(&site.name)
+        .is_some_and(|w| !w.copies.is_empty())
+        || matches!(main_db(cfg, site), MainDb::Sqlite { to, .. } if to.exists())
+}
+
+/// What the worktree may choose now: what main's database allows until its own is made,
+/// then only that one (Copy or Empty, as made; Copy after a Share) or Share.
+pub fn choices(cfg: &Config, site: &Site) -> Vec<DbChoice> {
+    if prepared(cfg, site) {
+        let own = match cfg.worktrees.get(&site.name).map(|w| w.db) {
+            Some(DbChoice::Empty) => DbChoice::Empty,
+            _ => DbChoice::Copy,
+        };
+        return vec![own, DbChoice::Share];
+    }
+    main_db(cfg, site).choices().to_vec()
+}
+
+/// Record `choice` for the worktree, refusing one `choices` doesn't offer.
+pub fn set_db(cfg: &mut Config, site: &Site, choice: DbChoice) -> anyhow::Result<()> {
+    let allowed = choices(cfg, site);
+    if !allowed.contains(&choice) {
+        let why = if prepared(cfg, site) {
+            "its own database is made already; choose it or Share main's"
+        } else {
+            "main's database is on a server Anvil doesn't manage; choose Empty or Share main's"
+        };
+        anyhow::bail!("{} can't use that database ({why})", site.name);
+    }
+    cfg.worktrees.entry(site.name.clone()).or_default().db = choice;
+    Ok(())
+}
+
 /// `prepare` with the server reached through `run(cfg, service, op)`, and `marker`
 /// the file that stays while a copy is under way (an interrupted one is redone).
 pub(crate) fn prepare_with(
@@ -676,6 +712,37 @@ fn drop_leftover_with(
     Ok(())
 }
 
+/// Refuses a worktree with uncommitted changes or unpushed commits, or one git can't tell about.
+fn check_clean(site: &Site) -> anyhow::Result<()> {
+    let Some(info) = crate::git::info(&site.path) else {
+        anyhow::bail!(
+            "Anvil couldn't check {} for uncommitted changes or unpushed commits",
+            site.name
+        );
+    };
+    if info.changed > 0 {
+        let n = info.changed;
+        anyhow::bail!(
+            "{} has {n} uncommitted {}",
+            site.name,
+            if n == 1 { "change" } else { "changes" }
+        );
+    }
+    if info.ahead > 0 {
+        anyhow::bail!("{} has {} unpushed commits", site.name, info.ahead);
+    }
+    Ok(())
+}
+
+/// `stop` (the worktree's processes) once `remove`'s safety check passes, unless `force`:
+/// a refused remove leaves everything running.
+pub fn stop_if_clean<T>(site: &Site, force: bool, stop: impl FnOnce() -> T) -> anyhow::Result<T> {
+    if !force {
+        check_clean(site)?;
+    }
+    Ok(stop())
+}
+
 /// Remove a worktree: its folder (`git worktree remove`) and, with `drop_db`, the databases
 /// recorded for it. Refuses uncommitted changes and unpushed commits unless `force`. Its
 /// processes are stopped by the caller first. Changes `cfg` only: the caller saves it after Ok and after Err alike (a failed
@@ -697,23 +764,7 @@ fn remove_with(
         anyhow::bail!("{} isn't a git worktree", site.path.display());
     };
     if !force {
-        let Some(info) = crate::git::info(&site.path) else {
-            anyhow::bail!(
-                "Anvil couldn't check {} for uncommitted changes or unpushed commits",
-                site.name
-            );
-        };
-        if info.changed > 0 {
-            let n = info.changed;
-            anyhow::bail!(
-                "{} has {n} uncommitted {}",
-                site.name,
-                if n == 1 { "change" } else { "changes" }
-            );
-        }
-        if info.ahead > 0 {
-            anyhow::bail!("{} has {} unpushed commits", site.name, info.ahead);
-        }
+        check_clean(site)?;
     }
     // Databases first: a failed drop leaves the folder, so nothing is half gone.
     if drop_db && let Some(w) = cfg.worktrees.get(&site.name).cloned() {
@@ -1320,6 +1371,42 @@ pub(crate) mod tests {
         keep_leftover(&mut cfg, &[], "shop", "feature-x");
         assert!(leftovers(&cfg, &[]).is_empty());
         assert_eq!(dropped.borrow().len(), 1);
+    }
+
+    #[test]
+    fn a_refused_remove_stops_nothing() {
+        let (_, site) = worktree_site("stop-clean", "");
+        fs::write(site.path.join("a.txt"), "x").unwrap();
+        let mut stopped = false;
+        let e = stop_if_clean(&site, false, || stopped = true).unwrap_err();
+        assert!(e.to_string().contains("1 uncommitted change"), "{e}");
+        assert!(!stopped);
+        stop_if_clean(&site, true, || stopped = true).unwrap();
+        assert!(stopped);
+    }
+
+    #[test]
+    fn the_database_choice_follows_main_and_what_is_made() {
+        use DbChoice::*;
+        // Main on a server Anvil doesn't manage: Empty or Share only.
+        let (mut cfg, site) = worktree_site(
+            "choice-ext",
+            "DB_CONNECTION=mysql\nDB_HOST=db.example.com\n",
+        );
+        assert_eq!(choices(&cfg, &site), [Share, Empty]);
+        assert!(set_db(&mut cfg, &site, Copy).is_err());
+        set_db(&mut cfg, &site, Empty).unwrap();
+        // Made already: its own (as made) or Share; Share and back reuses it.
+        let (mut cfg, site) = worktree_site("choice-made", "DB_CONNECTION=sqlite\n");
+        assert_eq!(choices(&cfg, &site), [Copy, Empty, Share]);
+        recorded(&mut cfg, &site);
+        assert_eq!(choices(&cfg, &site), [Copy, Share]);
+        let e = set_db(&mut cfg, &site, Empty).unwrap_err();
+        assert!(e.to_string().contains("made already"), "{e}");
+        set_db(&mut cfg, &site, Share).unwrap();
+        set_db(&mut cfg, &site, Copy).unwrap();
+        assert_eq!(cfg.worktrees[&site.name].copies.len(), 1);
+        assert!(pending(&cfg, &site).is_none());
     }
 
     #[test]

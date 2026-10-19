@@ -1165,6 +1165,7 @@ function projectNeeds(s, root) {
 const DB_CHOICES = { copy: "Copy of main", empty: "Empty", share: "Share main's" };
 const prepareErrors = new Map<string, string>(); // a failed Prepare database, across re-renders
 const preparing = new Set<string>();
+const dbErrors = new Map<string, string>(); // a refused database choice, across re-renders
 
 /** A worktree's Overview: what it's a worktree of, its database with the choice, and one
  * line for each thing it shares with or lacks from its app. */
@@ -1188,12 +1189,27 @@ function worktreeLines(s, root) {
         ? `copy of ${v.main_database ?? main}`
         : "empty";
     const dd = el("dd", null, share ? `${main}'s database` : `${v.database} (${how})`);
-    const opts = v.choices.includes(v.db) ? v.choices : [v.db, ...v.choices];
+    // Once made, its own database (reused after a Share) or main's; before, what main's allows.
+    const label = (c) => (v.prepared && c !== "share" ? `Own database (${v.database})` : DB_CHOICES[c]);
     const sel = el("select");
     sel.setAttribute("aria-label", "Database");
-    for (const c of opts) sel.add(new Option(DB_CHOICES[c], c));
+    for (const c of v.choices) sel.add(new Option(label(c), c));
+    if (!v.choices.includes(v.db)) {
+      // A choice main's database no longer allows: shown as it is, not offered.
+      const now = new Option(label(v.db), v.db);
+      now.disabled = true;
+      sel.prepend(now);
+    }
     sel.value = v.db;
-    sel.onchange = () => call("worktree_db", { site: s.name, choice: sel.value });
+    sel.onchange = async () => {
+      dbErrors.delete(s.name);
+      try {
+        await invoke("worktree_db", { site: s.name, choice: sel.value });
+      } catch (e) {
+        dbErrors.set(s.name, String(e));
+      }
+      call("state");
+    };
     dd.append(" ", sel);
     if (share) dd.append(el("div", "muted", `Not recommended: migrations and tests here change ${main}'s data`));
     else if (v.preparing) dd.append(el("div", "muted", v.preparing));
@@ -1216,8 +1232,9 @@ function worktreeLines(s, root) {
       };
       dd.append(" ", b);
     }
-    const fail = v.error ?? prepareErrors.get(s.name);
-    if (fail) dd.append(el("div", "muted", fail));
+    for (const fail of new Set([dbErrors.get(s.name), v.error, prepareErrors.get(s.name)])) {
+      if (fail) dd.append(el("div", "muted", fail));
+    }
     add("Database", dd);
   }
   add("Shared", el("dd", "muted", `S3 buckets and search indexes are shared with ${main}`));

@@ -1567,7 +1567,8 @@ describe("worktrees", () => {
   const wt = "shop--feature-x";
   const view = (o = {}) => ({
     db: "copy",
-    choices: ["copy", "empty", "share"],
+    choices: ["copy", "share"],
+    prepared: true,
     database: "shop_feature_x",
     main_database: "shop",
     pending: false,
@@ -1602,7 +1603,8 @@ describe("worktrees", () => {
     expect($('[data-panel="overview"] .worktree-of').textContent).toBe("Worktree of shop · branch feature/login");
     expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop_feature_x (copy of shop)");
     const choice = dbRow().querySelector("select") as HTMLSelectElement;
-    expect([...choice.options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty", "Share main's"]);
+    // Made already: its own database or main's, nothing that would remake it.
+    expect([...choice.options].map((o) => o.textContent)).toEqual(["Own database (shop_feature_x)", "Share main's"]);
     expect(choice.value).toBe("copy");
     expect(ovText()).toContain("S3 buckets and search indexes are shared with shop");
     expect(ovText()).not.toContain("Docker services");
@@ -1615,6 +1617,29 @@ describe("worktrees", () => {
     // Share warns inline.
     expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop's database");
     expect(dbRow().textContent).toContain("Not recommended: migrations and tests here change shop's data");
+  });
+
+  test("before its database is made all three choices show; a refused one says why inline", async () => {
+    await show({ pending: true, prepared: false, copies: [], choices: ["copy", "empty", "share"] });
+    const choice = () => dbRow().querySelector("select") as HTMLSelectElement;
+    expect([...choice().options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty", "Share main's"]);
+    w.mockDbFail = "shop--feature-x can't use that database (its own database is made already; choose it or Share main's)";
+    try {
+      choice().value = "empty";
+      choice().dispatchEvent(new Event("change"));
+      await wait(80);
+      expect(dbRow().textContent).toContain("its own database is made already");
+    } finally {
+      delete w.mockDbFail;
+    }
+    // Main on a server Anvil doesn't manage: the default Copy shows, but can't be picked.
+    await show({ choices: ["share", "empty"], prepared: false, pending: false, copies: [] });
+    const opts = [...choice().options];
+    expect(opts.map((o) => [o.textContent, o.disabled])).toEqual([
+      ["Copy of main", true],
+      ["Share main's", false],
+      ["Empty", false],
+    ]);
   });
 
   test("Docker services and a cached config each get one line", async () => {
