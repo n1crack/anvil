@@ -664,11 +664,11 @@ fn authority(url: &str) -> Option<&str> {
     crate::validate::authority(url)?.rsplit('@').next()
 }
 
-fn url_port(url: &str) -> Option<u16> {
+pub(crate) fn url_port(url: &str) -> Option<u16> {
     authority(url)?.rsplit_once(':')?.1.parse().ok()
 }
 
-fn url_host(url: &str) -> Option<String> {
+pub(crate) fn url_host(url: &str) -> Option<String> {
     let a = authority(url)?;
     let host = match a.rsplit_once(':') {
         Some((h, p)) if p.parse::<u16>().is_ok() => h,
@@ -677,7 +677,7 @@ fn url_host(url: &str) -> Option<String> {
     Some(host.trim_matches(['[', ']']).to_string())
 }
 
-fn is_local(host: Option<&str>) -> bool {
+pub(crate) fn is_local(host: Option<&str>) -> bool {
     matches!(
         host,
         None | Some("" | "127.0.0.1" | "localhost" | "::1" | "0.0.0.0")

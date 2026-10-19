@@ -101,7 +101,8 @@ fn path_with(dir: &Path) -> (String, String) {
 pub type Resolved = (PathBuf, Vec<String>, Vec<(String, String)>);
 
 /// What `tool` runs in `cwd`: the program, the arguments before the user's, and
-/// extra environment. `fetch` downloads Composer or the Laravel installer when missing.
+/// extra environment. `fetch` downloads Composer or the Laravel installer when missing,
+/// and makes a worktree's own database on its first use.
 pub fn resolve(tool: &str, cwd: &Path, cfg: &Config) -> Result<Resolved> {
     resolve_with(tool, cwd, cfg, true)
 }
@@ -111,6 +112,18 @@ pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result
     let site = site_for(&all, cwd);
     // First: a worktree Anvil can't separate from main runs nothing, whatever the tool.
     let extra = extra_env(cfg, site)?;
+    if fetch && let Some(s) = site.filter(|s| s.worktree_of.is_some()) {
+        // Its own database on first use, as a Start would. Without it the tool still
+        // runs: it reaches the worktree's (missing) database, never main's.
+        match crate::load().and_then(|mut c| crate::worktrees::prepare(&mut c, s)) {
+            Ok(Some(line)) => eprintln!("{line}"),
+            Ok(None) => {}
+            Err(e) => eprintln!(
+                "Anvil: couldn't prepare {}: {e:#}",
+                crate::worktrees::db_name(s)
+            ),
+        }
+    }
     let mut r = resolve_for(tool, cwd, cfg, fetch, site)?;
     r.2.extend(extra);
     Ok(r)
