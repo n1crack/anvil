@@ -1585,13 +1585,24 @@ pub fn same_as_main(cfg: &Config, site: &Site) -> Vec<String> {
         for k in &check {
             let same = mine
                 .get(k)
-                .is_some_and(|v| !v.is_empty() && theirs.get(k) == Some(v));
+                .is_some_and(|v| !v.is_empty() && theirs.get(k) == Some(v) && !in_worktree(v));
             if same && !out.contains(k) {
                 out.push(k.clone());
             }
         }
     }
     out
+}
+
+/// A value that names a file by a relative path (`database/database.sqlite`, Prisma's
+/// `file:./dev.db`): read from the worktree, it is the worktree's own file already.
+fn in_worktree(v: &str) -> bool {
+    let path = v.strip_prefix("file:").unwrap_or(v);
+    let file = v.starts_with("file:")
+        || path.contains('/')
+        || path.ends_with(".sqlite")
+        || path.ends_with(".db");
+    file && !path.contains("://") && !Path::new(path).is_absolute()
 }
 
 /// `list` (`after_create`) for a worktree in `dir`: `{install}` is the JS install its lock
@@ -3398,6 +3409,26 @@ pub(crate) mod tests {
         );
         // SESSION_COOKIE isn't one of the keys: still main's.
         assert_eq!(same_as_main(&cfg, &site), ["SESSION_COOKIE"]);
+    }
+
+    #[test]
+    fn check_leaves_out_values_that_resolve_inside_the_worktree() {
+        let dotenv = "DB_CONNECTION=sqlite\nDB_DATABASE=database/database.sqlite\nDATABASE_URL=file:./dev.db\nREDIS_PREFIX=shop_\n";
+        let (cfg, site) = worktree_site("same-rel", dotenv);
+        fs::write(site.path.join(".env"), dotenv).unwrap();
+        // The relative SQLite file and Prisma's `file:` are the worktree's own already.
+        assert_eq!(same_as_main(&cfg, &site), ["REDIS_PREFIX"]);
+        let abs = format!(
+            "DATABASE_URL=file:{}/dev.db\n",
+            main_of(&site.path).unwrap().display()
+        );
+        fs::write(main_of(&site.path).unwrap().join(".env"), &abs).unwrap();
+        fs::write(site.path.join(".env"), &abs).unwrap();
+        assert_eq!(
+            same_as_main(&cfg, &site),
+            ["DATABASE_URL"],
+            "main's file by its path"
+        );
     }
 
     #[test]
