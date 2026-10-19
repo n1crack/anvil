@@ -344,11 +344,17 @@ fn asgi_module(dir: &Path) -> &'static str {
     }
 }
 
-/// Pick the runtime version for a project: `.nvmrc` / `.node-version` for Node,
-/// otherwise the newest installed.
+/// Pick the runtime version for a project: `.anvil.toml`'s `node`, then `.nvmrc` /
+/// `.node-version` for Node, otherwise the newest installed. Only installed ones count.
 pub fn runtime_version(runtime: &str, dir: &Path) -> Option<String> {
-    let installed = runtimes::installed(runtime);
+    runtime_version_in(runtime, dir, runtimes::installed(runtime))
+}
+
+fn runtime_version_in(runtime: &str, dir: &Path, installed: Vec<String>) -> Option<String> {
     if runtime == "node" {
+        if let Some(v) = crate::project::node(dir, &installed) {
+            return Some(v);
+        }
         for f in [".nvmrc", ".node-version"] {
             let want = read(&dir.join(f));
             let major = want
@@ -805,6 +811,22 @@ pub fn check_command(command: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_is_the_project_file_then_nvmrc_then_the_newest() {
+        let dir = std::env::temp_dir().join(format!("anvil-node-pick-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let pick = || runtime_version_in("node", &dir, vec!["24".into(), "22".into(), "20".into()]);
+        assert_eq!(pick().as_deref(), Some("24"));
+        fs::write(dir.join(".nvmrc"), "v20.11.0\n").unwrap();
+        assert_eq!(pick().as_deref(), Some("20"));
+        fs::write(dir.join(".anvil.toml"), "node = \"22\"\n").unwrap();
+        assert_eq!(pick().as_deref(), Some("22"));
+        // Not installed: what the folder says otherwise.
+        fs::write(dir.join(".anvil.toml"), "node = \"18\"\n").unwrap();
+        assert_eq!(pick().as_deref(), Some("20"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn project(files: &[(&str, &str)]) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

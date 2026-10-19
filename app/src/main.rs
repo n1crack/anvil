@@ -66,6 +66,8 @@ struct Snapshot {
     paths: Vec<std::path::PathBuf>,
     /// Installed language versions by runtime id, newest first.
     runtimes: std::collections::BTreeMap<&'static str, Vec<String>>,
+    /// What each app's `.anvil.toml` asks for (PHP, Node.js, services), apps with one only.
+    projects: std::collections::BTreeMap<String, Vec<anvil::project::Need>>,
 }
 
 type Res<T> = Result<T, String>;
@@ -279,6 +281,11 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         runtimes: anvil::runtimes::RUNTIMES
             .iter()
             .map(|id| (*id, anvil::runtimes::installed(id)))
+            .collect(),
+        projects: sites
+            .iter()
+            .map(|s| (s.name.clone(), anvil::project::needs(&cfg, s)))
+            .filter(|(_, n)| !n.is_empty())
             .collect(),
         sites,
         hidden: anvil::hidden_sites(&cfg),

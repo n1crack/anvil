@@ -1517,3 +1517,48 @@ describe("show hidden", () => {
     ($("#new-service") as HTMLDialogElement).close();
   });
 });
+
+describe("project file", () => {
+  test("one quiet Overview line for what .anvil.toml asks and Anvil lacks: Install and Add", async () => {
+    const need = (kind, version, install, label, met = false, overridden = null) => ({ kind, version, install, label, met, overridden });
+    w.mockSnap.projects = {
+      shop: [
+        need("php", "8.3", "8.3", "PHP 8.3"),
+        need("node", "22", "22", "Node.js 22", true),
+        need("mysql", "8.4", "8.4.11", "MySQL 8.4"),
+        need("redis", "", "8.10.2", "Redis", true),
+      ],
+      vuefinder: [need("node", "22", "22", "Node.js 22", true)],
+    };
+    // The test before leaves the add_service mock's null as the service list.
+    await w.loadServices();
+    $('.modes [data-mode="apps"]').click();
+    w.refresh();
+    await wait(80);
+    try {
+      await select("vuefinder");
+      expect($$('[data-panel="overview"] dt').map((d) => d.textContent)).not.toContain("Project");
+      await select("shop");
+      const row = $$('[data-panel="overview"] .row').find((r) => r.querySelector("dt")!.textContent === "Project")!;
+      expect(row.querySelector("dd")!.firstChild!.textContent).toBe("This project asks for PHP 8.3 and MySQL 8.4");
+      const [install, add] = [...row.querySelectorAll("button")] as HTMLButtonElement[];
+      expect([install.textContent, add.textContent]).toEqual(["Install PHP 8.3", "Add MySQL 8.4"]);
+      // Settings: unset would follow the file only once its PHP is installed.
+      expect(($("#php") as HTMLSelectElement).options[0].textContent).toBe("Default (8.4)");
+      add.click();
+      await wait(60);
+      expect(($("#new-service") as HTMLDialogElement).open).toBe(true);
+      expect(($("#svc-version") as HTMLSelectElement).value).toBe("8.4.11");
+      expect($("#svc-license-text").textContent).toContain("MySQL 8.4.11");
+      expect(($("#svc-create") as HTMLButtonElement).disabled).toBe(true);
+      ($("#new-service") as HTMLDialogElement).close();
+      install.click();
+      await wait(60);
+      expect(calls("php_install").at(-1)![1]).toEqual({ version: "8.3" });
+    } finally {
+      delete w.mockSnap.projects;
+      w.refresh();
+      await wait(80);
+    }
+  });
+});

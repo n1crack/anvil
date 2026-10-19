@@ -47,6 +47,23 @@ export interface Snapshot {
   kinds: [string, string][];
   paths: string[];
   runtimes: Record<string, string[]>;
+  /** What an app's .anvil.toml asks for, by app name; apps with one only. */
+  projects: Record<string, Need[]>;
+}
+
+/** One thing a project's .anvil.toml asks for. */
+export interface Need {
+  /** "php", "node" or a service kind. */
+  kind: string;
+  /** As the file says it; "" is any version. */
+  version: string;
+  /** What installing or adding gets. */
+  install: string;
+  /** "PHP 8.3", "Redis". */
+  label: string;
+  met: boolean;
+  /** The version chosen in Anvil instead. */
+  overridden: string | null;
 }
 
 export interface Setup {

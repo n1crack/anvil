@@ -82,7 +82,7 @@ pub fn site_for<'a>(sites: &'a [Site], cwd: &Path) -> Option<&'a Site> {
         .map(|(s, _)| s)
 }
 
-/// The site's own PHP version, else the default, else the newest installed.
+/// The site's own PHP version (the user's, else `.anvil.toml`'s), else the default, else the newest installed.
 fn php_version(pinned: Option<String>, cfg: &Config, installed: &[String]) -> Result<String> {
     match pinned.or_else(|| cfg.php.clone()) {
         Some(v) if installed.contains(&v) => Ok(v),
@@ -113,10 +113,15 @@ pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result
     match tool {
         "php" | "composer" | "laravel" => {
             // From the config: a site that serves no PHP itself still has its pin.
+            let installed = installed_php();
             let pinned = site
                 .and_then(|s| cfg.sites.get(&s.name))
                 .and_then(|s| s.php.clone());
-            let v = php_version(pinned, cfg, &installed_php())?;
+            let pinned = match site {
+                Some(s) => crate::project::php_version(pinned, &s.path, &installed, None),
+                None => pinned,
+            };
+            let v = php_version(pinned, cfg, &installed)?;
             let php_dir = crate::php_dir(&v);
             let php = php_dir.join("php");
             if tool == "php" {

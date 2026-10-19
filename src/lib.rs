@@ -10,6 +10,7 @@ pub mod git;
 pub mod logs;
 pub mod packages;
 pub mod processes;
+pub mod project;
 pub mod resources;
 pub mod runtimes;
 pub mod services;
@@ -472,7 +473,11 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
                 .map_or(0, |d| d.as_secs());
             // "Pinned" only when the pin is in effect (a static site drops PHP it can't use).
             let pin_set = php_ok && pinned.is_some();
-            let php = site_php(&kind, pinned.or_else(|| cfg.php.clone()), &installed);
+            let php = site_php(
+                &kind,
+                project::php_version(pinned, &path, &installed, cfg.php.clone()),
+                &installed,
+            );
             let host = if kind == "next" && !apps::next_allows(&path, &cfg.tld) {
                 format!("{name}.localhost")
             } else {

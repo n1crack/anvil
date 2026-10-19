@@ -69,6 +69,12 @@ Until 1.0.0, minor versions may contain breaking changes.
   `pnpm`, `yarn` or `bun audit`, picked by the lock file) with the app's PHP and
   Node.js versions, and lists each advisory with its package, installed
   version, severity and fix. `anvil packages --audit` does the same in the CLI.
+- A project's `.anvil.toml` can ask for its PHP and Node.js versions and the
+  services it needs, so whoever clones it gets the same setup:
+  `php = "8.4"`, `node = "22"`, `[services] mysql = "8.4"` (`""` for any
+  version). A version you pick in Anvil still wins. What's missing shows as one
+  line in the Overview with Install and Add; `anvil project [--apply]` lists it
+  and installs or adds it. Anvil never writes the file.
 
 ### Changed
 

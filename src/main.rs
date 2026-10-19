@@ -124,6 +124,16 @@ enum Cmd {
     Setup,
     /// The program `php`, `composer`, `laravel`, `node`, `npm` or `npx` runs in this folder
     Which { tool: String },
+    /// What an app's .anvil.toml asks for (PHP, Node.js, services) and what's missing
+    /// (default: the app of the current folder); --apply installs and adds it
+    Project {
+        site: Option<String>,
+        #[arg(long)]
+        apply: bool,
+        /// Accept the services' licenses without being asked
+        #[arg(long)]
+        accept_license: bool,
+    },
     /// Trust Anvil's local HTTPS certificate authority (asks for your password)
     Trust,
     /// Run DNS, PHP-FPM and the web server in the foreground
@@ -508,6 +518,109 @@ fn print_setup(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
+/// `anvil service add`: the license asked for (or accepted with the flag), then
+/// the program downloaded and the service enabled.
+fn add_service(
+    cfg: &mut Config,
+    kind: &str,
+    name: Option<&str>,
+    port: Option<u16>,
+    version: Option<&str>,
+    accept_license: bool,
+) -> Result<()> {
+    let v = version.map_or_else(|| services::default_version(kind).to_string(), String::from);
+    let accept = accept_license
+        || services::license_accepted(cfg, kind, &v).is_some()
+        || ask_license(kind, &v)?;
+    edit(cfg, |c| services::require_license(c, kind, &v, accept))?;
+    let id = edit(cfg, |c| services::add(c, kind, name, port, version))?;
+    let v = services::version(cfg, &id);
+    if !services::installed(kind, &v) {
+        println!("Downloading {kind} {v}…");
+    }
+    if let Err(e) = services::ensure_installed(cfg, &id) {
+        edit(cfg, |c| services::remove(c, &id, false))?;
+        return Err(e);
+    }
+    edit(cfg, |c| services::set_enabled(c, &id, true))?;
+    println!(
+        "Added {} on port {}; it starts with {}.",
+        bold(&id),
+        services::port(cfg, &id),
+        cyan("`anvil start`")
+    );
+    Ok(())
+}
+
+/// `anvil project`: what the app's `.anvil.toml` asks for and whether Anvil has it;
+/// with `apply`, install or add what's missing.
+fn project_cmd(
+    cfg: &mut Config,
+    site: Option<String>,
+    apply: bool,
+    accept_license: bool,
+) -> Result<()> {
+    let all = sites(cfg);
+    let s = match &site {
+        Some(n) => all.iter().find(|s| s.name == site_name(n)),
+        None => shims::site_for(&all, &std::env::current_dir()?),
+    }
+    .with_context(|| match &site {
+        Some(n) => format!("No app named {n}"),
+        None => "This folder isn't an app in Anvil; name one: `anvil project <app>`".into(),
+    })?
+    .clone();
+    let file = s.path.join(".anvil.toml");
+    if let Some(e) = project::error(&s.path) {
+        bail!("{e}");
+    }
+    let needs = project::needs(cfg, &s);
+    if needs.is_empty() {
+        println!(
+            "{}",
+            dim(format!(
+                "{} asks for no PHP, Node.js or services.",
+                file.display()
+            ))
+        );
+        return Ok(());
+    }
+    println!("{}", dim(file.display()));
+    let width = needs
+        .iter()
+        .map(|n| n.label.chars().count())
+        .max()
+        .unwrap_or(0);
+    for n in &needs {
+        let state = match (&n.overridden, n.met, n.kind.as_str()) {
+            (Some(v), ..) => dim(format!("you chose {v} in Anvil")),
+            (None, true, "php" | "node") => green("installed"),
+            (None, true, _) => green("added"),
+            (None, false, "php" | "node") => yellow("not installed"),
+            (None, false, _) => yellow(format!("not added (adds {})", n.install)),
+        };
+        println!("  {:<width$}  {state}", n.label);
+    }
+    let missing: Vec<_> = needs.iter().filter(|n| n.missing()).collect();
+    if missing.is_empty() || !apply {
+        if !missing.is_empty() {
+            println!(
+                "{}",
+                commands("Run `anvil project --apply` to install and add them.")
+            );
+        }
+        return Ok(());
+    }
+    for n in missing {
+        match n.kind.as_str() {
+            "php" => php_install(cfg, &n.install)?,
+            "node" => runtimes::install("node", &n.install)?,
+            kind => add_service(cfg, kind, None, None, Some(&n.install), accept_license)?,
+        }
+    }
+    Ok(())
+}
+
 fn main() -> ExitCode {
     // Same output as returning the Result, with `Error:` in red on a terminal.
     if let Err(e) = run() {
@@ -734,35 +847,14 @@ fn run() -> Result<()> {
                 port,
                 version,
                 accept_license,
-            } => {
-                let v = version
-                    .clone()
-                    .unwrap_or_else(|| services::default_version(&kind).to_string());
-                let accept = accept_license
-                    || services::license_accepted(&cfg, &kind, &v).is_some()
-                    || ask_license(&kind, &v)?;
-                edit(&mut cfg, |c| {
-                    services::require_license(c, &kind, &v, accept)
-                })?;
-                let id = edit(&mut cfg, |c| {
-                    services::add(c, &kind, name.as_deref(), port, version.as_deref())
-                })?;
-                let v = services::version(&cfg, &id);
-                if !services::installed(&kind, &v) {
-                    println!("Downloading {kind} {v}…");
-                }
-                if let Err(e) = services::ensure_installed(&cfg, &id) {
-                    edit(&mut cfg, |c| services::remove(c, &id, false))?;
-                    return Err(e);
-                }
-                edit(&mut cfg, |c| services::set_enabled(c, &id, true))?;
-                println!(
-                    "Added {} on port {}; it starts with {}.",
-                    bold(&id),
-                    services::port(&cfg, &id),
-                    cyan("`anvil start`")
-                );
-            }
+            } => add_service(
+                &mut cfg,
+                &kind,
+                name.as_deref(),
+                port,
+                version.as_deref(),
+                accept_license,
+            )?,
             ServiceCmd::Remove { id, delete_data } => {
                 edit(&mut cfg, |c| services::remove(c, &id, delete_data))?
             }
@@ -1166,6 +1258,11 @@ fn run() -> Result<()> {
             edit(&mut cfg, |_| Ok(()))?;
             print_setup(&cfg)?;
         }
+        Cmd::Project {
+            site,
+            apply,
+            accept_license,
+        } => project_cmd(&mut cfg, site, apply, accept_license)?,
         Cmd::Which { tool } => {
             let (program, pre, _) =
                 shims::resolve_with(&tool, &std::env::current_dir()?, &cfg, false)?;

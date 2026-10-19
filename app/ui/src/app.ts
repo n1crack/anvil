@@ -963,7 +963,7 @@ export function renderSite() {
   const engine = process
     ? `${RUNTIME[s.kind]}${s.runtime_version && s.kind !== "dotnet" && s.kind !== "rust" ? ` ${s.runtime_version}` : ""}${s.runtime_version ? "" : " (not installed)"}`
     : s.php
-      ? `PHP ${s.php}${s.php_pinned ? "" : " (default)"}`
+      ? `PHP ${s.php}${s.php_pinned ? "" : fromFile(s, "php") === s.php ? " (.anvil.toml)" : " (default)"}`
       : PHP_KINDS.has(s.kind)
         ? "PHP, none installed"
         : null;
@@ -973,7 +973,7 @@ export function renderSite() {
   $('[data-field="runtime"]', root).textContent = s.kind === s.kind_detected ? runs : `${runs} (type set by you)`;
   // A plain folder runs on nothing; its path row says what it is.
   if (s.kind === "folder") $('[data-field="runtime"]', root).closest(".row")?.remove();
-  if (PHP_KINDS.has(s.kind) && !s.php) {
+  if (PHP_KINDS.has(s.kind) && !s.php && !fromFile(s, "php")) {
     const install = el("button", "inline-action", "Install PHP 8.4");
     install.onclick = async () => {
       install.disabled = true;
@@ -984,6 +984,7 @@ export function renderSite() {
     };
     $('[data-field="runtime"]', root).append(" ", install);
   }
+  projectNeeds(s, root);
   $('[data-field="path"]', root).textContent = tilde(s.path);
   $('[data-field="root"]', root).textContent = tilde(s.root);
   // Nothing is served from a folder or a Compose project: no web root, no HTTPS.
@@ -1004,7 +1005,13 @@ export function renderSite() {
   kindSel.onchange = () => call("set_app", kindSel.value ? { site: s.name, kind: kindSel.value } : { site: s.name, reset: ["kind"] });
 
   const php = $("#php", root);
-  php.add(new Option(`Default (${snap.php_default ?? "none"})`, ""));
+  // Unset follows the project's .anvil.toml when its version is installed, else the default.
+  const filePhp = fromFile(s, "php");
+  php.add(
+    filePhp && snap.php_installed.includes(filePhp)
+      ? new Option(`From .anvil.toml (${filePhp})`, "")
+      : new Option(`Default (${snap.php_default ?? "none"})`, ""),
+  );
   for (const v of snap.php_installed) php.add(new Option(`PHP ${v}`, v));
   php.value = s.php_pinned ? s.php : "";
   php.onchange = () => call("set_php", { site: s.name, version: php.value || null });
@@ -1053,6 +1060,58 @@ export function renderSite() {
 }
 
 /** Django checks the host name and, behind HTTPS, the scheme: two settings it needs once. */
+/** The version the app's .anvil.toml asks for, if it asks. */
+function fromFile(s, kind: string): string | null {
+  return snap.projects?.[s.name]?.find((n) => n.kind === kind)?.version ?? null;
+}
+
+const installing = new Set<string>(); // "php:8.3" while it installs, across re-renders
+
+/** One quiet line when the app's .anvil.toml asks for something Anvil doesn't have yet:
+ * Install for PHP and Node.js, Add opens the add-service sheet with the kind and version. */
+function projectNeeds(s, root) {
+  const missing = (snap.projects?.[s.name] ?? []).filter((n) => !n.met && !n.overridden);
+  if (!missing.length) return;
+  const labels = missing.map((n) => n.label);
+  const list = labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}` : labels[0];
+  const dd = el("dd", "muted", `This project asks for ${list}`);
+  const fail = el("span", "muted");
+  for (const n of missing) {
+    const runtime = n.kind === "php" || n.kind === "node";
+    const key = `${n.kind}:${n.install}`;
+    const b = el("button", "inline-action", runtime ? `Install ${n.label}` : `Add ${n.label}`);
+    if (installing.has(key)) {
+      b.disabled = true;
+      b.textContent = `Installing ${n.label}…`;
+    }
+    b.onclick = async () => {
+      if (!runtime) return late.openAddService({ kind: n.kind, version: n.install });
+      installing.add(key);
+      b.disabled = true;
+      b.textContent = `Installing ${n.label}…`;
+      fail.textContent = "";
+      try {
+        if (n.kind === "php") await invoke("php_install", { version: n.install });
+        else await invoke("runtime_install", { id: "node", version: n.install });
+      } catch (e) {
+        fail.textContent = ` ${String(e)}`;
+        b.disabled = false;
+        b.textContent = `Install ${n.label}`;
+      } finally {
+        installing.delete(key);
+      }
+      call("state");
+    };
+    dd.append(" ", b);
+  }
+  dd.append(fail);
+  const row = el("div", "row");
+  row.append(el("dt", null, "Project"), dd);
+  const runsOn = $('[data-field="runtime"]', root)?.closest(".row");
+  if (runsOn) runsOn.after(row);
+  else $('[data-panel="overview"] .group', root).prepend(row);
+}
+
 function djangoHint(root) {
   // Only in debug: in production another proxy decides what these headers may say.
   const lines = `if DEBUG:  # Anvil\n    ALLOWED_HOSTS += [".${snap.tld}", "localhost", "127.0.0.1"]\n    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`;
@@ -1343,7 +1402,7 @@ function renderRunSettings(s, root) {
   rt.add(new Option(autoVersion ? `Automatic (${autoVersion})` : "Automatic", ""));
   for (const v of versions) rt.add(new Option(v, v));
   rt.value = s.runtime_pinned ? s.runtime_version : "";
-  const pinFile = { node: ".nvmrc or .node-version", python: ".python-version" }[rtId];
+  const pinFile = { node: ".anvil.toml, .nvmrc or .node-version", python: ".python-version" }[rtId];
   rt.title = pinFile
     ? `Automatic uses ${pinFile} when the project has one, otherwise the newest installed`
     : "Automatic uses the newest installed";

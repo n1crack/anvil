@@ -174,7 +174,7 @@ export function renderService() {
   if (!svc) {
     const box = el("div", "welcome");
     const add = el("button", "primary", "Add Service…");
-    add.onclick = openAddService;
+    add.onclick = () => openAddService();
     box.append(
       el("h1", null, "No services yet"),
       el(
@@ -419,7 +419,8 @@ const svcPicker = picker({
   none: "No services match",
 });
 
-export async function openAddService() {
+/** The add-service sheet; `want` starts it on a kind and version (a project's .anvil.toml). */
+export async function openAddService(want?: { kind: string; version: string }) {
   try {
     svcKinds = await invoke("service_kinds");
   } catch (e) {
@@ -432,7 +433,12 @@ export async function openAddService() {
   // Adding from an application's page? Start with that application.
   app.value = mode === "apps" && selected ? selected : "";
   svcPicker.groups.splice(0, Infinity, ...new Set(svcKinds.map((k) => k.category)));
-  svcPicker.draw(svcKind);
+  svcPicker.draw(want?.kind ?? svcKind);
+  if (want?.version) {
+    $("#svc-version").value = want.version;
+    noteService();
+    drawLicense();
+  }
   setServiceBusy(false);
   $("#new-service").showModal();
   $("#svc-search").focus();

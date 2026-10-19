@@ -230,18 +230,9 @@ pub struct ServerRow {
     pub port: u16,
 }
 
-#[derive(Deserialize, Default)]
-struct ProjectFile {
-    #[serde(default)]
-    processes: std::collections::BTreeMap<String, String>,
-}
-
-/// `.anvil.toml` that can't be read as TOML, so it isn't silently ignored.
+/// `.anvil.toml` that can't be used, so it isn't silently ignored.
 pub fn project_file_error(site: &Site) -> Option<String> {
-    let text = fs::read_to_string(site.path.join(".anvil.toml")).ok()?;
-    toml::from_str::<ProjectFile>(&text)
-        .err()
-        .map(|e| format!(".anvil.toml: {}", e.message()))
+    crate::project::error(&site.path)
 }
 
 /// An app's processes: `.anvil.toml`'s by name, a dev script's in its order.
@@ -315,9 +306,7 @@ pub fn script_texts(dir: &Path) -> std::collections::BTreeMap<String, String> {
 
 fn detect_base(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>) -> Vec<Process> {
     let cfg = cfg.filter(|_| !apps::is_php(&site.kind));
-    let own = fs::read_to_string(site.path.join(".anvil.toml"))
-        .ok()
-        .and_then(|t| toml::from_str::<ProjectFile>(&t).ok());
+    let own = crate::project::load(&site.path);
     if let Some(f) = own.filter(|f| !f.processes.is_empty()) {
         return f
             .processes
@@ -541,9 +530,7 @@ fn rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
 /// `rows` with the hidden ones.
 fn all_rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
     // `.anvil.toml`'s processes replace everything detected.
-    let own = fs::read_to_string(site.path.join(".anvil.toml"))
-        .ok()
-        .and_then(|t| toml::from_str::<ProjectFile>(&t).ok());
+    let own = crate::project::load(&site.path);
     if !apps::runs_process(&site.kind) || own.is_some_and(|f| !f.processes.is_empty()) {
         return vec![];
     }
