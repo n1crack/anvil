@@ -135,7 +135,7 @@ pub fn resolve_run(
     Ok(r)
 }
 
-/// `php artisan test`, `php vendor/bin/phpunit` (or pest, paratest; `./vendor/bin/pest`
+/// `php artisan test`, `php vendor/bin/phpunit` (or pest, paratest, Symfony's `bin/phpunit`; `./vendor/bin/pest`
 /// reaches the shim the same way, through its `#!/usr/bin/env php`). Only to give it a test
 /// config's own database: a test run this misses (`composer test`, a named script) keeps
 /// the worktree's own database, never main's.
@@ -163,9 +163,11 @@ fn is_test_run(tool: &str, args: &[String]) -> bool {
     if script.file_name().is_some_and(|n| n == "artisan") {
         return words.next() == Some("test");
     }
-    ["phpunit", "pest", "paratest"]
-        .iter()
-        .any(|t| script.ends_with(Path::new("vendor/bin").join(t)))
+    // Symfony's phpunit-bridge: `bin/phpunit`, `vendor/bin/simple-phpunit`.
+    script.ends_with("bin/phpunit")
+        || ["pest", "paratest", "simple-phpunit"]
+            .iter()
+            .any(|t| script.ends_with(Path::new("vendor/bin").join(t)))
 }
 
 /// Refuses a folder in a git worktree of an Anvil app (a hidden one too) that isn't
@@ -575,6 +577,11 @@ mod tests {
         assert!(run(&["vendor/bin/phpunit"]));
         assert!(run(&["./vendor/bin/pest", "--filter", "x"]));
         assert!(run(&["/w/shop/vendor/bin/paratest"]));
+        // Symfony's phpunit-bridge script.
+        assert!(run(&["bin/phpunit"]));
+        assert!(run(&["./bin/phpunit", "--filter", "x"]));
+        assert!(run(&["vendor/bin/simple-phpunit"]));
+        assert!(!run(&["bin/console"]));
         assert!(!run(&["artisan", "migrate"]));
         assert!(!run(&["artisan"]));
         assert!(!run(&["vendor/bin/phpstan"]));
