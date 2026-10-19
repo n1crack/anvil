@@ -775,7 +775,7 @@ pub fn env_lines(cfg: &Config, id: &str) -> String {
         ),
         "redis" => format!("REDIS_HOST=127.0.0.1\nREDIS_PORT={p}\nREDIS_URL=redis://127.0.0.1:{p}"),
         "versitygw" => format!(
-            "FILESYSTEM_DISK=s3\nAWS_ACCESS_KEY_ID={S3_ACCESS_KEY}\nAWS_SECRET_ACCESS_KEY={S3_SECRET_KEY}\nAWS_DEFAULT_REGION=us-east-1\nAWS_BUCKET={S3_BUCKET}\nAWS_ENDPOINT=http://127.0.0.1:{p}\nAWS_USE_PATH_STYLE_ENDPOINT=true"
+            "AWS_ACCESS_KEY_ID={S3_ACCESS_KEY}\nAWS_SECRET_ACCESS_KEY={S3_SECRET_KEY}\nAWS_DEFAULT_REGION=us-east-1\nAWS_BUCKET={S3_BUCKET}\nAWS_ENDPOINT=http://127.0.0.1:{p}\nAWS_USE_PATH_STYLE_ENDPOINT=true"
         ),
         _ => format!("MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT={p}"),
     }
