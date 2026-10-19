@@ -78,9 +78,19 @@ Until 1.0.0, minor versions may contain breaking changes.
   version). A version you pick in Anvil still wins. What's missing shows as one
   line in the Overview with Install and Add; `anvil project [--apply]` lists it
   and installs or adds it. Anvil never writes the file.
+- Git worktrees run side by side. Each worktree of an app appears under it in
+  the sidebar and answers at `<app>--<name>.test`, with its own processes (Dev
+  tab, queue, Vite). Its database is a copy of the app's, made the first time it
+  is used and never shared with the main app, and its Redis and cache keys get
+  their own prefix. Removing a worktree stops its processes and drops its
+  database; databases left behind by worktrees that are gone are listed with
+  Delete and Keep. Create and remove them in the app (right-click) or with
+  `anvil worktree list|add|remove`.
 
 ### Changed
 
+- Aliases moved out of the sidebar into the app's header, as a "+N" chip that
+  lists them; worktrees now take the place under the app.
 - Extra dev servers answer at `<app>--<script>.test` (was `<script>.<app>.test`,
   which redirects there until the next release), so `*.<app>.test` stays free.
 - The Overview is a summary: one "Dev · 3 of 4 running" (or "Containers")
