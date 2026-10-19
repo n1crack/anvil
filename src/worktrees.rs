@@ -543,7 +543,43 @@ fn is_db_param(key: &str) -> bool {
         .any(|p| key.eq_ignore_ascii_case(p))
 }
 
-/// Every database a URL names: its path's, then its query's (the one that is used last).
+/// `s` percent-decoded, as Laravel and Doctrine read a URL; `+` is a space in a query.
+fn decoded(s: &str, query: bool) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = s
+            .get(i + 1..i + 3)
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (b[i], hex) {
+            (b'%', Some(c)) => {
+                out.push(c);
+                i += 3;
+                continue;
+            }
+            (b'+', _) if query => out.push(b' '),
+            (c, _) => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `s` percent-encoded for a URL: all but letters, digits and `-._~`.
+fn encoded(s: &str) -> String {
+    s.bytes()
+        .map(|c| match c {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (c as char).to_string()
+            }
+            c => format!("%{c:02X}"),
+        })
+        .collect()
+}
+
+/// Every database a URL names: its path's, then its query's (the one that is used last),
+/// percent-decoded.
 fn url_databases(url: &str) -> Vec<String> {
     let Some((_, rest)) = url.split_once("://") else {
         return Vec::new();
@@ -552,12 +588,12 @@ fn url_databases(url: &str) -> Vec<String> {
     let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
     let mut out: Vec<String> = path
         .split_once('/')
-        .map(|(_, db)| db.to_string())
+        .map(|(_, db)| decoded(db, false))
         .into_iter()
         .collect();
     out.extend(query.split('&').filter_map(|p| {
         let (k, v) = p.split_once('=')?;
-        is_db_param(k).then(|| v.to_string())
+        is_db_param(&decoded(k, true)).then(|| decoded(v, true))
     }));
     out.retain(|db| !db.is_empty());
     out
@@ -1034,13 +1070,14 @@ pub(crate) fn with_db(url: &str, db: &str, main: &Path, wt: &Path) -> Option<Str
     }
     let tail = rest.find(['?', '#']).unwrap_or(rest.len());
     let host_end = rest[..tail].find('/').unwrap_or(tail);
+    let db = encoded(db);
     // A database in the query wins over the path: it names the worktree's too.
     let (query, fragment) =
         rest[tail..].split_at(rest[tail..].find('#').unwrap_or(rest.len() - tail));
     let query = query
         .split('&')
         .map(|p| match p.trim_start_matches('?').split_once('=') {
-            Some((k, _)) if is_db_param(k) => {
+            Some((k, _)) if is_db_param(&decoded(k, true)) => {
                 format!("{}{k}={db}", if p.starts_with('?') { "?" } else { "" })
             }
             _ => p.to_string(),
@@ -2270,6 +2307,39 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_percent_encoded_database_is_read_decoded() {
+        assert_eq!(url_database("mysql://r@h/sh%6Fp").as_deref(), Some("shop"));
+        assert_eq!(
+            url_database("mysql://r@h/?data%62ase=sh%6Fp").as_deref(),
+            Some("shop")
+        );
+        // Main's `.env`: the encoded parameter is rewritten too.
+        let (cfg, site) = worktree_site(
+            "url-encoded",
+            "DB_CONNECTION=mysql\nDB_URL=mysql://root@127.0.0.1/?data%62ase=shop\n",
+        );
+        assert_eq!(
+            get(&env(&cfg, &site).unwrap(), "DB_URL"),
+            Some("mysql://root@127.0.0.1/shop_feature_x?data%62ase=shop_feature_x")
+        );
+        assert!(is_mains_database(&site, "shop"));
+        // A team `.anvil.toml` naming main's encoded: refused.
+        let main = main_of(&site.path).unwrap();
+        fs::write(
+            main.join(".anvil.toml"),
+            "[worktree]\nkeys = { DB_URL = \"mysql://root@127.0.0.1/sh%6Fp\" }\n",
+        )
+        .unwrap();
+        let err = env(&cfg, &site).unwrap_err();
+        assert!(err.contains("names shop's database"), "{err}");
+        // What is written is encoded: a name with a space (a hand-picked one) stays one value.
+        assert_eq!(
+            with_db("mysql://h/x?db=y", "a b", &main, &site.path).as_deref(),
+            Some("mysql://h/a%20b?db=a%20b")
+        );
+    }
+
+    #[test]
     fn a_database_in_the_url_query_is_the_worktrees_too() {
         // Laravel's `?database=` and Doctrine's `?dbname=` win over the path.
         assert_eq!(
@@ -3216,7 +3286,12 @@ pub(crate) mod tests {
     fn whatever_the_config_anvils_database_is_never_mains() {
         // `{MAIN}`: the main checkout's folder. Each with every database main could use,
         // written out here rather than asked of `is_mains_database`.
-        let mains: [(&str, &[&str]); 15] = [
+        let mains: [(&str, &[&str]); 16] = [
+            // Percent-encoded, as Laravel and Doctrine decode it.
+            (
+                "DB_CONNECTION=mysql\nDB_URL=mysql://root@127.0.0.1/sh%6Fp?data%62ase=shop\n",
+                &["shop", "laravel"],
+            ),
             // mysqlclient's `?db=` (the Python preset's stacks).
             (
                 "DATABASE_URL=mysql://root@127.0.0.1:3306/app?db=shop\n",
