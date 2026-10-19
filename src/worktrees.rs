@@ -535,9 +535,12 @@ pub(crate) fn url_database(url: &str) -> Option<String> {
     url_databases(url).pop()
 }
 
-/// A query parameter naming the database (Laravel's `database`, Doctrine's `dbname`).
+/// A query parameter naming the database (Laravel's `database`, Doctrine's `dbname`,
+/// mysqlclient's `db`: Django through dj-database-url, SQLAlchemy).
 fn is_db_param(key: &str) -> bool {
-    key.eq_ignore_ascii_case("database") || key.eq_ignore_ascii_case("dbname")
+    ["database", "dbname", "db"]
+        .iter()
+        .any(|p| key.eq_ignore_ascii_case(p))
 }
 
 /// Every database a URL names: its path's, then its query's (the one that is used last).
@@ -2277,6 +2280,21 @@ pub(crate) mod tests {
             url_database("mysql://r@h/a?x=1&DBName=shop").as_deref(),
             Some("shop")
         );
+        // mysqlclient's `db` (Django through dj-database-url, SQLAlchemy).
+        assert_eq!(
+            url_database("mysql://r@h:3306/app?db=shop").as_deref(),
+            Some("shop")
+        );
+        assert_eq!(
+            with_db(
+                "mysql://r@h:3306/app?db=shop",
+                "w",
+                Path::new("/m"),
+                Path::new("/w")
+            )
+            .as_deref(),
+            Some("mysql://r@h:3306/w?db=w")
+        );
         let (cfg, site) = worktree_site(
             "url-query",
             "DB_CONNECTION=mysql\nDB_URL=mysql://root@127.0.0.1/?database=shop\nDATABASE_URL=mysql://r@h:3306/x?charset=utf8&dbname=shop\n",
@@ -3198,7 +3216,12 @@ pub(crate) mod tests {
     fn whatever_the_config_anvils_database_is_never_mains() {
         // `{MAIN}`: the main checkout's folder. Each with every database main could use,
         // written out here rather than asked of `is_mains_database`.
-        let mains: [(&str, &[&str]); 14] = [
+        let mains: [(&str, &[&str]); 15] = [
+            // mysqlclient's `?db=` (the Python preset's stacks).
+            (
+                "DATABASE_URL=mysql://root@127.0.0.1:3306/app?db=shop\n",
+                &["shop", "app"],
+            ),
             ("DB_CONNECTION=pgsql\nDB_DATABASE=shop\n", &["shop"]),
             // The database in the query (Laravel's, Doctrine's), which wins over the path.
             (
