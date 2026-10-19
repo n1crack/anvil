@@ -822,6 +822,7 @@ fn run() -> Result<()> {
                 for s in list {
                     let state = match (s.installed, s.enabled) {
                         (false, _) => dim("not installed"),
+                        (true, true) if services::runs_somewhere(&s.id) => green("running"),
                         (true, true) => "enabled".into(),
                         (true, false) => "installed".into(),
                     };

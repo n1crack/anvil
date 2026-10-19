@@ -964,6 +964,19 @@ fn pid_in(home: &Path, id: &str) -> PathBuf {
     home.join("run").join(format!("svc-{id}.pids"))
 }
 
+/// Running in some Anvil (the app or `anvil start`), by the pid its launch wrote: for the
+/// CLI, whose own `Services` started nothing.
+pub fn runs_somewhere(id: &str) -> bool {
+    pid_alive(&pid_file(id))
+}
+
+fn pid_alive(file: &Path) -> bool {
+    fs::read_to_string(file)
+        .ok()
+        .and_then(|t| t.lines().nth(1).map(|p| crate::alive(p.trim())))
+        .unwrap_or(false)
+}
+
 pub fn log_file(id: &str) -> PathBuf {
     log_in(&home(), id)
 }
@@ -1507,5 +1520,22 @@ mod tests {
         let b = insert(&mut cfg, "mailpit", Some("mail-b"), None, None).unwrap();
         assert_ne!(web_port(&cfg, &a), web_port(&cfg, &b));
         assert_eq!(instances(&cfg), ["mail-a", "mail-b", "redis", "redis-2"]);
+    }
+    #[test]
+    fn a_service_runs_somewhere_while_its_launched_pid_lives() {
+        let dir = std::env::temp_dir().join(format!("anvil-svc-pid-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("svc-x.pids");
+        assert!(!pid_alive(&file));
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        fs::write(&file, format!("1\n{}", child.id())).unwrap();
+        assert!(pid_alive(&file));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!pid_alive(&file));
+        let _ = fs::remove_dir_all(dir);
     }
 }
