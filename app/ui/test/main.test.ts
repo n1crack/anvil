@@ -1909,6 +1909,39 @@ describe("worktrees", () => {
     }
   });
 
+  test("after New Worktree, a failed after-create list shows in the sheet, and Try again lists them", async () => {
+    w.mockNewDb = { can_copy: true, copy: false, main_database: "shop" };
+    w.mockAfterListFail = "this app: keys isn't a hooks field";
+    const ran = calls("worktree_after_create").length;
+    try {
+      await openNew();
+      ($("#ask-input") as HTMLInputElement).value = "broken";
+      await submit();
+      expect(sheetOpen()).toBe(true);
+      expect($("#ask-label").textContent).toBe("shop--broken is ready");
+      expect($("#ask-error").hidden).toBe(false);
+      expect($("#ask-error").textContent).toBe("this app: keys isn't a hooks field");
+      expect($("#ask-ok").textContent).toBe("Try again");
+      // Still failing: the error stays, the sheet too.
+      await submit();
+      expect(sheetOpen()).toBe(true);
+      delete w.mockAfterListFail;
+      w.mockAfter = ["composer install"];
+      await submit();
+      expect(sheetOpen()).toBe(true);
+      expect($("#ask-error").hidden).toBe(true);
+      expect($$("#ask-body li").map((l) => l.textContent)).toEqual(["composer install"]);
+      expect($("#ask-ok").textContent).toBe("Run");
+      expect(calls("worktree_after_create").length).toBe(ran);
+    } finally {
+      delete w.mockNewDb;
+      delete w.mockAfter;
+      delete w.mockAfterListFail;
+      $("#ask-cancel").click();
+      w.mockSnap.sites = w.mockSnap.sites.filter((x) => x.name !== "shop--broken");
+    }
+  });
+
   test("Add Alias and New Group are the same sheet, with their errors inline", async () => {
     await show({}, "shop");
     const cases: [string, string, string, string][] = [

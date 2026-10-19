@@ -684,6 +684,8 @@ export type Ask = {
   /** Checkboxes under the field, each with a line about it. */
   checks?: { label: string; checked?: boolean; note?: string }[];
   body?: Node;
+  /** An error it opens with, inline. */
+  error?: string;
   ok: string;
   /** Does the work: a failure shows in the sheet, which stays open. */
   submit: (value: string, checked: boolean[]) => Promise<unknown>;
@@ -716,7 +718,8 @@ export function ask(o: Ask): Promise<{ value: string; checked: boolean[] } | nul
   );
   const ok = $("#ask-ok");
   ok.textContent = o.ok;
-  error.hidden = true;
+  error.textContent = o.error ?? "";
+  error.hidden = !o.error;
   const show = () => (hint.textContent = o.preview ? o.preview(input.value.trim()) : "");
   input.oninput = show;
   show();
@@ -810,8 +813,25 @@ async function newWorktree(s) {
   if (!answer || !made) return;
   const site: string = made;
   select(site);
-  // Worked out from the new worktree, and exactly these run.
-  const commands: string[] = await invoke("worktree_after_create_list", { site }).catch(() => []);
+  // Worked out from the new worktree, and exactly these run. A failure isn't "none": it says so.
+  let commands: string[] = [];
+  const fetchList = async () => {
+    commands = await invoke("worktree_after_create_list", { site });
+  };
+  const failed = await fetchList().then(
+    () => null,
+    (e) => String(e),
+  );
+  if (failed !== null) {
+    const retried = await ask({
+      title: `${site} is ready`,
+      body: el("p", null, "Anvil couldn't work out the commands to run in it."),
+      error: failed,
+      ok: "Try again",
+      submit: fetchList,
+    });
+    if (!retried) return;
+  }
   if (!commands.length) return;
   const list = el("ol", "ask-list");
   list.append(...commands.map((c) => el("li", null, c)));

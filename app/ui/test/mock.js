@@ -630,6 +630,7 @@ const mockHandle = (cmd, a) => {
         );
       return mockSnap;
     case "worktree_after_create_list":
+      if (window.mockAfterListFail) throw window.mockAfterListFail;
       return window.mockAfter ?? [];
     case "worktree_rewrite":
       if (window.mockRewriteFail) throw window.mockRewriteFail;
