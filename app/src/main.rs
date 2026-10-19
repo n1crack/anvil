@@ -122,7 +122,7 @@ fn running_containers(sites: &[Site]) -> Vec<std::path::PathBuf> {
     {
         return vec![];
     }
-    let mut cache = CONTAINERS.lock().unwrap();
+    let mut cache = anvil::lock(&CONTAINERS);
     if let Some((at, dirs)) = cache.as_ref()
         && at.elapsed() < std::time::Duration::from_secs(5)
     {
@@ -150,7 +150,7 @@ fn edit<T>(f: impl FnOnce(&mut Config) -> anyhow::Result<T>) -> Res<(Config, T)>
 /// Whether Caddy and PHP-FPM serve. One of them ending on its own takes the server
 /// down: the rest stops in the background, and why shows as a failed start's error does.
 fn running(app: &App) -> bool {
-    let mut server = app.server.lock().unwrap();
+    let mut server = anvil::lock(&app.server);
     let Some(exited) = server.as_mut().map(Server::exited) else {
         return false;
     };
@@ -159,7 +159,7 @@ fn running(app: &App) -> bool {
     };
     let dead = server.take();
     drop(server);
-    *app.error.lock().unwrap() = Some(why);
+    *anvil::lock(&app.error) = Some(why);
     std::thread::spawn(move || drop(dead));
     false
 }
@@ -170,7 +170,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
     let http_port = anvil::public_http_port(&cfg);
     let sites = anvil::sites(&cfg);
     let (live, crashed) = {
-        let mut apps = app.apps.lock().unwrap();
+        let mut apps = anvil::lock(&app.apps);
         let live: Vec<String> = apps.list().into_iter().map(|(k, _, _)| k).collect();
         let crashed: Vec<String> = apps.crashed().into_iter().map(|(k, _)| k).collect();
         (live, crashed)
@@ -184,7 +184,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
     );
     Ok(Snapshot {
         app_states,
-        app_errors: app.app_errors.lock().unwrap().clone(),
+        app_errors: anvil::lock(&app.app_errors).clone(),
         kinds: anvil::apps::KINDS
             .iter()
             .map(|k| (*k, anvil::apps::label(k)))
@@ -205,10 +205,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         ini: cfg.ini.clone(),
         running: running(app),
         // The web server's own failure first; else a DNS server that can't answer.
-        error: app
-            .error
-            .lock()
-            .unwrap()
+        error: anvil::lock(&app.error)
             .clone()
             .or_else(|| anvil::needs_resolver(&cfg).then(anvil::dns_error).flatten()),
         tld: cfg.tld,
@@ -221,22 +218,22 @@ fn snapshot(app: &App) -> Res<Snapshot> {
 /// server takes up to 3 s a child and the first Caddy download much longer, and
 /// `running` is asked on every poll. Meanwhile the server counts as stopped.
 fn start(app: &App, cfg: &Config) {
-    let _one = app.restarting.lock().unwrap();
-    let old = app.server.lock().unwrap().take();
+    let _one = anvil::lock(&app.restarting);
+    let old = anvil::lock(&app.server).take();
     drop(old); // stop the old one first so ports are free
     let started = Server::start(cfg);
     match started {
         Ok(s) => {
-            *app.server.lock().unwrap() = Some(s);
-            *app.error.lock().unwrap() = None;
+            *anvil::lock(&app.server) = Some(s);
+            *anvil::lock(&app.error) = None;
         }
-        Err(e) => *app.error.lock().unwrap() = Some(err(e)),
+        Err(e) => *anvil::lock(&app.error) = Some(err(e)),
     }
 }
 
 fn stop(app: &App) {
-    let _one = app.restarting.lock().unwrap();
-    let old = app.server.lock().unwrap().take();
+    let _one = anvil::lock(&app.restarting);
+    let old = anvil::lock(&app.server).take();
     drop(old);
 }
 
@@ -303,10 +300,10 @@ fn sites_changed(handle: &AppHandle, app: &App, cfg: &Config) {
 
 fn start_app(app: &App, cfg: &Config, name: &str) {
     let result = site_in(cfg, name).and_then(|site| {
-        let started = app.apps.lock().unwrap().start(&site, &cfg.tld);
+        let started = anvil::lock(&app.apps).start(&site, &cfg.tld);
         started.map_err(err)
     });
-    let mut errors = app.app_errors.lock().unwrap();
+    let mut errors = anvil::lock(&app.app_errors);
     match result {
         Ok(()) => errors.remove(name),
         Err(e) => errors.insert(name.into(), e),
@@ -438,8 +435,8 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
             })
             .collect();
     // One lock at a time (see `App`): copy the errors, then take `apps`.
-    let errors = app.app_errors.lock().unwrap().clone();
-    let mut apps = app.apps.lock().unwrap();
+    let errors = anvil::lock(&app.app_errors).clone();
+    let mut apps = anvil::lock(&app.apps);
     let crashed = apps.crashed();
     let main = main_row(cfg, site, serving, apps.running(&site.name));
     let rows = detected.into_iter().map(|p| {
@@ -533,7 +530,7 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
         .collect();
     let one_off = anvil::processes::one_off_scripts(site);
     let commands = {
-        let mut apps = app.apps.lock().unwrap();
+        let mut apps = anvil::lock(&app.apps);
         one_off
             .into_iter()
             .map(|s| {
@@ -649,15 +646,12 @@ fn activity(app: State<App>) -> Res<Activity> {
     let cfg = anvil::load().map_err(err)?;
     let sites = anvil::sites(&cfg);
     // Quick snapshots, each lock released before anything slow.
-    let web_pids = app
-        .server
-        .lock()
-        .unwrap()
+    let web_pids = anvil::lock(&app.server)
         .as_ref()
         .map(|s| s.pids())
         .unwrap_or_default();
     let (listed, crashed, scripts) = {
-        let mut apps = app.apps.lock().unwrap();
+        let mut apps = anvil::lock(&app.apps);
         let listed = apps.list();
         // Commands run once show their script (`build:all`), not the id in their key.
         let scripts: std::collections::HashMap<String, String> = listed
@@ -667,7 +661,7 @@ fn activity(app: State<App>) -> Res<Activity> {
         (listed, apps.crashed(), scripts)
     };
     let (infos, service_pids) = {
-        let mut services = app.services.lock().unwrap();
+        let mut services = anvil::lock(&app.services);
         (services.info(&cfg), services.pids())
     };
 
@@ -932,10 +926,7 @@ fn process_run(
         let keys = match &name {
             Some(n) => vec![anvil::processes::key(&s.name, n)],
             // Scripts run once (`<site>#…`) aren't Dev's: they finish on their own.
-            None => app
-                .apps
-                .lock()
-                .unwrap()
+            None => anvil::lock(&app.apps)
                 .process_keys(&s.name)
                 .into_iter()
                 .filter(|k| !k.contains('#'))
@@ -943,7 +934,7 @@ fn process_run(
         };
         for key in keys {
             stop_app(&app, &key);
-            app.app_errors.lock().unwrap().remove(&key);
+            anvil::lock(&app.app_errors).remove(&key);
         }
     }
     if action != "stop" {
@@ -955,9 +946,9 @@ fn process_run(
             })
         {
             let key = anvil::processes::key(&s.name, &p.id);
-            let started = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld);
+            let started = anvil::lock(&app.apps).start_process(&s, &p, &cfg.tld);
             if let Err(e) = started {
-                app.app_errors.lock().unwrap().insert(key, err(e));
+                anvil::lock(&app.app_errors).insert(key, err(e));
             }
         }
     }
@@ -980,11 +971,7 @@ fn command_run(
         .into_iter()
         .find(|c| c.id == id)
         .ok_or_else(|| format!("{site} has no script {id}"))?;
-    app.apps
-        .lock()
-        .unwrap()
-        .run_once(&s, &script)
-        .map_err(err)?;
+    anvil::lock(&app.apps).run_once(&s, &script).map_err(err)?;
     Ok(overview(&app, &cfg, &s))
 }
 
@@ -1006,7 +993,7 @@ fn container_run(app: State<App>, site: String, service: String, action: String)
         return Err(format!("{site} has no compose file"));
     }
     anvil::compose::action(&s.path, &service, &action).map_err(err)?;
-    *CONTAINERS.lock().unwrap() = None;
+    *anvil::lock(&CONTAINERS) = None;
     Ok(overview(&app, &cfg, &s))
 }
 
@@ -1019,7 +1006,7 @@ fn containers_run(app: State<App>, site: String, action: String) -> Res<Overview
         return Err(format!("{site} has no compose file"));
     }
     anvil::compose::project_action(&s.path, &action).map_err(err)?;
-    *CONTAINERS.lock().unwrap() = None;
+    *anvil::lock(&CONTAINERS) = None;
     Ok(overview(&app, &cfg, &s))
 }
 
@@ -1034,10 +1021,7 @@ struct LogLines {
 
 #[tauri::command(async)]
 fn container_log_read(app: State<App>, site: String, service: String, after: u64) -> Res<LogLines> {
-    let (text, next) = app
-        .container_logs
-        .lock()
-        .unwrap()
+    let (text, next) = anvil::lock(&app.container_logs)
         .read(
             &site,
             || find_site(&site).map(|s| s.path).map_err(anyhow::Error::msg),
@@ -1051,7 +1035,7 @@ fn container_log_read(app: State<App>, site: String, service: String, after: u64
 /// The Containers tab is hidden, or shows another app: its log streams end.
 #[tauri::command(async)]
 fn container_logs_stop(app: State<App>) {
-    app.container_logs.lock().unwrap().stop();
+    anvil::lock(&app.container_logs).stop();
 }
 
 /// Start the processes marked Start with Anvil. Only apps that still exist and rows
@@ -1073,10 +1057,10 @@ fn autostart_processes(app: &App, cfg: &Config) {
 }
 
 fn start_process(app: &App, cfg: &Config, site: &Site, p: &anvil::processes::Process) {
-    let started = app.apps.lock().unwrap().start_process(site, p, &cfg.tld);
+    let started = anvil::lock(&app.apps).start_process(site, p, &cfg.tld);
     if let Err(e) = started {
         let key = anvil::processes::key(&site.name, &p.id);
-        app.app_errors.lock().unwrap().insert(key, err(e));
+        anvil::lock(&app.app_errors).insert(key, err(e));
     }
 }
 
@@ -1117,7 +1101,7 @@ struct UpdateState {
 #[tauri::command(async)]
 fn update_state() -> UpdateState {
     UpdateState {
-        update: FOUND.lock().unwrap().clone(),
+        update: anvil::lock(&FOUND).clone(),
         relaunch: rebuilt(),
     }
 }
@@ -1132,7 +1116,7 @@ async fn update_check(handle: AppHandle) -> Res<Option<Release>> {
         version: u.version,
         notes: u.body,
     });
-    *FOUND.lock().unwrap() = found.clone();
+    *anvil::lock(&FOUND) = found.clone();
     let _ = handle.emit("update", ());
     Ok(found)
 }
@@ -1169,11 +1153,7 @@ async fn update_install(handle: AppHandle) -> Res<()> {
 /// Restart Anvil; the dev processes running now start again in the new one.
 #[tauri::command(async)]
 fn relaunch(handle: AppHandle) -> Res<()> {
-    let keys: Vec<String> = handle
-        .state::<App>()
-        .apps
-        .lock()
-        .unwrap()
+    let keys: Vec<String> = anvil::lock(&handle.state::<App>().apps)
         .list()
         .into_iter()
         .map(|(k, ..)| k)
@@ -1232,7 +1212,7 @@ fn restore_processes(app: &App, cfg: &Config, keys: &[String]) {
 
 /// Stop an app or process without keeping `apps` locked while it shuts down (up to 5 s).
 fn stop_app(app: &App, key: &str) {
-    let stopping = app.apps.lock().unwrap().take(key);
+    let stopping = anvil::lock(&app.apps).take(key);
     if let Some(s) = stopping {
         s.wait();
     }
@@ -1240,7 +1220,7 @@ fn stop_app(app: &App, key: &str) {
 
 /// Stop a service without keeping `services` locked while it shuts down (up to 10 s).
 fn stop_service(app: &App, id: &str) {
-    let child = app.services.lock().unwrap().take(id);
+    let child = anvil::lock(&app.services).take(id);
     if let Some(c) = child {
         anvil::services::halt(id, c);
     }
@@ -1249,7 +1229,7 @@ fn stop_service(app: &App, id: &str) {
 fn run_app(app: &App, cfg: &Config, site: &str, action: &str) {
     if action != "start" {
         stop_app(app, site);
-        app.app_errors.lock().unwrap().remove(site);
+        anvil::lock(&app.app_errors).remove(site);
     }
     if action != "stop" {
         start_app(app, cfg, site);
@@ -1261,7 +1241,7 @@ fn run_app(app: &App, cfg: &Config, site: &str, action: &str) {
 fn set_size(app: &App, site: &str, columns: Option<u16>, lines: Option<u16>) {
     if let Some(c) = columns {
         let l = lines.unwrap_or(anvil::apps::TERM_SIZE.1);
-        app.apps.lock().unwrap().set_size(site, c, l);
+        anvil::lock(&app.apps).set_size(site, c, l);
     }
 }
 
@@ -1320,7 +1300,7 @@ fn set_app(
         )
     })?;
     // A running app picks up a new command or port by restarting.
-    let was_running = app.apps.lock().unwrap().running(&site);
+    let was_running = anvil::lock(&app.apps).running(&site);
     if was_running {
         stop_app(&app, &site);
     }
@@ -1373,7 +1353,7 @@ fn set_process(
             return Err(format!("Anvil serves {site}; it has no command of its own"));
         }
         let (cfg, ()) = edit(|c| anvil::set_site_app(c, &s.name, None, command, None, autostart))?;
-        if restart && app.apps.lock().unwrap().running(&s.name) {
+        if restart && anvil::lock(&app.apps).running(&s.name) {
             stop_app(&app, &s.name);
             start_app(&app, &cfg, &s.name);
         }
@@ -1395,11 +1375,11 @@ fn set_process(
             Ok(routes(c, &s) != before)
         })?;
         let key = anvil::processes::key(&s.name, &id);
-        let was_running = app.apps.lock().unwrap().running(&key);
+        let was_running = anvil::lock(&app.apps).running(&key);
         // A hidden row is out of sight, so it doesn't keep running unseen.
         if was_running && (restart || hidden == Some(true)) {
             stop_app(&app, &key);
-            app.app_errors.lock().unwrap().remove(&key);
+            anvil::lock(&app.app_errors).remove(&key);
         }
         if was_running && restart && hidden != Some(true) {
             let p = anvil::processes::detect_with(&s, Some(&cfg))
@@ -1407,9 +1387,9 @@ fn set_process(
                 .find(|p| p.id == id);
             if let Some(p) = p {
                 // Bound first: an `if let` scrutinee's guard would live through the block.
-                let started = app.apps.lock().unwrap().start_process(&s, &p, &cfg.tld);
+                let started = anvil::lock(&app.apps).start_process(&s, &p, &cfg.tld);
                 if let Err(e) = started {
-                    app.app_errors.lock().unwrap().insert(key, err(e));
+                    anvil::lock(&app.app_errors).insert(key, err(e));
                 }
             }
         }
@@ -1472,17 +1452,14 @@ fn processes_reset(handle: AppHandle, app: State<App>, site: String) -> Res<Over
         .into_iter()
         .map(|p| anvil::processes::key(&s.name, &p.id))
         .collect();
-    let gone: Vec<String> = app
-        .apps
-        .lock()
-        .unwrap()
+    let gone: Vec<String> = anvil::lock(&app.apps)
         .process_keys(&s.name)
         .into_iter()
         .filter(|k| k.contains('@') && !listed.contains(k))
         .collect();
     for k in gone {
         stop_app(&app, &k);
-        app.app_errors.lock().unwrap().remove(&k);
+        anvil::lock(&app.app_errors).remove(&k);
     }
     if routes(&cfg, &s) != before {
         reroute_later(&handle);
@@ -1499,9 +1476,9 @@ async fn resources(handle: AppHandle, site: String) -> Res<anvil::resources::Res
         let (cfg, s) = find_site_cfg(&site)?;
         let (total, items) = anvil::resources::disk(&s);
         let app = handle.state::<App>();
-        let pid = app.apps.lock().unwrap().pid(&s.name);
+        let pid = anvil::lock(&app.apps).pid(&s.name);
         let processes = anvil::resources::processes(&s, pid);
-        let live = app.services.lock().unwrap().pids();
+        let live = anvil::lock(&app.services).pids();
         let services = anvil::resources::services_used(&cfg, &s, &live);
         Ok(anvil::resources::Resources {
             total,
@@ -1554,7 +1531,7 @@ async fn package_updates(site: String) -> Res<Vec<anvil::packages::Update>> {
 async fn clean(handle: AppHandle, site: String, path: String) -> Res<u64> {
     tauri::async_runtime::spawn_blocking(move || {
         let s = find_site(&site)?;
-        let running = handle.state::<App>().apps.lock().unwrap().running(&s.name);
+        let running = anvil::lock(&handle.state::<App>().apps).running(&s.name);
         anvil::resources::clean(&s, &path, running).map_err(err)
     })
     .await
@@ -1898,7 +1875,7 @@ fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) ->
 #[tauri::command(async)]
 fn remove_site(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
     // Its processes and commands stop with it: afterwards nothing could reach them.
-    let keys = app.apps.lock().unwrap().process_keys(&site);
+    let keys = anvil::lock(&app.apps).process_keys(&site);
     for key in keys {
         stop_app(&app, &key);
     }
@@ -1919,7 +1896,7 @@ fn setup_status() -> Res<anvil::Setup> {
 fn setup_all(app: &App, cfg: &Config) -> Res<()> {
     let root = anvil::root_cert();
     if !root.exists() {
-        if app.server.lock().unwrap().is_none() {
+        if anvil::lock(&app.server).is_none() {
             start(app, cfg);
         }
         for _ in 0..50 {
@@ -2017,7 +1994,7 @@ fn set_runtime(
     version: Option<String>,
 ) -> Res<Snapshot> {
     let (cfg, ()) = edit(|c| anvil::set_site_runtime(c, &site, version))?;
-    let was_running = app.apps.lock().unwrap().running(&site);
+    let was_running = anvil::lock(&app.apps).running(&site);
     if was_running {
         stop_app(&app, &site);
         start_app(&app, &cfg, &site);
@@ -2090,11 +2067,8 @@ struct ServiceRow {
 #[tauri::command(async)]
 fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
     let cfg = anvil::load().map_err(err)?;
-    let errors = app.service_errors.lock().unwrap().clone();
-    Ok(app
-        .services
-        .lock()
-        .unwrap()
+    let errors = anvil::lock(&app.service_errors).clone();
+    Ok(anvil::lock(&app.services)
         .info(&cfg)
         .into_iter()
         .map(|info| ServiceRow {
@@ -2108,16 +2082,16 @@ fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
 /// Start a service with `services` locked only around the bookkeeping: `launch` takes
 /// at least 300 ms, a first MySQL init much longer.
 fn start_service(app: &App, cfg: &Config, id: &str) {
-    let begun = app.services.lock().unwrap().begin(cfg, id);
+    let begun = anvil::lock(&app.services).begin(cfg, id);
     let result = match begun {
         Ok(true) => {
             let launched = anvil::services::launch(cfg, id);
-            app.services.lock().unwrap().finish(id, launched)
+            anvil::lock(&app.services).finish(id, launched)
         }
         Ok(false) => Ok(()),
         Err(e) => Err(e),
     };
-    let mut errors = app.service_errors.lock().unwrap();
+    let mut errors = anvil::lock(&app.service_errors);
     match result {
         Ok(()) => errors.remove(id),
         Err(e) => errors.insert(id.into(), err(e)),
@@ -2139,7 +2113,7 @@ fn set_service_port(
             anvil::services::set_port(c, &id, port)
         }
     })?;
-    let was_running = app.services.lock().unwrap().running(&id);
+    let was_running = anvil::lock(&app.services).running(&id);
     stop_service(&app, &id);
     if was_running || cfg.services.get(&id).is_some_and(|s| s.enabled) {
         start_service(&app, &cfg, &id);
@@ -2163,7 +2137,7 @@ fn service_run(
     };
     if action != "start" {
         stop_service(&app, &id);
-        app.service_errors.lock().unwrap().remove(&id);
+        anvil::lock(&app.service_errors).remove(&id);
     }
     if action != "stop" {
         start_service(&app, &cfg, &id);
@@ -2323,7 +2297,7 @@ fn remove_service(
 ) -> Res<Vec<ServiceRow>> {
     // Stop first so the data folder isn't in use when it's deleted.
     stop_service(&app, &id);
-    app.service_errors.lock().unwrap().remove(&id);
+    anvil::lock(&app.service_errors).remove(&id);
     edit(|c| anvil::services::remove(c, &id, delete_data))?;
     changed(&handle);
     services(app)
@@ -2605,7 +2579,7 @@ fn set_tld(handle: AppHandle, tld: String) -> Res<Settings> {
     // Running dev servers were told which hosts to accept; start them again with the new one.
     let app = handle.state::<App>();
     let cfg = anvil::load().map_err(err)?;
-    let names = app.apps.lock().unwrap().names();
+    let names = anvil::lock(&app.apps).names();
     for name in names {
         stop_app(&app, &name);
         start_app(&app, &cfg, &name);
@@ -2984,7 +2958,7 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
             .filter(|s| !s.linked || !parked.contains(&s.path))
             .count();
         format!("Serving {n} applications")
-    } else if app.error.lock().unwrap().is_some() {
+    } else if anvil::lock(&app.error).is_some() {
         "Stopped, open Anvil for details".into()
     } else {
         "Stopped".into()
@@ -3074,7 +3048,7 @@ fn on_menu(handle: &AppHandle, id: &str) {
         _ => {
             if let Some(v) = id.strip_prefix("php:") {
                 match anvil::update(|c| anvil::set_default_php(c, v)) {
-                    Err(e) => *app.error.lock().unwrap() = Some(err(e)),
+                    Err(e) => *anvil::lock(&app.error) = Some(err(e)),
                     Ok((cfg, ())) if running(&app) => {
                         let handle = handle.clone();
                         std::thread::spawn(move || {
@@ -3314,11 +3288,11 @@ fn main() {
             }
             RunEvent::Exit => {
                 let app = handle.state::<App>();
-                app.container_logs.lock().unwrap().stop();
-                *app.apps.lock().unwrap() = Default::default();
+                anvil::lock(&app.container_logs).stop();
+                *anvil::lock(&app.apps) = Default::default();
                 stop(&app);
                 // Databases shut down cleanly before Anvil exits.
-                *app.services.lock().unwrap() = Default::default();
+                *anvil::lock(&app.services) = Default::default();
             }
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => show(handle),

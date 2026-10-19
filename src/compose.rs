@@ -421,7 +421,7 @@ fn follow(docker: &Path, dir: &Path, service: &str, buf: Shared) -> Result<std::
         while out.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
             let text = String::from_utf8_lossy(&line);
             let text = text.strip_suffix('\n').unwrap_or(&text).to_string();
-            buf.lock().unwrap_or_else(|e| e.into_inner()).push(text);
+            crate::lock(&buf).push(text);
             line.clear();
         }
     });
@@ -480,7 +480,7 @@ impl Logs {
         };
         if !matches!(f.child.try_wait(), Ok(None)) && f.at.elapsed() >= REFOLLOW {
             {
-                let mut b = f.buf.lock().unwrap_or_else(|e| e.into_inner());
+                let mut b = crate::lock(&f.buf);
                 b.replayed = b
                     .lines
                     .iter()
@@ -491,7 +491,7 @@ impl Logs {
             f.child = follow(docker, &self.dir, service, f.buf.clone())?;
             f.at = Instant::now();
         }
-        Ok(f.buf.lock().unwrap_or_else(|e| e.into_inner()).after(after))
+        Ok(crate::lock(&f.buf).after(after))
     }
 
     /// End every stream: their process groups are killed and reaped.

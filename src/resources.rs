@@ -421,12 +421,7 @@ fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
         let shared = !m.is_dir() && m.nlink() > 1;
         for &t in targets {
             let key = (t, m.dev(), m.ino());
-            if shared
-                && !linked[(m.ino() as usize ^ t) % 64]
-                    .lock()
-                    .unwrap()
-                    .insert(key)
-            {
+            if shared && !crate::lock(&linked[(m.ino() as usize ^ t) % 64]).insert(key) {
                 continue;
             }
             counters[t].fetch_add(n, Ordering::Relaxed);
@@ -459,7 +454,7 @@ fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
             scope.spawn(|| {
                 loop {
                     let (dir, targets) = {
-                        let mut q = queue.0.lock().unwrap();
+                        let mut q = crate::lock(&queue.0);
                         loop {
                             if let Some(job) = q.0.pop() {
                                 q.1 += 1;
@@ -485,7 +480,7 @@ fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
                             found.push((path, t));
                         }
                     }
-                    let mut q = queue.0.lock().unwrap();
+                    let mut q = crate::lock(&queue.0);
                     q.0.extend(found);
                     q.1 -= 1;
                     queue.1.notify_all();

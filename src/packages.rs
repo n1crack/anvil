@@ -125,16 +125,13 @@ pub fn cached(dir: &Path) -> Packages {
         .iter()
         .map(|f| fs::metadata(f).and_then(|m| m.modified()).ok())
         .collect();
-    if let Some((s, p)) = CACHE.lock().unwrap().get(dir)
+    if let Some((s, p)) = crate::lock(&CACHE).get(dir)
         && *s == stamp
     {
         return p.clone();
     }
     let p = read(dir);
-    CACHE
-        .lock()
-        .unwrap()
-        .insert(dir.to_path_buf(), (stamp, p.clone()));
+    crate::lock(&CACHE).insert(dir.to_path_buf(), (stamp, p.clone()));
     p
 }
 
@@ -836,7 +833,7 @@ pub fn updates(p: &Packages) -> Vec<Update> {
                     };
                     let current = pkg.version.as_deref().unwrap_or(&pkg.constraint);
                     if let Some(level) = level(current, &latest) {
-                        found.lock().unwrap().push(Update {
+                        crate::lock(&found).push(Update {
                             ecosystem: eco,
                             name: pkg.name.clone(),
                             latest,

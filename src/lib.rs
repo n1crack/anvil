@@ -293,7 +293,7 @@ fn read() -> Result<(Config, bool)> {
 /// locks aren't reentrant. Keep it short; long work (downloads) goes before or after.
 pub fn update<T>(f: impl FnOnce(&mut Config) -> Result<T>) -> Result<(Config, T)> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::lock(&LOCK);
     fs::create_dir_all(home())?;
     let file = fs::File::create(home().join("config.lock")).context("couldn't open config.lock")?;
     file.lock().context("couldn't lock config.lock")?;
@@ -1381,6 +1381,13 @@ pub fn setup_script(
     Ok(steps.join(" && "))
 }
 
+/// Lock a mutex even if a thread panicked while holding it: the data is still there,
+/// and one panic must not turn every later lock into another (the app would die and
+/// Quit would break).
+pub fn lock<T: ?Sized>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 static DNS: Once = Once::new();
 /// The suffix the DNS server answers for; every start sets it.
 static DNS_TLD: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
@@ -1389,12 +1396,12 @@ static DNS_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None)
 
 fn dns_failed(why: String) {
     eprintln!("{why}");
-    *DNS_ERROR.lock().unwrap_or_else(|e| e.into_inner()) = Some(why);
+    *crate::lock(&DNS_ERROR) = Some(why);
 }
 
 /// Set once the DNS server can't answer; it isn't restarted within this process.
 pub fn dns_error() -> Option<String> {
-    DNS_ERROR.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    crate::lock(&DNS_ERROR).clone()
 }
 
 fn pid_file() -> PathBuf {
