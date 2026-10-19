@@ -35,9 +35,9 @@ Until 1.0.0, minor versions may contain breaking changes.
   New application, with their errors in it.
 - A new worktree gets an empty database of its own unless "Copy the database
   too" is on (Settings › Worktrees, a preset or the app); it was a copy
-  before; a config saved before this keeps Copy. `anvil worktree add --copy-db`
-  replaces `--db copy|empty`, and the Overview no longer switches a worktree's
-  database before it is made.
+  before. Existing configs start with it off too: turn it on to keep copying.
+  `anvil worktree add --copy-db` replaces `--db copy|empty`, and the Overview
+  no longer switches a worktree's database before it is made.
 
 ## [0.1.0] - 2026-10-19
 

@@ -403,6 +403,12 @@ pub enum DbChoice {
     Empty,
 }
 
+impl DbChoice {
+    pub fn is_empty(&self) -> bool {
+        *self == DbChoice::Empty
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[serde(default)]
 pub struct WorktreeConfig {
@@ -2087,11 +2093,23 @@ pub(crate) mod tests {
                 .unwrap();
         assert_eq!(cfg.worktree_db, DbChoice::Empty);
         assert_eq!(cfg.worktrees["shop--x"].db, DbChoice::Empty);
-        // "Copy the database too" is off unless the user turned it on; a stored copy keeps it on.
+        // "Copy the database too" is off unless the user turned it on.
         let unset: Config = toml::from_str("tld = \"test\"\n").unwrap();
         assert_eq!(unset.worktree_db, DbChoice::Empty);
-        let copy: Config = toml::from_str("worktree_db = \"copy\"\n").unwrap();
-        assert_eq!(copy.worktree_db, DbChoice::Copy);
+        // `worktree_db = "copy"` was written to every config, chosen or not: read as unset,
+        // and gone from the file at its next save.
+        let old: Config = toml::from_str("worktree_db = \"copy\"\n").unwrap();
+        assert_eq!(old.worktree_db, DbChoice::Empty);
+        assert!(!toml::to_string(&old).unwrap().contains("worktree_d"));
+        // Turned on from now on: stored, and kept.
+        let cfg = Config {
+            worktree_db: DbChoice::Copy,
+            ..Config::default()
+        };
+        let saved = toml::to_string(&cfg).unwrap();
+        assert!(saved.contains("worktree_database = \"copy\""), "{saved}");
+        let back: Config = toml::from_str(&saved).unwrap();
+        assert_eq!(back.worktree_db, DbChoice::Copy);
     }
 
     #[test]

@@ -98,6 +98,13 @@ pub struct Config {
     /// Settings › Worktrees › Copy the database: the last layer of the hooks'
     /// `copy_database` (`worktrees::resolve`), so New Worktree's checkbox and what a
     /// worktree opened outside Anvil uses, unless a preset or the app says otherwise.
+    /// Stored only when turned on, under a key of its own: the `worktree_db = "copy"` older
+    /// versions wrote to every config wasn't a choice, so it is read as unset (and drops out
+    /// at the next save).
+    #[serde(
+        rename = "worktree_database",
+        skip_serializing_if = "worktrees::DbChoice::is_empty"
+    )]
     pub worktree_db: worktrees::DbChoice,
     /// Settings › Worktrees: the user's changes to Anvil's presets, by preset id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
