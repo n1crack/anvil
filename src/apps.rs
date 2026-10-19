@@ -756,6 +756,23 @@ impl Apps {
         })
     }
 
+    /// `take` everything (app, processes, one-off scripts, crash records) of a site that is
+    /// not in `sites` any more, a worktree whose folder is gone.
+    pub fn take_vanished(&mut self, sites: &[Site]) -> Vec<Stopping> {
+        let gone = |k: &&String| {
+            let site = k.split(['@', '#']).next().unwrap_or(k);
+            !sites.iter().any(|s| s.name == site)
+        };
+        let keys: Vec<String> = self
+            .children
+            .keys()
+            .chain(self.exits.keys())
+            .filter(gone)
+            .cloned()
+            .collect();
+        keys.iter().filter_map(|k| self.take(k)).collect()
+    }
+
     /// `take` every app and process, to stop together with `stop_all`.
     pub fn take_all(&mut self) -> Vec<Stopping> {
         let names: Vec<String> = self.children.keys().cloned().collect();
@@ -1376,5 +1393,27 @@ mod tests {
         apps.set_size("other", 3, 0);
         assert_eq!(apps.sizes["other"], (20, 5));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn processes_of_a_vanished_site_are_stopped() {
+        let dir = project(&[("x/y", "")]);
+        let mut apps = Apps::in_home(dir.join("home"));
+        let (mut gone, mut kept) = (site_at(&dir), site_at(&dir));
+        gone.name = "shop--x".into();
+        kept.name = "shop".into();
+        let cfg = crate::Config::default();
+        for s in [&gone, &kept] {
+            apps.start_process(s, &proc("w", "sleep 30"), &cfg).unwrap();
+        }
+        apps.start_process(&gone, &proc("boom", "exit 2"), &cfg)
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let stopping = apps.take_vanished(std::slice::from_ref(&kept));
+        assert_eq!(stopping.len(), 2); // running, and crashed but not yet polled
+        crate::stop_all(stopping, GRACE);
+        assert!(apps.process_keys("shop--x").is_empty());
+        assert_eq!(apps.process_keys("shop"), ["shop@w"]);
+        apps.stop("shop@w");
     }
 }

@@ -555,6 +555,100 @@ pub fn main_of(dir: &Path) -> Option<PathBuf> {
     common.parent().map(Path::to_path_buf)
 }
 
+/// A database Anvil copied for a worktree that is gone. Never dropped on its own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Leftover {
+    pub app: String,
+    pub worktree: String,
+    pub service: String,
+    pub database: String,
+}
+
+/// Recorded copies whose worktree is no longer one of `sites`.
+pub fn leftovers(cfg: &Config, sites: &[Site]) -> Vec<Leftover> {
+    let mut out = Vec::new();
+    for (name, w) in &cfg.worktrees {
+        if sites.iter().any(|s| s.name == *name) {
+            continue;
+        }
+        let (app, worktree) = name.split_once("--").unwrap_or((name, ""));
+        for (service, database) in &w.copies {
+            out.push(Leftover {
+                app: app.into(),
+                worktree: worktree.into(),
+                service: service.clone(),
+                database: database.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// Remove a worktree: its folder (`git worktree remove`) and, with `drop_db`, the databases
+/// recorded for it. Refuses uncommitted changes and unpushed commits unless `force`. Its
+/// processes are stopped by the caller first. Changes `cfg` only; the caller saves it.
+pub fn remove(cfg: &mut Config, site: &Site, drop_db: bool, force: bool) -> anyhow::Result<()> {
+    remove_with(cfg, site, drop_db, force, &mut |c, id, db| {
+        crate::databases::drop_database(c, id, db)
+    })
+}
+
+fn remove_with(
+    cfg: &mut Config,
+    site: &Site,
+    drop_db: bool,
+    force: bool,
+    drop: &mut dyn FnMut(&Config, &str, &str) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let Some(main) = main_of(&site.path) else {
+        anyhow::bail!("{} isn't a git worktree", site.path.display());
+    };
+    if !force && let Some(info) = crate::git::info(&site.path) {
+        if info.changed > 0 {
+            let n = info.changed;
+            anyhow::bail!(
+                "{} has {n} uncommitted {}",
+                site.name,
+                if n == 1 { "change" } else { "changes" }
+            );
+        }
+        if info.ahead > 0 {
+            anyhow::bail!("{} has {} unpushed commits", site.name, info.ahead);
+        }
+    }
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C").arg(&main).args(["worktree", "remove"]);
+    if force {
+        cmd.arg("--force");
+    }
+    let out = cmd.arg(&site.path).output()?;
+    if !out.status.success() {
+        anyhow::bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    if let Some(w) = cfg.worktrees.get(&site.name).cloned() {
+        let mut left = Vec::new();
+        let mut failed = None;
+        for copy in w.copies {
+            if drop_db && failed.is_none() {
+                match drop(cfg, &copy.0, &copy.1) {
+                    Ok(()) => continue,
+                    Err(e) => failed = Some(e),
+                }
+            }
+            left.push(copy);
+        }
+        if left.is_empty() {
+            cfg.worktrees.remove(&site.name);
+        } else if let Some(w) = cfg.worktrees.get_mut(&site.name) {
+            w.copies = left;
+        }
+        if let Some(e) = failed {
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1068,5 +1162,62 @@ pub(crate) mod tests {
         let n = spawns();
         assert_eq!(list(&main), first);
         assert_eq!(spawns(), n);
+    }
+
+    fn recorded(cfg: &mut Config, site: &Site) {
+        cfg.worktrees.insert(
+            site.name.clone(),
+            WorktreeConfig {
+                copies: vec![("postgres-x".into(), "shop_feature_x".into())],
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn a_vanished_worktree_with_a_copy_is_a_leftover() {
+        let (mut cfg, site) = worktree_site("left", "");
+        assert!(leftovers(&cfg, &[]).is_empty());
+        recorded(&mut cfg, &site);
+        assert!(leftovers(&cfg, std::slice::from_ref(&site)).is_empty());
+        assert_eq!(
+            leftovers(&cfg, &[]),
+            [Leftover {
+                app: "shop".into(),
+                worktree: "feature-x".into(),
+                service: "postgres-x".into(),
+                database: "shop_feature_x".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn remove_refuses_uncommitted_changes() {
+        let (mut cfg, site) = worktree_site("remove", "");
+        recorded(&mut cfg, &site);
+        fs::write(site.path.join("a.txt"), "x").unwrap();
+        let dropped = std::cell::RefCell::new(Vec::new());
+        let mut drop = |_: &Config, id: &str, db: &str| {
+            dropped.borrow_mut().push(format!("{id} {db}"));
+            Ok(())
+        };
+        let e = remove_with(&mut cfg, &site, true, false, &mut drop).unwrap_err();
+        assert!(e.to_string().contains("1 uncommitted change"), "{e}");
+        assert!(site.path.exists() && cfg.worktrees.contains_key(&site.name));
+        remove_with(&mut cfg, &site, true, true, &mut drop).unwrap();
+        assert!(!site.path.exists());
+        assert_eq!(*dropped.borrow(), ["postgres-x shop_feature_x"]);
+        assert!(cfg.worktrees.is_empty());
+    }
+
+    #[test]
+    fn remove_keeps_the_database_unless_asked() {
+        let (mut cfg, site) = worktree_site("remove-keep", "");
+        recorded(&mut cfg, &site);
+        let mut never = |_: &Config, _: &str, _: &str| panic!("dropped");
+        remove_with(&mut cfg, &site, false, false, &mut never).unwrap();
+        assert!(!site.path.exists());
+        // The copy stays on record, as a leftover.
+        assert_eq!(leftovers(&cfg, &[]).len(), 1);
     }
 }
