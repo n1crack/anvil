@@ -1672,9 +1672,6 @@ const RUNTIME_ENV: [&str; 4] = [
     ".env.development.local",
 ];
 
-/// The env files at `dir`'s root a process loads, in its order (the last one wins): `RUNTIME_ENV`,
-/// or Symfony's `.env`, `.env.local` (not for tests), `.env.<APP_ENV>`, `.env.<APP_ENV>.local`.
-/// APP_ENV is `test` for a test run, else as `symfony_env_files` works it out.
 /// `dir`'s first env file: `.env`, or for Symfony `.env.dist` when there's no `.env` (Dotenv
 /// loads it in its place).
 fn base_env(dir: &Path, symfony: bool) -> &'static str {
@@ -1685,10 +1682,20 @@ fn base_env(dir: &Path, symfony: bool) -> &'static str {
     }
 }
 
+/// The env files at `dir`'s root a process loads, in its order (the last one wins): `RUNTIME_ENV`,
+/// or Symfony's `.env`, `.env.local` (not for tests), `.env.<APP_ENV>`, `.env.<APP_ENV>.local`.
+/// APP_ENV is `test` for a test run, else as `symfony_env_files` works it out. A test run
+/// of anything else reads `.env.testing` last too: Laravel loads it with APP_ENV=testing.
 fn runtime_env(dir: &Path, symfony: bool, test: bool) -> Vec<String> {
     if !symfony {
-        return RUNTIME_ENV.map(String::from).to_vec();
+        let mut files = RUNTIME_ENV.map(String::from).to_vec();
+        if test {
+            files.push(".env.testing".into());
+        }
+        return files;
     }
+    // ponytail: APP_ENV from Anvil's own env only; `bin/console --env=`, an inline
+    // `APP_ENV=prod cmd` and per-process env aren't read. Read them if apps rely on them.
     symfony_env_files(dir, test, std::env::var("APP_ENV").ok())
 }
 
@@ -4177,6 +4184,26 @@ pub(crate) mod tests {
         composer("dotenv_path", r#""config/.env""#);
         let err = env(&cfg, &site).unwrap_err();
         assert!(err.contains("extra.runtime.dotenv_path"), "{err}");
+    }
+
+    #[test]
+    fn a_laravel_test_run_reads_env_testing_and_points_its_url_at_the_worktree() {
+        // The re-review's layout: `.env` names DB_DATABASE, the committed `.env.testing` a DB_URL.
+        let (cfg, site) = worktree_site("env-testing", "DB_CONNECTION=mysql\nDB_DATABASE=shop\n");
+        let main = main_of(&site.path).unwrap();
+        let testing = "DB_URL=mysql://root@127.0.0.1/shop_testing\n";
+        fs::write(main.join(".env.testing"), testing).unwrap();
+        fs::write(site.path.join(".env.testing"), testing).unwrap();
+        // `php artisan test` runs, on the worktree's own database.
+        let env = checked_env(&cfg, &site, true).unwrap();
+        assert_eq!(
+            get(&env, "DB_URL"),
+            Some("mysql://root@127.0.0.1/shop_feature_x")
+        );
+        assert_eq!(get(&env, "DB_DATABASE"), Some("shop_feature_x"));
+        // Not a test run: `.env.testing` isn't read, and its DB_URL (main's test database) would
+        // win in a test run Anvil doesn't tell apart (`composer test`): still refused.
+        assert!(checked_env(&cfg, &site, false).is_err());
     }
 
     #[test]
