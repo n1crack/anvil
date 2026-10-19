@@ -660,7 +660,8 @@ mod tests {
             &bin,
             &format!("sleep 30 & echo $$ $! > '{}'; wait", pids.display()),
         );
-        let e = run(&docker, &d, &["compose", "up"], Duration::from_millis(500));
+        // Long enough for the fake docker to start and write its pids on a busy machine.
+        let e = run(&docker, &d, &["compose", "up"], Duration::from_secs(2));
         assert_eq!(e.err().unwrap().to_string(), "Docker didn't answer in time");
         let pids = fs::read_to_string(&pids).unwrap();
         let (docker_pid, plugin) = pids.trim().split_once(' ').unwrap();
