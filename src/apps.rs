@@ -1025,6 +1025,15 @@ mod tests {
     }
 
     #[test]
+    fn next_origin_covers_the_double_dash_rows() {
+        // `**.test` is what allowedDevOrigins gets; Next's glob `**` spans labels.
+        let dir = project(&[("next.config.mjs", "export default {\n};\n")]);
+        allow_next_origin(&dir, "test").unwrap();
+        assert!(next_allows(&dir, "test"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn next_config_gets_the_tld() {
         // create-next-app's TypeScript config.
         let dir = project(&[(

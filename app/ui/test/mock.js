@@ -137,8 +137,8 @@ window.mockOv = {
         command: "npm run docs:dev",
         server: true,
         port: 5180,
-        web: "https://docs.vuefinder.test",
-        address: "https://docs.vuefinder.test",
+        web: "https://vuefinder--docs.test",
+        address: "https://vuefinder--docs.test",
         running: true,
       }),
     ],
@@ -217,8 +217,8 @@ mockOv.vuefinder.rows.push(
     command: "npm run docs:site",
     server: true,
     port: 5181,
-    web: "https://docs-site.vuefinder.test",
-    address: "https://docs-site.vuefinder.test",
+    web: "https://vuefinder--docs-site.test",
+    address: "https://vuefinder--docs-site.test",
   }),
 );
 window.mockServices = [
@@ -664,8 +664,8 @@ const mockHandle = (cmd, a) => {
       if (a.command === "") throw "The command can't be empty";
       const r = ov.rows.find((x) => x.id === a.id);
       if (a.host != null) {
-        if (a.host === "docs-site") throw "docs-site.vuefinder.test is already the address of docs:site";
-        Object.assign(r, { address: `https://${a.host}.vuefinder.test`, web: `https://${a.host}.vuefinder.test`, host_edited: true });
+        if (a.host === "docs-site") throw "vuefinder--docs-site.test is already the address of docs:site";
+        Object.assign(r, { address: `https://vuefinder--${a.host}.test`, web: `https://vuefinder--${a.host}.test`, host_edited: true });
       }
       if (a.command != null) Object.assign(r, { command: a.command, edited: true });
       if (a.autostart != null) r.autostart = a.autostart;

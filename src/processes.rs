@@ -227,6 +227,8 @@ pub fn hidden(site: &crate::SiteConfig) -> Vec<String> {
 pub struct ServerRow {
     pub id: String,
     pub host: String,
+    /// Where it answered before `<app>--<row>`: `<row>.<app host>`, redirected.
+    pub old_host: String,
     pub port: u16,
 }
 
@@ -509,7 +511,7 @@ fn laravel_dev_commands_cached(
 }
 
 /// The extra dev servers of a non-PHP app (everything but its own `dev`) with a
-/// stable port each and an address `<row>.<app host>`.
+/// stable port each and an address `<app>--<row>.<tld>`.
 pub fn server_rows(cfg: &crate::Config, site: &Site) -> Vec<ServerRow> {
     rows(cfg, site).into_iter().map(|(_, r)| r).collect()
 }
@@ -563,7 +565,12 @@ fn all_rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
             let label = set(&p.id).and_then(|c| c.host.clone()).unwrap_or(prefix);
             let row = ServerRow {
                 id: p.id.clone(),
-                host: format!("{label}.{}", site.host),
+                host: format!(
+                    "{}.{}",
+                    crate::worktrees::joined(&site.name, &label),
+                    cfg.tld
+                ),
+                old_host: format!("{label}.{}", site.host),
                 port,
             };
             (p, row)
@@ -1498,7 +1505,7 @@ echo '{DEV_JSON}'
         let ra = server_rows(&cfg, &a);
         // `dev` is the app itself; the first `docs` keeps the short host.
         let hosts: Vec<_> = ra.iter().map(|r| r.host.as_str()).collect();
-        assert_eq!(hosts, ["docs.vuefinder.test", "docs-site.vuefinder.test"]);
+        assert_eq!(hosts, ["vuefinder--docs.test", "vuefinder--docs-site.test"]);
         assert_eq!(ra[0].id, "docs-dev");
         let again = server_rows(&cfg, &a);
         assert_eq!(
@@ -1548,12 +1555,12 @@ echo '{DEV_JSON}'
         };
         assert_eq!(
             address(&cfg, &s, "docs-dev").as_deref(),
-            Some("http://docs.vuefinder.test:18080")
+            Some("http://vuefinder--docs.test:18080")
         );
         s.secure = true;
         assert_eq!(
             address(&cfg, &s, "docs-dev").as_deref(),
-            Some("https://docs.vuefinder.test:18443")
+            Some("https://vuefinder--docs.test:18443")
         );
         // The app's own `dev` and unknown ids have no row address.
         assert_eq!(address(&cfg, &s, "dev"), None);
@@ -1598,7 +1605,7 @@ echo '{DEV_JSON}'
         let rows = server_rows(&Default::default(), &s);
         assert_eq!(
             rows.iter().find(|r| r.id == "-x-dev").unwrap().host,
-            "-x-dev.vuefinder.test"
+            "vuefinder---x-dev.test"
         );
         // .anvil.toml wins entirely.
         fs::write(s.path.join(".anvil.toml"), "[processes]\nw = \"x\"\n").unwrap();
@@ -1638,6 +1645,33 @@ echo '{DEV_JSON}'
     }
 
     #[test]
+    fn row_hosts_use_the_double_dash_scheme() {
+        let s = vite_site(
+            "dd",
+            "vuefinder",
+            r#"{"dev":"vite","docs:dev":"vitepress dev docs"}"#,
+        );
+        let mut cfg = crate::Config::default();
+        let r = &server_rows(&cfg, &s)[0];
+        assert_eq!(
+            (r.host.as_str(), r.old_host.as_str()),
+            ("vuefinder--docs.test", "docs.vuefinder.test")
+        );
+        change_process(
+            &mut cfg,
+            &s,
+            "docs-dev",
+            ProcessChange {
+                host: Some(Some("site".into())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(server_rows(&cfg, &s)[0].host, "vuefinder--site.test");
+        fs::remove_dir_all(&s.path).unwrap();
+    }
+
+    #[test]
     fn a_row_address_can_be_edited_and_reset() {
         let scripts =
             r#"{"dev":"vite","docs:dev":"vitepress dev docs","docs:site":"vitepress dev docs"}"#;
@@ -1657,10 +1691,10 @@ echo '{DEV_JSON}'
             Some("api-docs")
         );
         let after = server_rows(&cfg, &s);
-        assert_eq!(after[0].host, "api-docs.vuefinder.test");
+        assert_eq!(after[0].host, "vuefinder--api-docs.test");
         assert_eq!(
             address(&cfg, &s, "docs-dev").as_deref(),
-            Some("http://api-docs.vuefinder.test:18080")
+            Some("http://vuefinder--api-docs.test:18080")
         );
         // The other row keeps its host, and every row its port.
         assert_eq!(after[1].host, before[1].host);
@@ -1683,7 +1717,7 @@ echo '{DEV_JSON}'
             );
         }
         assert!(change_process(&mut cfg, &s, "docs-site", host(Some("api-docs"))).is_err());
-        assert_eq!(server_rows(&cfg, &s)[0].host, "api-docs.vuefinder.test");
+        assert_eq!(server_rows(&cfg, &s)[0].host, "vuefinder--api-docs.test");
         // A row without an address has no address to edit.
         assert!(change_process(&mut cfg, &s, "dev", host(Some("x"))).is_err());
         // Back to automatic: the entry is gone.
@@ -1846,7 +1880,7 @@ echo '{DEV_JSON}'
         let site = site(Path::new("/s"), "vite");
         let env = apps::process_env(&site, &p, "test");
         assert!(env.contains(&("PORT".into(), "45001".into())));
-        // Vite answers 403 to a host it doesn't know, e.g. docs.vuefinder.test.
+        // Vite answers 403 to a host it doesn't know, e.g. vuefinder--docs.test.
         assert!(env.contains(&(
             "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),
             ".test".into()

@@ -525,9 +525,12 @@ fn caddyfile_for_a_few_sites() {
         "\nhttp://plain.test {\n\tredir https://{host}".into(),
         "\nhttp://front.test, http://front.localhost {\n\treverse_proxy 127.0.0.1:45123\n".into(),
         // Its docs server has an address of its own.
-        "\nhttp://docs.front.localhost {\n\treverse_proxy 127.0.0.1:".into(),
+        "\nhttp://front--docs.test, http://front--docs.localhost {\n\treverse_proxy 127.0.0.1:"
+            .into(),
+        // ...and the old one redirects to it.
+        "\nhttp://docs.front.localhost {\n\tredir http://front--docs.test:".into(),
         // A Vite app's docs server answers under the tld.
-        "\nhttp://docs.ui.test {\n\treverse_proxy 127.0.0.1:".into(),
+        "\nhttp://ui--docs.test, http://ui--docs.localhost {\n\treverse_proxy 127.0.0.1:".into(),
     ] {
         assert!(file.contains(&line), "missing {line:?} in:\n{file}");
     }

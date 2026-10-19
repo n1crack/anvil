@@ -161,8 +161,10 @@ async function clearOutput(name: string, x: Item) {
 
 async function editAddress(name: string, r: ProcessRow) {
   const host = new URL(r.address!).hostname;
-  const rest = host.slice(host.indexOf("."));
-  const first = await ask(`Address of ${r.name}`, host.slice(0, host.indexOf(".")), (v) => `${v.trim() || "…"}${rest}`);
+  // <app>--<label>.<tld>: only the label is editable.
+  const from = host.indexOf("--") + 2;
+  const to = host.indexOf(".");
+  const first = await ask(`Address of ${r.name}`, host.slice(from, to), (v) => `${host.slice(0, from)}${v.trim() || "…"}${host.slice(to)}`);
   if (typeof first !== "string") return;
   const v = first.trim();
   await loadProcs(name, "set_process", { id: r.id, ...(v ? { host: v } : { resetHost: true }) });
@@ -188,7 +190,7 @@ async function itemMenu(name: string, x: Item, at: HTMLElement) {
     else items.push(item("Start", () => runProc(name, x, "start")));
     const web = r.web ?? r.address;
     if (web) items.push(item("Open in Browser", () => invoke("open_url", { url: web }).catch((e) => showError(String(e)))));
-    // An extra dev server's own address, <first part>.<app>.<tld>: the first part is editable.
+    // An extra dev server's own address, <app>--<label>.<tld>: the label is editable.
     if (r.address && !r.main) items.push(item("Edit Address…", () => editAddress(name, r)));
     items.push(
       M.PredefinedMenuItem.new({ item: "Separator" }),

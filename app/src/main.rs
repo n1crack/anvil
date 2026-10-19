@@ -419,7 +419,7 @@ struct ProcessRow {
     /// The newest line it wrote.
     last: Option<String>,
     error: Option<String>,
-    /// Where an extra dev server answers, e.g. `https://docs.vuefinder.test`.
+    /// Where an extra dev server answers, e.g. `https://vuefinder--docs.test`.
     address: Option<String>,
     /// Its address's label was set in the app's settings.
     host_edited: bool,
@@ -3688,7 +3688,7 @@ mod tests {
             .find(|p| p.name == "docs:dev")
             .unwrap();
         let web = row_web(&cfg, &v, &docs).unwrap();
-        assert!(web.contains("docs.vuefinder.test"), "{web}");
+        assert!(web.contains("vuefinder--docs.test"), "{web}");
         // The same row in a PHP app is Vite serving assets: no page of its own.
         let l = site("shop", "laravel", &dir);
         assert_eq!(row_web(&cfg, &l, &docs), None);

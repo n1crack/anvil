@@ -18,6 +18,7 @@ pub mod shims;
 pub mod style;
 pub mod uninstall;
 pub mod validate;
+pub mod worktrees;
 
 use anyhow::{Context, Result, bail};
 use nix::sys::signal::Signal;
@@ -140,7 +141,7 @@ pub struct ProcessConfig {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
     /// The subdomain label of an extra dev server's address (`docs` in
-    /// `docs.vuefinder.test`), replacing the automatic one.
+    /// `vuefinder--docs.test`), replacing the automatic one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
     /// Left out when the app's processes start together (Dev start); started by hand only.
@@ -1057,9 +1058,12 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             if site.secure {
                 s += &redirect(&names);
             }
-            // The app's other dev servers (a docs site) answer at <row>.<host>.
+            // The app's other dev servers (a docs site) answer at <app>--<row>.<tld>.
             for row in processes::server_rows(cfg, site) {
-                let names = [row.host];
+                let mut names = vec![row.host.clone()];
+                if cfg.tld != "localhost" {
+                    names.push(row.host.replace(&format!(".{}", cfg.tld), ".localhost"));
+                }
                 s += &format!(
                     "\n{} {{\n\treverse_proxy 127.0.0.1:{}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
                     addresses(site, &names),
@@ -1068,6 +1072,22 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
                 );
                 if site.secure {
                     s += &redirect(&names);
+                }
+                // ponytail: remove the old-host redirect one release after 0.2
+                let to = site_url(
+                    cfg,
+                    &Site {
+                        host: row.host.clone(),
+                        ..site.clone()
+                    },
+                );
+                let old = row.old_host;
+                let mut from = vec![addresses(site, std::slice::from_ref(&old))];
+                if site.secure {
+                    from.push(format!("http://{old}"));
+                }
+                for n in from {
+                    s += &format!("\n{n} {{\n\tredir {to}{{uri}} 308\n}}\n");
                 }
             }
             continue;
@@ -2206,15 +2226,38 @@ mod tests {
         let port = processes::server_rows(&cfg, &vf)[0].port;
         let out = caddyfile(&cfg, &[vf.clone()]);
         assert!(out.contains(&format!(
-            "\ndocs.vuefinder.test {{\n\treverse_proxy 127.0.0.1:{port}"
+            "\nvuefinder--docs.test, vuefinder--docs.localhost {{\n\treverse_proxy 127.0.0.1:{port}"
         )));
-        assert!(out.contains("\nhttp://docs.vuefinder.test {\n\tredir https://{host}"));
+        assert!(out.contains("\nhttp://vuefinder--docs.test, http://vuefinder--docs.localhost {\n\tredir https://{host}"));
+        // The old address redirects to the new one.
+        let to = site_url(
+            &cfg,
+            &Site {
+                host: "vuefinder--docs.test".into(),
+                ..vf.clone()
+            },
+        );
+        let redir = format!("\n\tredir {to}{{uri}} 308\n}}\n");
+        assert!(out.contains(&format!("\ndocs.vuefinder.test {{{redir}")));
+        assert!(out.contains(&format!("\nhttp://docs.vuefinder.test {{{redir}")));
         vf.secure = false;
-        let out = caddyfile(&cfg, &[vf]);
+        let out = caddyfile(&cfg, &[vf.clone()]);
         assert!(out.contains(&format!(
-            "\nhttp://docs.vuefinder.test {{\n\treverse_proxy 127.0.0.1:{port}"
+            "\nhttp://vuefinder--docs.test, http://vuefinder--docs.localhost {{\n\treverse_proxy 127.0.0.1:{port}"
         )));
-        assert_eq!(out.matches("\tredir ").count(), 0);
+        let to = site_url(
+            &cfg,
+            &Site {
+                host: "vuefinder--docs.test".into(),
+                secure: false,
+                ..vf
+            },
+        );
+        assert!(to.starts_with("http://"));
+        assert!(out.contains(&format!(
+            "\nhttp://docs.vuefinder.test {{\n\tredir {to}{{uri}} 308\n}}\n"
+        )));
+        assert_eq!(out.matches("\tredir ").count(), 1);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -81,6 +81,8 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Changed
 
+- Extra dev servers answer at `<app>--<script>.test` (was `<script>.<app>.test`,
+  which redirects there until the next release), so `*.<app>.test` stays free.
 - The Overview is a summary: one "Dev · 3 of 4 running" (or "Containers")
   line that opens the tab, then where the app runs and its folders. The header
   shows the state; Start and Stop live in the Dev tab.
