@@ -118,13 +118,7 @@ pub fn test_db_name(site: &Site) -> String {
 fn main_database(main: &Path) -> Option<String> {
     let env = crate::resources::dotenv(main);
     let get = |k: &str| env.get(k).map(String::as_str).filter(|v| !v.is_empty());
-    let url_db = get("DB_URL").or(get("DATABASE_URL")).and_then(|url| {
-        let rest = url.split_once("://")?.1;
-        let rest = &rest[..rest.find(['?', '#']).unwrap_or(rest.len())];
-        rest.split_once('/')
-            .map(|(_, db)| db.to_string())
-            .filter(|db| !db.is_empty())
-    });
+    let url_db = get("DB_URL").or(get("DATABASE_URL")).and_then(url_database);
     if url_db.is_some() {
         return url_db;
     }
@@ -135,16 +129,45 @@ fn main_database(main: &Path) -> Option<String> {
     }
 }
 
-/// Whether `db` is the main app's own database: its name on a server, or main's
-/// `DB_DATABASE` as written (a SQLite file).
+/// The database a `scheme://host/<db>?…` URL names; `None` without one (or a `file:` URL).
+pub(crate) fn url_database(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let rest = &rest[..rest.find(['?', '#']).unwrap_or(rest.len())];
+    rest.split_once('/')
+        .map(|(_, db)| db.to_string())
+        .filter(|db| !db.is_empty())
+}
+
+/// Whether `db` is the main app's own database: its name on a server, main's
+/// `DB_DATABASE` as written, or an absolute SQLite path to main's file or into the main
+/// checkout (not into the worktree, which may sit inside it).
 pub fn is_mains_database(site: &Site, db: &str) -> bool {
     let Some(main) = main_of(&site.path) else {
         return false;
     };
-    main_database(&main).as_deref() == Some(db)
-        || crate::resources::dotenv(&main)
-            .get("DB_DATABASE")
-            .is_some_and(|v| v == db)
+    let mains = crate::resources::dotenv(&main).get("DB_DATABASE").cloned();
+    if main_database(&main).as_deref() == Some(db) || mains.as_deref() == Some(db) {
+        return true;
+    }
+    if !Path::new(db).is_absolute() {
+        return false;
+    }
+    let file = real_file(Path::new(db));
+    if file.starts_with(real_file(&site.path)) {
+        return false;
+    }
+    file.starts_with(real_file(&main))
+        || mains.is_some_and(|m| Path::new(&m).is_absolute() && real_file(Path::new(&m)) == file)
+}
+
+/// The database a worktree's run uses (`env_for`'s): its own, or with `test` while it
+/// shares main's, its test database.
+pub fn run_db(cfg: &Config, site: &Site, test: bool) -> String {
+    if test && choice(cfg, site) == DbChoice::Share {
+        test_db_name(site)
+    } else {
+        db_name(site)
+    }
 }
 
 /// The worktree's record; for one Anvil has none of (opened outside Anvil, say), Settings'
@@ -588,7 +611,7 @@ pub fn prepare_for(
 /// `url` pointing at database `db` instead: `postgres://u@h:5433/shop?x` -> `.../<db>?x`.
 /// `None` for a scheme Anvil can't rewrite. A SQLite `file:` URL with an absolute path
 /// is mapped like `sqlite_file`; a relative one already lives in the worktree.
-fn with_db(url: &str, db: &str, main: &Path, wt: &Path) -> Option<String> {
+pub(crate) fn with_db(url: &str, db: &str, main: &Path, wt: &Path) -> Option<String> {
     if let Some(rest) = url.strip_prefix("file:") {
         let (path, query) = rest.split_at(rest.find('?').unwrap_or(rest.len()));
         return Some(match sqlite_file(main, wt, path) {
@@ -640,15 +663,7 @@ fn sqlite_file(main: &Path, wt: &Path, file: &str) -> Option<String> {
     if !file.is_absolute() {
         return None;
     }
-    // Canonical, so a symlinked folder in `.env` still matches; the file may not exist yet.
-    let real = fs::canonicalize(file).ok().or_else(|| {
-        Some(
-            fs::canonicalize(file.parent()?)
-                .ok()?
-                .join(file.file_name()?),
-        )
-    });
-    let real = real.unwrap_or_else(|| file.to_path_buf());
+    let real = real_file(file);
     let main = fs::canonicalize(main).unwrap_or_else(|_| main.to_path_buf());
     // Already in the worktree (its own `.env`; a worktree may sit inside main's folder).
     if real.starts_with(fs::canonicalize(wt).unwrap_or_else(|_| wt.to_path_buf())) {
@@ -659,6 +674,20 @@ fn sqlite_file(main: &Path, wt: &Path, file: &str) -> Option<String> {
         Err(_) => wt.join("database").join(real.file_name()?),
     };
     Some(to.display().to_string())
+}
+
+/// `file` canonical, so a symlinked folder still matches; the file itself may not exist yet.
+fn real_file(file: &Path) -> PathBuf {
+    fs::canonicalize(file)
+        .ok()
+        .or_else(|| {
+            Some(
+                fs::canonicalize(file.parent()?)
+                    .ok()?
+                    .join(file.file_name()?),
+            )
+        })
+        .unwrap_or_else(|| file.to_path_buf())
 }
 
 /// What a worktree's processes get on top of their usual environment, so they never
