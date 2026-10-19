@@ -26,6 +26,7 @@ const mockSite = (name, kind, extra = {}) => ({
   aliases: [],
   ...extra,
 });
+window.mockSite = mockSite;
 window.mockSnap = {
   sites: [
     mockSite("shop", "laravel"),
@@ -614,6 +615,16 @@ const mockHandle = (cmd, a) => {
   switch (cmd) {
     case "state":
     case "app_run":
+    case "worktree_add":
+    case "worktree_remove":
+    case "leftover_drop":
+    case "leftover_keep":
+      return mockSnap;
+    case "worktree_db":
+      mockSnap.worktrees[a.site].db = a.choice;
+      return mockSnap;
+    case "worktree_prepare":
+      if (window.mockPrepareFail) throw window.mockPrepareFail;
       return mockSnap;
     case "setup_status":
       return window.mockSetup ?? { resolver: true, ports: true, trusted: true, php: true, shims: true };
@@ -796,7 +807,16 @@ const mockHandle = (cmd, a) => {
     }
     case "git_info":
       if (a.site === "notes") throw "Not a git repository"; // a plain folder
-      return { branch: "main", detached: false, ahead: 0, behind: 0, changed: 3, upstream: null, commit: null, remote: null };
+      return {
+        branch: "main",
+        detached: false,
+        ahead: 0,
+        behind: 0,
+        changed: window.mockGitClean ? 0 : 3,
+        upstream: null,
+        commit: null,
+        remote: null,
+      };
     case "unhide_site": {
       const h = mockSnap.hidden.find((x) => x.name === a.site);
       mockSnap.hidden = mockSnap.hidden.filter((x) => x !== h);

@@ -70,6 +70,64 @@ struct Snapshot {
     runtimes: std::collections::BTreeMap<&'static str, Vec<String>>,
     /// What each app's `.anvil.toml` asks for (PHP, Node.js, services), apps with one only.
     projects: std::collections::BTreeMap<String, Vec<anvil::project::Need>>,
+    /// Each worktree's database and what its Overview warns about.
+    worktrees: std::collections::BTreeMap<String, WorktreeView>,
+    /// Database copies of worktrees that are gone (never dropped on their own).
+    leftovers: Vec<anvil::worktrees::Leftover>,
+}
+
+/// What a worktree's Overview says about it.
+#[derive(Serialize)]
+struct WorktreeView {
+    db: anvil::worktrees::DbChoice,
+    choices: &'static [anvil::worktrees::DbChoice],
+    /// Its own database (a name, or a SQLite file in it); `None` when there's none to give it.
+    database: Option<String>,
+    /// Main's, as "copy of …" names it.
+    main_database: Option<String>,
+    /// Its own database is still to be made (Start, a terminal shim, Prepare database).
+    pending: bool,
+    /// "Anvil: preparing …" while a copy is made.
+    preparing: Option<String>,
+    compose: bool,
+    /// `bootstrap/cache/config.php` exists: Laravel then ignores the env Anvil passes.
+    cached_config: bool,
+    /// Why nothing of it starts (`checked_env`).
+    error: Option<String>,
+    /// Databases Anvil made for it on a server, for Remove's "Also delete".
+    copies: Vec<String>,
+}
+
+fn worktree_view(
+    cfg: &Config,
+    s: &Site,
+    preparing: &std::collections::BTreeMap<String, String>,
+) -> WorktreeView {
+    use anvil::worktrees::{self as w, MainDb};
+    let main = s.worktree_of.as_deref().unwrap_or_default();
+    let rec = cfg.worktrees.get(&s.name).cloned().unwrap_or_default();
+    let found = w::main_db(cfg, s);
+    let (database, main_database) = match &found {
+        MainDb::None => (None, None),
+        MainDb::Sqlite { to, .. } => (
+            Some(to.strip_prefix(&s.path).unwrap_or(to).display().to_string()),
+            Some(format!("{main}'s")),
+        ),
+        MainDb::Anvil { database, .. } => (Some(w::db_name(s)), Some(database.clone())),
+        MainDb::External => (Some(w::db_name(s)), None),
+    };
+    WorktreeView {
+        db: rec.db,
+        choices: found.choices(),
+        database,
+        main_database,
+        pending: w::pending(cfg, s).is_some(),
+        preparing: preparing.get(&s.name).cloned(),
+        compose: anvil::compose::file(&s.path).is_some(),
+        cached_config: s.path.join("bootstrap/cache/config.php").exists(),
+        error: w::checked_env(cfg, s).err().map(err),
+        copies: rec.copies.into_iter().map(|(_, d)| d).collect(),
+    }
 }
 
 type Res<T> = Result<T, String>;
@@ -289,6 +347,15 @@ fn snapshot(app: &App) -> Res<Snapshot> {
             .map(|s| (s.name.clone(), anvil::project::needs(&cfg, s)))
             .filter(|(_, n)| !n.is_empty())
             .collect(),
+        worktrees: {
+            let preparing = anvil::lock(&app.preparing).clone();
+            sites
+                .iter()
+                .filter(|s| s.worktree_of.is_some())
+                .map(|s| (s.name.clone(), worktree_view(&cfg, s, &preparing)))
+                .collect()
+        },
+        leftovers: anvil::worktrees::leftovers(&cfg, &sites),
         sites,
         hidden: anvil::hidden_sites(&cfg),
         php_default: cfg.php.clone(),
@@ -1163,6 +1230,10 @@ fn autostart_processes(app: &App, cfg: &Config) {
 fn prepare(app: &App, site: &Site) -> anyhow::Result<()> {
     let made = anvil::worktrees::prepare_site(site, &mut |line| {
         anvil::lock(&app.preparing).insert(site.name.clone(), line.into());
+        // The window shows the line on the worktree's Overview while the copy runs.
+        if let Some(h) = HANDLE.get() {
+            changed(h);
+        }
     });
     anvil::lock(&app.preparing).remove(&site.name);
     made
@@ -2047,6 +2118,121 @@ fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) ->
     let (cfg, _) = edit(|c| anvil::link(c, &alias, path))?;
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
+}
+
+/// Set once at setup: what `prepare` tells the window through while a copy runs.
+static HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+
+/// A new worktree of the app `site`, next to it (`worktrees::add`).
+#[tauri::command(async)]
+fn worktree_add(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    branch: String,
+    new: bool,
+) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    let main = site_in(&cfg, &site)?;
+    if main.worktree_of.is_some() || main.linked {
+        return Err(format!("{site} isn't an app's own folder"));
+    }
+    anvil::worktrees::add(&cfg, &main, &branch, new).map_err(err)?;
+    sites_changed(&handle, &app, &cfg);
+    snapshot(&app)
+}
+
+/// Stop everything of the worktree (one shared deadline), then `worktrees::remove`. The
+/// config is saved after a failure too: a failed drop has forgotten the databases that went.
+#[tauri::command(async)]
+fn worktree_remove(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    drop_db: bool,
+    force: bool,
+) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    let wt = site_in(&cfg, &site)?;
+    if wt.worktree_of.is_none() {
+        return Err(format!("{site} isn't a worktree"));
+    }
+    let others: Vec<Site> = anvil::sites(&cfg)
+        .into_iter()
+        .filter(|s| s.name != site)
+        .collect();
+    let stopping = anvil::lock(&app.apps).take_vanished(&others);
+    anvil::stop_all(stopping, anvil::apps::GRACE);
+    anvil::lock(&app.app_errors).retain(|k, _| k.split(['@', '#']).next() != Some(&site));
+    let (cfg, removed) = edit(|c| Ok(anvil::worktrees::remove(c, &wt, drop_db, force)))?;
+    sites_changed(&handle, &app, &cfg);
+    removed.map_err(err)?;
+    snapshot(&app)
+}
+
+/// Copy of main, Empty or Share main's for the worktree `site`.
+#[tauri::command(async)]
+fn worktree_db(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    choice: anvil::worktrees::DbChoice,
+) -> Res<Snapshot> {
+    let (cfg, ()) = edit(|c| {
+        let s = anvil::sites(c)
+            .into_iter()
+            .find(|s| s.name == site && s.worktree_of.is_some())
+            .ok_or_else(|| anyhow::anyhow!("No worktree named {site}"))?;
+        c.worktrees.entry(s.name).or_default().db = choice;
+        Ok(())
+    })?;
+    // Its PHP-FPM pool's env follows the choice.
+    sites_changed(&handle, &app, &cfg);
+    snapshot(&app)
+}
+
+/// Make the worktree's own database now (Overview's Prepare database), as its first Start would.
+#[tauri::command(async)]
+fn worktree_prepare(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    let s = site_in(&cfg, &site)?;
+    let made = prepare(&app, &s);
+    changed(&handle);
+    made.map_err(err)?;
+    snapshot(&app)
+}
+
+/// Delete a database left from a removed worktree (`worktrees::drop_leftover`).
+#[tauri::command(async)]
+fn leftover_drop(
+    handle: AppHandle,
+    app: State<App>,
+    service: String,
+    database: String,
+) -> Res<Snapshot> {
+    let (_, ()) = edit(|c| {
+        let sites = anvil::sites(c);
+        anvil::worktrees::drop_leftover(c, &sites, &service, &database)
+    })?;
+    changed(&handle);
+    snapshot(&app)
+}
+
+/// Keep a leftover's databases; Anvil forgets they were the gone worktree's.
+#[tauri::command(async)]
+fn leftover_keep(
+    handle: AppHandle,
+    state: State<App>,
+    app: String,
+    worktree: String,
+) -> Res<Snapshot> {
+    let (_, ()) = edit(|c| {
+        let sites = anvil::sites(c);
+        anvil::worktrees::keep_leftover(c, &sites, &app, &worktree);
+        Ok(())
+    })?;
+    changed(&handle);
+    snapshot(&state)
 }
 
 /// Unlinks linked names and hides parked folders. Never deletes files.
@@ -3293,6 +3479,12 @@ fn main() {
             park_folder,
             remove_site,
             unhide_site,
+            worktree_add,
+            worktree_remove,
+            worktree_db,
+            worktree_prepare,
+            leftover_drop,
+            leftover_keep,
             setup_status,
             setup_fix,
             set_group,
@@ -3380,6 +3572,7 @@ fn main() {
             relaunch
         ])
         .setup(|app| {
+            let _ = HANDLE.set(app.handle().clone());
             // Clicking a notification brings Anvil forward.
             use tauri_plugin_notification::NotificationExt;
             let h = app.handle().clone();

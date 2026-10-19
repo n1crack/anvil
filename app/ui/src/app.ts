@@ -624,6 +624,11 @@ async function siteMenu(s) {
     groupItems.push(await sep(), await M.MenuItem.new({ text: "New Group…", action: () => newGroup(s) }));
     items.push(await M.Submenu.new({ text: "Add to Group", items: groupItems }), await sep());
   }
+  if (s.worktree_of) {
+    items.push(await M.MenuItem.new({ text: "Remove Worktree…", action: () => removeWorktree(s) }), await sep());
+  } else if (!s.linked && (await invoke("git_info", { site: s.name }).catch(() => null))) {
+    items.push(await M.MenuItem.new({ text: "New Worktree…", action: () => newWorktree(s) }), await sep());
+  }
   items.push(
     await M.MenuItem.new({
       text: s.linked ? "Remove Link" : "Hide from Anvil",
@@ -652,13 +657,18 @@ function setShowHidden(on) {
   renderSite();
 }
 
-/** Inline text prompt under the search field. Resolves to the text, or null when cancelled. */
-/** Inline text prompt under the search field. `preview` turns the text into what
- * it will create. Only Return or Esc ends it, so a stray click keeps the typing. */
-export function ask(label: string, placeholder?: string, preview?: (v: string) => string) {
+/** Inline text prompt under the search field. Resolves to the text, or null when cancelled.
+ * `preview` turns the text into what it will create; `check` adds a checkbox with that
+ * label, read from `#ask-new` afterwards. Only Return or Esc ends it, so a stray click
+ * keeps the typing. */
+export function ask(label: string, placeholder?: string, preview?: (v: string) => string, check?: string) {
   const form = $("#ask");
   const input = $("#ask-input");
   const hint = $("#ask-hint");
+  const box = $("#ask-check");
+  box.hidden = !check;
+  $("span", box).textContent = check ?? "";
+  $("#ask-new").checked = false;
   const base = "Return to add, Esc to cancel";
   $("#ask-label").textContent = label;
   input.placeholder = placeholder;
@@ -672,7 +682,7 @@ export function ask(label: string, placeholder?: string, preview?: (v: string) =
   };
   return new Promise((resolve) => {
     const done = (value) => {
-      form.hidden = true;
+      form.hidden = box.hidden = true;
       form.onsubmit = input.onkeydown = input.oninput = null;
       resolve(value);
     };
@@ -694,6 +704,44 @@ async function addAlias(s) {
     (v) => `Opens ${v.replace(new RegExp(`\\.${snap.tld}$`), "")}.${snap.tld}`,
   );
   if (alias) await call("add_alias", { site: s.name, alias });
+}
+
+async function newWorktree(s) {
+  const branch = await ask(`New worktree of ${s.name}`, "Branch, e.g. feature/login", undefined, "New branch");
+  if (branch) await call("worktree_add", { site: s.name, branch, new: $("#ask-new").checked });
+}
+
+const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+
+/** Confirm under the worktree's row: what would be lost, and whether its database copy goes too.
+ * Uncommitted changes or unpushed commits (or no way to tell) make it "Remove anyway". */
+async function removeWorktree(s) {
+  const info = await invoke("git_info", { site: s.name }).catch(() => null);
+  const copies = snap.worktrees?.[s.name]?.copies ?? [];
+  const said = [`Remove ${s.name}? Its folder goes, its branch stays.`];
+  if (!info) said.push("Anvil couldn't check it for uncommitted changes.");
+  if (info?.changed) said.push(`It has ${count(info.changed, "uncommitted change")}, lost with the folder.`);
+  if (info?.ahead) said.push(`It has ${count(info.ahead, "unpushed commit")}, kept on ${s.branch ?? "its branch"}.`);
+  const force = !info || info.changed > 0 || info.ahead > 0;
+  const pop = el("div", "pop-confirm wide");
+  pop.append(el("p", null, said.join(" ")));
+  let drop: HTMLInputElement | null = null;
+  if (copies.length) {
+    const label = el("label");
+    drop = Object.assign(el("input"), { type: "checkbox" });
+    label.append(drop, ` Also delete ${copies.join(", ")}`);
+    pop.append(label);
+  }
+  const no = el("button", null, "Cancel");
+  const yes = el("button", "primary", force ? "Remove anyway" : "Remove");
+  pop.append(no, yes);
+  const anchor = $(`#list [data-name="${CSS.escape(s.name)}"]`) ?? $("#site .site-name");
+  const close = popAt(anchor, pop, yes);
+  no.onclick = close;
+  yes.onclick = () => {
+    close();
+    call("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force });
+  };
 }
 
 async function newGroup(s) {
@@ -985,6 +1033,8 @@ export function renderSite() {
     $('[data-field="runtime"]', root).append(" ", install);
   }
   projectNeeds(s, root);
+  worktreeLines(s, root);
+  leftoverLines(s, root);
   $('[data-field="path"]', root).textContent = tilde(s.path);
   $('[data-field="root"]', root).textContent = tilde(s.root);
   // Nothing is served from a folder or a Compose project: no web root, no HTTPS.
@@ -1110,6 +1160,108 @@ function projectNeeds(s, root) {
   const runsOn = $('[data-field="runtime"]', root)?.closest(".row");
   if (runsOn) runsOn.after(row);
   else $('[data-panel="overview"] .group', root).prepend(row);
+}
+
+const DB_CHOICES = { copy: "Copy of main", empty: "Empty", share: "Share main's" };
+const prepareErrors = new Map<string, string>(); // a failed Prepare database, across re-renders
+const preparing = new Set<string>();
+
+/** A worktree's Overview: what it's a worktree of, its database with the choice, and one
+ * line for each thing it shares with or lacks from its app. */
+function worktreeLines(s, root) {
+  const v = s.worktree_of ? snap.worktrees?.[s.name] : null;
+  if (!v) return;
+  const main = s.worktree_of;
+  const group = $('[data-panel="overview"] .group', root);
+  group.before(el("p", "worktree-of muted", `Worktree of ${main} · ${s.branch ? `branch ${s.branch}` : "detached"}`));
+  const rows: HTMLElement[] = [];
+  const add = (dt: string, dd: HTMLElement) => {
+    const r = el("div", "row");
+    r.append(el("dt", null, dt), dd);
+    rows.push(r);
+  };
+  if (v.database) {
+    const share = v.db === "share";
+    const how = !v.choices.includes(v.db)
+      ? "on a server Anvil doesn't manage"
+      : v.db === "copy"
+        ? `copy of ${v.main_database ?? main}`
+        : "empty";
+    const dd = el("dd", null, share ? `${main}'s database` : `${v.database} (${how})`);
+    const opts = v.choices.includes(v.db) ? v.choices : [v.db, ...v.choices];
+    const sel = el("select");
+    sel.setAttribute("aria-label", "Database");
+    for (const c of opts) sel.add(new Option(DB_CHOICES[c], c));
+    sel.value = v.db;
+    sel.onchange = () => call("worktree_db", { site: s.name, choice: sel.value });
+    dd.append(" ", sel);
+    if (share) dd.append(el("div", "muted", `Not recommended: migrations and tests here change ${main}'s data`));
+    else if (v.preparing) dd.append(el("div", "muted", v.preparing));
+    else if (v.pending) {
+      const b = el("button", "inline-action", preparing.has(s.name) ? "Preparing…" : "Prepare database");
+      b.disabled = preparing.has(s.name);
+      b.onclick = async () => {
+        preparing.add(s.name);
+        prepareErrors.delete(s.name);
+        b.disabled = true;
+        b.textContent = "Preparing…";
+        try {
+          await invoke("worktree_prepare", { site: s.name });
+        } catch (e) {
+          prepareErrors.set(s.name, String(e));
+        } finally {
+          preparing.delete(s.name);
+        }
+        call("state");
+      };
+      dd.append(" ", b);
+    }
+    const fail = v.error ?? prepareErrors.get(s.name);
+    if (fail) dd.append(el("div", "muted", fail));
+    add("Database", dd);
+  }
+  add("Shared", el("dd", "muted", `S3 buckets and search indexes are shared with ${main}`));
+  if (v.compose) add("Docker", el("dd", "muted", "Anvil doesn't start this worktree's Docker services"));
+  if (v.cached_config) {
+    add("Config", el("dd", "muted", "Cached config ignores the worktree's database; run php artisan config:clear"));
+  }
+  group.prepend(...rows);
+}
+
+const leftSizes = new Map<string, number>(); // "service/database" -> bytes, once read
+
+/** The app's Overview: one quiet line per database left from a removed worktree. */
+function leftoverLines(s, root) {
+  const group = $('[data-panel="overview"] .group', root);
+  for (const l of (snap.leftovers ?? []).filter((x) => x.app === s.name)) {
+    const key = `${l.service}/${l.database}`;
+    const text = document.createTextNode(`Database left from ${l.worktree}`);
+    const sized = () => leftSizes.has(key) && (text.data = `Database left from ${l.worktree} (${bytes(leftSizes.get(key))})`);
+    sized();
+    if (!leftSizes.has(key)) {
+      // Its server may be stopped: then the line goes without a size.
+      invoke("service_contents", { id: l.service })
+        .then((c) => {
+          const found = c?.databases?.find(([n]) => n === l.database);
+          if (found) leftSizes.set(key, found[1]);
+          sized();
+        })
+        .catch(() => {});
+    }
+    const del = el("button", "inline-action", "Delete");
+    del.onclick = () =>
+      late.confirmPop(del, `Delete ${l.database}? It can't be undone.`, "Delete", () =>
+        call("leftover_drop", { service: l.service, database: l.database }),
+      );
+    const keep = el("button", "inline-action", "Keep");
+    keep.title = "Keep the database; Anvil forgets it was this worktree's";
+    keep.onclick = () => call("leftover_keep", { app: l.app, worktree: l.worktree });
+    const dd = el("dd", "leftover muted");
+    dd.append(text, " ", del, keep);
+    const r = el("div", "row");
+    r.append(el("dt", null, "Left over"), dd);
+    group.append(r);
+  }
 }
 
 function djangoHint(root) {

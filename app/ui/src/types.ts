@@ -55,6 +55,40 @@ export interface Snapshot {
   runtimes: Record<string, string[]>;
   /** What an app's .anvil.toml asks for, by app name; apps with one only. */
   projects: Record<string, Need[]>;
+  /** Each worktree's database and what its Overview warns about, by worktree name. */
+  worktrees: Record<string, WorktreeView>;
+  /** Database copies of worktrees that are gone; never deleted on their own. */
+  leftovers: Leftover[];
+}
+
+export type DbChoice = "copy" | "empty" | "share";
+
+export interface WorktreeView {
+  db: DbChoice;
+  /** What it can choose (an external database: share or empty). */
+  choices: DbChoice[];
+  /** Its own database (a name, or a SQLite file in it); null when there's none to give it. */
+  database: string | null;
+  /** Main's, as "copy of …" names it. */
+  main_database: string | null;
+  /** Its own database is still to be made (Start, a terminal shim or Prepare database). */
+  pending: boolean;
+  /** "Anvil: preparing …" while a copy is made. */
+  preparing: string | null;
+  compose: boolean;
+  /** bootstrap/cache/config.php exists: its env is ignored. */
+  cached_config: boolean;
+  /** Why nothing of it starts. */
+  error: string | null;
+  /** Databases Anvil made for it on a server. */
+  copies: string[];
+}
+
+export interface Leftover {
+  app: string;
+  worktree: string;
+  service: string;
+  database: string;
 }
 
 /** One thing a project's .anvil.toml asks for. */

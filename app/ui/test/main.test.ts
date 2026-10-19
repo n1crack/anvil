@@ -1562,3 +1562,170 @@ describe("project file", () => {
     }
   });
 });
+
+describe("worktrees", () => {
+  const wt = "shop--feature-x";
+  const view = (o = {}) => ({
+    db: "copy",
+    choices: ["copy", "empty", "share"],
+    database: "shop_feature_x",
+    main_database: "shop",
+    pending: false,
+    preparing: null,
+    compose: false,
+    cached_config: false,
+    error: null,
+    copies: ["shop_feature_x"],
+    ...o,
+  });
+  const ovText = () => $('[data-panel="overview"]').textContent!;
+  const dbRow = () => $$('[data-panel="overview"] .row').find((r) => r.querySelector("dt")?.textContent === "Database")!;
+  async function show(o = {}, name = wt) {
+    w.mockSnap.worktrees = { [wt]: view(o) };
+    await (await import("../src/app")).call("state");
+    await wait(40);
+    await select(name);
+  }
+  beforeAll(() => {
+    w.mockSnap.sites.push(
+      w.mockSite(wt, "laravel", {
+        worktree_of: "shop",
+        branch: "feature/login",
+        path: `/Users/x/Sites/${wt}`,
+        root: `/Users/x/Sites/${wt}/public`,
+      }),
+    );
+  });
+
+  test("a worktree's Overview: what it is, its own database with the choice, what stays shared", async () => {
+    await show();
+    expect($('[data-panel="overview"] .worktree-of').textContent).toBe("Worktree of shop · branch feature/login");
+    expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop_feature_x (copy of shop)");
+    const choice = dbRow().querySelector("select") as HTMLSelectElement;
+    expect([...choice.options].map((o) => o.textContent)).toEqual(["Copy of main", "Empty", "Share main's"]);
+    expect(choice.value).toBe("copy");
+    expect(ovText()).toContain("S3 buckets and search indexes are shared with shop");
+    expect(ovText()).not.toContain("Docker services");
+    expect(ovText()).not.toContain("config:clear");
+    expect(dbRow().querySelector("button")).toBeNull(); // made already: no Prepare
+    choice.value = "share";
+    choice.dispatchEvent(new Event("change"));
+    await wait(80);
+    expect(calls("worktree_db").at(-1)![1]).toEqual({ site: wt, choice: "share" });
+    // Share warns inline.
+    expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop's database");
+    expect(dbRow().textContent).toContain("Not recommended: migrations and tests here change shop's data");
+  });
+
+  test("Docker services and a cached config each get one line", async () => {
+    await show({ compose: true, cached_config: true });
+    expect(ovText()).toContain("Anvil doesn't start this worktree's Docker services");
+    expect(ovText()).toContain("Cached config ignores the worktree's database; run php artisan config:clear");
+  });
+
+  test("Prepare database while it isn't made yet, with the preparing line inline", async () => {
+    await show({ pending: true, copies: [] });
+    const b = [...dbRow().querySelectorAll("button")].find((x) => x.textContent === "Prepare database") as HTMLButtonElement;
+    expect(b).toBeTruthy();
+    w.mockDelay = { worktree_prepare: 150 };
+    b.click();
+    await wait(40);
+    expect(b.disabled).toBe(true);
+    await wait(200);
+    w.mockDelay = {};
+    expect(calls("worktree_prepare").at(-1)![1]).toEqual({ site: wt });
+    // A copy under way (from Start or this button) shows its line in place of the button.
+    await show({ pending: true, copies: [], preparing: "Anvil: preparing shop_feature_x (copy of shop)" });
+    expect(dbRow().textContent).toContain("Anvil: preparing shop_feature_x (copy of shop)");
+    expect(dbRow().querySelector("button")).toBeNull();
+    // A failure shows next to the button.
+    w.mockPrepareFail = "Start mysql to prepare shop_feature_x";
+    await show({ pending: true, copies: [] });
+    (dbRow().querySelector("button") as HTMLButtonElement).click();
+    await wait(80);
+    expect(dbRow().textContent).toContain("Start mysql to prepare shop_feature_x");
+    delete w.mockPrepareFail;
+  });
+
+  test("the main app's Overview: a database left from a removed worktree, Delete (confirmed) or Keep", async () => {
+    w.mockSnap.leftovers = [{ app: "shop", worktree: "x", service: "mysql", database: "blog" }];
+    try {
+      await show({}, "shop");
+      await wait(80);
+      const row = $$('[data-panel="overview"] .leftover')[0];
+      expect(row.firstChild!.textContent).toBe("Database left from x (1.0 MB)");
+      const [del, keep] = [...row.querySelectorAll("button")] as HTMLButtonElement[];
+      expect([del.textContent, keep.textContent]).toEqual(["Delete", "Keep"]);
+      del.click();
+      await wait();
+      expect($(".pop-confirm").textContent).toContain("Delete blog?");
+      expect(calls("leftover_drop").length).toBe(0);
+      ($(".pop-confirm .primary") as HTMLButtonElement).click();
+      await wait(60);
+      expect(calls("leftover_drop").at(-1)![1]).toEqual({ service: "mysql", database: "blog" });
+      keep.click();
+      await wait(60);
+      expect(calls("leftover_keep").at(-1)![1]).toEqual({ app: "shop", worktree: "x" });
+    } finally {
+      delete w.mockSnap.leftovers;
+    }
+  });
+
+  test("New Worktree… asks for the branch and whether it's new", async () => {
+    await show({}, "shop");
+    $('#list [data-name="shop"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait(80);
+    const texts = (w.mockMenu as any[]).map((i) => i.text);
+    expect(texts).toContain("New Worktree…");
+    expect(texts).not.toContain("Remove Worktree…");
+    (w.mockMenu as any[]).find((i) => i.text === "New Worktree…").action();
+    await wait();
+    expect($("#ask").hidden).toBe(false);
+    expect($("#ask-check").hidden).toBe(false);
+    expect($("#ask-check").textContent).toContain("New branch");
+    ($("#ask-input") as HTMLInputElement).value = "feature/login";
+    ($("#ask-new") as HTMLInputElement).checked = true;
+    $("#ask").dispatchEvent(new Event("submit"));
+    await wait(60);
+    expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "feature/login", new: true });
+    expect($("#ask-check").hidden).toBe(true);
+  });
+
+  test("Remove Worktree… says what's uncommitted, offers to delete its database, and removes anyway", async () => {
+    await show();
+    $(`#list [data-name="${wt}"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait(80);
+    const texts = (w.mockMenu as any[]).map((i) => i.text);
+    expect(texts).not.toContain("New Worktree…");
+    (w.mockMenu as any[]).find((i) => i.text === "Remove Worktree…").action();
+    await wait(60);
+    const pop = $(".pop-confirm");
+    expect(pop.textContent).toContain("3 uncommitted changes");
+    expect(pop.textContent).toContain("Also delete shop_feature_x");
+    const yes = $(".pop-confirm .primary") as HTMLButtonElement;
+    expect(yes.textContent).toBe("Remove anyway");
+    expect(calls("worktree_remove").length).toBe(0);
+    ($(".pop-confirm input[type=checkbox]") as HTMLInputElement).checked = true;
+    yes.click();
+    await wait(60);
+    expect(calls("worktree_remove").at(-1)![1]).toEqual({ site: wt, dropDb: true, force: true });
+  });
+
+  test("Remove Worktree… on a clean worktree without a copy: just Remove", async () => {
+    w.mockGitClean = true;
+    try {
+      await show({ copies: [] });
+      $(`#list [data-name="${wt}"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await wait(80);
+      (w.mockMenu as any[]).find((i) => i.text === "Remove Worktree…").action();
+      await wait(60);
+      expect($(".pop-confirm .primary").textContent).toBe("Remove");
+      expect($(".pop-confirm input[type=checkbox]")).toBeNull();
+      ($(".pop-confirm .primary") as HTMLButtonElement).click();
+      await wait(60);
+      expect(calls("worktree_remove").at(-1)![1]).toEqual({ site: wt, dropDb: false, force: false });
+    } finally {
+      delete w.mockGitClean;
+    }
+  });
+});

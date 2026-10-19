@@ -181,7 +181,7 @@ pub(crate) enum Op<'a> {
 
 /// What's left to do for the worktree `site`: its choice and main's database, or
 /// `None` when it shares, has its copy already, or there's nothing Anvil can make.
-fn pending(cfg: &Config, site: &Site) -> Option<(DbChoice, MainDb)> {
+pub fn pending(cfg: &Config, site: &Site) -> Option<(DbChoice, MainDb)> {
     site.worktree_of.as_ref()?;
     let w = cfg.worktrees.get(&site.name).cloned().unwrap_or_default();
     if w.db == DbChoice::Share || !w.copies.is_empty() {
@@ -585,7 +585,7 @@ pub fn add(_cfg: &Config, app: &Site, branch: &str, new_branch: bool) -> anyhow:
 }
 
 /// A database Anvil copied for a worktree that is gone. Never dropped on its own.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Leftover {
     pub app: String,
     pub worktree: String,
@@ -611,6 +611,69 @@ pub fn leftovers(cfg: &Config, sites: &[Site]) -> Vec<Leftover> {
         }
     }
     out
+}
+
+/// The record a leftover of `app`'s worktree `worktree` comes from.
+fn leftover_key(app: &str, worktree: &str) -> String {
+    if worktree.is_empty() {
+        app.into()
+    } else {
+        joined(app, worktree)
+    }
+}
+
+/// Keep a leftover's databases: Anvil forgets they were the gone worktree's.
+pub fn keep_leftover(cfg: &mut Config, sites: &[Site], app: &str, worktree: &str) {
+    let key = leftover_key(app, worktree);
+    if !sites.iter().any(|s| s.name == key) {
+        cfg.worktrees.remove(&key);
+    }
+}
+
+/// Drop a leftover database and forget it. Refused for one that isn't a leftover (its
+/// worktree still exists, or Anvil never made it). Changes `cfg` only: the caller saves it.
+pub fn drop_leftover(
+    cfg: &mut Config,
+    sites: &[Site],
+    service: &str,
+    database: &str,
+) -> anyhow::Result<()> {
+    drop_leftover_with(cfg, sites, service, database, &mut |c, id, db| {
+        crate::databases::drop_database(c, id, db)
+    })
+}
+
+fn drop_leftover_with(
+    cfg: &mut Config,
+    sites: &[Site],
+    service: &str,
+    database: &str,
+    drop: &mut dyn FnMut(&Config, &str, &str) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let copy = (service.to_string(), database.to_string());
+    let Some(l) = leftovers(cfg, sites)
+        .into_iter()
+        .find(|l| l.service == service && l.database == database)
+    else {
+        anyhow::bail!("{database} isn't a database left from a removed worktree");
+    };
+    let live = sites.iter().any(|s| {
+        cfg.worktrees
+            .get(&s.name)
+            .is_some_and(|w| w.copies.contains(&copy))
+    });
+    if live {
+        anyhow::bail!("A worktree still uses {database}");
+    }
+    drop(cfg, service, database)?;
+    let key = leftover_key(&l.app, &l.worktree);
+    if let Some(w) = cfg.worktrees.get_mut(&key) {
+        w.copies.retain(|c| *c != copy);
+        if w.copies.is_empty() {
+            cfg.worktrees.remove(&key);
+        }
+    }
+    Ok(())
 }
 
 /// Remove a worktree: its folder (`git worktree remove`) and, with `drop_db`, the databases
@@ -1231,6 +1294,32 @@ pub(crate) mod tests {
                 database: "shop_feature_x".into()
             }]
         );
+    }
+
+    #[test]
+    fn a_leftover_is_dropped_or_kept_and_then_forgotten() {
+        let (mut cfg, site) = worktree_site("left-drop", "");
+        recorded(&mut cfg, &site);
+        let dropped = std::cell::RefCell::new(Vec::new());
+        let mut drop = |_: &Config, id: &str, db: &str| {
+            dropped.borrow_mut().push(format!("{id} {db}"));
+            Ok(())
+        };
+        let live = std::slice::from_ref(&site);
+        // Its worktree is still there: not a leftover, nothing dropped or forgotten.
+        let e = drop_leftover_with(&mut cfg, live, "postgres-x", "shop_feature_x", &mut drop);
+        assert!(e.is_err());
+        keep_leftover(&mut cfg, live, "shop", "feature-x");
+        assert!(dropped.borrow().is_empty() && cfg.worktrees.contains_key(&site.name));
+        // Gone: Delete drops and forgets it.
+        drop_leftover_with(&mut cfg, &[], "postgres-x", "shop_feature_x", &mut drop).unwrap();
+        assert_eq!(*dropped.borrow(), ["postgres-x shop_feature_x"]);
+        assert!(cfg.worktrees.is_empty());
+        // Keep only forgets.
+        recorded(&mut cfg, &site);
+        keep_leftover(&mut cfg, &[], "shop", "feature-x");
+        assert!(leftovers(&cfg, &[]).is_empty());
+        assert_eq!(dropped.borrow().len(), 1);
     }
 
     #[test]

@@ -2967,6 +2967,11 @@ body.activity {
 .pop-confirm { display: flex; align-items: center; gap: 8px; }
 .pop-confirm span { margin-right: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 .pop-confirm button { height: 24px; padding: 0 10px; }
+/* Remove Worktree: a sentence, maybe a checkbox, then the buttons on their own line. */
+.pop-confirm.wide { flex-wrap: wrap; justify-content: flex-end; max-width: 380px; }
+.pop-confirm.wide p,
+.pop-confirm.wide label { flex-basis: 100%; margin: 0; }
+.worktree-of { margin: 0 0 10px; }
 
 .sheet-actions .primary:hover,
 .pop-confirm .primary:hover,

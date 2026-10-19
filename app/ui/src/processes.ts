@@ -103,6 +103,8 @@ export function confirmPop(anchor, text, label, onYes) {
   };
 }
 
+late.confirmPop = confirmPop;
+
 /** A container as its dot shows it: running (green); starting (amber) while its health
  * check hasn't passed or Docker restarts it; crashed (red) when it exited non-zero. */
 export function containerState(c: Container): "running" | "starting" | "crashed" | "stopped" {
