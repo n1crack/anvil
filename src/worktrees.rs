@@ -15,11 +15,110 @@ pub fn worktree_name(app: &str, folder: &Path) -> String {
     }
 }
 
+use crate::{Config, Site};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
+
+/// Which database a worktree uses.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DbChoice {
+    /// Its own database, a copy of the main app's.
+    #[default]
+    Copy,
+    /// Its own database, empty (filled by migrations).
+    Empty,
+    /// The main app's database.
+    Share,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default)]
+pub struct WorktreeConfig {
+    pub db: DbChoice,
+    /// Copies Anvil made for this worktree: (service, database).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub copies: Vec<(String, String)>,
+}
+
+/// A worktree's own database name: `<app>_<name>` with `_` for anything else, at most 63 bytes.
+pub fn db_name(site: &Site) -> String {
+    let rest = site
+        .worktree_of
+        .as_ref()
+        .and_then(|main| Some((main, site.name.strip_prefix(&format!("{main}--"))?)));
+    let raw = match rest {
+        Some((main, rest)) => format!("{main}_{rest}"),
+        None => site.name.clone(),
+    };
+    let mut name: String = raw
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    name.truncate(63); // Postgres' limit; MySQL's is 64
+    name
+}
+
+/// `url` pointing at database `db` instead: `postgres://u@h:5433/shop?x` -> `.../<db>?x`.
+/// Only server databases; a SQLite `file:` URL already lives in the worktree.
+fn with_db(url: &str, db: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    if !["postgres", "postgresql", "mysql", "mariadb"].contains(&scheme) {
+        return None;
+    }
+    let tail = rest.find(['?', '#']).unwrap_or(rest.len());
+    let host_end = rest[..tail].find('/').unwrap_or(tail);
+    Some(format!(
+        "{scheme}://{}/{db}{}",
+        &rest[..host_end],
+        &rest[tail..]
+    ))
+}
+
+/// What a worktree's processes get on top of their usual environment, so they never
+/// reach the main app's database or Redis keys. Empty for anything but a worktree.
+/// Set variables win over the worktree's `.env` (Laravel, dotenv, Next.js, Prisma).
+pub fn env(cfg: &Config, site: &Site) -> Vec<(String, String)> {
+    if site.worktree_of.is_none() {
+        return Vec::new();
+    }
+    let db = db_name(site);
+    let mut env = Vec::new();
+    let choice = cfg
+        .worktrees
+        .get(&site.name)
+        .map(|w| w.db)
+        .unwrap_or_default();
+    if choice != DbChoice::Share {
+        let main = main_of(&site.path).unwrap_or_default();
+        let dotenv = crate::resources::dotenv(&main);
+        if let Some(current) = dotenv.get("DB_DATABASE") {
+            if dotenv.get("DB_CONNECTION").map(String::as_str) == Some("sqlite") {
+                // A file in the main checkout: the same file in the worktree.
+                if let Ok(rel) = Path::new(current).strip_prefix(&main) {
+                    let file = site.path.join(rel).display().to_string();
+                    env.push(("DB_DATABASE".into(), file));
+                }
+            } else {
+                env.push(("DB_DATABASE".into(), db.clone()));
+            }
+        }
+        for key in ["DB_URL", "DATABASE_URL"] {
+            if let Some(url) = dotenv.get(key).and_then(|u| with_db(u, &db)) {
+                env.push((key.into(), url));
+            }
+        }
+    }
+    let prefix = format!("{db}_");
+    env.push(("APP_URL".into(), crate::site_url(cfg, site)));
+    env.push(("REDIS_PREFIX".into(), prefix.clone()));
+    env.push(("CACHE_PREFIX".into(), prefix));
+    env
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Worktree {
@@ -126,7 +225,7 @@ pub(crate) mod tests {
     }
 
     /// A repo `<tmp>/main` with one commit and a linked worktree `<tmp>/x` on branch `x`.
-    fn repo(name: &str) -> (PathBuf, PathBuf) {
+    pub(crate) fn repo(name: &str) -> (PathBuf, PathBuf) {
         let root = tmp(name);
         let main = root.join("main");
         fs::create_dir(&main).unwrap();
@@ -134,6 +233,87 @@ pub(crate) mod tests {
         git(&main, &["commit", "-q", "--allow-empty", "-m", "i"]);
         git(&main, &["worktree", "add", "-q", "../x", "-b", "x"]);
         (main, root.join("x"))
+    }
+
+    /// `shop--feature-x`, a worktree of `shop` whose main checkout has `dotenv` as its `.env`.
+    pub(crate) fn worktree_site(name: &str, dotenv: &str) -> (Config, Site) {
+        let (main, x) = repo(name);
+        fs::write(main.join(".env"), dotenv).unwrap();
+        let mut site = crate::tests::site("shop--feature-x", x.to_str().unwrap(), Some("8.4"));
+        site.path = x;
+        site.secure = false;
+        site.worktree_of = Some("shop".into());
+        let cfg = Config {
+            http_port: 80,
+            ..Config::default()
+        };
+        (cfg, site)
+    }
+
+    fn get<'a>(env: &'a [(String, String)], k: &str) -> Option<&'a str> {
+        env.iter()
+            .find(|(key, _)| key == k)
+            .map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn env_points_a_laravel_worktree_at_its_own_database() {
+        let (cfg, site) = worktree_site("laravel", "DB_CONNECTION=mysql\nDB_DATABASE=shop\n");
+        let env = env(&cfg, &site);
+        assert_eq!(get(&env, "DB_DATABASE"), Some("shop_feature_x"));
+        assert_eq!(get(&env, "APP_URL"), Some("http://shop--feature-x.test"));
+        assert_eq!(get(&env, "REDIS_PREFIX"), Some("shop_feature_x_"));
+        assert_eq!(get(&env, "CACHE_PREFIX"), Some("shop_feature_x_"));
+        assert_eq!(get(&env, "DATABASE_URL"), None);
+        // The main app itself gets nothing.
+        let main = crate::tests::site("shop", "/s/shop", None);
+        assert!(super::env(&cfg, &main).is_empty());
+    }
+
+    #[test]
+    fn env_rewrites_database_url() {
+        let url = "DATABASE_URL=\"postgres://postgres@127.0.0.1:5433/shop?schema=public\"\n";
+        let (cfg, site) = worktree_site("url", url);
+        let env = env(&cfg, &site);
+        assert_eq!(
+            get(&env, "DATABASE_URL"),
+            Some("postgres://postgres@127.0.0.1:5433/shop_feature_x?schema=public")
+        );
+        assert_eq!(get(&env, "DB_DATABASE"), None);
+    }
+
+    #[test]
+    fn share_choice_leaves_the_database_alone() {
+        let dotenv = "DB_DATABASE=shop\nDATABASE_URL=mysql://root@127.0.0.1/shop\n";
+        let (mut cfg, site) = worktree_site("share", dotenv);
+        cfg.worktrees.insert(
+            site.name.clone(),
+            WorktreeConfig {
+                db: DbChoice::Share,
+                ..Default::default()
+            },
+        );
+        let env = env(&cfg, &site);
+        assert_eq!(get(&env, "DB_DATABASE"), None);
+        assert_eq!(get(&env, "DATABASE_URL"), None);
+        assert_eq!(get(&env, "REDIS_PREFIX"), Some("shop_feature_x_"));
+        assert_eq!(get(&env, "CACHE_PREFIX"), Some("shop_feature_x_"));
+    }
+
+    #[test]
+    fn no_database_settings_only_the_address_and_prefixes() {
+        let (cfg, site) = worktree_site("nodb", "APP_NAME=Shop\n");
+        let keys: Vec<_> = env(&cfg, &site).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(keys, ["APP_URL", "REDIS_PREFIX", "CACHE_PREFIX"]);
+    }
+
+    #[test]
+    fn db_names_are_slugged_and_short() {
+        let mut site = crate::tests::site("shop--feature-x", "/w", None);
+        site.worktree_of = Some("shop".into());
+        assert_eq!(db_name(&site), "shop_feature_x");
+        site.name = format!("shop--{}", "a".repeat(80));
+        assert_eq!(db_name(&site).len(), 63);
     }
 
     #[test]

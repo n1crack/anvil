@@ -107,9 +107,27 @@ pub fn resolve(tool: &str, cwd: &Path, cfg: &Config) -> Result<Resolved> {
 }
 
 pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result<Resolved> {
-    let h = home();
     let all = sites(cfg);
     let site = site_for(&all, cwd);
+    let mut r = resolve_for(tool, cwd, cfg, fetch, site)?;
+    r.2.extend(extra_env(cfg, site));
+    Ok(r)
+}
+
+/// A worktree's own database and prefixes (`worktrees::env`), so a terminal `php artisan migrate` stays off the main app's.
+fn extra_env(cfg: &Config, site: Option<&Site>) -> Vec<(String, String)> {
+    site.map(|s| crate::worktrees::env(cfg, s))
+        .unwrap_or_default()
+}
+
+fn resolve_for(
+    tool: &str,
+    cwd: &Path,
+    cfg: &Config,
+    fetch: bool,
+    site: Option<&Site>,
+) -> Result<Resolved> {
+    let h = home();
     match tool {
         "php" | "composer" | "laravel" => {
             // From the config: a site that serves no PHP itself still has its pin.
@@ -401,5 +419,38 @@ mod tests {
         assert_eq!(php_version(None, &none, &installed).unwrap(), "8.4");
         let err = php_version(None, &none, &[]).unwrap_err();
         assert!(err.to_string().contains("No PHP installed in Anvil"));
+    }
+
+    #[test]
+    fn shims_carry_the_worktree_env() {
+        use crate::worktrees::tests::{git, tmp};
+        let root = tmp("shims");
+        let shop = root.join("shop");
+        fs::create_dir(&shop).unwrap();
+        git(&shop, &["init", "-q", "-b", "main"]);
+        git(&shop, &["commit", "-q", "--allow-empty", "-m", "i"]);
+        fs::write(shop.join(".env"), "DB_DATABASE=shop\n").unwrap();
+        let wt = shop.join(".claude/worktrees/feature-x");
+        git(
+            &shop,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "fx"],
+        );
+        fs::create_dir_all(wt.join("app")).unwrap();
+        let mut cfg = Config::default();
+        cfg.paths.push(root);
+        let has_db = |env: &[(String, String)]| {
+            env.iter()
+                .any(|(k, v)| k == "DB_DATABASE" && v == "shop_feature_x")
+        };
+        let all = sites(&cfg);
+        let site = site_for(&all, &wt.join("app")).expect("the worktree's site");
+        assert_eq!(site.name, "shop--feature-x");
+        assert!(has_db(&extra_env(&cfg, Some(site))));
+        assert!(extra_env(&cfg, site_for(&all, &shop)).is_empty());
+        // Through the real shim when this machine has an Anvil PHP (CI has none).
+        if !installed_php().is_empty() {
+            let (_, _, env) = resolve_with("php", &wt.join("app"), &cfg, false).unwrap();
+            assert!(has_db(&env), "{env:?}");
+        }
     }
 }

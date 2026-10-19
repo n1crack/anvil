@@ -95,6 +95,9 @@ pub struct Config {
     /// Service licenses the user accepted before installing: license id -> date.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub accepted_licenses: BTreeMap<String, String>,
+    /// Per worktree site (`<app>--<name>`): its database choice and copies made.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub worktrees: BTreeMap<String, worktrees::WorktreeConfig>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -178,6 +181,7 @@ impl Default for Config {
             trim_app_logs: true,
             notifications: true,
             accepted_licenses: BTreeMap::new(),
+            worktrees: BTreeMap::new(),
         }
     }
 }
@@ -1025,23 +1029,29 @@ fn caddy_cmd() -> Command {
 }
 
 /// Pool name for a site with its own settings (FPM pool names can't contain dots).
-fn pool(site: &Site) -> String {
+pub(crate) fn pool(site: &Site) -> String {
     format!("site-{}", site.name.replace('.', "_"))
+}
+
+/// A site with php.ini overrides, or a worktree (its `env[]` lines), gets a pool of its own.
+pub(crate) fn own_pool(site: &Site) -> bool {
+    !site.ini.is_empty() || site.worktree_of.is_some()
 }
 
 /// The socket a site's PHP requests go to: its own pool, or the version's shared pool.
 fn fpm_socket(site: &Site) -> Option<PathBuf> {
     let v = site.php.as_ref()?;
-    let name = if site.ini.is_empty() {
-        format!("php-{v}")
-    } else {
+    let name = if own_pool(site) {
         pool(site)
+    } else {
+        format!("php-{v}")
     };
     Some(home().join("run").join(format!("{name}.sock")))
 }
 
 /// PHP-FPM config for one version: the shared pool plus one pool per customised site.
-fn fpm_conf(v: &str, global: &BTreeMap<String, String>, sites: &[Site]) -> String {
+fn fpm_conf(cfg: &Config, v: &str, sites: &[Site]) -> String {
+    let global = &cfg.ini;
     let pool_conf = |name: &str, sock: &Path, max: u8| {
         format!(
             "\n[{name}]\nlisten = {}\npm = ondemand\npm.max_children = {max}\ncatch_workers_output = yes\nclear_env = no\n",
@@ -1061,12 +1071,19 @@ fn fpm_conf(v: &str, global: &BTreeMap<String, String>, sites: &[Site]) -> Strin
     s += &values(global);
     for site in sites
         .iter()
-        .filter(|s| s.php.as_deref() == Some(v) && !s.ini.is_empty())
+        .filter(|s| s.php.as_deref() == Some(v) && own_pool(s))
     {
         s += &pool_conf(&pool(site), &fpm_socket(site).unwrap(), 8);
         let mut ini = global.clone();
         ini.extend(site.ini.clone());
         s += &values(&ini);
+        // Quoted: URLs hold `?`, `=`, `&`. A value FPM would misread is left out, not
+        // written: one bad line stops every pool.
+        for (k, val) in worktrees::env(cfg, site) {
+            if check_ini(&k, &val).is_ok() && !val.contains(['"', '$', '\\']) {
+                s += &format!("env[{k}] = \"{val}\"\n");
+            }
+        }
     }
     s
 }
@@ -1760,7 +1777,7 @@ impl Server {
             }
             let _ = fs::remove_file(home().join("run").join(format!("php-{v}.sock")));
             let conf = home().join("run").join(format!("php-{v}-fpm.conf"));
-            fs::write(&conf, fpm_conf(v, &cfg.ini, &sites))?;
+            fs::write(&conf, fpm_conf(cfg, v, &sites))?;
             server.labels.push(format!("PHP {v} FPM"));
             server.children.push(
                 Command::new(php_dir(v).join("php-fpm"))
@@ -2479,6 +2496,29 @@ mod tests {
     }
 
     #[test]
+    fn fpm_gives_a_worktree_its_own_pool_with_env() {
+        let (cfg, wt) = crate::worktrees::tests::worktree_site(
+            "fpm",
+            "DB_CONNECTION=mysql\nDB_DATABASE=shop\n",
+        );
+        let sites = [site("shop", "/s/shop", Some("8.4")), wt.clone()];
+        let conf = fpm_conf(&cfg, "8.4", &sites);
+        let own = &conf[conf.find("[site-shop--feature-x]").expect("its own pool")..];
+        assert!(
+            own.contains("env[DB_DATABASE] = \"shop_feature_x\"\n"),
+            "{own}"
+        );
+        assert!(own.contains("env[REDIS_PREFIX] = \"shop_feature_x_\"\n"));
+        assert!(
+            !conf.contains("site-shop]"),
+            "the main app stays on the shared pool"
+        );
+        let sock = fpm_socket(&wt).unwrap();
+        assert!(sock.ends_with("site-shop--feature-x.sock"));
+        assert_ne!(Some(sock), fpm_socket(&sites[0]));
+    }
+
+    #[test]
     fn customised_sites_get_their_own_pool() {
         let mut shop = site("shop.be", "/s/shop/public", Some("8.4"));
         shop.ini.insert("memory_limit".into(), "1G".into());
@@ -2488,7 +2528,11 @@ mod tests {
             ("memory_limit".to_string(), "256M".to_string()),
             ("max_execution_time".to_string(), "60".to_string()),
         ]);
-        let conf = fpm_conf("8.4", &global, &sites);
+        let cfg = Config {
+            ini: global,
+            ..Config::default()
+        };
+        let conf = fpm_conf(&cfg, "8.4", &sites);
         // www gets the global values; the site pool merges them with its own.
         let site_pool = &conf[conf.find("[site-shop_be]").unwrap()..];
         assert!(site_pool.contains("php_value[max_execution_time] = 60"));

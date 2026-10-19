@@ -616,13 +616,14 @@ pub fn processes(site: &Site, app_pid: Option<u32>) -> Vec<Process> {
             .iter()
             .find(|p| p.command.contains(&conf))
             .map(|p| p.pid);
-        let pool = if site.ini.is_empty() {
-            "pool www".to_string()
+        let own = crate::own_pool(site);
+        let pool = if own {
+            format!("pool {}", crate::pool(site))
         } else {
-            format!("pool site-{}", site.name.replace('.', "_"))
+            "pool www".to_string()
         };
         let (memory, cpu, n) = sum(&|p| Some(p.ppid) == master && p.command.contains(&pool));
-        out.push(if site.ini.is_empty() {
+        out.push(if !own {
             Process {
                 label: format!("PHP {v}, {n} workers shared by all PHP apps"),
                 memory,
@@ -642,7 +643,7 @@ pub fn processes(site: &Site, app_pid: Option<u32>) -> Vec<Process> {
 }
 
 /// Read `KEY=value` pairs from the project's .env.
-fn dotenv(dir: &Path) -> BTreeMap<String, String> {
+pub(crate) fn dotenv(dir: &Path) -> BTreeMap<String, String> {
     std::fs::read_to_string(dir.join(".env"))
         .unwrap_or_default()
         .lines()

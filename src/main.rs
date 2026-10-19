@@ -383,7 +383,7 @@ fn start(cfg: &Config) -> Result<()> {
     let mut server = Server::start(cfg)?;
     let mut apps = apps::Apps::default();
     for site in sites(cfg).iter().filter(|s| s.autostart) {
-        match apps.start(site, &cfg.tld) {
+        match apps.start(site, cfg) {
             Ok(()) => println!(
                 "  {} ({}) on {}",
                 green(&site.name),

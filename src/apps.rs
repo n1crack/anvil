@@ -610,19 +610,29 @@ impl Apps {
 
     /// A one-off script, as a process of the app (key `<site>#<id>`); its end is not a
     /// crash. Its log holds the last run.
-    pub fn run_once(&mut self, site: &Site, script: &crate::processes::Script) -> Result<()> {
+    pub fn run_once(
+        &mut self,
+        site: &Site,
+        script: &crate::processes::Script,
+        cfg: &crate::Config,
+    ) -> Result<()> {
         let key = crate::processes::once_key(&site.name, &script.id);
         if self.running(&key) {
             return Ok(());
         }
-        self.spawn(&key, &site.path, &script.run, crate::processes::env(site))?;
+        self.spawn(
+            &key,
+            &site.path,
+            &script.run,
+            crate::processes::env(cfg, site),
+        )?;
         self.processes.insert(key.clone());
         self.once.insert(key, script.name.clone());
         Ok(())
     }
 
-    /// `tld` lets dev servers that check the Host header (Vite, Nuxt) accept `<name>.<tld>`.
-    pub fn start(&mut self, site: &Site, tld: &str) -> Result<()> {
+    /// `cfg.tld` lets dev servers that check the Host header (Vite, Nuxt) accept `<name>.<tld>`.
+    pub fn start(&mut self, site: &Site, cfg: &crate::Config) -> Result<()> {
         if self.running(&site.name) {
             return Ok(());
         }
@@ -642,6 +652,7 @@ impl Apps {
 
         // app_env: Python's version and uv environment rules on top of the runtime's.
         let mut env = app_env(site, runtime, &version);
+        env.extend(crate::worktrees::env(cfg, site));
         env.extend([
             ("PORT".to_string(), port.to_string()),
             // Best effort: most dev servers honour one of these and stay off the LAN.
@@ -651,24 +662,24 @@ impl Apps {
             // Vite rejects unknown hosts; a leading dot allows every name under the tld.
             (
                 "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),
-                format!(".{tld}"),
+                format!(".{}", cfg.tld),
             ),
         ]);
         self.spawn(&site.name, &site.path, &command, env)
     }
 
-    /// One of an app's other processes (queue, Vite…), see `processes`; `tld` as in `start`.
+    /// One of an app's other processes (queue, Vite…), see `processes`; `cfg` as in `start`.
     pub fn start_process(
         &mut self,
         site: &Site,
         p: &crate::processes::Process,
-        tld: &str,
+        cfg: &crate::Config,
     ) -> Result<()> {
         let key = crate::processes::key(&site.name, &p.id);
         if self.running(&key) {
             return Ok(());
         }
-        self.spawn(&key, &site.path, &p.command, process_env(site, p, tld))?;
+        self.spawn(&key, &site.path, &p.command, process_env(site, p, cfg))?;
         self.processes.insert(key);
         Ok(())
     }
@@ -774,13 +785,13 @@ impl Drop for Apps {
 pub(crate) fn process_env(
     site: &Site,
     p: &crate::processes::Process,
-    tld: &str,
+    cfg: &crate::Config,
 ) -> Vec<(String, String)> {
-    let mut env = crate::processes::env(site);
+    let mut env = crate::processes::env(cfg, site);
     env.extend(p.port.map(|port| ("PORT".to_string(), port.to_string())));
     env.push((
         "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),
-        format!(".{tld}"),
+        format!(".{}", cfg.tld),
     ));
     env
 }
@@ -1119,8 +1130,10 @@ mod tests {
         let mut apps = Apps::in_home(dir.join("home"));
         let site = site_at(&dir);
         let (boom, idle) = (proc("boom", "sh -c 'exit 3'"), proc("docs:dev", "sleep 30"));
-        apps.start_process(&site, &idle, "test").unwrap();
-        apps.start_process(&site, &boom, "test").unwrap();
+        apps.start_process(&site, &idle, &crate::Config::default())
+            .unwrap();
+        apps.start_process(&site, &boom, &crate::Config::default())
+            .unwrap();
         std::thread::sleep(Duration::from_millis(300));
 
         let crashed = apps.crashed();
@@ -1135,7 +1148,8 @@ mod tests {
         assert!(dir.join("home/log/app-shop@docs-dev.log").exists());
 
         // Starting it again clears the record; crashing again leaves exactly one.
-        apps.start_process(&site, &boom, "test").unwrap();
+        apps.start_process(&site, &boom, &crate::Config::default())
+            .unwrap();
         assert!(!apps.exits.contains_key("shop@boom"));
         std::thread::sleep(Duration::from_millis(300));
         assert_eq!(apps.crashed().len(), 1);
@@ -1154,13 +1168,13 @@ mod tests {
         let mut apps = Apps::in_home(dir.join("home"));
         let site = site_at(&dir);
         // Neither id is detected in `dir` (no package.json, no .anvil.toml).
-        apps.start_process(&site, &proc("gone", "sleep 30"), "test")
+        apps.start_process(&site, &proc("gone", "sleep 30"), &crate::Config::default())
             .unwrap();
-        apps.start_process(&site, &proc("boom", "exit 2"), "test")
+        apps.start_process(&site, &proc("boom", "exit 2"), &crate::Config::default())
             .unwrap();
         let mut other = site_at(&dir);
         other.name = "shopping".into();
-        apps.start_process(&other, &proc("w", "sleep 30"), "test")
+        apps.start_process(&other, &proc("w", "sleep 30"), &crate::Config::default())
             .unwrap();
         std::thread::sleep(Duration::from_millis(300));
         assert_eq!(apps.process_keys("shop"), ["shop@boom", "shop@gone"]);
@@ -1194,10 +1208,12 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(20));
             }
         };
-        apps.start_process(&site, &p, "test").unwrap();
+        apps.start_process(&site, &p, &crate::Config::default())
+            .unwrap();
         wait_for("run");
         apps.stop("shop@env");
-        apps.start_process(&site, &p, "test").unwrap();
+        apps.start_process(&site, &p, &crate::Config::default())
+            .unwrap();
         wait_for("run");
         std::thread::sleep(Duration::from_millis(100));
         // Only the second run's output, with the color variables set.
@@ -1286,7 +1302,8 @@ mod tests {
             source: "package.json",
             run: "npm run build:all".into(),
         };
-        apps.run_once(&site, &script).unwrap();
+        apps.run_once(&site, &script, &crate::Config::default())
+            .unwrap();
         assert!(apps.processes.contains("shop#build-all"));
         // The Processes window shows the script, not its id.
         assert_eq!(apps.once_name("shop#build-all"), Some("build:all"));
@@ -1305,8 +1322,12 @@ mod tests {
         let mut apps = Apps::in_home(dir.join("home"));
         let site = site_at(&dir);
         let size = |apps: &mut Apps, id: &str| {
-            apps.start_process(&site, &proc(id, "echo $COLUMNS $LINES"), "test")
-                .unwrap();
+            apps.start_process(
+                &site,
+                &proc(id, "echo $COLUMNS $LINES"),
+                &crate::Config::default(),
+            )
+            .unwrap();
             let key = crate::processes::key(&site.name, id);
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             while apps.running(&key) {
