@@ -586,7 +586,8 @@ pub fn leftovers(cfg: &Config, sites: &[Site]) -> Vec<Leftover> {
 
 /// Remove a worktree: its folder (`git worktree remove`) and, with `drop_db`, the databases
 /// recorded for it. Refuses uncommitted changes and unpushed commits unless `force`. Its
-/// processes are stopped by the caller first. Changes `cfg` only; the caller saves it.
+/// processes are stopped by the caller first. Changes `cfg` only: the caller saves it after Ok and after Err alike (a failed
+/// drop has already removed the records of the databases that were dropped).
 pub fn remove(cfg: &mut Config, site: &Site, drop_db: bool, force: bool) -> anyhow::Result<()> {
     remove_with(cfg, site, drop_db, force, &mut |c, id, db| {
         crate::databases::drop_database(c, id, db)
@@ -603,7 +604,13 @@ fn remove_with(
     let Some(main) = main_of(&site.path) else {
         anyhow::bail!("{} isn't a git worktree", site.path.display());
     };
-    if !force && let Some(info) = crate::git::info(&site.path) {
+    if !force {
+        let Some(info) = crate::git::info(&site.path) else {
+            anyhow::bail!(
+                "Anvil couldn't check {} for uncommitted changes or unpushed commits",
+                site.name
+            );
+        };
         if info.changed > 0 {
             let n = info.changed;
             anyhow::bail!(
@@ -616,6 +623,26 @@ fn remove_with(
             anyhow::bail!("{} has {} unpushed commits", site.name, info.ahead);
         }
     }
+    // Databases first: a failed drop leaves the folder, so nothing is half gone.
+    if drop_db && let Some(w) = cfg.worktrees.get(&site.name).cloned() {
+        let mut left = Vec::new();
+        let mut failed = None;
+        for copy in w.copies {
+            if failed.is_none() {
+                match drop(cfg, &copy.0, &copy.1) {
+                    Ok(()) => continue,
+                    Err(e) => failed = Some(e),
+                }
+            }
+            left.push(copy);
+        }
+        if let Some(w) = cfg.worktrees.get_mut(&site.name) {
+            w.copies = left;
+        }
+        if let Some(e) = failed {
+            return Err(e);
+        }
+    }
     let mut cmd = std::process::Command::new("git");
     cmd.arg("-C").arg(&main).args(["worktree", "remove"]);
     if force {
@@ -625,26 +652,12 @@ fn remove_with(
     if !out.status.success() {
         anyhow::bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
     }
-    if let Some(w) = cfg.worktrees.get(&site.name).cloned() {
-        let mut left = Vec::new();
-        let mut failed = None;
-        for copy in w.copies {
-            if drop_db && failed.is_none() {
-                match drop(cfg, &copy.0, &copy.1) {
-                    Ok(()) => continue,
-                    Err(e) => failed = Some(e),
-                }
-            }
-            left.push(copy);
-        }
-        if left.is_empty() {
-            cfg.worktrees.remove(&site.name);
-        } else if let Some(w) = cfg.worktrees.get_mut(&site.name) {
-            w.copies = left;
-        }
-        if let Some(e) = failed {
-            return Err(e);
-        }
+    if cfg
+        .worktrees
+        .get(&site.name)
+        .is_some_and(|w| w.copies.is_empty())
+    {
+        cfg.worktrees.remove(&site.name);
     }
     Ok(())
 }
@@ -1219,5 +1232,38 @@ pub(crate) mod tests {
         assert!(!site.path.exists());
         // The copy stays on record, as a leftover.
         assert_eq!(leftovers(&cfg, &[]).len(), 1);
+    }
+
+    #[test]
+    fn a_failing_drop_leaves_the_folder_and_the_other_records() {
+        let (mut cfg, site) = worktree_site("remove-fail", "");
+        recorded(&mut cfg, &site);
+        cfg.worktrees
+            .get_mut(&site.name)
+            .unwrap()
+            .copies
+            .push(("postgres-x".into(), "other".into()));
+        let mut drop = |_: &Config, _: &str, db: &str| {
+            if db == "other" {
+                anyhow::bail!("server down")
+            }
+            Ok(())
+        };
+        assert!(remove_with(&mut cfg, &site, true, false, &mut drop).is_err());
+        assert!(site.path.exists());
+        assert_eq!(cfg.worktrees[&site.name].copies.len(), 1);
+        assert_eq!(cfg.worktrees[&site.name].copies[0].1, "other");
+    }
+
+    #[test]
+    fn remove_fails_closed_when_git_cant_say() {
+        let (mut cfg, site) = worktree_site("remove-closed", "");
+        // main_of still works, but git status fails: break its HEAD.
+        let git_dir = crate::git::git_dir(&site.path).unwrap();
+        fs::write(git_dir.join("HEAD"), "garbage").unwrap();
+        let mut never = |_: &Config, _: &str, _: &str| panic!("dropped");
+        let e = remove_with(&mut cfg, &site, true, false, &mut never).unwrap_err();
+        assert!(e.to_string().contains("couldn't check"), "{e}");
+        assert!(site.path.exists());
     }
 }

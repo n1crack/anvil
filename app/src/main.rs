@@ -351,6 +351,7 @@ fn state(app: State<App>) -> Res<Snapshot> {
 #[tauri::command(async)]
 fn refresh(handle: AppHandle, app: State<App>) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
+    stop_vanished(&app, &cfg);
     if running(&app) && anvil::needs_restart(&cfg) {
         start(&app, &cfg);
         changed(&handle);
@@ -387,6 +388,7 @@ fn set_php(
 
 /// Sites changed on disk config: re-serve if running, then refresh everything.
 fn sites_changed(handle: &AppHandle, app: &App, cfg: &Config) {
+    stop_vanished(app, cfg);
     if running(app) {
         start(app, cfg);
     }
@@ -1330,6 +1332,15 @@ fn stop_app(app: &App, key: &str) {
     let stopping = anvil::lock(&app.apps).take(key);
     if let Some(s) = stopping {
         s.wait(anvil::apps::GRACE);
+    }
+}
+
+/// Stop what runs for a site that is gone (a worktree removed outside Anvil), all at once
+/// and without keeping `apps` locked while it shuts down.
+fn stop_vanished(app: &App, cfg: &Config) {
+    let stopping = anvil::lock(&app.apps).take_vanished(&anvil::sites(cfg));
+    if !stopping.is_empty() {
+        anvil::stop_all(stopping, anvil::apps::GRACE);
     }
 }
 
@@ -3422,6 +3433,10 @@ fn main() {
                             }
                             let crashed = anvil::lock(&state.apps).crashed();
                             notify_crashes(&watch, &new_crashes(&mut seen, crashed));
+                            // A worktree deleted in a terminal: its processes stop even with the window hidden.
+                            if let Ok(cfg) = anvil::load() {
+                                stop_vanished(&state, &cfg);
+                            }
                         }
                     });
                     for id in anvil::services::enabled(&cfg) {
@@ -3432,6 +3447,7 @@ fn main() {
                     }
                     autostart_processes(&state, &cfg);
                     restore_processes(&state, &cfg, &take_keys(&restore_file()));
+                    stop_vanished(&state, &cfg);
                     changed(&handle);
                 });
             }
