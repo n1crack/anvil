@@ -115,13 +115,13 @@ pub const PRESETS: [(&str, &str, &[&str]); 8] = [
 const SHIPPED: &str = r#"
 [laravel]
 copy = [".env"]
-check = ["DB_DATABASE", "DB_URL", "DATABASE_URL", "REDIS_PREFIX", "CACHE_PREFIX", "SESSION_COOKIE"]
+check = ["DB_DATABASE", "DB_URL", "DATABASE_URL", "REDIS_PREFIX", "CACHE_PREFIX"]
 after_create = ["composer install", "{install}", "php artisan migrate"]
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", APP_URL = "{url}", REDIS_PREFIX = "{prefix}", CACHE_PREFIX = "{prefix}" }
 
 [statamic]
 copy = [".env"]
-check = ["DB_DATABASE", "DB_URL", "DATABASE_URL", "REDIS_PREFIX", "CACHE_PREFIX", "SESSION_COOKIE"]
+check = ["DB_DATABASE", "DB_URL", "DATABASE_URL", "REDIS_PREFIX", "CACHE_PREFIX"]
 after_create = ["composer install", "{install}", "php artisan migrate"]
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", APP_URL = "{url}", REDIS_PREFIX = "{prefix}", CACHE_PREFIX = "{prefix}" }
 
@@ -3480,14 +3480,14 @@ pub(crate) mod tests {
         let (cfg, site) = worktree_site("rewrite", dotenv);
         assert!(rewrite(&cfg, &site).is_err(), "no .env to rewrite");
         fs::write(site.path.join(".env"), dotenv).unwrap();
-        assert_eq!(same_as_main(&cfg, &site), ["DB_DATABASE", "SESSION_COOKIE"]);
+        assert_eq!(same_as_main(&cfg, &site), ["DB_DATABASE"]);
         rewrite(&cfg, &site).unwrap();
         assert_eq!(
             fs::read_to_string(site.path.join(".env")).unwrap(),
             "APP_NAME=Shop\nDB_CONNECTION=pgsql\nDB_DATABASE=shop_feature_x\nSESSION_COOKIE=s\nREDIS_PREFIX=shop_feature_x_\nAPP_URL=http://shop--feature-x.test\nCACHE_PREFIX=shop_feature_x_\n"
         );
-        // SESSION_COOKIE isn't one of the keys: still main's.
-        assert_eq!(same_as_main(&cfg, &site), ["SESSION_COOKIE"]);
+        // Rewritten: nothing of main's left to warn about (a cookie belongs to its host anyway).
+        assert!(same_as_main(&cfg, &site).is_empty());
     }
 
     #[test]
