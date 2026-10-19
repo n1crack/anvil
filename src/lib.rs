@@ -1741,6 +1741,7 @@ mod tests {
     /// The admin path without the password dialog: quotes, `$`, backslashes and
     /// newlines in the script and the prompt arrive untouched.
     #[test]
+    #[cfg(target_os = "macos")] // osascript / plutil
     fn a_setup_script_runs_from_its_file_as_written() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("it's \"out\"");
@@ -2017,6 +2018,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")] // osascript / plutil
     fn ports_daemon_forwards_loopback_only() {
         let (file, plist) = ports_daemon(&Config::default());
         assert_eq!(
