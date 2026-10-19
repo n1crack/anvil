@@ -667,7 +667,10 @@ fn main() -> ExitCode {
 fn shim(tool: &std::ffi::OsStr, args: impl Iterator<Item = std::ffi::OsString>) -> Result<()> {
     use std::os::unix::process::CommandExt;
     let tool = tool.to_string_lossy();
-    let (program, pre, env) = shims::resolve(&tool, &std::env::current_dir()?, &load()?)?;
+    let args: Vec<std::ffi::OsString> = args.collect();
+    let words: Vec<String> = args.iter().map(|a| a.to_string_lossy().into()).collect();
+    let cwd = std::env::current_dir()?;
+    let (program, pre, env) = shims::resolve_run(&tool, &words, &cwd, &load()?, true)?;
     let e = Command::new(&program).args(pre).args(args).envs(env).exec();
     Err(e).with_context(|| format!("couldn't run {}", program.display()))
 }

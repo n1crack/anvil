@@ -53,31 +53,33 @@ pub fn info(dir: &Path) -> Option<GitInfo> {
     Some(info)
 }
 
-fn spawn(dir: &Path, args: &[&str]) -> std::io::Result<std::process::Child> {
-    #[cfg(test)]
-    SPAWNS.with(|c| c.set(c.get() + 1));
-    Command::new("git")
-        // A repo's own config could otherwise run a program (fsmonitor) on status.
-        .args(["-c", "core.fsmonitor=false"])
+/// git in `dir`, hardened: a repo's own config could otherwise run a program
+/// (fsmonitor), and it never waits on a prompt.
+fn command(dir: &Path) -> Command {
+    let mut c = Command::new("git");
+    c.args(["-c", "core.fsmonitor=false"])
         .arg("-C")
         .arg(dir)
-        .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+    c
+}
+
+fn spawn(dir: &Path, args: &[&str]) -> std::io::Result<std::process::Child> {
+    command(dir)
+        .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
 }
 
-#[cfg(test)]
-thread_local!(pub(crate) static SPAWNS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) });
-
-/// Stdout of one git command, `None` when git is missing or the command fails.
-pub(crate) fn git(dir: &Path, args: &[&str]) -> Option<String> {
-    let out = spawn(dir, args).ok()?.wait_with_output().ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+/// One git command: its stdout, or what it printed on stderr as the error.
+pub(crate) fn run<S: AsRef<std::ffi::OsStr>>(dir: &Path, args: &[S]) -> anyhow::Result<String> {
+    let out = command(dir).args(args).output()?;
+    if !out.status.success() {
+        anyhow::bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// The repository folder: `.git` itself, or where a `.git` file points to.

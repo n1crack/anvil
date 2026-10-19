@@ -108,11 +108,27 @@ pub fn resolve(tool: &str, cwd: &Path, cfg: &Config) -> Result<Resolved> {
 }
 
 pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result<Resolved> {
+    resolve_run(tool, &[], cwd, cfg, fetch)
+}
+
+/// `resolve` for a shim run with `args`: a test run (`artisan test`, PHPUnit, Pest,
+/// ParaTest) in a worktree whose test config names its own database keeps that one.
+pub fn resolve_run(
+    tool: &str,
+    args: &[String],
+    cwd: &Path,
+    cfg: &Config,
+    fetch: bool,
+) -> Result<Resolved> {
     let all = sites(cfg);
     let site = site_for(&all, cwd);
     // First: a worktree Anvil can't separate from main runs nothing, whatever the tool.
-    let extra = extra_env(cfg, site)?;
-    if fetch && let Some(s) = site.filter(|s| s.worktree_of.is_some()) {
+    known_worktree(cfg, site, cwd)?;
+    let (extra, own_tests) = extra_env(cfg, site, tool, args)?;
+    if fetch
+        && !own_tests
+        && let Some(s) = site.filter(|s| s.worktree_of.is_some())
+    {
         // Its own database on first use, as a Start would; the line shows while it's made.
         // Refused when that fails: never run against a missing or half-made database.
         crate::worktrees::prepare(&mut crate::load()?, s, &mut |line| eprintln!("{line}"))?;
@@ -122,12 +138,99 @@ pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result
     Ok(r)
 }
 
-/// A worktree's own database and prefixes (`worktrees::env`), so a terminal `php artisan migrate` stays off the main app's.
-fn extra_env(cfg: &Config, site: Option<&Site>) -> Result<Vec<(String, String)>> {
-    Ok(match site {
-        Some(s) => crate::worktrees::checked_env(cfg, s)?,
-        None => Vec::new(),
-    })
+/// `php artisan test`, `php vendor/bin/phpunit` (or pest, paratest; `./vendor/bin/pest`
+/// reaches the shim the same way, through its `#!/usr/bin/env php`).
+fn is_test_run(tool: &str, args: &[String]) -> bool {
+    if tool != "php" {
+        return false;
+    }
+    let mut words = args.iter().map(String::as_str);
+    let mut script = None;
+    while let Some(w) = words.next() {
+        match w {
+            "-d" | "-c" => {
+                words.next();
+            }
+            w if w.starts_with('-') => {}
+            w => {
+                script = Some(w);
+                break;
+            }
+        }
+    }
+    let Some(script) = script.map(Path::new) else {
+        return false;
+    };
+    if script.file_name().is_some_and(|n| n == "artisan") {
+        return words.next() == Some("test");
+    }
+    ["phpunit", "pest", "paratest"]
+        .iter()
+        .any(|t| script.ends_with(Path::new("vendor/bin").join(t)))
+}
+
+/// The project's test config names its own database: `<env name="DB_DATABASE" …/>` in
+/// phpunit.xml(.dist) (not commented out), or DB_DATABASE in `.env.testing`.
+fn own_test_db(dir: &Path) -> bool {
+    let in_xml = ["phpunit.xml", "phpunit.xml.dist"].iter().any(|f| {
+        let mut xml = fs::read_to_string(dir.join(f)).unwrap_or_default();
+        while let Some(a) = xml.find("<!--") {
+            let b = xml[a..].find("-->").map_or(xml.len(), |b| a + b + 3);
+            xml.replace_range(a..b, "");
+        }
+        xml.split("<env").skip(1).any(|tag| {
+            let tag = &tag[..tag.find('>').unwrap_or(tag.len())];
+            tag.contains("name=\"DB_DATABASE\"") || tag.contains("name='DB_DATABASE'")
+        })
+    });
+    in_xml
+        || crate::resources::dotenv_file(&dir.join(".env.testing"))
+            .get("DB_DATABASE")
+            .is_some_and(|v| !v.is_empty())
+}
+
+/// Refuses a folder in a git worktree of an Anvil app (a hidden one too) that isn't
+/// that worktree's site: it would run with no worktree env, on main's database.
+fn known_worktree(cfg: &Config, site: Option<&Site>, cwd: &Path) -> Result<()> {
+    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let Some(root) = cwd.ancestors().find(|d| d.join(".git").exists()) else {
+        return Ok(());
+    };
+    let Some(main) = crate::worktrees::main_of(root) else {
+        return Ok(()); // not a linked worktree
+    };
+    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    if site.is_some_and(|s| real(&s.path).starts_with(root)) {
+        return Ok(());
+    }
+    if crate::app_folders(cfg).contains(&main) {
+        bail!(
+            "Anvil can't tell which worktree {} is: it belongs to {} but isn't one of its worktrees in Anvil",
+            root.display(),
+            main.display()
+        );
+    }
+    Ok(())
+}
+
+/// A worktree's own database and prefixes (`worktrees::env`), so a terminal `php artisan
+/// migrate` stays off the main app's; `true` when a test run keeps its own test database.
+fn extra_env(
+    cfg: &Config,
+    site: Option<&Site>,
+    tool: &str,
+    args: &[String],
+) -> Result<(Vec<(String, String)>, bool)> {
+    let Some(s) = site else {
+        return Ok((Vec::new(), false));
+    };
+    let mut env = crate::worktrees::checked_env(cfg, s)?;
+    let own_tests = s.worktree_of.is_some() && is_test_run(tool, args) && own_test_db(&s.path);
+    if own_tests {
+        // PHPUnit's <env> and .env.testing don't replace a variable that is set already.
+        env.retain(|(k, _)| !matches!(k.as_str(), "DB_DATABASE" | "DB_URL" | "DATABASE_URL"));
+    }
+    Ok((env, own_tests))
 }
 
 fn resolve_for(
@@ -455,13 +558,93 @@ mod tests {
         let all = sites(&cfg);
         let site = site_for(&all, &wt.join("app")).expect("the worktree's site");
         assert_eq!(site.name, "shop--feature-x");
-        assert!(has_db(&extra_env(&cfg, Some(site)).unwrap()));
-        assert!(extra_env(&cfg, site_for(&all, &shop)).unwrap().is_empty());
+        let extra = |s, args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+            extra_env(&cfg, s, "php", &args).unwrap()
+        };
+        assert!(has_db(&extra(Some(site), &["artisan", "migrate"]).0));
+        assert!(extra(site_for(&all, &shop), &[]).0.is_empty());
+        // A test run keeps the database its own test config names; the prefixes stay.
+        assert!(
+            has_db(&extra(Some(site), &["artisan", "test"]).0),
+            "no test config yet"
+        );
+        fs::write(
+            wt.join("phpunit.xml"),
+            r#"<phpunit><php><env name="DB_DATABASE" value=":memory:"/></php></phpunit>"#,
+        )
+        .unwrap();
+        let (env, own) = extra(Some(site), &["artisan", "test"]);
+        assert!(own && !has_db(&env));
+        assert!(env.iter().any(|(k, _)| k == "REDIS_PREFIX"));
+        assert!(has_db(&extra(Some(site), &["artisan", "migrate:fresh"]).0));
         // Through the real shim when this machine has an Anvil PHP (CI has none).
         if !installed_php().is_empty() {
             let (_, _, env) = resolve_with("php", &wt.join("app"), &cfg, false).unwrap();
             assert!(has_db(&env), "{env:?}");
         }
+    }
+
+    #[test]
+    fn test_runs_and_their_own_test_database() {
+        let run = |args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+            is_test_run("php", &args)
+        };
+        assert!(run(&["artisan", "test", "--parallel"]));
+        assert!(run(&["-d", "memory_limit=1G", "artisan", "test"]));
+        assert!(run(&["vendor/bin/phpunit"]));
+        assert!(run(&["./vendor/bin/pest", "--filter", "x"]));
+        assert!(run(&["/w/shop/vendor/bin/paratest"]));
+        assert!(!run(&["artisan", "migrate"]));
+        assert!(!run(&["artisan"]));
+        assert!(!run(&["vendor/bin/phpstan"]));
+        assert!(!is_test_run("composer", &["test".into()]));
+
+        let d = crate::worktrees::tests::tmp("testdb");
+        assert!(!own_test_db(&d));
+        // Laravel's own phpunit.xml ships the line commented out.
+        let xml = "<php>\n<!-- <env name=\"DB_DATABASE\" value=\":memory:\"/> -->\n<env name=\"APP_ENV\" value=\"testing\"/>\n</php>";
+        fs::write(d.join("phpunit.xml"), xml).unwrap();
+        assert!(!own_test_db(&d));
+        fs::write(
+            d.join("phpunit.xml.dist"),
+            "<env name='DB_DATABASE' value='t'/>",
+        )
+        .unwrap();
+        assert!(own_test_db(&d));
+        fs::remove_file(d.join("phpunit.xml.dist")).unwrap();
+        fs::write(d.join(".env.testing"), "DB_DATABASE=shop_testing\n").unwrap();
+        assert!(own_test_db(&d));
+    }
+
+    #[test]
+    fn shims_refuse_a_worktree_of_a_hidden_app() {
+        use crate::worktrees::tests::{git, tmp};
+        let root = tmp("shims-hidden");
+        let shop = root.join("shop");
+        fs::create_dir(&shop).unwrap();
+        git(&shop, &["init", "-q", "-b", "main"]);
+        git(&shop, &["commit", "-q", "--allow-empty", "-m", "i"]);
+        let wt = shop.join(".claude/worktrees/agent");
+        git(
+            &shop,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "a"],
+        );
+        let mut cfg = Config::default();
+        cfg.paths.push(root);
+        cfg.hidden.push("shop".into());
+        let all = sites(&cfg);
+        let e = known_worktree(&cfg, site_for(&all, &wt), &wt).unwrap_err();
+        assert!(
+            e.to_string().starts_with("Anvil can't tell which worktree"),
+            "{e}"
+        );
+        // Its main checkout itself, and a folder in no worktree, are fine.
+        assert!(known_worktree(&cfg, None, &shop).is_ok());
+        cfg.hidden.clear();
+        let all = sites(&cfg);
+        assert!(known_worktree(&cfg, site_for(&all, &wt), &wt).is_ok());
     }
 
     #[test]

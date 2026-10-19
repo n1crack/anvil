@@ -441,6 +441,17 @@ pub fn site_name_clashes(cfg: &Config) -> Vec<String> {
     parked(cfg).1
 }
 
+/// Every app's folder (canonical), hidden ones too.
+pub(crate) fn app_folders(cfg: &Config) -> BTreeSet<PathBuf> {
+    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    parked(cfg)
+        .0
+        .into_values()
+        .map(|(p, _)| real(&p))
+        .chain(cfg.links.values().map(|p| real(p)))
+        .collect()
+}
+
 pub fn sites(cfg: &Config) -> Vec<Site> {
     let mut found: BTreeMap<String, (PathBuf, Option<PathBuf>)> = parked(cfg)
         .0
@@ -451,13 +462,15 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     for (name, path) in &cfg.links {
         found.insert(name.clone(), (path.clone(), None));
     }
-    // The git worktrees of each app; an alias (a link to a parked app's folder) is the
-    // same app. A worktree deleted by hand counts as removed, though git still lists it.
+    // The git worktrees of each app, read from the repository's files (git may be broken
+    // or missing); an alias (a link to a parked app's folder) is the same app. A worktree
+    // deleted by hand counts as removed.
+    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let mut seen = BTreeSet::new();
     let mut mains = vec![];
     let parked_first = found.iter().filter(|(_, (_, d))| d.is_some());
     for (name, (path, _)) in parked_first.chain(found.iter().filter(|(_, (_, d))| d.is_none())) {
-        if seen.insert(path) {
+        if seen.insert(real(path)) {
             let mut list = worktrees::list(path);
             list.retain(|w| !w.prunable && w.path.exists());
             if !list.is_empty() {
@@ -465,17 +478,26 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             }
         }
     }
-    // A parked folder that is one of those worktrees is listed under its app only.
-    let worktree_paths: BTreeSet<&Path> = mains
+    let worktree_paths: BTreeSet<PathBuf> = mains
         .iter()
-        .flat_map(|(_, _, l)| l.iter().map(|w| w.path.as_path()))
+        .flat_map(|(_, _, l)| l.iter().map(|w| w.path.clone()))
         .collect();
-    if !worktree_paths.is_empty() {
-        found.retain(|_, (path, dir)| {
-            dir.is_none()
-                || !fs::canonicalize(path).is_ok_and(|p| worktree_paths.contains(p.as_path()))
-        });
-    }
+    // Every app's folder, hidden ones too: a folder that is a worktree of one of them is
+    // never an app of its own (that would run on main's database). A hidden app's
+    // worktrees are hidden with it.
+    let app_paths = app_folders(cfg);
+    // A link pointing straight at a worktree folder is that worktree, at one more address.
+    let mut linked_to: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
+    found.retain(|name, (path, dir)| {
+        let p = real(path);
+        if worktree_paths.contains(&p) {
+            if dir.is_none() {
+                linked_to.entry(p).or_default().push(name.clone());
+            }
+            return false;
+        }
+        !worktrees::main_of(&p).is_some_and(|m| app_paths.contains(&m))
+    });
     let installed = installed_php();
     let mut sites: Vec<Site> = found
         .into_iter()
@@ -493,7 +515,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
         let aliases: Vec<&String> = cfg
             .links
             .iter()
-            .filter(|(n, p)| *p == main_path && *n != main)
+            .filter(|(n, p)| real(p) == real(main_path) && *n != main)
             .map(|(n, _)| n)
             .collect();
         // The extra dev servers of the app and its aliases keep their `<app>--<row>` names.
@@ -510,11 +532,11 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
         for w in list {
             let base = worktrees::worktree_name(main, &w.path);
             let (mut label, mut n) = (base.clone(), 2);
-            while taken.contains(&worktrees::joined(main, &label)) {
+            while taken.contains(&worktrees::capped(main, &label)) {
                 label = format!("{base}-{n}");
                 n += 1;
             }
-            let name = worktrees::joined(main, &label);
+            let name = worktrees::capped(main, &label);
             taken.insert(name.clone());
             let own = worktree_settings(cfg, main, &name);
             let mut site = site_at(cfg, &installed, name, w.path.clone(), None, Some(&own));
@@ -523,9 +545,14 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
             site.branch = w.branch.clone();
             // A derived alias address another app, dev server or worktree has is left out.
             for a in &aliases {
-                let host = worktrees::joined(a, &label);
+                let host = worktrees::capped(a, &label);
                 if taken.insert(host.clone()) {
                     site.aliases.push(format!("{host}{tld}"));
+                }
+            }
+            for n in linked_to.get(&w.path).into_iter().flatten() {
+                if taken.insert(n.clone()) {
+                    site.aliases.push(format!("{n}{tld}"));
                 }
             }
             sites.push(site);
@@ -1046,7 +1073,19 @@ fn fpm_socket(site: &Site) -> Option<PathBuf> {
     } else {
         format!("php-{v}")
     };
-    Some(home().join("run").join(format!("{name}.sock")))
+    let sock = home().join("run").join(format!("{name}.sock"));
+    // macOS keeps a socket path in 104 bytes; a longer one would stop PHP-FPM for every
+    // site of the version. Such a pool listens on a (shorter) hashed name instead.
+    let short = home()
+        .join("run")
+        .join(format!("site-{}.sock", short_hash(&name)));
+    if own_pool(site)
+        && sock.as_os_str().len() > 100
+        && short.as_os_str().len() < sock.as_os_str().len()
+    {
+        return Some(short);
+    }
+    Some(sock)
 }
 
 /// PHP-FPM config for one version: the shared pool plus one pool per customised site.
@@ -1174,22 +1213,47 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             .collect();
         list.join(", ")
     };
-    for site in sites {
-        // Containers answer on their own ports; a plain folder has nothing to serve.
-        if !apps::serves(&site.kind) {
-            continue;
+    // Caddy refuses a whole Caddyfile that has one address twice, so each host goes to one
+    // block: sites (with their aliases) first, then dev-server rows, then old-host redirects.
+    let mut used = BTreeSet::new();
+    let mut claim = |n: &String| {
+        let fresh = used.insert(n.clone());
+        if !fresh {
+            static SAID: std::sync::Mutex<BTreeSet<String>> =
+                std::sync::Mutex::new(BTreeSet::new());
+            if lock(&SAID).insert(n.clone()) {
+                eprintln!("Anvil: {n} is another site's address; left out");
+            }
         }
-        let mut names = vec![format!("{}.{}", site.name, cfg.tld)];
-        names.extend(site.aliases.iter().cloned());
-        if let (true, Some(port)) = (apps::runs_process(&site.kind), site.port) {
+        fresh
+    };
+    let own: Vec<Vec<String>> = sites
+        .iter()
+        .map(|site| {
+            // Containers answer on their own ports; a plain folder has nothing to serve.
+            if !apps::serves(&site.kind) {
+                return vec![];
+            }
+            let mut names = vec![format!("{}.{}", site.name, cfg.tld)];
+            names.extend(site.aliases.iter().cloned());
             // Dev servers that only trust localhost (Next.js) work at <name>.localhost too.
-            if cfg.tld != "localhost" {
+            if apps::runs_process(&site.kind) && site.port.is_some() && cfg.tld != "localhost" {
                 names.push(format!("{}.localhost", site.name));
                 for a in &site.aliases {
                     let stem = a.strip_suffix(&format!(".{}", cfg.tld)).unwrap_or(a);
                     names.push(format!("{stem}.localhost"));
                 }
             }
+            names.retain(&mut claim);
+            names
+        })
+        .collect();
+    let mut old_hosts = vec![];
+    for (site, names) in sites.iter().zip(own) {
+        if names.is_empty() {
+            continue;
+        }
+        if let (true, Some(port)) = (apps::runs_process(&site.kind), site.port) {
             s += &format!(
                 "\n{} {{\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
                 addresses(site, &names),
@@ -1205,6 +1269,11 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
                     let stem = row.host.strip_suffix(&format!(".{}", cfg.tld));
                     names.push(format!("{}.localhost", stem.unwrap_or(&row.host)));
                 }
+                // A site of that name keeps it (the spec's order: the app wins).
+                names.retain(&mut claim);
+                if names.is_empty() {
+                    continue;
+                }
                 s += &format!(
                     "\n{} {{\n\treverse_proxy 127.0.0.1:{}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
                     addresses(site, &names),
@@ -1214,24 +1283,9 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
                 if site.secure {
                     s += &redirect(&names);
                 }
-                // ponytail: remove the old-host redirect one release after 0.2
-                if site.worktree_of.is_some() {
-                    continue; // never had an old host
-                }
-                let to = site_url(
-                    cfg,
-                    &Site {
-                        host: row.host.clone(),
-                        ..site.clone()
-                    },
-                );
-                let old = row.old_host;
-                let mut from = vec![addresses(site, std::slice::from_ref(&old))];
-                if site.secure {
-                    from.push(format!("http://{old}"));
-                }
-                for n in from {
-                    s += &format!("\n{n} {{\n\tredir {to}{{uri}} 308\n}}\n");
+                if site.worktree_of.is_none() {
+                    // A worktree never had an old host.
+                    old_hosts.push((site, row));
                 }
             }
             continue;
@@ -1272,6 +1326,27 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         s += "\tfile_server {\n\t\thide .*\n\t}\n}\n";
         if site.secure {
             s += &redirect(&names);
+        }
+    }
+    // ponytail: remove the old-host redirect one release after 0.2
+    for (site, row) in old_hosts {
+        let old = row.old_host;
+        if !claim(&old) {
+            continue;
+        }
+        let to = site_url(
+            cfg,
+            &Site {
+                host: row.host.clone(),
+                ..site.clone()
+            },
+        );
+        let mut from = vec![addresses(site, std::slice::from_ref(&old))];
+        if site.secure {
+            from.push(format!("http://{old}"));
+        }
+        for n in from {
+            s += &format!("\n{n} {{\n\tredir {to}{{uri}} 308\n}}\n");
         }
     }
     s
@@ -2202,6 +2277,108 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// `shop` parked in `<root>/sites` with a worktree `<root>/sites/shop--x`.
+    fn parked_worktree(tag: &str) -> (PathBuf, Config) {
+        let root = crate::worktrees::tests::tmp(tag);
+        let shop = root.join("sites/shop");
+        app_repo(&shop);
+        add_worktree(&shop, &root.join("sites/shop--x"), "x");
+        let mut cfg = Config::default();
+        cfg.paths.push(root.join("sites"));
+        (root, cfg)
+    }
+
+    #[test]
+    fn without_git_a_parked_worktree_folder_is_still_its_apps() {
+        let (root, _) = parked_worktree("no-git");
+        // The check runs in a test process whose PATH has no git at all.
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::no_git_child",
+                "--ignored",
+                "--test-threads=1",
+            ])
+            .env("PATH", "/nonexistent")
+            .env("ANVIL_NO_GIT_ROOT", &root)
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success() && text.contains("1 passed"), "{text}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "run by without_git_a_parked_worktree_folder_is_still_its_apps"]
+    fn no_git_child() {
+        assert!(
+            std::process::Command::new("git").output().is_err(),
+            "git is gone"
+        );
+        let root = PathBuf::from(std::env::var_os("ANVIL_NO_GIT_ROOT").unwrap());
+        let mut cfg = Config::default();
+        cfg.paths.push(root.join("sites"));
+        let all = sites(&cfg);
+        let x = all.iter().find(|s| s.path.ends_with("shop--x")).unwrap();
+        assert_eq!(x.worktree_of.as_deref(), Some("shop"));
+        assert_eq!(x.branch.as_deref(), Some("x"));
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn a_hidden_apps_worktrees_are_hidden_with_it() {
+        let (root, mut cfg) = parked_worktree("hidden-main");
+        cfg.hidden.push("shop".into());
+        assert!(sites(&cfg).is_empty(), "not a plain app on shop's database");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_link_to_a_worktree_folder_is_that_worktree() {
+        let (root, mut cfg) = parked_worktree("link-wt");
+        cfg.links.insert("demo".into(), root.join("sites/shop--x"));
+        let all = sites(&cfg);
+        assert_eq!(
+            all.len(),
+            2,
+            "{:?}",
+            all.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+        let x = all.iter().find(|s| s.name == "shop--x").unwrap();
+        assert_eq!(x.worktree_of.as_deref(), Some("shop"));
+        assert_eq!(x.aliases, ["demo.test"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_moved_worktree_of_an_app_is_not_an_app() {
+        let (root, cfg) = parked_worktree("moved");
+        // Moved by hand: git's record points at the old place, its `.git` still at shop.
+        fs::rename(root.join("sites/shop--x"), root.join("sites/moved")).unwrap();
+        let names: Vec<_> = sites(&cfg).into_iter().map(|s| s.name).collect();
+        assert_eq!(names, ["shop"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_long_worktree_name_is_capped_and_its_socket_fits() {
+        let root = crate::worktrees::tests::tmp("long-name");
+        let shop = root.join("sites/shop");
+        app_repo(&shop);
+        add_worktree(&shop, &root.join("sites").join("w".repeat(90)), "long");
+        let mut cfg = Config::default();
+        cfg.paths.push(root.join("sites"));
+        let all = sites(&cfg);
+        let w = all.iter().find(|s| s.worktree_of.is_some()).unwrap();
+        assert_eq!(w.name.len(), 63);
+        let mut php = w.clone();
+        php.php = Some("8.4".into());
+        let sock = fpm_socket(&php).unwrap();
+        assert!(sock.as_os_str().len() <= 100, "{}", sock.display());
+        assert_eq!(fpm_socket(&php), Some(sock), "stable");
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn a_worktree_without_an_anvil_main_stays_an_app() {
         let root = crate::worktrees::tests::tmp("no-main");
@@ -2788,6 +2965,79 @@ mod tests {
             )));
         }
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Every address of a Caddyfile, once per block it opens.
+    fn addresses_of(caddy: &str) -> Vec<String> {
+        caddy
+            .lines()
+            .filter(|l| l.ends_with(" {") && !l.starts_with(['\t', ' ']))
+            .flat_map(|l| l.trim_end_matches(" {").split(", ").map(String::from))
+            .collect()
+    }
+
+    #[test]
+    fn caddyfile_never_has_one_host_twice() {
+        let cfg = Config::default();
+        let plain = |name: &str| {
+            let mut s = site(name, "/s/plain", None);
+            s.kind = "static".into();
+            s
+        };
+        // An app folder named like a dev-server row; a worktree's own row next to a
+        // worktree of that name; an alias named like an old row host.
+        let (d1, vf) = vite_rows_site("dup-row", "vuefinder");
+        let (d2, mut wt) = vite_rows_site("dup-wt", "shop--x");
+        wt.worktree_of = Some("shop".into());
+        let mut alias = plain("other");
+        alias.aliases = vec!["docs.vuefinder.test".into()];
+        let cases = [
+            (
+                vec![vf.clone(), plain("vuefinder--docs")],
+                "vuefinder--docs.test",
+            ),
+            (vec![wt, plain("shop--x--docs")], "shop--x--docs.test"),
+            (vec![vf, alias], "docs.vuefinder.test"),
+        ];
+        for (sites, host) in cases {
+            for secure in [false, true] {
+                let sites: Vec<Site> = sites
+                    .iter()
+                    .map(|s| Site {
+                        secure,
+                        ..s.clone()
+                    })
+                    .collect();
+                let caddy = caddyfile(&cfg, &sites);
+                let mut all = addresses_of(&caddy);
+                let n = all.len();
+                all.sort();
+                all.dedup();
+                assert_eq!(all.len(), n, "{caddy}");
+                // The site keeps the name: its block serves files, not the row's proxy.
+                let at = caddy.find(host).unwrap();
+                let block = &caddy[at..at + caddy[at..].find("\n}").unwrap()];
+                assert!(block.contains("file_server"), "{host}: {block}");
+                // Caddy itself takes it, when this machine has Anvil's Caddy (CI has none).
+                let bin = PathBuf::from(std::env::var("HOME").unwrap()).join(".anvil/bin/caddy");
+                if bin.exists() {
+                    let dir = crate::worktrees::tests::tmp("caddy-adapt");
+                    let file = dir.join("Caddyfile");
+                    fs::write(&file, &caddy).unwrap();
+                    let out = std::process::Command::new(&bin)
+                        .args(["adapt", "--adapter", "caddyfile", "--config"])
+                        .arg(&file)
+                        .env("XDG_DATA_HOME", &dir)
+                        .env("XDG_CONFIG_HOME", &dir)
+                        .output()
+                        .unwrap();
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    assert!(out.status.success(), "{host}: {err}");
+                }
+            }
+        }
+        fs::remove_dir_all(d1).unwrap();
+        fs::remove_dir_all(d2).unwrap();
     }
 
     #[test]

@@ -645,14 +645,20 @@ pub fn processes(site: &Site, app_pid: Option<u32>) -> Vec<Process> {
 
 /// Read `KEY=value` pairs from the project's .env.
 pub(crate) fn dotenv(dir: &Path) -> BTreeMap<String, String> {
-    std::fs::read_to_string(dir.join(".env"))
+    dotenv_file(&dir.join(".env"))
+}
+
+/// `KEY=value` pairs of one env file; `export KEY=value` lines count too.
+pub(crate) fn dotenv_file(file: &Path) -> BTreeMap<String, String> {
+    std::fs::read_to_string(file)
         .unwrap_or_default()
         .lines()
         .filter(|l| !l.trim_start().starts_with('#'))
         .filter_map(|l| {
             let (k, v) = l.split_once('=')?;
+            let k = k.trim();
             Some((
-                k.trim().to_string(),
+                k.strip_prefix("export ").unwrap_or(k).trim().to_string(),
                 v.trim().trim_matches(['"', '\'']).to_string(),
             ))
         })

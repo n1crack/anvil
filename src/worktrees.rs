@@ -5,6 +5,21 @@ pub fn joined(first: &str, rest: &str) -> String {
     format!("{first}--{rest}")
 }
 
+/// `joined(app, label)` as one DNS label (at most 63 bytes): a longer one keeps its
+/// start and ends in a hash of the whole, as `db_name` does, so it stays the same.
+pub fn capped(app: &str, label: &str) -> String {
+    let name = joined(app, label);
+    if name.len() <= 63 {
+        return name;
+    }
+    let hash = crate::short_hash(&name);
+    let mut end = 63 - 1 - hash.len();
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}-{hash}", name[..end].trim_end_matches(['-', '.']))
+}
+
 /// A worktree's own part of its name: the folder slugged like site names, less a
 /// leading `<app>--` (an Anvil-made `myapp--feature-x` is `feature-x`).
 pub fn worktree_name(app: &str, folder: &Path) -> String {
@@ -17,11 +32,8 @@ pub fn worktree_name(app: &str, folder: &Path) -> String {
 
 use crate::{Config, Site};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::SystemTime;
 
 /// Which database a worktree uses.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
@@ -43,6 +55,9 @@ pub struct WorktreeConfig {
     /// Copies Anvil made for this worktree: (service, database).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub copies: Vec<(String, String)>,
+    /// Its database was there already and the user chose to use it ("Use existing").
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub adopted: bool,
 }
 
 /// A worktree's own database name: `<app>_<name>` with `_` for anything else, at most 63 bytes.
@@ -61,12 +76,33 @@ pub fn db_name(site: &Site) -> String {
         .collect();
     // Postgres' limit is 63 bytes (MySQL's 64): a longer one keeps its start and gets a
     // hash of the whole, so two long names that start alike still differ.
+    // Never main's own (main `shop` on `shop_dev`, worktree `dev`): a name of its own.
+    let main_db = main_of(&site.path).and_then(|m| main_database(&m));
+    if main_db.as_deref() == Some(name.as_str()) {
+        name = format!("{name}_wt_{}", crate::short_hash(&name));
+    }
     if name.len() > 63 {
         let hash = crate::short_hash(&name);
         name.truncate(63 - 1 - hash.len());
         name = format!("{name}_{hash}");
     }
     name
+}
+
+/// The name of main's database on a server, as main's `.env` gives it (URL path, else
+/// `DB_DATABASE`, else Laravel's `laravel`); `None` for SQLite or no settings.
+fn main_database(main: &Path) -> Option<String> {
+    let env = crate::resources::dotenv(main);
+    let get = |k: &str| env.get(k).map(String::as_str).filter(|v| !v.is_empty());
+    if let Some(url) = get("DB_URL").or(get("DATABASE_URL")) {
+        let rest = url.split_once("://")?.1;
+        let rest = &rest[..rest.find(['?', '#']).unwrap_or(rest.len())];
+        return rest.split_once('/').map(|(_, db)| db.to_string());
+    }
+    match get("DB_CONNECTION") {
+        None | Some("sqlite") => None,
+        Some(_) => Some(get("DB_DATABASE").unwrap_or("laravel").into()),
+    }
 }
 
 /// Where the main app keeps its data, as far as a worktree's own copy goes.
@@ -275,8 +311,8 @@ pub(crate) fn prepare_with(
             }
             if run(cfg, &service, Op::Exists(&name))? {
                 if !marker.exists() {
-                    // Made before but not recorded (or by hand): kept, and not Anvil's to drop.
-                    return Ok(false);
+                    // Not Anvil's: maybe another app's. Used only when the user says so (`adopt`).
+                    anyhow::bail!("{name} already exists and Anvil didn't make it");
                 }
                 // A copy that was cut off: half a database, made again.
                 run(cfg, &service, Op::Drop(&name))?;
@@ -303,6 +339,30 @@ pub(crate) fn prepare_with(
         }
         MainDb::None | MainDb::External => Ok(false),
     }
+}
+
+/// Use the existing database the worktree would get ("Use existing <db>"): recorded as
+/// its own, so nothing copies over it. Like a copy, it is dropped only when the user asks.
+pub fn adopt(cfg: &mut Config, site: &Site) -> anyhow::Result<()> {
+    adopt_with(cfg, site, &mut on_server)
+}
+
+fn adopt_with(
+    cfg: &mut Config,
+    site: &Site,
+    run: &mut dyn FnMut(&Config, &str, Op) -> anyhow::Result<bool>,
+) -> anyhow::Result<()> {
+    let name = db_name(site);
+    let Some((_, MainDb::Anvil { service, .. })) = pending(cfg, site) else {
+        anyhow::bail!("{} has no database to use", site.name);
+    };
+    if !run(cfg, &service, Op::Exists(&name))? {
+        anyhow::bail!("{name} doesn't exist");
+    }
+    let w = cfg.worktrees.entry(site.name.clone()).or_default();
+    w.copies.push((service, name));
+    w.adopted = true;
+    Ok(())
 }
 
 fn on_server(cfg: &Config, id: &str, op: Op) -> anyhow::Result<bool> {
@@ -434,6 +494,10 @@ fn sqlite_file(main: &Path, wt: &Path, file: &str) -> Option<String> {
     });
     let real = real.unwrap_or_else(|| file.to_path_buf());
     let main = fs::canonicalize(main).unwrap_or_else(|_| main.to_path_buf());
+    // Already in the worktree (its own `.env`; a worktree may sit inside main's folder).
+    if real.starts_with(fs::canonicalize(wt).unwrap_or_else(|_| wt.to_path_buf())) {
+        return None;
+    }
     let to = match real.strip_prefix(&main) {
         Ok(rel) => wt.join(rel),
         Err(_) => wt.join("database").join(real.file_name()?),
@@ -460,23 +524,40 @@ pub fn env(cfg: &Config, site: &Site) -> Result<Vec<(String, String)>, String> {
     let share = choice == DbChoice::Share;
     if !share {
         let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
-        let dotenv = crate::resources::dotenv(&main);
-        let conn = dotenv.get("DB_CONNECTION").map(String::as_str);
+        // What its processes would load: main's `.env` (copied in), then its own `.env`
+        // and `.env.local` over it.
+        let files = [
+            crate::resources::dotenv(&main),
+            crate::resources::dotenv(&site.path),
+            crate::resources::dotenv_file(&site.path.join(".env.local")),
+        ];
+        let last = |k: &str| {
+            files
+                .iter()
+                .rev()
+                .find_map(|f| f.get(k).filter(|v| !v.is_empty()))
+        };
+        let conn = last("DB_CONNECTION").map(String::as_str);
         if conn == Some("sqlite") {
-            if let Some(file) = dotenv
-                .get("DB_DATABASE")
-                .and_then(|f| sqlite_file(&main, &site.path, f))
+            if let Some(file) = last("DB_DATABASE").and_then(|f| sqlite_file(&main, &site.path, f))
             {
                 env.push(("DB_DATABASE".into(), file));
             }
-        } else if conn.is_some() || dotenv.contains_key("DB_DATABASE") {
+        } else if conn.is_some() || files.iter().any(|f| f.contains_key("DB_DATABASE")) {
             // Laravel falls back to `laravel` without DB_DATABASE: never main's.
             env.push(("DB_DATABASE".into(), db.clone()));
         }
         for key in ["DB_URL", "DATABASE_URL"] {
-            if let Some(url) = dotenv.get(key).filter(|u| !u.is_empty()) {
-                let url = with_db(url, &db, &main, &site.path)
+            // Every one of them must be rewritable, whichever file wins.
+            for url in files
+                .iter()
+                .filter_map(|f| f.get(key))
+                .filter(|u| !u.is_empty())
+            {
+                with_db(url, &db, &main, &site.path)
                     .ok_or_else(|| format!("{key} uses a kind of database Anvil can't rewrite"))?;
+            }
+            if let Some(url) = last(key).and_then(|u| with_db(u, &db, &main, &site.path)) {
                 env.push((key.into(), url));
             }
         }
@@ -519,68 +600,41 @@ pub struct Worktree {
     pub prunable: bool,
 }
 
-/// Linked worktrees from `git worktree list --porcelain`; the first entry (the main checkout) is left out.
-pub fn parse_porcelain(text: &str) -> Vec<Worktree> {
-    text.split("\n\n")
-        .skip(1)
-        .filter_map(|block| {
-            let mut w = Worktree {
-                path: PathBuf::new(),
-                branch: None,
-                detached: false,
-                prunable: false,
-            };
-            for line in block.lines() {
-                if let Some(p) = line.strip_prefix("worktree ") {
-                    w.path = p.into();
-                } else if let Some(b) = line.strip_prefix("branch ") {
-                    w.branch = Some(b.strip_prefix("refs/heads/").unwrap_or(b).into());
-                } else if line == "detached" {
-                    w.detached = true;
-                } else if line.starts_with("prunable") {
-                    w.prunable = true;
-                }
-            }
-            (!w.path.as_os_str().is_empty()).then_some(w)
-        })
-        .collect()
-}
-
-type Cached = (Vec<SystemTime>, Vec<Worktree>);
-static CACHE: Mutex<Option<HashMap<PathBuf, Cached>>> = Mutex::new(None);
-
-/// Modified times of `.git/worktrees` and each entry's HEAD (a branch switch rewrites HEAD).
-/// `None` when the repository has no worktrees folder.
-fn stamp(main: &Path) -> Option<Vec<SystemTime>> {
-    let dir = main.join(".git/worktrees");
-    let mtime = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
-    let mut out = vec![mtime(&dir)?];
-    for e in fs::read_dir(&dir).ok()?.flatten() {
-        out.extend(mtime(&e.path().join("HEAD")));
-    }
-    Some(out)
-}
-
-/// The linked worktrees of the repository at `main`. Git only runs when the worktrees folder changed.
+/// The linked worktrees of the repository at `main`, read from its `.git/worktrees/<id>`
+/// folders (`gitdir`, `HEAD`): no git process, so a missing or broken git (or one that
+/// refuses the repository) never turns a worktree into a plain app that reaches main's data.
 pub fn list(main: &Path) -> Vec<Worktree> {
-    let Some(stamp) = stamp(main) else {
+    let Some(dir) = crate::git::git_dir(main).map(|d| d.join("worktrees")) else {
         return Vec::new();
     };
-    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    let cache = cache.get_or_insert_default();
-    if let Some((s, list)) = cache.get(main)
-        && *s == stamp
-    {
-        return list.clone();
-    }
-    let mut list = crate::git::git(main, &["worktree", "list", "--porcelain"])
-        .map(|t| parse_porcelain(&t))
-        .unwrap_or_default();
-    for w in &mut list {
-        w.path = fs::canonicalize(&w.path).unwrap_or_else(|_| w.path.clone());
-    }
-    cache.insert(main.to_path_buf(), (stamp, list.clone()));
-    list
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Worktree> = entries
+        .flatten()
+        .filter_map(|e| {
+            let admin = e.path();
+            // `<worktree>/.git`, absolute or (worktree.useRelativePaths) relative to `admin`.
+            let dot_git = admin.join(fs::read_to_string(admin.join("gitdir")).ok()?.trim());
+            let path = dot_git.parent()?;
+            let head = fs::read_to_string(admin.join("HEAD")).unwrap_or_default();
+            let branch = head.trim().strip_prefix("ref: ").map(|r| {
+                r.trim()
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(r.trim())
+                    .to_string()
+            });
+            Some(Worktree {
+                path: fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+                detached: branch.is_none(),
+                branch,
+                prunable: !dot_git.exists(),
+            })
+        })
+        .collect();
+    // `read_dir` order isn't stable; the `-2` suffixes must not depend on it.
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
 }
 
 /// The main checkout when `dir` is a linked worktree (its `.git` file points into `<main>/.git/worktrees/<name>`).
@@ -598,21 +652,26 @@ pub fn add(_cfg: &Config, app: &Site, branch: &str, new_branch: bool) -> anyhow:
     let Some(parent) = app.path.parent() else {
         anyhow::bail!("{} has no parent folder", app.path.display());
     };
-    let folder = parent.join(joined(&app.name, &crate::site_name(branch)));
+    // Never an option to git (`--force`, `--detach`), and a name git takes as a branch.
+    if branch.is_empty() || branch.starts_with('-') {
+        anyhow::bail!("\"{branch}\" isn't a branch name");
+    }
+    crate::git::run(&app.path, &["check-ref-format", "--branch", branch])
+        .map_err(|_| anyhow::anyhow!("\"{branch}\" isn't a branch name"))?;
+    let folder = parent.join(capped(&app.name, &crate::site_name(branch)));
     if folder.exists() {
         anyhow::bail!("{} already exists", folder.display());
     }
-    let mut cmd = std::process::Command::new("git");
-    cmd.arg("-C").arg(&app.path).args(["worktree", "add"]);
+    let o = std::ffi::OsStr::new;
+    let mut args = vec![o("worktree"), o("add")];
     if new_branch {
-        cmd.args(["-b", branch]).arg(&folder);
-    } else {
-        cmd.arg(&folder).arg(branch);
+        args.extend([o("-b"), o(branch)]);
     }
-    let out = cmd.output()?;
-    if !out.status.success() {
-        anyhow::bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
+    args.extend([o("--"), folder.as_os_str()]);
+    if !new_branch {
+        args.push(o(branch));
     }
+    crate::git::run(&app.path, &args)?;
     let (from, to) = (app.path.join(".env"), folder.join(".env"));
     if from.is_file() && !to.exists() {
         fs::copy(from, to)?;
@@ -731,6 +790,23 @@ fn check_clean(site: &Site) -> anyhow::Result<()> {
     if info.ahead > 0 {
         anyhow::bail!("{} has {} unpushed commits", site.name, info.ahead);
     }
+    // Detached (mid-rebase, a checked-out commit): commits made there are on no branch,
+    // and removing the worktree drops the only HEAD that reaches them.
+    let args = [
+        "rev-list",
+        "-n1",
+        "HEAD",
+        "--not",
+        "--branches",
+        "--tags",
+        "--remotes",
+    ];
+    if info.detached && crate::git::run(&site.path, &args).map_or(true, |o| !o.trim().is_empty()) {
+        anyhow::bail!(
+            "{} has commits on no branch, lost with the worktree",
+            site.name
+        );
+    }
     Ok(())
 }
 
@@ -786,15 +862,13 @@ fn remove_with(
             return Err(e);
         }
     }
-    let mut cmd = std::process::Command::new("git");
-    cmd.arg("-C").arg(&main).args(["worktree", "remove"]);
+    let o = std::ffi::OsStr::new;
+    let mut args = vec![o("worktree"), o("remove")];
     if force {
-        cmd.arg("--force");
+        args.push(o("--force"));
     }
-    let out = cmd.arg(&site.path).output()?;
-    if !out.status.success() {
-        anyhow::bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
-    }
+    args.extend([o("--"), site.path.as_os_str()]);
+    crate::git::run(&main, &args)?;
     if cfg
         .worktrees
         .get(&site.name)
@@ -1089,17 +1163,88 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn an_existing_database_is_kept_and_not_recorded() {
+    fn an_existing_database_anvil_didnt_make_is_used_only_when_asked() {
         let (cfg, site) = worktree_site("prep-exists", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
         let mut cfg = with_postgres(cfg);
         let srv = Server {
             exists: true,
             ..Default::default()
         };
-        let (made, log) = prep(&mut cfg, &site, &srv).unwrap();
-        assert!(!made);
-        assert_eq!(log, ["postgres-x exists shop_feature_x"]);
+        // Maybe another app's (`blog_api` of the app `blog-api`): refused, nothing recorded.
+        let e = prep(&mut cfg, &site, &srv).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "shop_feature_x already exists and Anvil didn't make it"
+        );
         assert!(!cfg.worktrees.contains_key(&site.name));
+        // "Use existing shop_feature_x": recorded as its own, and nothing is copied over it.
+        let mut answer = |_: &Config, _: &str, op: Op| Ok(matches!(op, Op::Exists(_)));
+        adopt_with(&mut cfg, &site, &mut answer).unwrap();
+        let w = &cfg.worktrees[&site.name];
+        assert!(w.adopted);
+        assert_eq!(
+            w.copies,
+            [("postgres-x".to_string(), "shop_feature_x".to_string())]
+        );
+        let (made, log) = prep(&mut cfg, &site, &srv).unwrap();
+        assert!(!made && log.is_empty());
+        // Not there: nothing to use.
+        let (cfg2, site2) = worktree_site("adopt-none", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
+        let mut cfg2 = with_postgres(cfg2);
+        let mut none = |_: &Config, _: &str, _: Op| Ok(false);
+        assert!(adopt_with(&mut cfg2, &site2, &mut none).is_err());
+        assert!(cfg2.worktrees.is_empty());
+    }
+
+    #[test]
+    fn a_worktree_never_gets_mains_own_database_name() {
+        for dotenv in [
+            "DB_CONNECTION=pgsql\nDB_DATABASE=shop_dev\n",
+            "DATABASE_URL=postgres://u@127.0.0.1:5433/shop_dev?schema=public\n",
+        ] {
+            let (cfg, mut site) = worktree_site("main-name", dotenv);
+            site.name = "shop--dev".into();
+            let db = db_name(&site);
+            assert_ne!(db, "shop_dev");
+            assert!(db.starts_with("shop_dev_wt_"), "{db}");
+            assert_eq!(db_name(&site), db, "stable");
+            let env = env(&cfg, &site).unwrap();
+            assert!(
+                env.iter()
+                    .all(|(_, v)| !v.ends_with("/shop_dev?schema=public"))
+            );
+            assert!(env.iter().all(|(k, v)| k != "DB_DATABASE" || *v == db));
+        }
+    }
+
+    #[test]
+    fn env_reads_the_worktrees_own_env_files_and_export_lines() {
+        let (cfg, site) = worktree_site("own-files", "APP_NAME=Shop\n");
+        fs::write(site.path.join(".env"), "export DB_CONNECTION=mysql\n").unwrap();
+        fs::write(
+            site.path.join(".env.local"),
+            "DATABASE_URL=postgres://u@127.0.0.1:5433/shop\n",
+        )
+        .unwrap();
+        let env = env(&cfg, &site).unwrap();
+        assert_eq!(get(&env, "DB_DATABASE"), Some("shop_feature_x"));
+        assert_eq!(
+            get(&env, "DATABASE_URL"),
+            Some("postgres://u@127.0.0.1:5433/shop_feature_x")
+        );
+        // One that can't be rewritten in any of them refuses, whichever file wins.
+        fs::write(site.path.join(".env"), "export DB_URL=redis://h/0\n").unwrap();
+        fs::write(
+            site.path.join(".env.local"),
+            "DB_URL=mysql://r@127.0.0.1/shop\n",
+        )
+        .unwrap();
+        let e = env_err(&cfg, &site);
+        assert_eq!(e, "DB_URL uses a kind of database Anvil can't rewrite");
+    }
+
+    fn env_err(cfg: &Config, site: &Site) -> String {
+        env(cfg, site).unwrap_err()
     }
 
     #[test]
@@ -1267,20 +1412,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn parses_branches_detached_and_prunable() {
-        let text = "worktree /m\nHEAD a\nbranch refs/heads/main\n\n\
-            worktree /w/a\nHEAD b\nbranch refs/heads/feature/login\n\n\
-            worktree /w/b\nHEAD c\ndetached\n\n\
-            worktree /w/c\nHEAD d\nbranch refs/heads/c\nprunable gitdir file points to non-existent location\n";
-        let l = parse_porcelain(text);
-        assert_eq!(l.len(), 3);
-        assert_eq!(l[0].path, PathBuf::from("/w/a"));
-        assert_eq!(l[0].branch.as_deref(), Some("feature/login"));
-        assert!(l[1].detached && l[1].branch.is_none());
-        assert!(l[2].prunable && !l[0].prunable);
-    }
-
-    #[test]
     fn a_real_repo_lists_its_worktrees() {
         let (main, x) = repo("real");
         let l = list(&main);
@@ -1306,18 +1437,6 @@ pub(crate) mod tests {
         let d = tmp("plain");
         assert!(list(&d).is_empty());
         assert_eq!(main_of(&d), None);
-        // Missing git binary: `git()` maps a failed spawn to None, which `list` turns into empty.
-        assert!(crate::git::git(&d.join("nope"), &["status"]).is_none());
-    }
-
-    #[test]
-    fn cache_skips_git_when_nothing_changed() {
-        let (main, _) = repo("cache");
-        let spawns = || crate::git::SPAWNS.with(|c| c.get());
-        let first = list(&main);
-        let n = spawns();
-        assert_eq!(list(&main), first);
-        assert_eq!(spawns(), n);
     }
 
     fn recorded(cfg: &mut Config, site: &Site) {
@@ -1506,6 +1625,52 @@ pub(crate) mod tests {
         );
         let e = add(&cfg, &app, "old", false).unwrap_err().to_string();
         assert!(e.contains("already exists"), "{e}");
+    }
+
+    #[test]
+    fn add_refuses_a_branch_git_would_take_as_an_option() {
+        let (main, _) = repo("add-opt");
+        let mut app = crate::tests::site("main", main.to_str().unwrap(), None);
+        app.path = main.clone();
+        let cfg = Config::default();
+        for bad in ["", "-f", "--detach", "a..b", "x y", "-"] {
+            let e = add(&cfg, &app, bad, true).unwrap_err().to_string();
+            assert!(e.contains("isn't a branch name"), "{bad}: {e}");
+        }
+        let folders = fs::read_dir(main.parent().unwrap()).unwrap().count();
+        assert_eq!(folders, 2, "main and x only");
+        // A name that is fine still works, and an existing branch too.
+        assert!(add(&cfg, &app, "feat/ok", true).is_ok());
+        assert!(add(&cfg, &app, "x2", true).is_ok());
+    }
+
+    #[test]
+    fn remove_refuses_commits_on_no_branch() {
+        let (mut cfg, site) = worktree_site("detached", "");
+        // Detached at a commit a branch has: nothing to lose.
+        git(&site.path, &["checkout", "-q", "--detach"]);
+        assert!(check_clean(&site).is_ok());
+        git(&site.path, &["commit", "-q", "--allow-empty", "-m", "lost"]);
+        let mut never = |_: &Config, _: &str, _: &str| panic!("dropped");
+        let e = remove_with(&mut cfg, &site, false, false, &mut never).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "shop--feature-x has commits on no branch, lost with the worktree"
+        );
+        assert!(site.path.exists());
+        remove_with(&mut cfg, &site, false, true, &mut never).unwrap();
+        assert!(!site.path.exists());
+    }
+
+    #[test]
+    fn long_worktree_names_stay_one_dns_label() {
+        let long = "a".repeat(80);
+        let name = capped("shop", &long);
+        assert_eq!(name.len(), 63);
+        assert!(name.starts_with("shop--aaa"));
+        assert_eq!(capped("shop", &long), name, "stable");
+        assert_ne!(capped("shop", &format!("{long}-2")), name);
+        assert_eq!(capped("shop", "x"), "shop--x");
     }
 
     #[test]
