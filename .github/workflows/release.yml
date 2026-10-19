@@ -94,14 +94,13 @@ jobs:
 
       - name: Build the CLI
         run: |
+          # The universal one bundle-cli.sh made for the app; one download, like the .dmg.
           mkdir -p dist
-          for target in aarch64-apple-darwin x86_64-apple-darwin; do
-            cargo build --release --locked -p anvil --target "$target"
-            stage="anvil-$VERSION-$target"
-            mkdir -p "$stage"
-            cp "target/$target/release/anvil" LICENSE README.md CHANGELOG.md "$stage/"
-            tar -czf "dist/$stage.tar.gz" "$stage"
-          done
+          stage="anvil-$VERSION-universal-apple-darwin"
+          mkdir -p "$stage"
+          cp app/binaries/anvil-universal-apple-darwin "$stage/anvil"
+          cp LICENSE README.md CHANGELOG.md "$stage/"
+          tar -czf "dist/$stage.tar.gz" "$stage"
 
       - name: Collect assets and checksums
         run: |

@@ -1,0 +1,92 @@
+name: Homebrew
+
+# When a release is published (not while it is a draft, whose downloads don't
+# exist yet), write the cask and the formula into n1crack/homebrew-anvil from
+# the release's SHA256SUMS.txt. HOMEBREW_TAP_TOKEN: a fine-grained token with
+# Contents read and write on that repository only.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  tap:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checksums from the release
+        run: |
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern SHA256SUMS.txt
+          version="${TAG#v}"
+          sum() { awk -v f="$1" '$2 == f { print $1 }' SHA256SUMS.txt | grep . ; }
+          {
+            echo "VERSION=$version"
+            echo "DMG=$(sum "Anvil_${version}_universal.dmg")"
+            echo "CLI=$(sum "anvil-$version-universal-apple-darwin.tar.gz")"
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: n1crack/homebrew-anvil
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Write the cask and the formula
+        working-directory: tap
+        run: |
+          mkdir -p Casks Formula
+          base="https://github.com/${{ github.repository }}/releases/download/v#{version}"
+          cat > Casks/anvil.rb <<EOF
+          cask "anvil" do
+            version "$VERSION"
+            sha256 "$DMG"
+
+            url "$base/Anvil_#{version}_universal.dmg",
+                verified: "github.com/${{ github.repository }}/"
+            name "Anvil"
+            desc "Native development environment"
+            homepage "https://anvil.tr/"
+
+            auto_updates true
+            depends_on :macos
+
+            app "Anvil.app"
+            binary "#{appdir}/Anvil.app/Contents/MacOS/anvil"
+          end
+          EOF
+          cat > Formula/anvil.rb <<EOF
+          class Anvil < Formula
+            desc "Native development environment"
+            homepage "https://anvil.tr/"
+            url "$base/anvil-#{version}-universal-apple-darwin.tar.gz"
+            version "$VERSION"
+            sha256 "$CLI"
+            license "GPL-3.0-only"
+
+            depends_on :macos
+
+            def install
+              bin.install "anvil"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/anvil --version")
+            end
+          end
+          EOF
+
+      - name: Push to the tap
+        working-directory: tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks Formula
+          git diff --cached --quiet && exit 0
+          git commit -m "Anvil $VERSION"
+          git push
