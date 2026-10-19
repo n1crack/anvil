@@ -368,11 +368,12 @@ fn run_step(step: &Step) -> Result<()> {
                 }
             };
             let dumped = dump.wait_with_output()?;
-            if !dumped.status.success() {
-                return Err(failed(&a.program, &dumped.stderr));
-            }
+            // The load first: when it stops on an error, the dump only reports a broken pipe.
             if !load.status.success() {
                 return Err(failed(&b.program, &load.stderr));
+            }
+            if !dumped.status.success() {
+                return Err(failed(&a.program, &dumped.stderr));
             }
         }
     }

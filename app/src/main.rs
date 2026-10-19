@@ -31,6 +31,8 @@ struct App {
     app_errors: Mutex<std::collections::BTreeMap<String, String>>,
     /// Last start failure per service id.
     service_errors: Mutex<std::collections::BTreeMap<String, String>>,
+    /// Worktrees whose own database is being made, with the line saying so.
+    preparing: Mutex<std::collections::BTreeMap<String, String>>,
     /// The Containers tab's log streams.
     container_logs: Mutex<anvil::compose::Logs>,
     /// Set when Caddy or PHP-FPM ended on its own, until the watcher has notified.
@@ -393,6 +395,7 @@ fn sites_changed(handle: &AppHandle, app: &App, cfg: &Config) {
 
 fn start_app(app: &App, cfg: &Config, name: &str) {
     let result = site_in(cfg, name).and_then(|site| {
+        prepare(app, &site).map_err(err)?;
         let started = anvil::lock(&app.apps).start(&site, cfg);
         started.map_err(err)
     });
@@ -1039,7 +1042,8 @@ fn process_run(
             })
         {
             let key = anvil::processes::key(&s.name, &p.id);
-            let started = anvil::lock(&app.apps).start_process(&s, &p, &cfg);
+            let started =
+                prepare(&app, &s).and_then(|()| anvil::lock(&app.apps).start_process(&s, &p, &cfg));
             if let Err(e) = started {
                 anvil::lock(&app.app_errors).insert(key, err(e));
             }
@@ -1151,8 +1155,22 @@ fn autostart_processes(app: &App, cfg: &Config) {
     }
 }
 
+/// A worktree's own database before anything of it starts (`worktrees::prepare`), and
+/// outside `app.apps`: a copy can take minutes. Its line is in `app.preparing` meanwhile.
+fn prepare(app: &App, site: &Site) -> anyhow::Result<()> {
+    if site.worktree_of.is_none() {
+        return Ok(());
+    }
+    let made = anvil::worktrees::prepare(&mut anvil::load()?, site, &mut |line| {
+        anvil::lock(&app.preparing).insert(site.name.clone(), line.into());
+    });
+    anvil::lock(&app.preparing).remove(&site.name);
+    made.map(drop)
+}
+
 fn start_process(app: &App, cfg: &Config, site: &Site, p: &anvil::processes::Process) {
-    let started = anvil::lock(&app.apps).start_process(site, p, cfg);
+    let started =
+        prepare(app, site).and_then(|()| anvil::lock(&app.apps).start_process(site, p, cfg));
     if let Err(e) = started {
         let key = anvil::processes::key(&site.name, &p.id);
         anvil::lock(&app.app_errors).insert(key, err(e));
@@ -1505,7 +1523,8 @@ fn set_process(
                 .find(|p| p.id == id);
             if let Some(p) = p {
                 // Bound first: an `if let` scrutinee's guard would live through the block.
-                let started = anvil::lock(&app.apps).start_process(&s, &p, &cfg);
+                let started = prepare(&app, &s)
+                    .and_then(|()| anvil::lock(&app.apps).start_process(&s, &p, &cfg));
                 if let Err(e) = started {
                     anvil::lock(&app.app_errors).insert(key, err(e));
                 }

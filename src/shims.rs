@@ -113,16 +113,9 @@ pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result
     // First: a worktree Anvil can't separate from main runs nothing, whatever the tool.
     let extra = extra_env(cfg, site)?;
     if fetch && let Some(s) = site.filter(|s| s.worktree_of.is_some()) {
-        // Its own database on first use, as a Start would. Without it the tool still
-        // runs: it reaches the worktree's (missing) database, never main's.
-        match crate::load().and_then(|mut c| crate::worktrees::prepare(&mut c, s)) {
-            Ok(Some(line)) => eprintln!("{line}"),
-            Ok(None) => {}
-            Err(e) => eprintln!(
-                "Anvil: couldn't prepare {}: {e:#}",
-                crate::worktrees::db_name(s)
-            ),
-        }
+        // Its own database on first use, as a Start would; the line shows while it's made.
+        // Refused when that fails: never run against a missing or half-made database.
+        crate::worktrees::prepare(&mut crate::load()?, s, &mut |line| eprintln!("{line}"))?;
     }
     let mut r = resolve_for(tool, cwd, cfg, fetch, site)?;
     r.2.extend(extra);

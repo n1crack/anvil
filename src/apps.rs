@@ -653,7 +653,6 @@ impl Apps {
         // app_env: Python's version and uv environment rules on top of the runtime's.
         let mut env = app_env(site, runtime, &version);
         env.extend(crate::worktrees::checked_env(cfg, site)?);
-        prepare(site)?;
         env.extend([
             ("PORT".to_string(), port.to_string()),
             // Best effort: most dev servers honour one of these and stay off the LAN.
@@ -680,9 +679,7 @@ impl Apps {
         if self.running(&key) {
             return Ok(());
         }
-        let env = process_env(site, p, cfg)?;
-        prepare(site)?;
-        self.spawn(&key, &site.path, &p.command, env)?;
+        self.spawn(&key, &site.path, &p.command, process_env(site, p, cfg)?)?;
         self.processes.insert(key);
         Ok(())
     }
@@ -781,15 +778,6 @@ impl Drop for Apps {
     fn drop(&mut self) {
         crate::stop_all(self.take_all(), GRACE);
     }
-}
-
-/// A worktree's own database, made on its first Start (`worktrees::prepare`). On the
-/// config as saved: what's recorded there is what counts, and `start` only reads its own.
-fn prepare(site: &Site) -> Result<()> {
-    if site.worktree_of.is_some() {
-        crate::worktrees::prepare(&mut crate::load()?, site)?;
-    }
-    Ok(())
 }
 
 /// A process's environment: Anvil's PATH, plus `PORT` for a server row (`$PORT` in its

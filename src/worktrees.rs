@@ -168,9 +168,15 @@ pub fn main_db(cfg: &Config, site: &Site) -> MainDb {
 
 /// What `prepare` asks of a database server.
 pub(crate) enum Op<'a> {
+    /// Whether the service answers on its port.
+    Running,
     Exists(&'a str),
-    Clone { from: &'a str, to: &'a str },
+    Clone {
+        from: &'a str,
+        to: &'a str,
+    },
     Create(&'a str),
+    Drop(&'a str),
 }
 
 /// What's left to do for the worktree `site`: its choice and main's database, or
@@ -188,103 +194,121 @@ fn pending(cfg: &Config, site: &Site) -> Option<(DbChoice, MainDb)> {
     }
 }
 
-/// `prepare` with the server reached through `run(cfg, service, op)`.
+/// `prepare` with the server reached through `run(cfg, service, op)`, and `marker`
+/// the file that stays while a copy is under way (an interrupted one is redone).
 pub(crate) fn prepare_with(
     cfg: &mut Config,
     site: &Site,
+    marker: &Path,
+    say: &mut dyn FnMut(&str),
     run: &mut dyn FnMut(&Config, &str, Op) -> anyhow::Result<bool>,
-) -> anyhow::Result<Option<String>> {
+) -> anyhow::Result<bool> {
     let Some((choice, db)) = pending(cfg, site) else {
-        return Ok(None);
+        return Ok(false);
     };
     let name = db_name(site);
     match db {
         MainDb::Sqlite { from, to } => {
             if choice == DbChoice::Copy && !from.exists() {
-                return Ok(None);
+                return Ok(false);
             }
             if let Some(dir) = to.parent() {
                 fs::create_dir_all(dir)?;
             }
+            let shown = to.strip_prefix(&site.path).unwrap_or(&to).display();
+            let main = site.worktree_of.as_deref().unwrap_or("main");
             // Through a temporary file: nothing ever opens a half-copied database.
             let tmp = to.with_file_name(format!(
                 ".{}.anvil",
                 to.file_name().unwrap_or_default().to_string_lossy()
             ));
-            let how = if choice == DbChoice::Copy {
+            if choice == DbChoice::Copy {
+                say(&format!("Anvil: preparing {shown} (copy of {main}'s)"));
                 fs::copy(&from, &tmp)?;
-                format!(
-                    "copy of {}'s",
-                    site.worktree_of.as_deref().unwrap_or("main")
-                )
             } else {
+                say(&format!("Anvil: preparing {shown} (empty)"));
                 fs::File::create(&tmp)?;
-                "empty".into()
-            };
+            }
             fs::rename(&tmp, &to)?;
             // It lives in the worktree folder and goes with it: nothing to record.
-            let shown = to.strip_prefix(&site.path).unwrap_or(&to).display();
-            Ok(Some(format!("Anvil: preparing {shown} ({how})")))
+            Ok(true)
         }
         MainDb::Anvil { service, database } => {
-            // Made before but not recorded (or by hand): kept, and not Anvil's to drop.
-            if run(cfg, &service, Op::Exists(&name))? {
-                return Ok(None);
+            if !run(cfg, &service, Op::Running)? {
+                anyhow::bail!("Start {service} to prepare {name}");
             }
-            let how = if choice == DbChoice::Copy {
-                run(
-                    cfg,
-                    &service,
-                    Op::Clone {
-                        from: &database,
-                        to: &name,
-                    },
-                )?;
-                format!("copy of {database}")
+            if run(cfg, &service, Op::Exists(&name))? {
+                if !marker.exists() {
+                    // Made before but not recorded (or by hand): kept, and not Anvil's to drop.
+                    return Ok(false);
+                }
+                // A copy that was cut off: half a database, made again.
+                run(cfg, &service, Op::Drop(&name))?;
+            }
+            let how = match choice {
+                DbChoice::Copy => format!("copy of {database}"),
+                _ => "empty".into(),
+            };
+            say(&format!("Anvil: preparing {name} ({how})"));
+            fs::write(marker, &name)?;
+            if choice == DbChoice::Copy {
+                let op = Op::Clone {
+                    from: &database,
+                    to: &name,
+                };
+                run(cfg, &service, op)?;
             } else {
                 run(cfg, &service, Op::Create(&name))?;
-                "empty".into()
-            };
+            }
             let w = cfg.worktrees.entry(site.name.clone()).or_default();
-            w.copies.push((service, name.clone()));
-            Ok(Some(format!("Anvil: preparing {name} ({how})")))
+            w.copies.push((service, name));
+            fs::remove_file(marker)?;
+            Ok(true)
         }
-        MainDb::None | MainDb::External => Ok(None),
+        MainDb::None | MainDb::External => Ok(false),
     }
 }
 
 fn on_server(cfg: &Config, id: &str, op: Op) -> anyhow::Result<bool> {
     use crate::databases as d;
     match op {
+        Op::Running => {
+            let at = std::net::SocketAddr::from(([127, 0, 0, 1], crate::services::port(cfg, id)));
+            let wait = std::time::Duration::from_secs(1);
+            Ok(std::net::TcpStream::connect_timeout(&at, wait).is_ok())
+        }
         Op::Exists(n) => d::exists(cfg, id, n),
         Op::Clone { from, to } => d::clone_database(cfg, id, from, to).map(|()| true),
         Op::Create(n) => d::create(cfg, id, n).map(|()| true),
+        Op::Drop(n) => d::drop_database(cfg, id, n).map(|()| true),
     }
 }
 
 /// Make a worktree's own database on its first use (a Start, a terminal shim): a copy
-/// of main's, or an empty one, as chosen. Returns the line to show when it made one.
-/// What it made on a server is recorded in `cfg.worktrees` (and saved).
-pub fn prepare(cfg: &mut Config, site: &Site) -> anyhow::Result<Option<String>> {
+/// of main's, or an empty one, as chosen. `say` gets the line to show before the work
+/// starts; `true` when it made one. What it made on a server is recorded in
+/// `cfg.worktrees` (and saved). Slow: hold no other lock across it.
+pub fn prepare(cfg: &mut Config, site: &Site, say: &mut dyn FnMut(&str)) -> anyhow::Result<bool> {
     if pending(cfg, site).is_none() {
-        return Ok(None);
+        return Ok(false);
     }
-    let home = crate::home();
-    crate::state_dirs_in(&home)?;
+    let run = crate::home().join("run");
+    crate::state_dirs_in(&crate::home())?;
     // One at a time per worktree: a Start and a shim racing don't copy twice.
-    let lock = fs::File::create(home.join("run").join(format!("prepare-{}.lock", site.name)))?;
+    let lock = fs::File::create(run.join(format!("prepare-{}.lock", site.name)))?;
     lock.lock()?;
     // The other one may have made it while this one waited.
     if let Some(w) = crate::load()?.worktrees.remove(&site.name) {
         cfg.worktrees.insert(site.name.clone(), w);
     }
-    let line = prepare_with(cfg, site, &mut on_server)?;
+    let marker = run.join(format!("prepare-{}.copying", site.name));
+    let made = prepare_with(cfg, site, &marker, say, &mut on_server)?;
     let copies = cfg
         .worktrees
         .get(&site.name)
         .map(|w| w.copies.clone())
         .unwrap_or_default();
-    if line.is_some() && !copies.is_empty() {
+    if made && !copies.is_empty() {
         let (saved, ()) = crate::update(|c| {
             let w = c.worktrees.entry(site.name.clone()).or_default();
             for copy in &copies {
@@ -296,7 +320,7 @@ pub fn prepare(cfg: &mut Config, site: &Site) -> anyhow::Result<Option<String>> 
         })?;
         *cfg = saved;
     }
-    Ok(line)
+    Ok(made)
 }
 
 /// `url` pointing at database `db` instead: `postgres://u@h:5433/shop?x` -> `.../<db>?x`.
@@ -724,16 +748,40 @@ pub(crate) mod tests {
         assert_eq!(get(&env, "DB_DATABASE"), want.to_str());
     }
 
-    /// A fake database server: logs what `prepare` asks; nothing exists yet.
-    fn fake(log: &mut Vec<String>) -> impl FnMut(&Config, &str, Op) -> anyhow::Result<bool> + '_ {
-        |_, id, op| {
-            log.push(match op {
-                Op::Exists(n) => format!("{id} exists {n}"),
-                Op::Clone { from, to } => format!("{id} clone {from} {to}"),
-                Op::Create(n) => format!("{id} create {n}"),
-            });
-            Ok(false)
-        }
+    /// A fake database server.
+    #[derive(Default)]
+    struct Server {
+        exists: bool,
+        stopped: bool,
+    }
+
+    /// `prepare_with` on `srv`: whether it made one, and what was said and asked in
+    /// order (`Running` left out). The copy marker sits next to the worktree.
+    fn prep(cfg: &mut Config, site: &Site, srv: &Server) -> anyhow::Result<(bool, Vec<String>)> {
+        let log = std::cell::RefCell::new(Vec::new());
+        let marker = marker_of(site);
+        let made = prepare_with(
+            cfg,
+            site,
+            &marker,
+            &mut |line| log.borrow_mut().push(line.to_string()),
+            &mut |_, id, op| {
+                let (entry, answer) = match op {
+                    Op::Running => return Ok(!srv.stopped),
+                    Op::Exists(n) => (format!("{id} exists {n}"), srv.exists),
+                    Op::Clone { from, to } => (format!("{id} clone {from} {to}"), true),
+                    Op::Create(n) => (format!("{id} create {n}"), true),
+                    Op::Drop(n) => (format!("{id} drop {n}"), true),
+                };
+                log.borrow_mut().push(entry);
+                Ok(answer)
+            },
+        )?;
+        Ok((made, log.into_inner()))
+    }
+
+    fn marker_of(site: &Site) -> PathBuf {
+        site.path.with_file_name("copying")
     }
 
     fn with_postgres(mut cfg: Config) -> Config {
@@ -753,16 +801,14 @@ pub(crate) mod tests {
         let dotenv = "DB_CONNECTION=pgsql\nDB_PORT=5433\nDB_DATABASE=shop\n";
         let (cfg, site) = worktree_site("prep", dotenv);
         let mut cfg = with_postgres(cfg);
-        let mut log = vec![];
-        let line = prepare_with(&mut cfg, &site, &mut fake(&mut log)).unwrap();
-        assert_eq!(
-            line.as_deref(),
-            Some("Anvil: preparing shop_feature_x (copy of shop)")
-        );
+        let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
+        assert!(made);
+        // The line comes before the work.
         assert_eq!(
             log,
             [
                 "postgres-x exists shop_feature_x",
+                "Anvil: preparing shop_feature_x (copy of shop)",
                 "postgres-x clone shop shop_feature_x"
             ]
         );
@@ -770,33 +816,75 @@ pub(crate) mod tests {
             cfg.worktrees[&site.name].copies,
             [("postgres-x".to_string(), "shop_feature_x".to_string())]
         );
-        let mut again = vec![];
-        assert_eq!(
-            prepare_with(&mut cfg, &site, &mut fake(&mut again)).unwrap(),
-            None
-        );
-        assert!(again.is_empty());
+        assert!(!marker_of(&site).exists(), "cleared after the copy");
+        let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
+        assert!(!made && log.is_empty());
         // The same through DATABASE_URL.
         let url = "DATABASE_URL=postgresql://postgres@127.0.0.1:5433/shop?schema=public\n";
         let (cfg, site) = worktree_site("prep-url", url);
         let mut cfg = with_postgres(cfg);
-        let mut log = vec![];
-        assert!(
-            prepare_with(&mut cfg, &site, &mut fake(&mut log))
-                .unwrap()
-                .is_some()
-        );
-        assert_eq!(log[1], "postgres-x clone shop shop_feature_x");
+        let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
+        assert!(made);
+        assert_eq!(log[2], "postgres-x clone shop shop_feature_x");
     }
 
     #[test]
     fn an_existing_database_is_kept_and_not_recorded() {
         let (cfg, site) = worktree_site("prep-exists", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
         let mut cfg = with_postgres(cfg);
-        let line = prepare_with(&mut cfg, &site, &mut |_, _, op| {
-            Ok(matches!(op, Op::Exists(_)))
-        });
-        assert_eq!(line.unwrap(), None);
+        let srv = Server {
+            exists: true,
+            ..Default::default()
+        };
+        let (made, log) = prep(&mut cfg, &site, &srv).unwrap();
+        assert!(!made);
+        assert_eq!(log, ["postgres-x exists shop_feature_x"]);
+        assert!(!cfg.worktrees.contains_key(&site.name));
+    }
+
+    #[test]
+    fn an_interrupted_copy_is_dropped_and_made_again() {
+        let (cfg, site) = worktree_site("prep-cut", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
+        let mut cfg = with_postgres(cfg);
+        // A copy that failed half-way leaves its marker behind.
+        let mut failing = |_: &Config, _: &str, op: Op| match op {
+            Op::Clone { .. } => anyhow::bail!("cut off"),
+            _ => Ok(matches!(op, Op::Running)),
+        };
+        let marker = marker_of(&site);
+        assert!(prepare_with(&mut cfg, &site, &marker, &mut |_| {}, &mut failing).is_err());
+        assert!(marker.exists());
+        assert!(!cfg.worktrees.contains_key(&site.name));
+        // Next time the half database is there: dropped and copied again.
+        let srv = Server {
+            exists: true,
+            ..Default::default()
+        };
+        let (made, log) = prep(&mut cfg, &site, &srv).unwrap();
+        assert!(made);
+        assert_eq!(
+            log,
+            [
+                "postgres-x exists shop_feature_x",
+                "postgres-x drop shop_feature_x",
+                "Anvil: preparing shop_feature_x (copy of laravel)",
+                "postgres-x clone laravel shop_feature_x"
+            ]
+        );
+        assert!(!marker.exists());
+        assert_eq!(cfg.worktrees[&site.name].copies.len(), 1);
+    }
+
+    #[test]
+    fn a_stopped_service_refuses_to_prepare() {
+        let (cfg, site) = worktree_site("prep-stopped", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
+        let mut cfg = with_postgres(cfg);
+        let srv = Server {
+            stopped: true,
+            ..Default::default()
+        };
+        let e = prep(&mut cfg, &site, &srv).unwrap_err();
+        assert_eq!(e.to_string(), "Start postgres-x to prepare shop_feature_x");
         assert!(!cfg.worktrees.contains_key(&site.name));
     }
 
@@ -813,21 +901,20 @@ pub(crate) mod tests {
             let main = main_of(&site.path).unwrap();
             fs::create_dir_all(main.join("database")).unwrap();
             fs::write(main.join("database/database.sqlite"), "rows").unwrap();
-            let mut log = vec![];
-            let line = prepare_with(&mut cfg, &site, &mut fake(&mut log)).unwrap();
+            let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
+            assert!(made);
+            // Said, and nothing asked of a server.
             assert_eq!(
-                line.as_deref(),
-                Some("Anvil: preparing database/database.sqlite (copy of shop's)")
+                log,
+                ["Anvil: preparing database/database.sqlite (copy of shop's)"]
             );
             let copy = site.path.join("database/database.sqlite");
             assert_eq!(fs::read_to_string(&copy).unwrap(), "rows", "{name}");
-            // It lives in the worktree folder: nothing to record, nothing asked of a server.
-            assert!(cfg.worktrees.is_empty() && log.is_empty());
+            // It lives in the worktree folder: nothing to record.
+            assert!(cfg.worktrees.is_empty());
             fs::write(&copy, "changed").unwrap();
-            assert_eq!(
-                prepare_with(&mut cfg, &site, &mut fake(&mut log)).unwrap(),
-                None
-            );
+            let (made, _) = prep(&mut cfg, &site, &Server::default()).unwrap();
+            assert!(!made);
             assert_eq!(fs::read_to_string(&copy).unwrap(), "changed");
         }
     }
@@ -837,16 +924,13 @@ pub(crate) mod tests {
         let (cfg, site) = worktree_site("prep-empty", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
         let mut cfg = with_postgres(cfg);
         cfg.worktrees.entry(site.name.clone()).or_default().db = DbChoice::Empty;
-        let mut log = vec![];
-        let line = prepare_with(&mut cfg, &site, &mut fake(&mut log)).unwrap();
-        assert_eq!(
-            line.as_deref(),
-            Some("Anvil: preparing shop_feature_x (empty)")
-        );
+        let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
+        assert!(made);
         assert_eq!(
             log,
             [
                 "postgres-x exists shop_feature_x",
+                "Anvil: preparing shop_feature_x (empty)",
                 "postgres-x create shop_feature_x"
             ]
         );
@@ -858,12 +942,8 @@ pub(crate) mod tests {
         let (cfg, site) = worktree_site("prep-share", "DB_CONNECTION=pgsql\nDB_PORT=5433\n");
         let mut cfg = with_postgres(cfg);
         cfg.worktrees.entry(site.name.clone()).or_default().db = DbChoice::Share;
-        let mut log = vec![];
-        assert_eq!(
-            prepare_with(&mut cfg, &site, &mut fake(&mut log)).unwrap(),
-            None
-        );
-        assert!(log.is_empty());
+        let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
+        assert!(!made && log.is_empty());
         assert!(cfg.worktrees[&site.name].copies.is_empty());
     }
 
@@ -882,12 +962,8 @@ pub(crate) mod tests {
         ] {
             let (cfg, site) = worktree_site(name, dotenv);
             let mut cfg = with_postgres(cfg);
-            let mut log = vec![];
-            assert_eq!(
-                prepare_with(&mut cfg, &site, &mut fake(&mut log)).unwrap(),
-                None
-            );
-            assert!(log.is_empty() && cfg.worktrees.is_empty());
+            let (made, log) = prep(&mut cfg, &site, &Server::default()).unwrap();
+            assert!(!made && log.is_empty() && cfg.worktrees.is_empty());
             let db = main_db(&cfg, &site);
             assert_eq!(db, MainDb::External, "{name}");
             assert_eq!(db.choices(), [DbChoice::Share, DbChoice::Empty]);
