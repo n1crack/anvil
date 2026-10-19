@@ -43,6 +43,9 @@ Anvil is meant for your own machine only:
   - Redis: SHA-256 from the `redis/redis-hashes` list.
   - Composer: SHA-256 from `composer.phar.sha256`.
   - Rust: SHA-256 from the `rustup-init.sha256` file next to the installer.
+  - Python: uv, pinned to the SHA-256 its release lists, installs
+    python-build-standalone builds and checks them against the checksums
+    built into uv.
   - Mailpit publishes no checksums; Anvil uses the SHA-256 GitHub records for
     each release file, which shows the download is the uploaded file.
   - MySQL publishes only MD5 (`.md5` next to each download). That catches a

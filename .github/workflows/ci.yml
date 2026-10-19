@@ -59,9 +59,8 @@ jobs:
           got=$(cargo run -q --locked -- --version)
           test "$got" = "anvil $want" || { echo "anvil --version printed '$got', expected 'anvil $want'"; exit 1; }
 
-  # The core library and CLI only use Unix APIs, so they build and their tests
-  # pass on Linux too (checked in a Debian container before this job was added).
-  # The Tauri app is macOS-only and is not built here.
+  # The core library and CLI only use Unix APIs, so they build and test on
+  # Linux too. The Tauri app is macOS-only and is not built here.
   linux:
     name: Linux (anvil crate)
     runs-on: ubuntu-latest

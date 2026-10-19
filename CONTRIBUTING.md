@@ -1,6 +1,6 @@
 # Contributing to Anvil
 
-Thanks for helping. Bug reports, fixes and documentation are all welcome. For
+Thanks for helping. Bug reports and fixes are welcome. For
 larger changes, open an issue first so we can agree on the approach.
 
 ## Build

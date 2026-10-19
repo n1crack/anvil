@@ -110,13 +110,3 @@ jobs:
           case "$VERSION" in *-*) flags="--prerelease" ;; esac
           gh release create "$TAG" dist/* --draft $flags --verify-tag \
             --title "Anvil $VERSION" --notes-file notes.md
-
-  # ---------------------------------------------------------------------------
-  # PLACEHOLDER: Windows build and signing via SignPath. Not implemented.
-  # Anvil does not run on Windows yet. When it does, add a windows-latest job
-  # that builds the installer with tauri-apps/tauri-action, submits it to
-  # SignPath for signing (signpath/github-action-submit-signing-request) with
-  # SIGNPATH_API_TOKEN, SIGNPATH_ORGANIZATION_ID and SIGNPATH_PROJECT_SLUG
-  # secrets, and uploads the signed installer plus its checksum to the same
-  # draft release.
-  # ---------------------------------------------------------------------------
