@@ -64,10 +64,41 @@ pub fn db_name(site: &Site) -> String {
 }
 
 /// `url` pointing at database `db` instead: `postgres://u@h:5433/shop?x` -> `.../<db>?x`.
-/// Only server databases; a SQLite `file:` URL already lives in the worktree.
-fn with_db(url: &str, db: &str) -> Option<String> {
+/// `None` for a scheme Anvil can't rewrite. A SQLite `file:` URL with an absolute path
+/// is mapped like `sqlite_file`; a relative one already lives in the worktree.
+fn with_db(url: &str, db: &str, main: &Path, wt: &Path) -> Option<String> {
+    if let Some(rest) = url.strip_prefix("file:") {
+        let (path, query) = rest.split_at(rest.find('?').unwrap_or(rest.len()));
+        return Some(match sqlite_file(main, wt, path) {
+            Some(file) => format!("file:{file}{query}"),
+            None => url.into(),
+        });
+    }
     let (scheme, rest) = url.split_once("://")?;
-    if !["postgres", "postgresql", "mysql", "mariadb"].contains(&scheme) {
+    if scheme == "sqlserver" {
+        // Prisma: `sqlserver://host:1433;database=shop;user=sa`
+        let mut parts: Vec<String> = rest.split(';').map(Into::into).collect();
+        let is_db = |p: &str| {
+            p.split_once('=')
+                .is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case("database"))
+        };
+        match parts.iter_mut().find(|p| is_db(p)) {
+            Some(p) => *p = format!("database={db}"),
+            None => parts.insert(1.min(parts.len()), format!("database={db}")),
+        }
+        return Some(format!("sqlserver://{}", parts.join(";")));
+    }
+    let path_based = [
+        "postgres",
+        "postgresql",
+        "pgsql",
+        "mysql",
+        "mysql2",
+        "mariadb",
+        "sqlsrv",
+        "mssql",
+    ];
+    if !path_based.contains(&scheme) {
         return None;
     }
     let tail = rest.find(['?', '#']).unwrap_or(rest.len());
@@ -79,36 +110,67 @@ fn with_db(url: &str, db: &str) -> Option<String> {
     ))
 }
 
+/// The worktree's own copy of an absolute SQLite path: the same place inside the
+/// worktree when the file is in the main checkout, else `<worktree>/database/<file>`.
+/// `None` for a relative path (or `:memory:`), which already resolves in the worktree.
+fn sqlite_file(main: &Path, wt: &Path, file: &str) -> Option<String> {
+    let file = Path::new(file);
+    if !file.is_absolute() {
+        return None;
+    }
+    // Canonical, so a symlinked folder in `.env` still matches; the file may not exist yet.
+    let real = fs::canonicalize(file).ok().or_else(|| {
+        Some(
+            fs::canonicalize(file.parent()?)
+                .ok()?
+                .join(file.file_name()?),
+        )
+    });
+    let real = real.unwrap_or_else(|| file.to_path_buf());
+    let main = fs::canonicalize(main).unwrap_or_else(|_| main.to_path_buf());
+    let to = match real.strip_prefix(&main) {
+        Ok(rel) => wt.join(rel),
+        Err(_) => wt.join("database").join(real.file_name()?),
+    };
+    Some(to.display().to_string())
+}
+
 /// What a worktree's processes get on top of their usual environment, so they never
 /// reach the main app's database or Redis keys. Empty for anything but a worktree.
 /// Set variables win over the worktree's `.env` (Laravel, dotenv, Next.js, Prisma).
-pub fn env(cfg: &Config, site: &Site) -> Vec<(String, String)> {
+/// `Err(reason)` when Anvil can't work out the worktree's own database: then nothing
+/// of the worktree runs (`checked_env`, no PHP-FPM pool) unless it shares main's.
+pub fn env(cfg: &Config, site: &Site) -> Result<Vec<(String, String)>, String> {
     if site.worktree_of.is_none() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let db = db_name(site);
-    let mut env = Vec::new();
+    let mut env: Vec<(String, String)> = Vec::new();
     let choice = cfg
         .worktrees
         .get(&site.name)
         .map(|w| w.db)
         .unwrap_or_default();
-    if choice != DbChoice::Share {
-        let main = main_of(&site.path).unwrap_or_default();
+    let share = choice == DbChoice::Share;
+    if !share {
+        let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
         let dotenv = crate::resources::dotenv(&main);
-        if let Some(current) = dotenv.get("DB_DATABASE") {
-            if dotenv.get("DB_CONNECTION").map(String::as_str) == Some("sqlite") {
-                // A file in the main checkout: the same file in the worktree.
-                if let Ok(rel) = Path::new(current).strip_prefix(&main) {
-                    let file = site.path.join(rel).display().to_string();
-                    env.push(("DB_DATABASE".into(), file));
-                }
-            } else {
-                env.push(("DB_DATABASE".into(), db.clone()));
+        let conn = dotenv.get("DB_CONNECTION").map(String::as_str);
+        if conn == Some("sqlite") {
+            if let Some(file) = dotenv
+                .get("DB_DATABASE")
+                .and_then(|f| sqlite_file(&main, &site.path, f))
+            {
+                env.push(("DB_DATABASE".into(), file));
             }
+        } else if conn.is_some() || dotenv.contains_key("DB_DATABASE") {
+            // Laravel falls back to `laravel` without DB_DATABASE: never main's.
+            env.push(("DB_DATABASE".into(), db.clone()));
         }
         for key in ["DB_URL", "DATABASE_URL"] {
-            if let Some(url) = dotenv.get(key).and_then(|u| with_db(u, &db)) {
+            if let Some(url) = dotenv.get(key).filter(|u| !u.is_empty()) {
+                let url = with_db(url, &db, &main, &site.path)
+                    .ok_or_else(|| format!("{key} uses a kind of database Anvil can't rewrite"))?;
                 env.push((key.into(), url));
             }
         }
@@ -117,7 +179,29 @@ pub fn env(cfg: &Config, site: &Site) -> Vec<(String, String)> {
     env.push(("APP_URL".into(), crate::site_url(cfg, site)));
     env.push(("REDIS_PREFIX".into(), prefix.clone()));
     env.push(("CACHE_PREFIX".into(), prefix));
-    env
+    if !share
+        && site.php.is_some()
+        && let Some((k, _)) = env.iter().find(|(k, v)| !fpm_safe(k, v))
+    {
+        return Err(format!("{k} holds characters PHP-FPM can't take"));
+    }
+    Ok(env)
+}
+
+/// Whether `env[k] = "v"` reads back as `v` in a PHP-FPM pool (checked with php-fpm -tt):
+/// no line breaks, `;` or empty value (`check_ini`), no `"`, `\` or `$` (`${…}` expands).
+pub(crate) fn fpm_safe(k: &str, v: &str) -> bool {
+    crate::check_ini(k, v).is_ok() && !v.contains(['"', '$', '\\'])
+}
+
+/// `env`, or the error that refuses to start anything of a worktree it can't separate from main.
+pub fn checked_env(cfg: &Config, site: &Site) -> anyhow::Result<Vec<(String, String)>> {
+    env(cfg, site).map_err(|reason| {
+        anyhow::anyhow!(
+            "Anvil can't point {} at its own database ({reason}); choose Share main's to use main's database",
+            site.name
+        )
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -259,7 +343,7 @@ pub(crate) mod tests {
     #[test]
     fn env_points_a_laravel_worktree_at_its_own_database() {
         let (cfg, site) = worktree_site("laravel", "DB_CONNECTION=mysql\nDB_DATABASE=shop\n");
-        let env = env(&cfg, &site);
+        let env = env(&cfg, &site).unwrap();
         assert_eq!(get(&env, "DB_DATABASE"), Some("shop_feature_x"));
         assert_eq!(get(&env, "APP_URL"), Some("http://shop--feature-x.test"));
         assert_eq!(get(&env, "REDIS_PREFIX"), Some("shop_feature_x_"));
@@ -267,14 +351,14 @@ pub(crate) mod tests {
         assert_eq!(get(&env, "DATABASE_URL"), None);
         // The main app itself gets nothing.
         let main = crate::tests::site("shop", "/s/shop", None);
-        assert!(super::env(&cfg, &main).is_empty());
+        assert!(super::env(&cfg, &main).unwrap().is_empty());
     }
 
     #[test]
     fn env_rewrites_database_url() {
         let url = "DATABASE_URL=\"postgres://postgres@127.0.0.1:5433/shop?schema=public\"\n";
         let (cfg, site) = worktree_site("url", url);
-        let env = env(&cfg, &site);
+        let env = env(&cfg, &site).unwrap();
         assert_eq!(
             get(&env, "DATABASE_URL"),
             Some("postgres://postgres@127.0.0.1:5433/shop_feature_x?schema=public")
@@ -293,7 +377,7 @@ pub(crate) mod tests {
                 ..Default::default()
             },
         );
-        let env = env(&cfg, &site);
+        let env = env(&cfg, &site).unwrap();
         assert_eq!(get(&env, "DB_DATABASE"), None);
         assert_eq!(get(&env, "DATABASE_URL"), None);
         assert_eq!(get(&env, "REDIS_PREFIX"), Some("shop_feature_x_"));
@@ -303,8 +387,105 @@ pub(crate) mod tests {
     #[test]
     fn no_database_settings_only_the_address_and_prefixes() {
         let (cfg, site) = worktree_site("nodb", "APP_NAME=Shop\n");
-        let keys: Vec<_> = env(&cfg, &site).into_iter().map(|(k, _)| k).collect();
+        let keys: Vec<_> = env(&cfg, &site)
+            .unwrap()
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
         assert_eq!(keys, ["APP_URL", "REDIS_PREFIX", "CACHE_PREFIX"]);
+    }
+
+    #[test]
+    fn a_server_connection_without_db_database_still_gets_its_own() {
+        // Laravel would fall back to `laravel`, which main uses too.
+        let (cfg, site) = worktree_site("nodbname", "DB_CONNECTION=pgsql\n");
+        let env = env(&cfg, &site).unwrap();
+        assert_eq!(get(&env, "DB_DATABASE"), Some("shop_feature_x"));
+    }
+
+    #[test]
+    fn db_url_and_other_schemes_are_rewritten() {
+        let (cfg, site) = worktree_site("dburl", "DB_URL=mysql2://root@127.0.0.1:3306/shop\n");
+        let env = env(&cfg, &site).unwrap();
+        assert_eq!(
+            get(&env, "DB_URL"),
+            Some("mysql2://root@127.0.0.1:3306/shop_feature_x")
+        );
+        let (m, w) = (Path::new("/m"), Path::new("/w"));
+        assert_eq!(
+            with_db("sqlserver://h:1433;database=shop;user=sa", "d", m, w).as_deref(),
+            Some("sqlserver://h:1433;database=d;user=sa")
+        );
+        assert_eq!(
+            with_db("pgsql://u@h", "d", m, w).as_deref(),
+            Some("pgsql://u@h/d")
+        );
+        assert_eq!(
+            with_db("file:./dev.db", "d", m, w).as_deref(),
+            Some("file:./dev.db")
+        );
+    }
+
+    #[test]
+    fn an_unknown_scheme_leaves_the_worktree_without_a_database() {
+        let (mut cfg, site) = worktree_site("scheme", "DATABASE_URL=redis://h:6379/0\n");
+        let err = checked_env(&cfg, &site).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "Anvil can't point shop--feature-x at its own database (DATABASE_URL uses a kind of database Anvil can't rewrite); choose Share main's to use main's database"
+        );
+        // Share lifts it: main's database, on purpose.
+        cfg.worktrees.insert(
+            site.name.clone(),
+            WorktreeConfig {
+                db: DbChoice::Share,
+                ..Default::default()
+            },
+        );
+        let env = env(&cfg, &site).unwrap();
+        assert_eq!(get(&env, "DATABASE_URL"), None);
+    }
+
+    #[test]
+    fn a_value_php_fpm_cant_take_leaves_the_worktree_without_a_database() {
+        let dotenv = "DB_URL=mysql://root:pa$$w0rd@127.0.0.1/shop\n";
+        let (mut cfg, mut site) = worktree_site("fpmsafe", dotenv);
+        assert_eq!(
+            env(&cfg, &site).unwrap_err(),
+            "DB_URL holds characters PHP-FPM can't take"
+        );
+        // Only PHP-FPM can't take it: a Node worktree gets it as it is.
+        site.php = None;
+        assert!(env(&cfg, &site).is_ok());
+        site.php = Some("8.4".into());
+        cfg.worktrees.entry(site.name.clone()).or_default().db = DbChoice::Share;
+        assert!(env(&cfg, &site).is_ok());
+    }
+
+    #[test]
+    fn sqlite_in_the_checkout_maps_into_the_worktree_through_symlinks() {
+        let (_, site) = worktree_site("sqlite-in", "");
+        let main = main_of(&site.path).unwrap();
+        let link = main.parent().unwrap().join("link");
+        std::os::unix::fs::symlink(&main, &link).unwrap();
+        let file = link.join("database/app.sqlite");
+        let dotenv = format!("DB_CONNECTION=sqlite\nDB_DATABASE={}\n", file.display());
+        fs::write(main.join(".env"), dotenv).unwrap();
+        let cfg = Config::default();
+        let env = env(&cfg, &site).unwrap();
+        let want = site.path.join("database/app.sqlite");
+        assert_eq!(get(&env, "DB_DATABASE"), want.to_str());
+    }
+
+    #[test]
+    fn sqlite_outside_the_checkout_gets_a_file_in_the_worktree() {
+        let (_, site) = worktree_site("sqlite-out", "");
+        let main = main_of(&site.path).unwrap();
+        let dotenv = "DB_CONNECTION=sqlite\nDB_DATABASE=/var/data/shop.sqlite\n";
+        fs::write(main.join(".env"), dotenv).unwrap();
+        let env = env(&Config::default(), &site).unwrap();
+        let want = site.path.join("database/shop.sqlite");
+        assert_eq!(get(&env, "DB_DATABASE"), want.to_str());
     }
 
     #[test]

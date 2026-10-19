@@ -622,7 +622,8 @@ pub fn processes(site: &Site, app_pid: Option<u32>) -> Vec<Process> {
         } else {
             "pool www".to_string()
         };
-        let (memory, cpu, n) = sum(&|p| Some(p.ppid) == master && p.command.contains(&pool));
+        let (memory, cpu, n) =
+            sum(&|p| Some(p.ppid) == master && p.command.trim_end().ends_with(&pool));
         out.push(if !own {
             Process {
                 label: format!("PHP {v}, {n} workers shared by all PHP apps"),

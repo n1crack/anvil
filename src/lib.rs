@@ -1073,23 +1073,25 @@ fn fpm_conf(cfg: &Config, v: &str, sites: &[Site]) -> String {
         .iter()
         .filter(|s| s.php.as_deref() == Some(v) && own_pool(s))
     {
+        // A worktree Anvil can't separate from main gets no pool (Caddy shows why).
+        let Ok(env) = worktrees::env(cfg, site) else {
+            continue;
+        };
         s += &pool_conf(&pool(site), &fpm_socket(site).unwrap(), 8);
         let mut ini = global.clone();
         ini.extend(site.ini.clone());
         s += &values(&ini);
-        // Quoted: URLs hold `?`, `=`, `&`. A value FPM would misread is left out, not
-        // written: one bad line stops every pool.
-        for (k, val) in worktrees::env(cfg, site) {
-            if check_ini(&k, &val).is_ok() && !val.contains(['"', '$', '\\']) {
-                s += &format!("env[{k}] = \"{val}\"\n");
-            }
+        // Quoted: URLs hold `?`, `=`, `&`. One bad line would stop every pool; `env`
+        // already refuses a database value that isn't safe, so only a shared one is left out.
+        for (k, val) in env.iter().filter(|(k, v)| worktrees::fpm_safe(k, v)) {
+            s += &format!("env[{k}] = \"{val}\"\n");
         }
     }
     s
 }
 
 /// Reject anything that could break out of a `php_value[key] = value` line.
-fn check_ini(key: &str, value: &str) -> Result<()> {
+pub(crate) fn check_ini(key: &str, value: &str) -> Result<()> {
     let key_ok = !key.is_empty()
         && key
             .chars()
@@ -1243,6 +1245,22 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         {
             continue;
         }
+        if let Err(reason) = worktrees::env(cfg, site) {
+            s += &format!(
+                "\n{} {{\n\theader Content-Type \"text/html; charset=utf-8\"\n\trespond `{}` 502\n}}\n",
+                addresses(site, &names),
+                error_page(
+                    &format!("{} has no database of its own", site.name),
+                    &format!(
+                        "Anvil can't point it at its own database ({reason}). Choose Share main's to use main's database."
+                    ),
+                ),
+            );
+            if site.secure {
+                s += &redirect(&names);
+            }
+            continue;
+        }
         s += &format!(
             "\n{} {{\n\troot * \"{}\"\n\tencode\n",
             addresses(site, &names),
@@ -1261,8 +1279,16 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
 
 /// Shown instead of a bare 502 when an app that runs its own server is stopped.
 fn not_running_page(name: &str) -> String {
+    error_page(
+        &format!("{name} is not running"),
+        "Start it in Anvil, then reload this page.",
+    )
+}
+
+/// A plain page for Caddy's `respond`; `title` and `text` must hold no backtick.
+fn error_page(title: &str, text: &str) -> String {
     format!(
-        "<!doctype html><title>{name} is not running</title><body style=\"font:15px -apple-system,system-ui;display:grid;place-items:center;height:90vh;color:#444\"><div><h2>{name} is not running</h2><p>Start it in Anvil, then reload this page.</p></div>"
+        "<!doctype html><title>{title}</title><body style=\"font:15px -apple-system,system-ui;display:grid;place-items:center;height:90vh;color:#444\"><div><h2>{title}</h2><p>{text}</p></div>"
     )
 }
 
@@ -2377,7 +2403,10 @@ mod tests {
         w.worktree_of = Some("m".into());
         let mut bad = site("m--y", "/tmp/a\"b", None);
         bad.worktree_of = Some("m".into());
-        let c = caddyfile(&Config::default(), &[w, bad]);
+        // No real checkout behind these: Share, so no main `.env` is needed.
+        let mut cfg = Config::default();
+        cfg.worktrees.entry("m--x".into()).or_default().db = worktrees::DbChoice::Share;
+        let c = caddyfile(&cfg, &[w, bad]);
         assert!(
             c.contains("m--x.test {\n\troot * \"/tmp/my app--x\""),
             "{c}"
@@ -2516,6 +2545,19 @@ mod tests {
         let sock = fpm_socket(&wt).unwrap();
         assert!(sock.ends_with("site-shop--feature-x.sock"));
         assert_ne!(Some(sock), fpm_socket(&sites[0]));
+    }
+
+    #[test]
+    fn a_worktree_without_its_own_database_gets_no_pool_and_an_error_page() {
+        let (cfg, wt) =
+            crate::worktrees::tests::worktree_site("fpm-refuse", "DATABASE_URL=redis://h/0\n");
+        let sites = [wt];
+        assert!(!fpm_conf(&cfg, "8.4", &sites).contains("[site-shop--feature-x]"));
+        let caddy = caddyfile(&cfg, &sites);
+        let block = &caddy[caddy.find("http://shop--feature-x.test").expect("its host")..];
+        assert!(!block.contains("php_fastcgi"), "{block}");
+        assert!(block.contains("DATABASE_URL uses a kind of database Anvil can't rewrite"));
+        assert!(block.contains("respond `"));
     }
 
     #[test]

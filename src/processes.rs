@@ -1037,7 +1037,7 @@ pub fn address(cfg: &crate::Config, site: &Site, id: &str) -> Option<String> {
 /// Anvil's PHP for the app, its Node.js and the package managers installed from
 /// Settings, first on PATH, with Node's caches kept in Anvil's folder; a worktree's
 /// own database and prefixes (`worktrees::env`).
-pub fn env(cfg: &crate::Config, site: &Site) -> Vec<(String, String)> {
+pub fn env(cfg: &crate::Config, site: &Site) -> anyhow::Result<Vec<(String, String)>> {
     let mut env = vec![];
     let mut path = crate::env_path();
     // The project's .nvmrc / .node-version when installed, else the newest.
@@ -1054,8 +1054,8 @@ pub fn env(cfg: &crate::Config, site: &Site) -> Vec<(String, String)> {
         path = crate::prepend_path(&crate::php_dir(v), &path);
     }
     env.push(("PATH".into(), path));
-    env.extend(crate::worktrees::env(cfg, site));
-    env
+    env.extend(crate::worktrees::checked_env(cfg, site)?);
+    Ok(env)
 }
 
 #[cfg(test)]
@@ -1889,7 +1889,7 @@ echo '{DEV_JSON}'
             ..Default::default()
         };
         let site = site(Path::new("/s"), "vite");
-        let env = apps::process_env(&site, &p, &crate::Config::default());
+        let env = apps::process_env(&site, &p, &crate::Config::default()).unwrap();
         assert!(env.contains(&("PORT".into(), "45001".into())));
         // Vite answers 403 to a host it doesn't know, e.g. vuefinder--docs.test.
         assert!(env.contains(&(
@@ -1899,6 +1899,7 @@ echo '{DEV_JSON}'
         p.port = None;
         assert!(
             !apps::process_env(&site, &p, &crate::Config::default())
+                .unwrap()
                 .iter()
                 .any(|(k, _)| k == "PORT")
         );

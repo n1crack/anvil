@@ -624,7 +624,7 @@ impl Apps {
             &key,
             &site.path,
             &script.run,
-            crate::processes::env(cfg, site),
+            crate::processes::env(cfg, site)?,
         )?;
         self.processes.insert(key.clone());
         self.once.insert(key, script.name.clone());
@@ -652,7 +652,7 @@ impl Apps {
 
         // app_env: Python's version and uv environment rules on top of the runtime's.
         let mut env = app_env(site, runtime, &version);
-        env.extend(crate::worktrees::env(cfg, site));
+        env.extend(crate::worktrees::checked_env(cfg, site)?);
         env.extend([
             ("PORT".to_string(), port.to_string()),
             // Best effort: most dev servers honour one of these and stay off the LAN.
@@ -679,7 +679,7 @@ impl Apps {
         if self.running(&key) {
             return Ok(());
         }
-        self.spawn(&key, &site.path, &p.command, process_env(site, p, cfg))?;
+        self.spawn(&key, &site.path, &p.command, process_env(site, p, cfg)?)?;
         self.processes.insert(key);
         Ok(())
     }
@@ -786,14 +786,14 @@ pub(crate) fn process_env(
     site: &Site,
     p: &crate::processes::Process,
     cfg: &crate::Config,
-) -> Vec<(String, String)> {
-    let mut env = crate::processes::env(cfg, site);
+) -> Result<Vec<(String, String)>> {
+    let mut env = crate::processes::env(cfg, site)?;
     env.extend(p.port.map(|port| ("PORT".to_string(), port.to_string())));
     env.push((
         "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),
         format!(".{}", cfg.tld),
     ));
-    env
+    Ok(env)
 }
 
 /// The runtime's environment for one app. Python leaves the version to the

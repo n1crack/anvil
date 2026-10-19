@@ -109,15 +109,19 @@ pub fn resolve(tool: &str, cwd: &Path, cfg: &Config) -> Result<Resolved> {
 pub fn resolve_with(tool: &str, cwd: &Path, cfg: &Config, fetch: bool) -> Result<Resolved> {
     let all = sites(cfg);
     let site = site_for(&all, cwd);
+    // First: a worktree Anvil can't separate from main runs nothing, whatever the tool.
+    let extra = extra_env(cfg, site)?;
     let mut r = resolve_for(tool, cwd, cfg, fetch, site)?;
-    r.2.extend(extra_env(cfg, site));
+    r.2.extend(extra);
     Ok(r)
 }
 
 /// A worktree's own database and prefixes (`worktrees::env`), so a terminal `php artisan migrate` stays off the main app's.
-fn extra_env(cfg: &Config, site: Option<&Site>) -> Vec<(String, String)> {
-    site.map(|s| crate::worktrees::env(cfg, s))
-        .unwrap_or_default()
+fn extra_env(cfg: &Config, site: Option<&Site>) -> Result<Vec<(String, String)>> {
+    Ok(match site {
+        Some(s) => crate::worktrees::checked_env(cfg, s)?,
+        None => Vec::new(),
+    })
 }
 
 fn resolve_for(
@@ -445,12 +449,24 @@ mod tests {
         let all = sites(&cfg);
         let site = site_for(&all, &wt.join("app")).expect("the worktree's site");
         assert_eq!(site.name, "shop--feature-x");
-        assert!(has_db(&extra_env(&cfg, Some(site))));
-        assert!(extra_env(&cfg, site_for(&all, &shop)).is_empty());
+        assert!(has_db(&extra_env(&cfg, Some(site)).unwrap()));
+        assert!(extra_env(&cfg, site_for(&all, &shop)).unwrap().is_empty());
         // Through the real shim when this machine has an Anvil PHP (CI has none).
         if !installed_php().is_empty() {
             let (_, _, env) = resolve_with("php", &wt.join("app"), &cfg, false).unwrap();
             assert!(has_db(&env), "{env:?}");
         }
+    }
+
+    #[test]
+    fn shims_refuse_a_worktree_without_its_own_database() {
+        let (mut cfg, site) =
+            crate::worktrees::tests::worktree_site("shims-refuse", "DATABASE_URL=redis://h/0\n");
+        cfg.paths.push(site.path.parent().unwrap().to_path_buf());
+        let err = resolve_with("php", &site.path, &cfg, false).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Anvil can't point main--x at its own database (DATABASE_URL uses a kind of database Anvil can't rewrite); choose Share main's to use main's database"
+        );
     }
 }
