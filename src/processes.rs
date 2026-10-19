@@ -253,6 +253,11 @@ fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>)
     apply_settings(site, cfg, detect_base(site, php, cache, cfg))
 }
 
+/// Whose process settings an app follows: a worktree shares its app's.
+fn settings_of(site: &Site) -> &str {
+    site.worktree_of.as_deref().unwrap_or(&site.name)
+}
+
 /// The app's per-process settings applied: hidden rows dropped, commands replaced,
 /// autostart copied, and pinned package.json commands added as rows.
 fn apply_settings(
@@ -261,7 +266,7 @@ fn apply_settings(
     mut procs: Vec<Process>,
 ) -> Vec<Process> {
     let Some(set) = cfg
-        .and_then(|c| c.sites.get(&site.name))
+        .and_then(|c| c.sites.get(settings_of(site)))
         .map(|s| &s.processes)
         .filter(|p| !p.is_empty())
     else {
@@ -286,7 +291,8 @@ fn apply_settings(
     procs.retain(|p| !set.get(&p.id).is_some_and(|c| c.hidden));
     for p in &mut procs {
         if let Some(c) = set.get(&p.id) {
-            p.autostart = c.autostart;
+            // A worktree's processes don't start with Anvil (dozens of agent worktrees would).
+            p.autostart = c.autostart && site.worktree_of.is_none();
             p.manual = c.manual;
             if let Some(command) = &c.command {
                 p.command = command.clone();
@@ -519,7 +525,7 @@ pub fn server_rows(cfg: &crate::Config, site: &Site) -> Vec<ServerRow> {
 fn rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
     let hidden = |id: &str| {
         cfg.sites
-            .get(&site.name)
+            .get(settings_of(site))
             .is_some_and(|s| s.processes.get(id).is_some_and(|p| p.hidden))
     };
     // Dropped after ports and prefixes are given out, so the other rows keep theirs.
@@ -543,7 +549,7 @@ fn all_rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
         taken.extend(crate::services::web_port(cfg, &id));
     }
     let mut prefixes: Vec<String> = vec![];
-    let set = |id: &str| cfg.sites.get(&site.name)?.processes.get(id);
+    let set = |id: &str| cfg.sites.get(settings_of(site))?.processes.get(id);
     let mut procs = package_scripts(&site.path).0;
     procs.retain(|p| p.name != "dev");
     procs
@@ -1235,6 +1241,9 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            worktree_of: None,
+            branch: None,
+            aliases: vec![],
         }
     }
 

@@ -5,6 +5,16 @@ pub fn joined(first: &str, rest: &str) -> String {
     format!("{first}--{rest}")
 }
 
+/// A worktree's own part of its name: the folder slugged like site names, less a
+/// leading `<app>--` (an Anvil-made `myapp--feature-x` is `feature-x`).
+pub fn worktree_name(folder: &Path) -> String {
+    let name = crate::site_name(&folder.file_name().unwrap_or_default().to_string_lossy());
+    match name.split_once("--") {
+        Some((_, rest)) if !rest.is_empty() => rest.into(),
+        _ => name,
+    }
+}
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -93,18 +103,18 @@ pub fn main_of(dir: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::process::Command;
 
-    fn tmp(name: &str) -> PathBuf {
+    pub(crate) fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("anvil-wt-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         fs::canonicalize(&d).unwrap()
     }
 
-    fn git(dir: &Path, args: &[&str]) {
+    pub(crate) fn git(dir: &Path, args: &[&str]) {
         let ok = Command::new("git")
             .args(["-c", "user.name=t", "-c", "user.email=t@t", "-C"])
             .arg(dir)

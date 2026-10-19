@@ -97,7 +97,7 @@ pub struct Config {
     pub accepted_licenses: BTreeMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct SiteConfig {
     pub php: Option<String>,
     /// php.ini overrides for this site only, e.g. memory_limit = "1G".
@@ -216,6 +216,12 @@ pub struct Site {
     /// Language version the app runs with: chosen, from the project, or the newest.
     pub runtime_version: Option<String>,
     pub runtime_pinned: bool,
+    /// For a git worktree of another app: that app's name (its processes and runtimes are shared).
+    pub worktree_of: Option<String>,
+    /// A worktree's branch, `None` when detached.
+    pub branch: Option<String>,
+    /// A worktree's addresses derived from its app's aliases (`admin--x.<tld>`).
+    pub aliases: Vec<String>,
 }
 
 /// `run` (sockets, pid files, generated configs) and `log`. `run` is private:
@@ -441,77 +447,174 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     for (name, path) in &cfg.links {
         found.insert(name.clone(), (path.clone(), None));
     }
+    // The git worktrees of each app; an alias (a link to a parked app's folder) is the
+    // same app. A worktree deleted by hand counts as removed, though git still lists it.
+    let mut seen = BTreeSet::new();
+    let mut mains = vec![];
+    let parked_first = found.iter().filter(|(_, (_, d))| d.is_some());
+    for (name, (path, _)) in parked_first.chain(found.iter().filter(|(_, (_, d))| d.is_none())) {
+        if seen.insert(path) {
+            let mut list = worktrees::list(path);
+            list.retain(|w| !w.prunable && w.path.exists());
+            if !list.is_empty() {
+                mains.push((name.clone(), path.clone(), list));
+            }
+        }
+    }
+    // A parked folder that is one of those worktrees is listed under its app only.
+    let worktree_paths: BTreeSet<&Path> = mains
+        .iter()
+        .flat_map(|(_, _, l)| l.iter().map(|w| w.path.as_path()))
+        .collect();
+    if !worktree_paths.is_empty() {
+        found.retain(|_, (path, dir)| {
+            dir.is_none()
+                || !fs::canonicalize(path).is_ok_and(|p| worktree_paths.contains(p.as_path()))
+        });
+    }
     let installed = installed_php();
-    let sites = found
+    let mut sites: Vec<Site> = found
         .into_iter()
         .map(|(name, (path, parked_in))| {
-            let public = path.join("public");
-            let root = if public.is_dir() {
-                public
-            } else {
-                path.clone()
-            };
             let own = cfg.sites.get(&name);
-            let pinned = own.and_then(|s| s.php.clone());
-            let ini = own.map(|s| s.ini.clone()).unwrap_or_default();
-            let detected = apps::detect(&path);
-            let kind = own
-                .and_then(|s| s.kind.clone())
-                .unwrap_or_else(|| detected.to_string());
-            let custom = own.and_then(|s| s.command.clone());
-            let command = custom
-                .clone()
-                .or_else(|| apps::default_command(&kind, &path));
-            let php_ok = !apps::runs_process(&kind) && apps::serves(&kind);
-            let runtime_version = apps::runtime(&kind).and_then(|rt| {
-                own.and_then(|s| s.runtime.clone())
-                    .or_else(|| apps::runtime_version(rt, &path))
-            });
-            let modified = fs::metadata(&path)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_secs());
-            // "Pinned" only when the pin is in effect (a static site drops PHP it can't use).
-            let pin_set = php_ok && pinned.is_some();
-            let php = site_php(
-                &kind,
-                project::php_version(pinned, &path, &installed, cfg.php.clone()),
-                &installed,
-            );
-            let host = if kind == "next" && !apps::next_allows(&path, &cfg.tld) {
-                format!("{name}.localhost")
-            } else {
-                format!("{name}.{}", cfg.tld)
-            };
-            Site {
-                host,
-                secure: own
-                    .and_then(|s| s.https)
-                    .unwrap_or(cfg.https_default == Some(true)),
-                modified,
-                ini,
-                php_pinned: pin_set && php.is_some(),
-                php,
-                kind_detected: detected.into(),
-                kind,
-                command_custom: custom.is_some(),
-                command,
-                port: own.and_then(|s| s.port),
-                autostart: own.is_some_and(|s| s.autostart),
-                runtime_pinned: own.is_some_and(|s| s.runtime.is_some()),
-                runtime_version,
-                name,
-                path,
-                root,
-                linked: parked_in.is_none(),
-                parked_in,
-            }
+            site_at(cfg, &installed, name, path, parked_in, own)
         })
-        .collect::<Vec<_>>();
-    let mut sites = sites;
+        .collect();
+    let mut taken: BTreeSet<String> = sites.iter().map(|s| s.name.clone()).collect();
+    let tld = format!(".{}", cfg.tld);
+    for (main, main_path, list) in &mains {
+        let Some(app) = sites.iter().find(|s| &s.name == main) else {
+            continue;
+        };
+        // The app's extra dev servers keep their `<app>--<row>` names.
+        taken.extend(
+            processes::server_rows(cfg, app)
+                .into_iter()
+                .map(|r| r.host.strip_suffix(&tld).unwrap_or(&r.host).to_string()),
+        );
+        let aliases: Vec<&String> = cfg
+            .links
+            .iter()
+            .filter(|(n, p)| *p == main_path && *n != main)
+            .map(|(n, _)| n)
+            .collect();
+        for w in list {
+            let base = worktrees::worktree_name(&w.path);
+            let (mut label, mut n) = (base.clone(), 2);
+            while taken.contains(&worktrees::joined(main, &label)) {
+                label = format!("{base}-{n}");
+                n += 1;
+            }
+            let name = worktrees::joined(main, &label);
+            taken.insert(name.clone());
+            // Without its own settings a worktree runs as its app does, on its own port,
+            // not with Anvil, and with the versions its own `.anvil.toml` asks for.
+            let inherited = cfg
+                .sites
+                .get(main)
+                .filter(|_| !cfg.sites.contains_key(&name))
+                .map(|m| {
+                    let file = project::load(&w.path);
+                    let asks = |f: fn(&project::ProjectFile) -> bool| file.as_ref().is_some_and(f);
+                    SiteConfig {
+                        php: m.php.clone().filter(|_| !asks(|f| f.php.is_some())),
+                        runtime: m.runtime.clone().filter(|_| !asks(|f| f.node.is_some())),
+                        port: None,
+                        autostart: false,
+                        processes: BTreeMap::new(),
+                        ..m.clone()
+                    }
+                });
+            let own = cfg.sites.get(&name).or(inherited.as_ref());
+            let mut site = site_at(cfg, &installed, name, w.path.clone(), None, own);
+            site.linked = false;
+            site.worktree_of = Some(main.clone());
+            site.branch = w.branch.clone();
+            site.aliases = aliases
+                .iter()
+                .map(|a| format!("{}{tld}", worktrees::joined(a, &label)))
+                .collect();
+            sites.push(site);
+        }
+    }
+    sites.sort_by(|a, b| a.name.cmp(&b.name));
     apps::assign_ports(cfg, &mut sites);
     sites
+}
+
+/// The site for the folder at `path` served as `name`, with the settings `own`.
+fn site_at(
+    cfg: &Config,
+    installed: &[String],
+    name: String,
+    path: PathBuf,
+    parked_in: Option<PathBuf>,
+    own: Option<&SiteConfig>,
+) -> Site {
+    let public = path.join("public");
+    let root = if public.is_dir() {
+        public
+    } else {
+        path.clone()
+    };
+    let pinned = own.and_then(|s| s.php.clone());
+    let ini = own.map(|s| s.ini.clone()).unwrap_or_default();
+    let detected = apps::detect(&path);
+    let kind = own
+        .and_then(|s| s.kind.clone())
+        .unwrap_or_else(|| detected.to_string());
+    let custom = own.and_then(|s| s.command.clone());
+    let command = custom
+        .clone()
+        .or_else(|| apps::default_command(&kind, &path));
+    let php_ok = !apps::runs_process(&kind) && apps::serves(&kind);
+    let runtime_version = apps::runtime(&kind).and_then(|rt| {
+        own.and_then(|s| s.runtime.clone())
+            .or_else(|| apps::runtime_version(rt, &path))
+    });
+    let modified = fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs());
+    // "Pinned" only when the pin is in effect (a static site drops PHP it can't use).
+    let pin_set = php_ok && pinned.is_some();
+    let php = site_php(
+        &kind,
+        project::php_version(pinned, &path, installed, cfg.php.clone()),
+        installed,
+    );
+    let host = if kind == "next" && !apps::next_allows(&path, &cfg.tld) {
+        format!("{name}.localhost")
+    } else {
+        format!("{name}.{}", cfg.tld)
+    };
+    Site {
+        host,
+        secure: own
+            .and_then(|s| s.https)
+            .unwrap_or(cfg.https_default == Some(true)),
+        modified,
+        ini,
+        php_pinned: pin_set && php.is_some(),
+        php,
+        kind_detected: detected.into(),
+        kind,
+        command_custom: custom.is_some(),
+        command,
+        port: own.and_then(|s| s.port),
+        autostart: own.is_some_and(|s| s.autostart),
+        runtime_pinned: own.is_some_and(|s| s.runtime.is_some()),
+        worktree_of: None,
+        branch: None,
+        aliases: vec![],
+        runtime_version,
+        name,
+        path,
+        root,
+        linked: parked_in.is_none(),
+        parked_in,
+    }
 }
 
 /// Serve `path` as `<name>.<tld>`; returns the cleaned-up name.
@@ -1045,6 +1148,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             continue;
         }
         let mut names = vec![format!("{}.{}", site.name, cfg.tld)];
+        names.extend(site.aliases.iter().cloned());
         if let (true, Some(port)) = (apps::runs_process(&site.kind), site.port) {
             // Dev servers that only trust localhost (Next.js) work at <name>.localhost too.
             if cfg.tld != "localhost" {
@@ -1075,6 +1179,9 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
                     s += &redirect(&names);
                 }
                 // ponytail: remove the old-host redirect one release after 0.2
+                if site.worktree_of.is_some() {
+                    continue; // never had an old host
+                }
                 let to = site_url(
                     cfg,
                     &Site {
@@ -1955,7 +2062,169 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            worktree_of: None,
+            branch: None,
+            aliases: vec![],
         }
+    }
+
+    /// A git repository at `dir` with one commit holding `index.php`.
+    fn app_repo(dir: &Path) {
+        use crate::worktrees::tests::git;
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join("index.php"), "").unwrap();
+        git(dir, &["init", "-q", "-b", "main"]);
+        git(dir, &["add", "."]);
+        git(dir, &["commit", "-q", "-m", "i"]);
+    }
+
+    fn add_worktree(main: &Path, at: &Path, branch: &str) {
+        let at = at.to_str().unwrap();
+        crate::worktrees::tests::git(main, &["worktree", "add", "-q", at, "-b", branch]);
+    }
+
+    #[test]
+    fn a_worktree_is_a_site_named_app_double_dash_folder() {
+        let root = crate::worktrees::tests::tmp("site");
+        let shop = root.join("sites/shop");
+        app_repo(&shop);
+        add_worktree(&shop, &shop.join(".claude/worktrees/agent-1a2b"), "agent");
+        let gone = root.join("gone");
+        add_worktree(&shop, &gone, "gone");
+        let mut cfg = Config::default();
+        cfg.paths.push(root.join("sites"));
+        let main = cfg.sites.entry("shop".into()).or_default();
+        main.autostart = true;
+        main.processes.insert(
+            "queue".into(),
+            ProcessConfig {
+                command: Some("php artisan queue:work".into()),
+                added: true,
+                autostart: true,
+                ..Default::default()
+            },
+        );
+        let all = sites(&cfg);
+        let w = all.iter().find(|s| s.name == "shop--agent-1a2b");
+        let w = w.expect("the worktree is a site");
+        assert_eq!(w.host, "shop--agent-1a2b.test");
+        assert_eq!(w.worktree_of.as_deref(), Some("shop"));
+        assert_eq!(w.branch.as_deref(), Some("agent"));
+        assert!(!w.autostart);
+        // The app's processes, never started with Anvil.
+        let q = processes::detect_with(w, Some(&cfg))
+            .into_iter()
+            .find(|p| p.id == "queue")
+            .expect("the app's own process");
+        assert!(!q.autostart);
+        assert!(all.iter().any(|s| s.name == "shop--gone"));
+        // Deleted by hand: gone, though git still lists it until it is pruned.
+        fs::remove_dir_all(&gone).unwrap();
+        assert!(sites(&cfg).iter().all(|s| s.name != "shop--gone"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_parked_worktree_folder_is_listed_once_under_its_app() {
+        let root = crate::worktrees::tests::tmp("parked");
+        let shop = root.join("shop");
+        app_repo(&shop);
+        let wt = root.join("shop--feature-x");
+        add_worktree(&shop, &wt, "feature-x");
+        let mut cfg = Config::default();
+        cfg.paths.push(root.clone());
+        let all = sites(&cfg);
+        assert_eq!(all.len(), 2);
+        let at: Vec<_> = all.iter().filter(|s| s.path == wt).collect();
+        assert_eq!(at.len(), 1);
+        assert_eq!(at[0].name, "shop--feature-x");
+        assert_eq!(at[0].worktree_of.as_deref(), Some("shop"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_worktree_without_an_anvil_main_stays_an_app() {
+        let root = crate::worktrees::tests::tmp("no-main");
+        let shop = root.join("elsewhere/shop");
+        app_repo(&shop);
+        fs::create_dir(root.join("sites")).unwrap();
+        add_worktree(&shop, &root.join("sites/shop--x"), "x");
+        let mut cfg = Config::default();
+        cfg.paths.push(root.join("sites"));
+        let all = sites(&cfg);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].name, "shop--x");
+        assert_eq!(all[0].worktree_of, None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn collisions_give_the_worktree_a_suffix() {
+        let root = crate::worktrees::tests::tmp("clash");
+        let shop = root.join("sites/shop");
+        app_repo(&shop);
+        fs::write(
+            shop.join("package.json"),
+            r#"{"scripts":{"dev":"vite","docs":"vitepress dev docs"}}"#,
+        )
+        .unwrap();
+        fs::create_dir(root.join("sites/shop--x")).unwrap();
+        add_worktree(&shop, &root.join("docs"), "docs");
+        add_worktree(&shop, &root.join("x"), "x");
+        let mut cfg = Config::default();
+        cfg.paths.push(root.join("sites"));
+        cfg.sites.entry("shop".into()).or_default().kind = Some("vite".into());
+        let all = sites(&cfg);
+        let of = |n: &str| {
+            all.iter()
+                .find(|s| s.name == n)
+                .map(|s| s.worktree_of.clone())
+        };
+        assert_eq!(of("shop--docs-2"), Some(Some("shop".into())));
+        assert_eq!(of("shop--docs"), None);
+        assert_eq!(of("shop--x"), Some(None));
+        assert_eq!(of("shop--x-2"), Some(Some("shop".into())));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn alias_addresses_are_derived() {
+        let root = crate::worktrees::tests::tmp("alias");
+        let shop = root.join("sites/shop");
+        app_repo(&shop);
+        add_worktree(&shop, &root.join("x"), "x");
+        let mut cfg = Config::default();
+        cfg.paths.push(root.join("sites"));
+        cfg.links.insert("admin".into(), shop.clone());
+        cfg.https_default = Some(true);
+        let all = sites(&cfg);
+        let wts: Vec<_> = all.iter().filter(|s| s.worktree_of.is_some()).collect();
+        assert_eq!(wts.len(), 1, "an alias isn't another app");
+        assert_eq!(wts[0].name, "shop--x");
+        assert_eq!(wts[0].aliases, ["admin--x.test"]);
+        assert!(caddyfile(&cfg, &all).contains("\nshop--x.test, admin--x.test {"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn odd_paths_are_quoted_or_skipped() {
+        use crate::worktrees::worktree_name;
+        assert_eq!(worktree_name(Path::new("/tmp/my app--x")), "x");
+        assert_eq!(worktree_name(Path::new("/s/myapp--feature-x")), "feature-x");
+        assert_eq!(
+            worktree_name(Path::new("/s/.claude/worktrees/agent-1a2b")),
+            "agent-1a2b"
+        );
+        let mut w = site("m--x", "/tmp/my app--x", None);
+        w.worktree_of = Some("m".into());
+        let mut bad = site("m--y", "/tmp/a\"b", None);
+        bad.worktree_of = Some("m".into());
+        let c = caddyfile(&Config::default(), &[w, bad]);
+        assert!(
+            c.contains("m--x.test {\n\troot * \"/tmp/my app--x\""),
+            "{c}"
+        );
+        assert!(!c.contains("m--y"));
     }
 
     #[test]

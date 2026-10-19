@@ -21,6 +21,9 @@ const mockSite = (name, kind, extra = {}) => ({
   autostart: false,
   runtime_version: kind === "laravel" ? null : "22.1.0",
   runtime_pinned: false,
+  worktree_of: null,
+  branch: null,
+  aliases: [],
   ...extra,
 });
 window.mockSnap = {

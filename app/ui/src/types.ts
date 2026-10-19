@@ -21,6 +21,12 @@ export interface Site {
   autostart: boolean;
   runtime_version: string | null;
   runtime_pinned: boolean;
+  /** For a git worktree of another app: that app's name. */
+  worktree_of: string | null;
+  /** A worktree's branch; null when detached. */
+  branch: string | null;
+  /** A worktree's addresses derived from its app's aliases. */
+  aliases: string[];
 }
 
 export interface Snapshot {

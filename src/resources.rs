@@ -1393,6 +1393,9 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            worktree_of: None,
+            branch: None,
+            aliases: vec![],
         };
 
         assert!(clean(&site, "storage/logs", false).unwrap() > 0);
@@ -1445,6 +1448,9 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            worktree_of: None,
+            branch: None,
+            aliases: vec![],
         };
         assert!(clean(&site, "ios/Pods", false).is_err());
         assert!(outside.join("Pods/keep.txt").exists());
@@ -1508,6 +1514,9 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            worktree_of: None,
+            branch: None,
+            aliases: vec![],
         }
     }
 

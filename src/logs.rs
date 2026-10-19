@@ -954,6 +954,9 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            worktree_of: None,
+            branch: None,
+            aliases: vec![],
         };
         let ids: Vec<String> = sources(&site).into_iter().map(|s| s.id).collect();
         assert_eq!(ids, ["laravel.log"]);
