@@ -8,6 +8,33 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Worktree hooks: what a new worktree of an app gets is yours to set. The
+  files copied from the app (`.env` for Laravel, or what `.worktreeinclude`
+  lists), "Copy the database too", the env keys set per worktree (`{db}`,
+  `{url}`, `{prefix}`, `{port}`, `{name}`), the keys checked against the
+  app's, and commands offered once it is made (`composer install`, `npm ci`,
+  `php artisan migrate` for Laravel), run only when you say Run. Anvil ships a
+  preset per framework, editable in Settings › Worktrees with Reset to
+  default; an app changes any of it in its Settings tab, and a project can
+  share its own in `.anvil.toml`'s `[worktree]`. The keys go into the env
+  files Anvil copies and into everything Anvil starts; a worktree whose env
+  file still has the app's value for a checked key says so on its Overview,
+  with "Rewrite with the hooks". Taking the database keys out shares the
+  app's database; tests still get the worktree's own. `anvil worktree hooks`
+  prints an app's hooks and where each comes from.
+
+### Changed
+
+- New Worktree, Add Alias, New Group and Edit Address open as a sheet, like
+  New application, with their errors in it.
+- A new worktree gets an empty database of its own unless "Copy the database
+  too" is on (Settings › Worktrees, a preset or the app); it was a copy
+  before; a config saved before this keeps Copy. `anvil worktree add --copy-db`
+  replaces `--db copy|empty`, and the Overview no longer switches a worktree's
+  database before it is made.
+
 ## [0.1.0] - 2026-10-19
 
 The first public release of Anvil, a macOS development environment. It comes as
