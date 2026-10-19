@@ -25,8 +25,10 @@ Until 1.0.0, minor versions may contain breaking changes.
   `.env.testing` or `.env.test`) when Anvil copies them; a worktree whose env
   file still has the app's value for a checked key says so on its Overview,
   with "Rewrite with the hooks", which changes only those lines. A database
-  named in a URL's query (`?database=`, `?dbname=`) becomes the worktree's
-  too. Taking the database keys out of an app's own settings shares the app's
+  named in a URL's query (`?database=`, `?dbname=`, `?db=`), percent-encoded
+  or not, becomes the worktree's too. A Symfony app with composer.json's
+  `extra.runtime.dotenv_overload` on runs nothing in a worktree, since its env
+  files would win over Anvil's, and its `bin/phpunit` counts as a test run. Taking the database keys out of an app's own settings shares the app's
   database; a `.anvil.toml` or a preset that leaves them out still gets them.
   A database key left empty, or one whose placeholder has no value, stops the
   worktree instead, and tests always get the worktree's own. `anvil worktree hooks` prints an app's hooks, where each
