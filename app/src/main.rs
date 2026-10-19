@@ -99,6 +99,10 @@ struct WorktreeView {
     error: Option<String>,
     /// Databases Anvil made for it on a server, for Remove's "Also delete".
     copies: Vec<String>,
+    /// Its database was there already and the user chose to use it.
+    adopted: bool,
+    /// What it lacks to run: main's `.env`, its packages (`worktrees::missing`).
+    missing: anvil::worktrees::Missing,
 }
 
 fn worktree_view(
@@ -131,6 +135,8 @@ fn worktree_view(
         cached_config: s.path.join("bootstrap/cache/config.php").exists(),
         error: w::checked_env(cfg, s).err().map(err),
         copies: rec.copies.into_iter().map(|(_, d)| d).collect(),
+        adopted: rec.adopted,
+        missing: w::missing(s),
     }
 }
 
@@ -2138,7 +2144,12 @@ fn worktree_add(
 ) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
     let main = site_in(&cfg, &site)?;
-    if main.worktree_of.is_some() || main.linked {
+    // A linked app may have worktrees; an alias (a link to another app's folder) is that app.
+    let alias = main.linked
+        && anvil::sites(&cfg)
+            .iter()
+            .any(|o| o.name != main.name && !o.linked && same_folder(&o.path, &main.path));
+    if main.worktree_of.is_some() || alias {
         return Err(format!("{site} isn't an app's own folder"));
     }
     anvil::worktrees::add(&cfg, &main, &branch, new).map_err(err)?;
@@ -2206,6 +2217,50 @@ fn worktree_prepare(handle: AppHandle, app: State<App>, site: String) -> Res<Sna
     let made = prepare(&app, &s);
     changed(&handle);
     made.map_err(err)?;
+    snapshot(&app)
+}
+
+fn same_folder(a: &std::path::Path, b: &std::path::Path) -> bool {
+    let real = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    real(a) == real(b)
+}
+
+/// "Use existing <db>": the worktree takes the database that is there already (`worktrees::adopt`).
+#[tauri::command(async)]
+fn worktree_adopt(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    let (cfg, ()) = edit(|c| {
+        let s = anvil::sites(c)
+            .into_iter()
+            .find(|s| s.name == site && s.worktree_of.is_some())
+            .ok_or_else(|| anyhow::anyhow!("No worktree named {site}"))?;
+        anvil::worktrees::adopt(c, &s)
+    })?;
+    sites_changed(&handle, &app, &cfg);
+    snapshot(&app)
+}
+
+/// Give a worktree its app's `.env` (Overview's "Copy .env from <app>").
+#[tauri::command(async)]
+fn worktree_copy_env(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    anvil::worktrees::copy_env(&site_in(&cfg, &site)?).map_err(err)?;
+    sites_changed(&handle, &app, &cfg);
+    snapshot(&app)
+}
+
+/// Install a worktree's packages (`worktrees::install`); `what` is `composer` or `js`.
+#[tauri::command(async)]
+fn worktree_install(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    what: String,
+) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    let s = site_in(&cfg, &site)?;
+    let done = anvil::worktrees::install(&cfg, &s, &what);
+    changed(&handle);
+    done.map_err(err)?;
     snapshot(&app)
 }
 
@@ -3490,6 +3545,9 @@ fn main() {
             worktree_remove,
             worktree_db,
             worktree_prepare,
+            worktree_adopt,
+            worktree_copy_env,
+            worktree_install,
             leftover_drop,
             leftover_keep,
             setup_status,

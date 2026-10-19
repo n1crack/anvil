@@ -679,6 +679,75 @@ pub fn add(_cfg: &Config, app: &Site, branch: &str, new_branch: bool) -> anyhow:
     Ok(folder)
 }
 
+/// What a worktree (one made outside Anvil, say) lacks to run: main's `.env`, which git
+/// ignores, and its packages: `(id, command)` for `install`.
+#[derive(Serialize, Debug, Default, PartialEq)]
+pub struct Missing {
+    pub env: bool,
+    pub installs: Vec<(String, String)>,
+}
+
+pub fn missing(site: &Site) -> Missing {
+    let (dir, mut out) = (&site.path, Missing::default());
+    out.env = !dir.join(".env").exists() && main_of(dir).is_some_and(|m| m.join(".env").is_file());
+    if dir.join("composer.json").is_file() && !dir.join("vendor").exists() {
+        out.installs
+            .push(("composer".into(), "composer install".into()));
+    }
+    if dir.join("package.json").is_file() && !dir.join("node_modules").exists() {
+        let manager = crate::apps::js_manager(dir);
+        out.installs
+            .push(("js".into(), format!("{manager} install")));
+    }
+    out
+}
+
+/// Give the worktree main's `.env`; never over one it has.
+pub fn copy_env(site: &Site) -> anyhow::Result<()> {
+    let main =
+        main_of(&site.path).ok_or_else(|| anyhow::anyhow!("{} isn't a git worktree", site.name))?;
+    let to = site.path.join(".env");
+    if to.exists() {
+        anyhow::bail!("{} has a .env already", site.name);
+    }
+    fs::copy(main.join(".env"), to)?;
+    Ok(())
+}
+
+/// Install the worktree's packages (`missing`'s ids): `composer install` through Anvil's
+/// composer shim, or node_modules with the lock file's manager, as a dev server would.
+/// With the worktree's env: a composer script that runs artisan stays off main's database.
+pub fn install(cfg: &Config, site: &Site, what: &str) -> anyhow::Result<()> {
+    use crate::shims::resolve_with;
+    let dir = &site.path;
+    let (program, args, env) = match what {
+        "composer" => {
+            crate::create::composer()?;
+            let (php, mut pre, env) = resolve_with("composer", dir, cfg, false)?;
+            pre.extend(["install".into(), "--no-interaction".into()]);
+            (php, pre, env)
+        }
+        "js" => {
+            let install = crate::apps::js_install(crate::apps::js_manager(dir));
+            let (_, _, env) = resolve_with("node", dir, cfg, false)?;
+            ("/bin/sh".into(), vec!["-c".into(), install], env)
+        }
+        _ => anyhow::bail!("Anvil doesn't install {what}"),
+    };
+    let out = std::process::Command::new(program)
+        .args(args)
+        .envs(env)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()?;
+    if !out.status.success() {
+        let text = String::from_utf8_lossy(&out.stderr);
+        let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        anyhow::bail!("{}", tail[tail.len().saturating_sub(3)..].join("\n"));
+    }
+    Ok(())
+}
+
 /// A database Anvil copied for a worktree that is gone. Never dropped on its own.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Leftover {
@@ -1671,6 +1740,34 @@ pub(crate) mod tests {
         assert_eq!(capped("shop", &long), name, "stable");
         assert_ne!(capped("shop", &format!("{long}-2")), name);
         assert_eq!(capped("shop", "x"), "shop--x");
+    }
+
+    #[test]
+    fn a_worktree_says_what_it_lacks_and_gets_mains_env() {
+        let (_, site) = worktree_site("missing", "A=1\n");
+        assert_eq!(
+            missing(&site),
+            Missing {
+                env: true,
+                installs: vec![]
+            }
+        );
+        fs::write(site.path.join("composer.json"), "{}").unwrap();
+        fs::write(site.path.join("package.json"), "{}").unwrap();
+        fs::write(site.path.join("pnpm-lock.yaml"), "").unwrap();
+        let ids: Vec<_> = missing(&site)
+            .installs
+            .into_iter()
+            .map(|(_, c)| c)
+            .collect();
+        assert_eq!(ids, ["composer install", "pnpm install"]);
+        copy_env(&site).unwrap();
+        assert_eq!(fs::read_to_string(site.path.join(".env")).unwrap(), "A=1\n");
+        assert!(!missing(&site).env);
+        assert!(copy_env(&site).is_err(), "never over its own");
+        fs::create_dir(site.path.join("vendor")).unwrap();
+        fs::create_dir(site.path.join("node_modules")).unwrap();
+        assert_eq!(missing(&site), Missing::default());
     }
 
     #[test]

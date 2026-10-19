@@ -80,12 +80,21 @@ function drawGit(name) {
   panel.append(list);
 
   // The git app lives here, not among the buttons at the top.
-  if (snap.git_client) {
+  const s = snap.sites.find((x) => x.name === name);
+  const worktrees = s && late.mayHaveWorktrees?.(s);
+  if (snap.git_client || worktrees) {
     const actions = el("div", "below");
-    const btn = el("button", "git-btn", `Open in ${snap.git_client}`);
-    btn.title = "⌘G";
-    btn.onclick = () => open("git");
-    actions.append(btn);
+    if (snap.git_client) {
+      const btn = el("button", "git-btn", `Open in ${snap.git_client}`);
+      btn.title = "⌘G";
+      btn.onclick = () => open("git");
+      actions.append(btn);
+    }
+    if (worktrees) {
+      const add = el("button", null, "New Worktree…");
+      add.onclick = () => late.newWorktree(s);
+      actions.append(add);
+    }
     panel.append(actions);
   }
 }

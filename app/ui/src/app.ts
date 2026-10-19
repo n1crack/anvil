@@ -639,7 +639,7 @@ async function siteMenu(s) {
   }
   if (s.worktree_of) {
     items.push(await M.MenuItem.new({ text: "Remove Worktree…", action: () => removeWorktree(s) }), await sep());
-  } else if (!s.linked && (await invoke("git_info", { site: s.name }).catch(() => null))) {
+  } else if (mayHaveWorktrees(s) && (await invoke("git_info", { site: s.name }).catch(() => null))) {
     items.push(await M.MenuItem.new({ text: "New Worktree…", action: () => newWorktree(s) }), await sep());
   }
   items.push(
@@ -719,10 +719,16 @@ async function addAlias(s) {
   if (alias) await call("add_alias", { site: s.name, alias });
 }
 
+/** An app's own folder, linked or parked; not a worktree, nor an alias (a link to another app's folder). */
+const mayHaveWorktrees = (s) =>
+  !s.worktree_of && !(s.linked && snap.sites.some((o) => o.name !== s.name && !o.linked && o.path === s.path));
+late.mayHaveWorktrees = mayHaveWorktrees;
+
 async function newWorktree(s) {
   const branch = await ask(`New worktree of ${s.name}`, "Branch, e.g. feature/login", undefined, "New branch");
   if (branch) await call("worktree_add", { site: s.name, branch, new: $("#ask-new").checked });
 }
+late.newWorktree = newWorktree;
 
 const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 
@@ -731,7 +737,7 @@ const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 async function removeWorktree(s) {
   const info = await invoke("git_info", { site: s.name }).catch(() => null);
   const copies = snap.worktrees?.[s.name]?.copies ?? [];
-  const said = [`Remove ${s.name}? Its folder goes, its branch stays.`];
+  const said = [`Remove ${s.name}? Its folder goes${s.branch ? ", its branch stays" : ""}.`];
   if (!info) said.push("Anvil couldn't check it for uncommitted changes.");
   if (info?.changed) said.push(`It has ${count(info.changed, "uncommitted change")}, lost with the folder.`);
   if (info?.ahead) said.push(`It has ${count(info.ahead, "unpushed commit")}, kept on ${s.branch ?? "its branch"}.`);
@@ -751,9 +757,25 @@ async function removeWorktree(s) {
   const anchor = $(`#list [data-name="${CSS.escape(s.name)}"]`) ?? $("#site .site-name");
   const close = popAt(anchor, pop, yes);
   no.onclick = close;
-  yes.onclick = () => {
-    close();
-    call("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force });
+  yes.onclick = async () => {
+    if (force) {
+      close();
+      call("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force });
+      return;
+    }
+    // Refused (commits on no branch, say): said here, and the button becomes Remove anyway.
+    try {
+      await askSnap("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force: false });
+      close();
+      render();
+    } catch (e) {
+      $("p", pop).textContent = `${String(e)}.`;
+      yes.textContent = "Remove anyway";
+      yes.onclick = () => {
+        close();
+        call("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force: true });
+      };
+    }
   };
 }
 
@@ -1203,9 +1225,11 @@ function worktreeLines(s, root) {
     const share = v.db === "share";
     const how = !v.choices.includes(v.db)
       ? "on a server Anvil doesn't manage"
-      : v.db === "copy"
-        ? `copy of ${v.main_database ?? main}`
-        : "empty";
+      : v.adopted
+        ? "existing"
+        : v.db === "copy"
+          ? `copy of ${v.main_database ?? main}`
+          : "empty";
     const dd = el("dd", null, share ? `${main}'s database` : `${v.database} (${how})`);
     // Once made, its own database (reused after a Share) or main's; before, what main's allows.
     const label = (c) => (v.prepared && c !== "share" ? `Own database (${v.database})` : DB_CHOICES[c]);
@@ -1250,17 +1274,85 @@ function worktreeLines(s, root) {
       };
       dd.append(" ", b);
     }
-    for (const fail of new Set([dbErrors.get(s.name), v.error, prepareErrors.get(s.name)])) {
-      if (fail) dd.append(el("div", "muted", fail));
+    const fails = [dbErrors.get(s.name), v.error, prepareErrors.get(s.name), ...startErrors(s.name)];
+    for (const fail of new Set(fails)) {
+      if (!fail) continue;
+      const line = el("div", "muted", fail);
+      // A database that is there already but isn't Anvil's: used only when asked.
+      const db = v.pending && /(\S+) already exists and Anvil didn't make it/.exec(fail)?.[1];
+      if (db) {
+        const use = el("button", "inline-action", `Use existing ${db}`);
+        use.onclick = () =>
+          late.confirmPop(use, `Use ${db} for this worktree? Its migrations and tests then change it.`, "Use", async () => {
+            prepareErrors.delete(s.name);
+            await call("worktree_adopt", { site: s.name });
+          });
+        line.append(" ", use);
+      }
+      dd.append(line);
     }
     add("Database", dd);
   }
+  setupLines(s, v, main, add);
   add("Shared", el("dd", "muted", `S3 buckets and search indexes are shared with ${main}`));
   if (v.compose) add("Docker", el("dd", "muted", "Anvil doesn't start this worktree's Docker services"));
   if (v.cached_config) {
     add("Config", el("dd", "muted", "Cached config ignores the worktree's database; run php artisan config:clear"));
   }
   group.prepend(...rows);
+}
+
+/** The errors of the worktree's last Start, by process. */
+const startErrors = (name: string) =>
+  Object.entries(snap.app_errors ?? {})
+    .filter(([k]) => k.split(/[@#]/)[0] === name)
+    .map(([, e]) => e);
+
+const setupErrors = new Map<string, string>(); // a failed copy or install, across re-renders
+const wtInstalling = new Set<string>(); // "<site> <id>" while it runs
+
+/** What a worktree opened outside Anvil lacks: main's .env, its packages. Installs are confirmed first. */
+function setupLines(s, v, main, add) {
+  const m = v.missing;
+  if (!m || (!m.env && !m.installs.length)) return;
+  const dd = el("dd");
+  if (m.env) {
+    const b = el("button", "inline-action", `Copy .env from ${main}`);
+    b.onclick = async () => {
+      setupErrors.delete(s.name);
+      try {
+        await invoke("worktree_copy_env", { site: s.name });
+      } catch (e) {
+        setupErrors.set(s.name, String(e));
+      }
+      call("state");
+    };
+    dd.append(el("span", "muted", "No .env "), b);
+  }
+  for (const [id, command] of m.installs) {
+    const key = `${s.name} ${id}`;
+    const b = el("button", "inline-action", wtInstalling.has(key) ? "Installing…" : command);
+    b.disabled = wtInstalling.has(key);
+    b.onclick = () =>
+      late.confirmPop(b, `Run ${command} in ${s.name}?`, "Install", async () => {
+        wtInstalling.add(key);
+        setupErrors.delete(s.name);
+        b.disabled = true;
+        b.textContent = "Installing…";
+        try {
+          await invoke("worktree_install", { site: s.name, what: id });
+        } catch (e) {
+          setupErrors.set(s.name, String(e));
+        } finally {
+          wtInstalling.delete(key);
+        }
+        call("state");
+      });
+    dd.append(" ", b);
+  }
+  const fail = setupErrors.get(s.name);
+  if (fail) dd.append(el("div", "muted", fail));
+  add("Setup", dd);
 }
 
 const leftSizes = new Map<string, number>(); // "service/database" -> bytes, once read

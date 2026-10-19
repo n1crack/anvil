@@ -85,6 +85,10 @@ export interface WorktreeView {
   error: string | null;
   /** Databases Anvil made for it on a server. */
   copies: string[];
+  /** Its database was there already; the user chose to use it. */
+  adopted: boolean;
+  /** What it lacks to run: main's .env, and packages to install as [id, command]. */
+  missing: { env: boolean; installs: [string, string][] };
 }
 
 export interface Leftover {

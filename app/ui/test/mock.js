@@ -616,9 +616,14 @@ const mockHandle = (cmd, a) => {
     case "state":
     case "app_run":
     case "worktree_add":
-    case "worktree_remove":
+    case "worktree_adopt":
+    case "worktree_copy_env":
+    case "worktree_install":
     case "leftover_drop":
     case "leftover_keep":
+      return mockSnap;
+    case "worktree_remove":
+      if (window.mockRemoveFail && !a.force) throw window.mockRemoveFail;
       return mockSnap;
     case "worktree_db":
       if (window.mockDbFail) throw window.mockDbFail;

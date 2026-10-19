@@ -1577,6 +1577,8 @@ describe("worktrees", () => {
     cached_config: false,
     error: null,
     copies: ["shop_feature_x"],
+    adopted: false,
+    missing: { env: false, installs: [] },
     ...o,
   });
   const ovText = () => $('[data-panel="overview"]').textContent!;
@@ -1672,6 +1674,85 @@ describe("worktrees", () => {
     delete w.mockPrepareFail;
   });
 
+  test("a database that is there but isn't Anvil's: Use existing, confirmed first", async () => {
+    w.mockPrepareFail = "shop_feature_x already exists and Anvil didn't make it";
+    try {
+      await show({ pending: true, prepared: false, copies: [] });
+      (dbRow().querySelector("button") as HTMLButtonElement).click();
+      await wait(80);
+      const use = [...dbRow().querySelectorAll("button")].find((b) => b.textContent === "Use existing shop_feature_x") as HTMLButtonElement;
+      expect(use).toBeTruthy();
+      use.click();
+      await wait();
+      expect($(".pop-confirm").textContent).toContain("Use shop_feature_x for this worktree?");
+      expect(calls("worktree_adopt").length).toBe(0);
+      ($(".pop-confirm .primary") as HTMLButtonElement).click();
+      await wait(60);
+      expect(calls("worktree_adopt").at(-1)![1]).toEqual({ site: wt });
+    } finally {
+      delete w.mockPrepareFail;
+    }
+    // Used: the line says so.
+    await show({ adopted: true });
+    expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop_feature_x (existing)");
+  });
+
+  test("a worktree without .env or packages: Copy .env, and installs confirmed before they run", async () => {
+    const setup = () => $$('[data-panel="overview"] .row').find((r) => r.querySelector("dt")?.textContent === "Setup")!;
+    await show();
+    expect(setup()).toBeUndefined();
+    await show({
+      missing: {
+        env: true,
+        installs: [
+          ["composer", "composer install"],
+          ["js", "pnpm install"],
+        ],
+      },
+    });
+    const btn = (t: string) => [...setup().querySelectorAll("button")].find((b) => b.textContent === t) as HTMLButtonElement;
+    btn("Copy .env from shop").click();
+    await wait(60);
+    expect(calls("worktree_copy_env").at(-1)![1]).toEqual({ site: wt });
+    btn("composer install").click();
+    await wait();
+    expect($(".pop-confirm").textContent).toContain(`Run composer install in ${wt}?`);
+    expect(calls("worktree_install").length).toBe(0);
+    ($(".pop-confirm .primary") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("worktree_install").at(-1)![1]).toEqual({ site: wt, what: "composer" });
+    expect(btn("pnpm install")).toBeTruthy();
+  });
+
+  test("the Git tab has New Worktree… for an app's own folder, not for a worktree", async () => {
+    const gitButtons = () => [...$$('[data-panel="git"] button')].map((b) => b.textContent);
+    await show({}, "shop");
+    await wait(80);
+    expect(gitButtons()).toContain("New Worktree…");
+    ($$('[data-panel="git"] button').find((b) => b.textContent === "New Worktree…") as HTMLButtonElement).click();
+    await wait();
+    expect($("#ask").hidden).toBe(false);
+    expect($("#ask-label").textContent).toBe("New worktree of shop");
+    $("#ask-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await select(wt);
+    await wait(80);
+    expect(gitButtons()).not.toContain("New Worktree…");
+  });
+
+  test("New Worktree… is offered for a linked app that isn't an alias", async () => {
+    w.mockSnap.sites.push(w.mockSite("linked-app", "laravel", { linked: true, path: "/Users/x/elsewhere/linked-app", parked_in: null }));
+    try {
+      await show({}, "linked-app");
+      $$("#list [data-name]")
+        .find((r) => r.dataset.name === "linked-app")!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await wait(80);
+      expect((w.mockMenu as any[]).map((i) => i.text)).toContain("New Worktree…");
+    } finally {
+      w.mockSnap.sites.pop();
+    }
+  });
+
   test("the main app's Overview: a database left from a removed worktree, Delete (confirmed) or Keep", async () => {
     w.mockSnap.leftovers = [{ app: "shop", worktree: "x", service: "mysql", database: "blog" }];
     try {
@@ -1751,6 +1832,29 @@ describe("worktrees", () => {
       expect(calls("worktree_remove").at(-1)![1]).toEqual({ site: wt, dropDb: false, force: false });
     } finally {
       delete w.mockGitClean;
+    }
+  });
+
+  test("Remove Worktree… refused (commits on no branch): says why in place, then Remove anyway", async () => {
+    w.mockGitClean = true;
+    w.mockRemoveFail = `${wt} has commits on no branch, lost with the worktree`;
+    try {
+      await show({ copies: [] });
+      $(`#list [data-name="${wt}"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await wait(80);
+      (w.mockMenu as any[]).find((i) => i.text === "Remove Worktree…").action();
+      await wait(60);
+      ($(".pop-confirm .primary") as HTMLButtonElement).click();
+      await wait(60);
+      expect($(".pop-confirm").textContent).toContain("has commits on no branch, lost with the worktree");
+      const yes = $(".pop-confirm .primary") as HTMLButtonElement;
+      expect(yes.textContent).toBe("Remove anyway");
+      yes.click();
+      await wait(60);
+      expect(calls("worktree_remove").at(-1)![1]).toEqual({ site: wt, dropDb: false, force: true });
+    } finally {
+      delete w.mockGitClean;
+      delete w.mockRemoveFail;
     }
   });
 });
