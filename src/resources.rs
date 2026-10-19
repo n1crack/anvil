@@ -747,10 +747,12 @@ fn listeners(ports: &[u16]) -> BTreeMap<u16, String> {
 
 /// Container names by published port; empty if Docker isn't there or doesn't answer in 3s.
 fn containers() -> BTreeMap<u16, String> {
+    use std::os::unix::process::CommandExt;
     let child = Command::new(crate::compose::docker_bin())
         .args(["ps", "--format", "{{.Names}}\t{{.Ports}}"])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
+        .process_group(0) // a timeout ends whatever docker started too
         .spawn();
     let Ok(mut child) = child else {
         return BTreeMap::new();
@@ -766,8 +768,7 @@ fn containers() -> BTreeMap<u16, String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    crate::terminate(&mut child, std::time::Duration::ZERO); // the whole group, reaped
     BTreeMap::new()
 }
 

@@ -47,12 +47,15 @@ fn compose(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Resul
 
 /// Run `docker <args>` in `dir`; stdout on success, a readable error otherwise.
 fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
+    use std::os::unix::process::CommandExt;
     let mut child = match Command::new(docker)
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // Its own group, so a timeout also ends the compose plugin docker starts.
+        .process_group(0)
         .spawn()
     {
         Ok(c) => c,
@@ -69,8 +72,7 @@ fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<St
             break st;
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            crate::terminate(&mut child, Duration::ZERO); // the whole group, reaped
             bail!("Docker didn't answer in time");
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -645,6 +647,30 @@ mod tests {
         let d = tmp("action");
         assert!(action(&d, "x", "down").is_err());
         assert!(action(&d, "x", "kill").is_err());
+    }
+
+    /// A timeout ends docker and the compose plugin it started, and reaps docker (a
+    /// zombie still answers `kill 0`, so `alive` false means no `<defunct>`).
+    #[test]
+    fn a_timeout_kills_the_plugin_too_and_reaps_docker() {
+        let d = tmp("timeout-dir");
+        let bin = tmp("timeout-bin");
+        let pids = bin.join("pids");
+        let docker = fake_docker(
+            &bin,
+            &format!("sleep 30 & echo $$ $! > '{}'; wait", pids.display()),
+        );
+        let e = run(&docker, &d, &["compose", "up"], Duration::from_millis(500));
+        assert_eq!(e.err().unwrap().to_string(), "Docker didn't answer in time");
+        let pids = fs::read_to_string(&pids).unwrap();
+        let (docker_pid, plugin) = pids.trim().split_once(' ').unwrap();
+        assert!(!crate::alive(docker_pid), "docker left unreaped");
+        // The orphaned plugin is reaped by launchd; give it a moment.
+        let gone = (0..50).any(|_| {
+            std::thread::sleep(Duration::from_millis(20));
+            !crate::alive(plugin)
+        });
+        assert!(gone, "the compose plugin outlived the timeout");
     }
 
     #[test]
