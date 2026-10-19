@@ -219,6 +219,8 @@ describe("worktrees", () => {
     await wait();
     const areas = $$("#presets textarea") as HTMLTextAreaElement[];
     expect(areas.map((a) => a.value)).toEqual([".env", "APP_URL={url}", "", "composer install"]);
+    // The database switch is Settings' own, above: not a preset field.
+    expect($$("#presets input[type=checkbox]").length).toBe(0);
     areas[3].value = "composer install\nphp artisan migrate";
     areas[3].dispatchEvent(new Event("change"));
     await wait();

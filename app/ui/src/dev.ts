@@ -167,9 +167,10 @@ async function editAddress(name: string, r: ProcessRow) {
     title: `Address of ${r.name}`,
     field: "Label",
     placeholder: host.slice(from, to),
-    preview: (v) => `Opens ${host.slice(0, from)}${v || host.slice(from, to)}${host.slice(to)}`,
+    optional: true,
+    preview: (v) => (v ? `Opens ${host.slice(0, from)}${v}${host.slice(to)}` : "Empty: back to the automatic label"),
     ok: "Save",
-    submit: (v) => askProcs(name, "set_process", { id: r.id, host: v }),
+    submit: (v) => askProcs(name, "set_process", { id: r.id, ...(v ? { host: v } : { resetHost: true }) }),
   });
   if (done) await loadProcs(name);
 }

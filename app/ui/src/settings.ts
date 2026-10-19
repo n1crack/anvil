@@ -651,7 +651,8 @@ function renderPresets() {
           if (next) s = next;
           render();
         });
-      const fields: HTMLElement[] = FIELDS.map(([field, name, hint]) => {
+      // Not copy_database: the switch above is that layer, a preset leaves it to it.
+      const fields: HTMLElement[] = FIELDS.filter(([f]) => f !== "copy_database").map(([field, name, hint]) => {
         const r = document.createElement("label");
         r.className = "row row-top preset-field";
         const t = document.createElement("span");

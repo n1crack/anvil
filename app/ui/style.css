@@ -175,7 +175,6 @@ button, select, input { font: inherit; color: inherit; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-
 .search input::placeholder { color: var(--muted); }
 
 .list {
@@ -2760,7 +2759,6 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .logs-status:empty { display: none; }
 
 .logs-menu { font-size: 16px; line-height: 1; }
-
 
 /* One secondary button, defined here only: every plain action in the app and service
    panes looks the same. The sheets' own buttons and the setup buttons are styled apart. */

@@ -675,6 +675,8 @@ export type Ask = {
   title: string;
   /** The text field's name; none: a sheet that only confirms (`body`). */
   field?: string;
+  /** An empty field is an answer too (`preview` says what it does). */
+  optional?: boolean;
   placeholder?: string;
   value?: string;
   /** What the text will make, under the field. */
@@ -733,7 +735,7 @@ export function ask(o: Ask): Promise<{ value: string; checked: boolean[] } | nul
     $("#ask-form").onsubmit = async (e) => {
       e.preventDefault();
       const value = input.value.trim();
-      if (o.field && !value) return input.focus();
+      if (o.field && !value && !o.optional) return input.focus();
       const checked = boxes.map((b) => b.checked);
       ok.disabled = true;
       try {

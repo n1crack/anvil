@@ -289,6 +289,16 @@ describe("dev", () => {
     await wait(80);
     expect(calls("set_process").at(-1)![1]).toEqual({ site: "vuefinder", id: "docs-dev", host: "manual" });
     expect(($("#ask") as HTMLDialogElement).open).toBe(false);
+    // Empty: back to the automatic label, as the sheet says.
+    item("proc:docs-dev").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait();
+    (w.mockMenu as any[]).find((i) => i.text === "Edit Address…").action();
+    await wait();
+    expect($("#ask-hint").textContent).toBe("Empty: back to the automatic label");
+    $("#ask-form").dispatchEvent(new Event("submit"));
+    await wait(80);
+    expect(calls("set_process").at(-1)![1]).toEqual({ site: "vuefinder", id: "docs-dev", resetHost: true });
+    expect(($("#ask") as HTMLDialogElement).open).toBe(false);
   });
 
   test("↓ moves the selection; a stopped process says Not running, with a small ▶", async () => {
