@@ -1817,7 +1817,7 @@ describe("worktrees", () => {
   };
 
   test("New Worktree… is a sheet: the branch, new or not, Copy the database too as the hooks set it", async () => {
-    w.mockNewDb = { can_copy: true, copy: true, main_database: "shop", after_create: [] };
+    w.mockNewDb = { can_copy: true, copy: true, main_database: "shop" };
     try {
       await openNew();
       expect(sheetOpen()).toBe(true);
@@ -1854,11 +1854,11 @@ describe("worktrees", () => {
 
   test("New Worktree… shows the database checkbox only when main's can be copied", async () => {
     try {
-      w.mockNewDb = { can_copy: false, copy: false, main_database: "shop", after_create: [] };
+      w.mockNewDb = { can_copy: false, copy: false, main_database: "shop" };
       await openNew();
       expect(checks().length).toBe(1);
       $("#ask-cancel").click();
-      w.mockNewDb = { can_copy: true, copy: false, main_database: null, after_create: [] };
+      w.mockNewDb = { can_copy: true, copy: false, main_database: null };
       await openNew();
       expect(checks().length).toBe(1);
       ($("#ask-input") as HTMLInputElement).value = "x";
@@ -1871,7 +1871,8 @@ describe("worktrees", () => {
   });
 
   test("after New Worktree, its after-create commands are offered and run only on Run", async () => {
-    w.mockNewDb = { can_copy: true, copy: false, main_database: "shop", after_create: ["composer install", "php artisan migrate"] };
+    w.mockNewDb = { can_copy: true, copy: false, main_database: "shop" };
+    w.mockAfter = ["composer install", "php artisan migrate"];
     try {
       await openNew();
       ($("#ask-input") as HTMLInputElement).value = "hooks";
@@ -1882,11 +1883,18 @@ describe("worktrees", () => {
       expect($("#ask-field").hidden).toBe(true);
       expect(calls("worktree_after_create").length).toBe(0);
       expect($("#ask-ok").textContent).toBe("Run");
+      // It starts on Cancel: a held Return runs nothing.
+      expect(document.activeElement).toBe($("#ask-cancel"));
+      expect(calls("worktree_after_create_list").at(-1)![1]).toEqual({ site: "shop--hooks" });
       await submit();
-      expect(calls("worktree_after_create").at(-1)![1]).toEqual({ site: "shop--hooks" });
+      expect(calls("worktree_after_create").at(-1)![1]).toEqual({
+        site: "shop--hooks",
+        commands: ["composer install", "php artisan migrate"],
+      });
       expect(sheetOpen()).toBe(false);
     } finally {
       delete w.mockNewDb;
+      delete w.mockAfter;
       w.mockSnap.sites = w.mockSnap.sites.filter((x) => x.name !== "shop--hooks");
     }
   });

@@ -719,7 +719,8 @@ export function ask(o: Ask): Promise<{ value: string; checked: boolean[] } | nul
   input.oninput = show;
   show();
   dlg.showModal();
-  (o.field ? input : ok).focus();
+  // A sheet that only confirms starts on Cancel: a held Return doesn't run anything.
+  (o.field ? input : $("#ask-cancel")).focus();
   return new Promise((resolve) => {
     const finish = (answer: { value: string; checked: boolean[] } | null) => {
       dlg.onclose = null;
@@ -807,7 +808,8 @@ async function newWorktree(s) {
   if (!answer || !made) return;
   const site: string = made;
   select(site);
-  const commands: string[] = db?.after_create ?? [];
+  // Worked out from the new worktree, and exactly these run.
+  const commands: string[] = await invoke("worktree_after_create_list", { site }).catch(() => []);
   if (!commands.length) return;
   const list = el("ol", "ask-list");
   list.append(...commands.map((c) => el("li", null, c)));
@@ -818,7 +820,7 @@ async function newWorktree(s) {
     afterRunning.add(site);
     afterErrors.delete(site);
     renderSite();
-    invoke("worktree_after_create", { site })
+    invoke("worktree_after_create", { site, commands })
       .catch((e) => afterErrors.set(site, String(e)))
       .finally(() => {
         afterRunning.delete(site);

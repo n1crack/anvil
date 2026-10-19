@@ -651,8 +651,8 @@ pub fn choices(cfg: &Config, site: &Site) -> Vec<DbChoice> {
     main_db(cfg, site).choices().to_vec()
 }
 
-/// What New Worktree offers for a new worktree of an app: "Copy the database too", and
-/// the commands to offer once it is made.
+/// What New Worktree offers for a new worktree of an app: "Copy the database too". Its
+/// `after_create` is worked out from the worktree once it is made (`after_create`).
 #[derive(Serialize, Debug, PartialEq)]
 pub struct NewDb {
     /// Main's database can be copied (it isn't on a server Anvil doesn't manage).
@@ -661,8 +661,6 @@ pub struct NewDb {
     pub copy: bool,
     /// Main's database by name; `None` when main has no database settings (nothing to choose).
     pub main_database: Option<String>,
-    /// The hooks' `after_create` (`after_create`), asked about once the worktree is there.
-    pub after_create: Vec<String>,
 }
 
 pub fn new_db(cfg: &Config, app: &Site) -> NewDb {
@@ -680,7 +678,6 @@ pub fn new_db(cfg: &Config, app: &Site) -> NewDb {
         can_copy,
         copy: can_copy && hooks.copy_database,
         main_database,
-        after_create: commands(&hooks.after_create, &app.path),
     }
 }
 
@@ -706,8 +703,8 @@ pub fn set_db_at(cfg: &mut Config, folder: &Path, choice: DbChoice) -> anyhow::R
     set_db(cfg, &site, choice)
 }
 
-/// The worktree Anvil serves from `folder`.
-fn site_at(cfg: &Config, folder: &Path) -> Option<Site> {
+/// The worktree Anvil serves from `folder` (one `add` just made, say).
+pub fn site_at(cfg: &Config, folder: &Path) -> Option<Site> {
     let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     crate::sites(cfg)
         .into_iter()
@@ -1608,14 +1605,17 @@ fn in_worktree(v: &str) -> bool {
 /// `list` (`after_create`) for a worktree in `dir`: `{install}` is the JS install its lock
 /// file asks for (`npm ci` with package-lock.json), a command with it left out without package.json.
 fn commands(list: &[String], dir: &Path) -> Vec<String> {
-    let install = dir.join("package.json").is_file().then(|| {
-        match crate::apps::js_manager(dir) {
-            "npm" if dir.join("package-lock.json").is_file() => "npm ci".to_string(),
-            // pnpm 11 fails an install whose dependencies' build scripts it skipped (`js_install`).
-            "pnpm" => "pnpm install --config.strict-dep-builds=false".into(),
-            m => format!("{m} install"),
-        }
-    });
+    // `js_manager` says npm without a lock file too: then there's nothing to install from.
+    let install = match crate::apps::js_manager(dir) {
+        _ if !dir.join("package.json").is_file() => None,
+        "npm" => dir
+            .join("package-lock.json")
+            .is_file()
+            .then(|| "npm ci".to_string()),
+        // pnpm 11 fails an install whose dependencies' build scripts it skipped (`js_install`).
+        "pnpm" => Some("pnpm install --config.strict-dep-builds=false".into()),
+        m => Some(format!("{m} install")),
+    };
     list.iter()
         .filter_map(|c| match &install {
             _ if !c.contains("{install}") => Some(c.clone()),
@@ -3504,7 +3504,16 @@ pub(crate) mod tests {
             .or_default()
             .worktree
             .after_create = Some(vec!["{install}".into(), "touch ran".into()]);
-        assert_eq!(new_db(&cfg, &app).after_create, ["npm ci", "touch ran"]);
+        let list = ["{install}".to_string(), "touch ran".into()];
+        assert_eq!(commands(&list, &app.path), ["npm ci", "touch ran"]);
+        // No lock file: no install to offer (`npm ci` needs one).
+        fs::remove_file(app.path.join("package-lock.json")).unwrap();
+        assert_eq!(commands(&list, &app.path), ["touch ran"]);
+        fs::write(app.path.join("pnpm-lock.yaml"), "").unwrap();
+        assert_eq!(
+            commands(&list, &app.path)[0],
+            "pnpm install --config.strict-dep-builds=false"
+        );
         let (folder, _) = add(&cfg, &app, "feat", true, None).unwrap();
         // `add` made it and ran nothing: the caller asks first.
         assert!(!folder.join("ran").exists());

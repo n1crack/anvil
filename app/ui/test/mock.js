@@ -629,6 +629,8 @@ const mockHandle = (cmd, a) => {
           mockSite(`${a.site}--${a.branch.replace(/[^a-z0-9.-]/g, "-")}`, "laravel", { worktree_of: a.site, branch: a.branch }),
         );
       return mockSnap;
+    case "worktree_after_create_list":
+      return window.mockAfter ?? [];
     case "worktree_rewrite":
       if (window.mockRewriteFail) throw window.mockRewriteFail;
       return mockSnap;
@@ -661,7 +663,7 @@ const mockHandle = (cmd, a) => {
       if (window.mockRemoveFail && !a.force) throw window.mockRemoveFail;
       return mockSnap;
     case "worktree_new_db":
-      return window.mockNewDb ?? { can_copy: true, copy: false, main_database: "shop", after_create: [] };
+      return window.mockNewDb ?? { can_copy: true, copy: false, main_database: "shop" };
     case "worktree_prepare":
       if (window.mockPrepareFail) throw window.mockPrepareFail;
       return mockSnap;

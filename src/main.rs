@@ -528,11 +528,7 @@ fn confirm(question: &str, elsewhere: &str) -> Result<bool> {
 /// (its database prepared first); elsewhere only listed.
 fn after_create(cfg: &Config, folder: &std::path::Path) -> Result<()> {
     use std::io::IsTerminal;
-    let real = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    let Some(site) = sites(cfg)
-        .into_iter()
-        .find(|s| s.worktree_of.is_some() && real(&s.path) == real(folder))
-    else {
+    let Some(site) = worktrees::site_at(cfg, folder) else {
         return Ok(());
     };
     let commands = worktrees::after_create(cfg, &site);

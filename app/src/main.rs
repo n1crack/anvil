@@ -2172,14 +2172,32 @@ fn worktree_add(
     snapshot(&app)
 }
 
-/// Run the worktree's `after_create` commands, once the user said so: its database first,
-/// then each command in turn; the first that fails stops the rest.
+/// The worktree's `after_create` commands as they would run in it, to offer.
 #[tauri::command(async)]
-fn worktree_after_create(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+fn worktree_after_create_list(site: String) -> Res<Vec<String>> {
+    let cfg = anvil::load().map_err(err)?;
+    Ok(anvil::worktrees::after_create(&cfg, &site_in(&cfg, &site)?))
+}
+
+/// Run the `commands` the user was offered (`worktree_after_create_list`), once they said so:
+/// refused when the worktree's would now be others. Its database first, then each in turn;
+/// the first that fails stops the rest.
+#[tauri::command(async)]
+fn worktree_after_create(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    commands: Vec<String>,
+) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
     let s = site_in(&cfg, &site)?;
+    if anvil::worktrees::after_create(&cfg, &s) != commands {
+        return Err(format!(
+            "{site}'s after-create commands changed; nothing ran"
+        ));
+    }
     let ran = prepare(&app, &s).and_then(|()| {
-        anvil::worktrees::after_create(&cfg, &s)
+        commands
             .iter()
             .try_for_each(|c| anvil::worktrees::run_after(&cfg, &s, c, true))
     });
@@ -3684,6 +3702,7 @@ fn main() {
             worktree_new_db,
             worktree_remove,
             worktree_after_create,
+            worktree_after_create_list,
             worktree_rewrite,
             worktree_hooks,
             set_app_hooks,
