@@ -28,6 +28,17 @@ cargo install --path .
 
 That installs the CLI. To build the macOS app as well, see [The macOS app](https://anvil.tr/docs/getting-started#the-macos-app-optional).
 
+## Quick start
+
+```sh
+anvil php install 8.4      # an isolated PHP
+anvil setup                # local domains, ports 80/443, HTTPS certificate, PATH (one sudo command)
+anvil park ~/Sites         # every folder in ~/Sites becomes <folder>.test
+anvil start
+```
+
+Open `http://<folder>.test`. For HTTPS, `anvil https <folder>`, and `anvil setup` once more after the first start to trust the certificate.
+
 ## Documentation
 
 Getting started, guides, the CLI reference and configuration are at [anvil.tr/docs](https://anvil.tr/docs). See also the [Changelog](CHANGELOG.md).
