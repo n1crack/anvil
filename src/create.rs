@@ -259,7 +259,12 @@ pub fn resolve(kind: &str, cfg: &Config, given: &Options) -> Result<Options> {
             .find(|o| o.key == k)
             .with_context(|| format!("{} apps have no option {k}", apps::label(kind)))?;
         if !o.choices.iter().any(|c| c.0 == *v) {
-            bail!("{v} isn't a choice for {}", o.label);
+            let list: Vec<&str> = o.choices.iter().map(|c| c.0.as_str()).collect();
+            bail!(
+                "{v} isn't a choice for {}; use one of: {}",
+                o.label,
+                list.join(", ")
+            );
         }
     }
     Ok(opts

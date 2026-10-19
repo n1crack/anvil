@@ -80,6 +80,8 @@ enum Cmd {
         /// Parent folder (default: the first parked folder)
         #[arg(long = "in")]
         dir: Option<PathBuf>,
+        #[command(flatten)]
+        opts: NewOpts,
     },
     /// Disk usage of an app, what is safe to delete, and the services it uses.
     /// Without an app: Anvil's own footprint and every app's size.
@@ -139,6 +141,111 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+}
+
+/// The New application sheet's choices as flags. Their values and defaults come
+/// from `create::options`; a flag the template doesn't offer is refused.
+#[derive(clap::Args, Default)]
+#[command(next_help_heading = "Template options (unset ones take the app's defaults)")]
+struct NewOpts {
+    /// laravel: none, react, vue, svelte or livewire
+    #[arg(long, value_name = "KIT")]
+    starter: Option<String>,
+    /// laravel: sqlite, or a MySQL/PostgreSQL service, e.g. mysql or pgsql
+    #[arg(long)]
+    db: Option<String>,
+    /// vite: react, vue, svelte or vanilla
+    #[arg(long)]
+    framework: Option<String>,
+    /// laravel, statamic, next, nuxt, vite: npm, pnpm or bun
+    #[arg(long, value_name = "MANAGER")]
+    pm: Option<String>,
+    /// laravel, statamic, symfony, php: an installed PHP version, e.g. 8.4
+    #[arg(long, value_name = "VERSION")]
+    php: Option<String>,
+    /// next, nuxt, vite, node: an installed Node.js version, e.g. 22
+    #[arg(long, value_name = "VERSION")]
+    node: Option<String>,
+    /// next, vite: TypeScript; --no-ts for JavaScript
+    #[arg(long, overrides_with = "no_ts")]
+    ts: bool,
+    #[arg(long, hide = true)]
+    no_ts: bool,
+    /// next: Tailwind; --no-tailwind without it
+    #[arg(long, overrides_with = "no_tailwind")]
+    tailwind: bool,
+    #[arg(long, hide = true)]
+    no_tailwind: bool,
+    /// Every template: a Git repository; --no-git without one
+    #[arg(long, overrides_with = "no_git")]
+    git: bool,
+    #[arg(long, hide = true)]
+    no_git: bool,
+    /// Every template: HTTPS; --no-https for HTTP (default: Settings, https_default)
+    #[arg(long, overrides_with = "no_https")]
+    https: bool,
+    #[arg(long, hide = true)]
+    no_https: bool,
+}
+
+impl NewOpts {
+    /// The flags given as `create::Options` for a `kind` app whose sheet offers
+    /// the option keys `offered`. `create::resolve` checks the values.
+    fn chosen(&self, kind: &str, offered: &[&str]) -> Result<create::Options> {
+        let toggle = |on: bool, off: bool| match (on, off) {
+            (true, _) => Some("on".to_string()),
+            (_, true) => Some("off".to_string()),
+            _ => None,
+        };
+        // A service id, or Laravel's name for it.
+        let db = self.db.as_deref().map(|d| match d {
+            "sqlite" => d.to_string(),
+            d => match d.strip_prefix("service:").unwrap_or(d) {
+                "pgsql" | "postgresql" => "service:postgres".into(),
+                id => format!("service:{id}"),
+            },
+        });
+        let given = [
+            ("--starter", "kit", self.starter.clone()),
+            ("--db", "db", db),
+            ("--framework", "framework", self.framework.clone()),
+            ("--pm", "js", self.pm.clone()),
+            ("--php", "php", self.php.clone()),
+            ("--node", "node", self.node.clone()),
+            ("--ts/--no-ts", "ts", toggle(self.ts, self.no_ts)),
+            (
+                "--tailwind/--no-tailwind",
+                "tailwind",
+                toggle(self.tailwind, self.no_tailwind),
+            ),
+            ("--git/--no-git", "git", toggle(self.git, self.no_git)),
+            (
+                "--https/--no-https",
+                "https",
+                toggle(self.https, self.no_https),
+            ),
+        ];
+        let mut out = create::Options::new();
+        for (flag, key, value) in given {
+            let Some(value) = value else { continue };
+            if !offered.contains(&key) {
+                // The version flags apply, but there is nothing installed to pick.
+                if key == "php" && (create::needs(kind) == Some("php") || kind == "php") {
+                    bail!(
+                        "No PHP version is installed; add one with `anvil php install <version>`"
+                    );
+                }
+                if key == "node" && apps::runtime(kind) == Some("node") {
+                    bail!(
+                        "No Node.js version is installed; add one with `anvil runtime install node <version>`"
+                    );
+                }
+                bail!("{flag} doesn't apply to {} apps", apps::label(kind));
+            }
+            out.insert(key.into(), value);
+        }
+        Ok(out)
+    }
 }
 
 #[derive(Subcommand)]
@@ -745,7 +852,20 @@ fn run() -> Result<()> {
                 set_site_app(c, &site, None, None, Some(port), None)
             })?,
         },
-        Cmd::New { kind, name, dir } => {
+        Cmd::New {
+            kind,
+            name,
+            dir,
+            opts,
+        } => {
+            if !create::TEMPLATES.contains(&kind.as_str()) {
+                bail!(
+                    "Unknown type {kind}; use one of: {}",
+                    create::TEMPLATES.join(", ")
+                );
+            }
+            let offered: Vec<_> = create::options(&kind, &cfg).iter().map(|o| o.key).collect();
+            let opts = create::resolve(&kind, &cfg, &opts.chosen(&kind, &offered)?)?;
             let parent = match dir {
                 Some(d) => d,
                 None => cfg
@@ -754,15 +874,8 @@ fn run() -> Result<()> {
                     .cloned()
                     .context("Park a folder first, or pass --in")?,
             };
-            if !create::TEMPLATES.contains(&kind.as_str()) {
-                bail!(
-                    "Unknown type {kind}; use one of: {}",
-                    create::TEMPLATES.join(", ")
-                );
-            }
             let parent = dir_or_cwd(Some(parent))?;
             println!("Creating {} ({})…", bold(&name), dim(apps::label(&kind)));
-            let opts = create::resolve(&kind, &cfg, &Default::default())?;
             let path = create::create(&kind, &name, &parent, &opts, create::LOG_SIZE)?;
             // Outside a parked folder the new app needs a link to get its address.
             if !cfg.paths.contains(&parent) {
@@ -1051,5 +1164,87 @@ fn safety(s: resources::Safety, width: usize) -> String {
     match s {
         resources::Safety::Keep => yellow(text),
         _ => text,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flags(args: &[&str]) -> NewOpts {
+        let argv = ["anvil", "new", "laravel", "shop"].iter().chain(args);
+        match Cli::try_parse_from(argv).unwrap().cmd {
+            Cmd::New { opts, .. } => opts,
+            _ => unreachable!(),
+        }
+    }
+
+    const LARAVEL: &[&str] = &["kit", "db", "js", "php", "git", "https"];
+
+    #[test]
+    fn new_flags_map_onto_the_sheets_options() {
+        let args = [
+            "--starter",
+            "react",
+            "--db",
+            "pgsql",
+            "--pm",
+            "pnpm",
+            "--php",
+            "8.4",
+            "--no-git",
+            "--https",
+        ];
+        let got = flags(&args).chosen("laravel", LARAVEL).unwrap();
+        let want: create::Options = [
+            ("kit", "react"),
+            ("db", "service:postgres"),
+            ("js", "pnpm"),
+            ("php", "8.4"),
+            ("git", "off"),
+            ("https", "on"),
+        ]
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .into();
+        assert_eq!(got, want);
+        // Unset flags leave the defaults to `create::resolve`; the last of a pair wins.
+        assert!(flags(&[]).chosen("laravel", LARAVEL).unwrap().is_empty());
+        let next = ["ts", "tailwind", "js", "node", "git", "https"];
+        let got = flags(&["--db", "mysql-2"]).chosen("laravel", LARAVEL);
+        assert_eq!(got.unwrap()["db"], "service:mysql-2");
+        let got = flags(&["--ts", "--no-ts", "--no-tailwind"]).chosen("next", &next);
+        let got = got.unwrap();
+        assert_eq!(
+            (got["ts"].as_str(), got["tailwind"].as_str()),
+            ("off", "off")
+        );
+    }
+
+    #[test]
+    fn new_flags_that_dont_apply_are_refused() {
+        let err = |args: &[&str], kind, offered| {
+            flags(args).chosen(kind, offered).unwrap_err().to_string()
+        };
+        let next = &["ts", "tailwind", "js", "node", "git", "https"][..];
+        assert_eq!(
+            err(&["--starter", "react"], "next", next),
+            "--starter doesn't apply to Next.js apps"
+        );
+        assert_eq!(
+            err(&["--tailwind"], "laravel", LARAVEL),
+            "--tailwind/--no-tailwind doesn't apply to Laravel apps"
+        );
+        assert!(err(&["--pm", "bun"], "static", &["git", "https"]).contains("--pm doesn't apply"));
+        // Laravel takes a PHP version, there is just none installed.
+        assert!(err(&["--php", "8.4"], "laravel", &["kit", "git"]).starts_with("No PHP version"));
+        // Values are `create::resolve`'s to check, against the same list the app uses.
+        let cfg = Config::default();
+        let given = flags(&["--starter", "angular"])
+            .chosen("laravel", LARAVEL)
+            .unwrap();
+        let e = create::resolve("laravel", &cfg, &given)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("angular isn't a choice for Starter kit; use one of: none, react"));
     }
 }

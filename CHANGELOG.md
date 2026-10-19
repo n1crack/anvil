@@ -53,6 +53,11 @@ Until 1.0.0, minor versions may contain breaking changes.
 - macOS notifications while Anvil isn't in front: a dev process, Caddy or
   PHP-FPM stopping unexpectedly, and a new application's setup ending.
   Settings › General › Notifications turns them off.
+- `anvil new` takes the New application sheet's options as flags, e.g.
+  `anvil new laravel shop --starter react --db pgsql --pm pnpm --php 8.4
+  --no-git --https`; also `--framework`, `--node`, `--[no-]ts` and
+  `--[no-]tailwind`. A flag the template doesn't offer is refused, and
+  `anvil new --help` lists which templates each one applies to.
 
 ### Changed
 
