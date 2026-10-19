@@ -484,7 +484,7 @@ fn main_databases(main: &Path) -> Vec<String> {
     let sqlite = get("DB_CONNECTION") == Some("sqlite");
     let mut out: Vec<String> = ["DB_URL", "DATABASE_URL"]
         .into_iter()
-        .filter_map(|k| get(k).and_then(url_database))
+        .flat_map(|k| get(k).map(url_databases).unwrap_or_default())
         .collect();
     match get("DB_DATABASE") {
         Some(db) if !(sqlite && !Path::new(db).is_absolute()) => out.push(db.into()),
@@ -495,12 +495,34 @@ fn main_databases(main: &Path) -> Vec<String> {
 }
 
 /// The database a `scheme://host/<db>?…` URL names; `None` without one (or a `file:` URL).
+/// A `database=` / `dbname=` query parameter wins over the path, as in Laravel and Doctrine.
 pub(crate) fn url_database(url: &str) -> Option<String> {
-    let rest = url.split_once("://")?.1;
-    let rest = &rest[..rest.find(['?', '#']).unwrap_or(rest.len())];
-    rest.split_once('/')
+    url_databases(url).pop()
+}
+
+/// A query parameter naming the database (Laravel's `database`, Doctrine's `dbname`).
+fn is_db_param(key: &str) -> bool {
+    key.eq_ignore_ascii_case("database") || key.eq_ignore_ascii_case("dbname")
+}
+
+/// Every database a URL names: its path's, then its query's (the one that is used last).
+fn url_databases(url: &str) -> Vec<String> {
+    let Some((_, rest)) = url.split_once("://") else {
+        return Vec::new();
+    };
+    let rest = &rest[..rest.find('#').unwrap_or(rest.len())];
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let mut out: Vec<String> = path
+        .split_once('/')
         .map(|(_, db)| db.to_string())
-        .filter(|db| !db.is_empty())
+        .into_iter()
+        .collect();
+    out.extend(query.split('&').filter_map(|p| {
+        let (k, v) = p.split_once('=')?;
+        is_db_param(k).then(|| v.to_string())
+    }));
+    out.retain(|db| !db.is_empty());
+    out
 }
 
 /// Whether `db` is the main app's own database: its name on a server, or an absolute SQLite path to main's file or into the main
@@ -972,10 +994,22 @@ pub(crate) fn with_db(url: &str, db: &str, main: &Path, wt: &Path) -> Option<Str
     }
     let tail = rest.find(['?', '#']).unwrap_or(rest.len());
     let host_end = rest[..tail].find('/').unwrap_or(tail);
+    // A database in the query wins over the path: it names the worktree's too.
+    let (query, fragment) =
+        rest[tail..].split_at(rest[tail..].find('#').unwrap_or(rest.len() - tail));
+    let query = query
+        .split('&')
+        .map(|p| match p.trim_start_matches('?').split_once('=') {
+            Some((k, _)) if is_db_param(k) => {
+                format!("{}{k}={db}", if p.starts_with('?') { "?" } else { "" })
+            }
+            _ => p.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("&");
     Some(format!(
-        "{scheme}://{}/{db}{}",
+        "{scheme}://{}/{db}{query}{fragment}",
         &rest[..host_end],
-        &rest[tail..]
     ))
 }
 
@@ -1123,9 +1157,14 @@ fn env_with(
     }
     // A database key the user set by hand to main's database: sharing it is taking the key out.
     let is_db = |k: &str| names_db(k) || keys.get(k).is_some_and(|t| t == "{db}");
-    let mains = |v: &str| match url_database(v) {
-        Some(d) => is_mains_database(site, &d),
-        None => is_mains_database(site, v),
+    // A URL's every name (path and query), else the value itself.
+    let mains = |v: &str| {
+        let names = url_databases(v);
+        if names.is_empty() {
+            is_mains_database(site, v)
+        } else {
+            names.iter().any(|d| is_mains_database(site, d))
+        }
     };
     if let Some((k, _)) = env.iter().find(|(k, v)| is_db(k) && mains(v)) {
         return Err(format!(
@@ -1239,7 +1278,10 @@ pub fn run_env(cfg: &Config, site: &Site, test: bool) -> Result<Vec<(String, Str
     let mains = |v: &TestVar| match v.key {
         "DB_CONNECTION" => false,
         "DB_DATABASE" => is_mains_database(site, &v.value),
-        _ => url_database(&v.value).is_none_or(|db| is_mains_database(site, &db)),
+        _ => {
+            let names = url_databases(&v.value);
+            names.is_empty() || names.iter().any(|db| is_mains_database(site, db))
+        }
     };
     let has = |env: &[(String, String)], key: &str| env.iter().any(|(k, _)| k == key);
     if let Some(v) = vars
@@ -2072,6 +2114,42 @@ pub(crate) mod tests {
         // The main app itself gets nothing.
         let main = crate::tests::site("shop", "/s/shop", None);
         assert!(super::env(&cfg, &main).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_database_in_the_url_query_is_the_worktrees_too() {
+        // Laravel's `?database=` and Doctrine's `?dbname=` win over the path.
+        assert_eq!(
+            url_database("mysql://r@h/?database=shop").as_deref(),
+            Some("shop")
+        );
+        assert_eq!(
+            url_database("mysql://r@h/a?x=1&DBName=shop").as_deref(),
+            Some("shop")
+        );
+        let (cfg, site) = worktree_site(
+            "url-query",
+            "DB_CONNECTION=mysql\nDB_URL=mysql://root@127.0.0.1/?database=shop\nDATABASE_URL=mysql://r@h:3306/x?charset=utf8&dbname=shop\n",
+        );
+        let env = env(&cfg, &site).unwrap();
+        assert_eq!(
+            get(&env, "DB_URL"),
+            Some("mysql://root@127.0.0.1/shop_feature_x?database=shop_feature_x")
+        );
+        assert_eq!(
+            get(&env, "DATABASE_URL"),
+            Some("mysql://r@h:3306/shop_feature_x?charset=utf8&dbname=shop_feature_x")
+        );
+        // Main's named in either place: refused.
+        for url in [
+            "mysql://r@h/shop_feature_x?database=shop",
+            "mysql://r@h/shop?database=shop_feature_x",
+        ] {
+            let mut keys = shipped("laravel").keys.unwrap();
+            keys.insert("DB_URL".into(), url.into());
+            let err = env_with(&cfg, &site, &keys).unwrap_err();
+            assert!(err.contains("names shop's database"), "{url}: {err}");
+        }
     }
 
     #[test]
@@ -2970,8 +3048,17 @@ pub(crate) mod tests {
     fn whatever_the_config_anvils_database_is_never_mains() {
         // `{MAIN}`: the main checkout's folder. Each with every database main could use,
         // written out here rather than asked of `is_mains_database`.
-        let mains: [(&str, &[&str]); 12] = [
+        let mains: [(&str, &[&str]); 14] = [
             ("DB_CONNECTION=pgsql\nDB_DATABASE=shop\n", &["shop"]),
+            // The database in the query (Laravel's, Doctrine's), which wins over the path.
+            (
+                "DB_CONNECTION=mysql\nDB_URL=mysql://root@127.0.0.1/?database=shop\n",
+                &["shop", "laravel"],
+            ),
+            (
+                "DATABASE_URL=mysql://root@127.0.0.1:3306/other?dbname=shop\n",
+                &["shop", "other"],
+            ),
             (
                 "DB_CONNECTION=mysql\nDB_URL=mysql://r@127.0.0.1/shop\n",
                 &["shop", "laravel"],
@@ -3054,9 +3141,10 @@ pub(crate) mod tests {
                 r#"<env name="DB_DATABASE" value="shop_t"/>"#,
             ),
         ];
+        // Every database a value names (a URL's path and query).
         let db_of = |k: &str, v: &str| match k {
-            "DB_DATABASE" => Some(v.to_string()),
-            "DB_URL" | "DATABASE_URL" => Some(url_database(v).unwrap_or_default()),
+            "DB_DATABASE" => Some(vec![v.to_string()]),
+            "DB_URL" | "DATABASE_URL" => Some(url_databases(v)),
             _ => None,
         };
         for (n, (dotenv, names)) in mains.iter().enumerate() {
@@ -3134,9 +3222,9 @@ pub(crate) mod tests {
                             );
                         }
                         for (k, v) in &env {
-                            let Some(db) = db_of(k, v) else { continue };
+                            let Some(dbs) = db_of(k, v) else { continue };
                             // A relative SQLite name resolves inside the worktree.
-                            assert!(!is_mains(&db), "{k}={v}: {case}");
+                            assert!(!dbs.iter().any(|db| is_mains(db)), "{k}={v}: {case}");
                             // Not a test run (or one misdetected): only ever its own.
                             if !test && variant == "preset" {
                                 assert_eq!(
