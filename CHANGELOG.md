@@ -50,6 +50,9 @@ Until 1.0.0, minor versions may contain breaking changes.
 - Updates: Anvil checks for a new release daily and shows "Update available" in
   the titlebar (Settings › About › "Check for updates" asks now). "Restart to
   update" installs it and brings back the dev processes that were running.
+- macOS notifications while Anvil isn't in front: a dev process, Caddy or
+  PHP-FPM stopping unexpectedly, and a new application's setup ending.
+  Settings › General › Notifications turns them off.
 
 ### Changed
 

@@ -88,6 +88,8 @@ pub struct Config {
     pub https_default: Option<bool>,
     /// Weekly, trim apps' big `storage/logs/*.log` and delete old daily logs (`logs::trim_app_logs`).
     pub trim_app_logs: bool,
+    /// macOS notifications for crashes and finished New applications while Anvil isn't in front.
+    pub notifications: bool,
     /// Service licenses the user accepted before installing: license id -> date.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub accepted_licenses: BTreeMap<String, String>,
@@ -172,6 +174,7 @@ impl Default for Config {
             git_client: None,
             https_default: Some(false),
             trim_app_logs: true,
+            notifications: true,
             accepted_licenses: BTreeMap::new(),
         }
     }

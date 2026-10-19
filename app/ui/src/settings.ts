@@ -546,6 +546,7 @@ export function render() {
   $("#login").checked = s.login;
   $("#dock").checked = s.dock_icon;
   $("#trim-logs").checked = s.trim_app_logs;
+  $("#notifications").checked = s.notifications;
   $("#theme").value = s.theme ?? "";
   options($("#editor"), s.editors, s.editor, "None");
   options(
@@ -627,6 +628,7 @@ $("#add-path").onclick = async () => {
 $("#login").onchange = (e) => call("set_login", { on: e.target.checked });
 $("#dock").onchange = (e) => call("set_dock_icon", { on: e.target.checked });
 $("#trim-logs").onchange = (e) => call("set_trim_app_logs", { on: e.target.checked });
+$("#notifications").onchange = (e) => call("set_notifications", { on: e.target.checked });
 $("#https-default").onchange = (e) => call("set_https_default", { on: e.target.checked });
 $("#theme").onchange = (e) => call("set_theme", { theme: e.target.value || null });
 $("#editor").onchange = (e) => call("set_editor", { editor: e.target.value || null });

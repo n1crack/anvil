@@ -180,6 +180,7 @@ export interface Settings {
   theme: string | null;
   dock_icon: boolean;
   trim_app_logs: boolean;
+  notifications: boolean;
   https_default: boolean;
   login: boolean;
   config_dir: string;

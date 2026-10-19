@@ -816,6 +816,7 @@ const mockHandle = (cmd, a) => {
         theme: null,
         dock_icon: true,
         trim_app_logs: true,
+        notifications: true,
         https_default: true,
         login: false,
         config_dir: "/Users/x/Library/Application Support/Anvil",

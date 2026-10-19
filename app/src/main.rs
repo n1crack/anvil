@@ -33,6 +33,8 @@ struct App {
     service_errors: Mutex<std::collections::BTreeMap<String, String>>,
     /// The Containers tab's log streams.
     container_logs: Mutex<anvil::compose::Logs>,
+    /// Set when Caddy or PHP-FPM ended on its own, until the watcher has notified.
+    server_crashed: AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -161,8 +163,91 @@ fn running(app: &App) -> bool {
     let dead = server.take();
     drop(server);
     *anvil::lock(&app.error) = Some(why);
+    app.server_crashed.store(true, Ordering::SeqCst);
     std::thread::spawn(move || drop(dead));
     false
+}
+
+/// A macOS notification, only while no Anvil window has focus and Settings › General ›
+/// Notifications is on. macOS asks for permission on the first one; denied, it shows nothing.
+fn notify(handle: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::{NotificationExt, PermissionState};
+    let focused = handle
+        .webview_windows()
+        .values()
+        .any(|w| w.is_focused().unwrap_or(false));
+    let n = handle.notification();
+    // On macOS the plugin always answers Granted; the system's own prompt comes with the first.
+    if focused
+        || !anvil::load().is_ok_and(|c| c.notifications)
+        || !matches!(n.request_permission(), Ok(PermissionState::Granted))
+    {
+        return;
+    }
+    let mut b = n.builder().title(title);
+    if !body.is_empty() {
+        b = b.body(body);
+    }
+    let _ = b.show();
+}
+
+/// Crashes not there on the last look (`seen`, which becomes this look's): a stopped or
+/// restarted process leaves the list, one still crashed stays seen.
+fn new_crashes(
+    seen: &mut std::collections::BTreeSet<(String, u64)>,
+    crashed: Vec<(String, anvil::apps::Exit)>,
+) -> Vec<(String, anvil::apps::Exit)> {
+    let now = crashed.iter().map(|(k, e)| (k.clone(), e.at)).collect();
+    let new = crashed
+        .into_iter()
+        .filter(|(k, e)| !seen.contains(&(k.clone(), e.at)))
+        .collect();
+    *seen = now;
+    new
+}
+
+/// "shop stopped" for an app, "shop: queue stopped" for one of its processes.
+fn crash_title(cfg: &Config, key: &str) -> String {
+    let Some((site, id)) = key.split_once('@') else {
+        return format!("{key} stopped");
+    };
+    // Names come from detection, as on the Processes rows.
+    let name = anvil::sites(cfg)
+        .iter()
+        .find(|s| s.name == site)
+        .and_then(|s| {
+            anvil::processes::detect_with(s, Some(cfg))
+                .into_iter()
+                .find(|p| p.id == id)
+                .map(|p| p.name)
+        })
+        .unwrap_or_else(|| id.to_string());
+    format!("{site}: {name} stopped")
+}
+
+/// One notification for the processes that crashed since the last look.
+fn notify_crashes(handle: &AppHandle, new: &[(String, anvil::apps::Exit)]) {
+    if new.is_empty() {
+        return;
+    }
+    let Ok(cfg) = anvil::load() else {
+        return;
+    };
+    match new {
+        [(key, exit)] => notify(handle, &crash_title(&cfg, key), &exit_detail(exit)),
+        _ => {
+            let names: Vec<String> = new
+                .iter()
+                .map(|(k, _)| {
+                    crash_title(&cfg, k)
+                        .trim_end_matches(" stopped")
+                        .to_string()
+                })
+                .collect();
+            let title = format!("{} processes stopped", new.len());
+            notify(handle, &title, &names.join(", "));
+        }
+    }
 }
 
 fn snapshot(app: &App) -> Res<Snapshot> {
@@ -1785,9 +1870,30 @@ async fn create_app(
     columns: Option<u16>,
     lines: Option<u16>,
 ) -> Res<String> {
+    let done = create(&handle, kind, &name, parent, options, columns, lines).await;
+    match &done {
+        Ok(site) => notify(&handle, &format!("{site} is ready"), ""),
+        Err(e) => notify(
+            &handle,
+            &format!("{name}: setup failed"),
+            e.lines().next().unwrap_or(""),
+        ),
+    }
+    done
+}
+
+async fn create(
+    handle: &AppHandle,
+    kind: String,
+    name: &str,
+    parent: std::path::PathBuf,
+    options: Option<anvil::create::Options>,
+    columns: Option<u16>,
+    lines: Option<u16>,
+) -> Res<String> {
     let cfg = anvil::load().map_err(err)?;
     let opts = anvil::create::resolve(&kind, &cfg, &options.unwrap_or_default()).map_err(err)?;
-    let job = (kind.clone(), name.clone(), parent.clone(), opts.clone());
+    let job = (kind.clone(), name.to_string(), parent.clone(), opts.clone());
     let (c, l) = anvil::create::LOG_SIZE;
     let size = (columns.unwrap_or(c), lines.unwrap_or(l));
     let dir = tauri::async_runtime::spawn_blocking(move || {
@@ -1804,9 +1910,9 @@ async fn create_app(
             .iter()
             .any(|p| p.canonicalize().ok() == parent.canonicalize().ok());
         let site = if parked {
-            anvil::site_name(&name)
+            anvil::site_name(name)
         } else {
-            anvil::link(cfg, &name, dir)?
+            anvil::link(cfg, name, dir)?
         };
         // The versions chosen in the sheet, when they aren't the defaults anyway.
         let defaults = anvil::create::resolve(&kind, cfg, &Default::default())?;
@@ -1823,11 +1929,11 @@ async fn create_app(
         }
         Ok(site)
     })?;
-    sites_changed(&handle, &app, &cfg);
+    sites_changed(handle, &app, &cfg);
     if anvil::apps::runs_process(&kind) {
         start_app(&app, &cfg, &site);
     }
-    changed(&handle);
+    changed(handle);
     Ok(site)
 }
 
@@ -2362,6 +2468,7 @@ struct Settings {
     theme: Option<String>,
     dock_icon: bool,
     trim_app_logs: bool,
+    notifications: bool,
     https_default: bool,
     login: bool,
     config_dir: std::path::PathBuf,
@@ -2485,6 +2592,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         theme: cfg.theme,
         dock_icon: cfg.dock_icon,
         trim_app_logs: cfg.trim_app_logs,
+        notifications: cfg.notifications,
         https_default: cfg.https_default == Some(true),
         hidden: cfg.hidden.clone(),
         paths: cfg.paths,
@@ -2624,6 +2732,19 @@ fn set_dock_icon(handle: AppHandle, on: bool) -> Res<Settings> {
     );
     update_dock(&handle);
     s
+}
+
+/// Settings › General › Notifications (`notify`).
+#[tauri::command(async)]
+fn set_notifications(handle: AppHandle, on: bool) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.notifications = on;
+            Ok(())
+        },
+        false,
+    )
 }
 
 /// Settings › Storage › Trim app logs weekly (`anvil::logs::retention`).
@@ -3100,6 +3221,7 @@ fn main() {
     STARTED_EXE.get_or_init(exe_mtime);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -3159,6 +3281,7 @@ fn main() {
             container_logs_stop,
             set_dock_icon,
             set_trim_app_logs,
+            set_notifications,
             set_login,
             open_config_dir,
             services,
@@ -3208,6 +3331,14 @@ fn main() {
             relaunch
         ])
         .setup(|app| {
+            // Clicking a notification brings Anvil forward.
+            use tauri_plugin_notification::NotificationExt;
+            let h = app.handle().clone();
+            let _ = app.notification().on_action(move |a| {
+                if a.action_id() == "tap" {
+                    show(&h);
+                }
+            });
             if let Ok(cfg) = anvil::load() {
                 apply_theme(app.handle(), cfg.theme.as_deref());
                 // Starting everything (and the first web server download) happens in the
@@ -3233,16 +3364,26 @@ fn main() {
                     });
                     start(&state, &cfg);
                     // A crashed Caddy or PHP-FPM shows in the menu bar and window within 2 s.
+                    // So does a crashed dev process, as a notification while Anvil isn't in front.
                     let watch = handle.clone();
                     std::thread::spawn(move || {
                         let mut was = true;
+                        let mut seen = Default::default();
                         loop {
                             std::thread::sleep(std::time::Duration::from_secs(2));
-                            let now = running(&watch.state::<App>());
+                            let state = watch.state::<App>();
+                            let now = running(&state);
                             if was && !now {
                                 changed(&watch);
                             }
                             was = now;
+                            if state.server_crashed.swap(false, Ordering::SeqCst) {
+                                let why = anvil::lock(&state.error).clone().unwrap_or_default();
+                                let label = why.split(" stopped").next().unwrap_or("Web server");
+                                notify(&watch, &format!("{label} stopped"), &why);
+                            }
+                            let crashed = anvil::lock(&state.apps).crashed();
+                            notify_crashes(&watch, &new_crashes(&mut seen, crashed));
                         }
                     });
                     for id in anvil::services::enabled(&cfg) {
@@ -3343,6 +3484,23 @@ fn main() {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn a_crash_notifies_once() {
+        let exit = |at| anvil::apps::Exit { code: Some(1), at };
+        let mut seen = Default::default();
+        let new = new_crashes(&mut seen, vec![("shop@queue".into(), exit(10))]);
+        assert_eq!(new.len(), 1);
+        // Still crashed on the next look: nothing new.
+        assert!(new_crashes(&mut seen, vec![("shop@queue".into(), exit(10))]).is_empty());
+        // Stopped by the user, so gone from the list: nothing.
+        assert!(new_crashes(&mut seen, vec![]).is_empty());
+        // Started again and crashed again: a new crash.
+        assert_eq!(
+            new_crashes(&mut seen, vec![("shop@queue".into(), exit(20))]).len(),
+            1
+        );
+    }
 
     #[test]
     fn restart_keys_are_read_once() {
