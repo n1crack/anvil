@@ -2099,6 +2099,7 @@ kbd {
 .svc-postgres { --hue: #7b8fe0; }
 .svc-redis { --hue: #e0574a; }
 .svc-mailpit { --hue: #3fb59a; }
+.svc-versitygw { --hue: #a37ad6; }
 .mark.svc-mark {
   background: color-mix(in srgb, var(--hue) 20%, var(--steel-raised));
   color: color-mix(in srgb, var(--hue) 75%, var(--text));

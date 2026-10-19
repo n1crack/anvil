@@ -58,7 +58,7 @@ enum Cmd {
         key: String,
         value: Option<String>,
     },
-    /// Databases, cache and mail: mysql, postgres, redis, mailpit
+    /// Databases, cache, mail and S3 storage: mysql, postgres, redis, mailpit, versitygw
     Service {
         #[command(subcommand)]
         cmd: ServiceCmd,
@@ -255,7 +255,7 @@ enum ServiceCmd {
     /// Add a service: `add redis`, `add redis cache --port 6380`. Downloads the
     /// program the first time (Redis is built from source).
     Add {
-        /// mysql, postgres, redis or mailpit
+        /// mysql, postgres, redis, mailpit or versitygw (S3)
         kind: String,
         /// Defaults to the kind, then `<kind>-2`…
         name: Option<String>,
@@ -296,7 +296,7 @@ enum ServiceCmd {
     Port {
         id: String,
         port: Option<u16>,
-        /// Mailpit's web inbox port (leave the value out for the default)
+        /// The web inbox or console port (leave the value out for the default)
         #[arg(long, num_args = 0..=1)]
         web: Option<Option<u16>>,
     },
@@ -711,7 +711,10 @@ fn run() -> Result<()> {
                     };
                     let inbox = s
                         .web_port
-                        .map(|p| format!(", inbox on {p}"))
+                        .map(|p| match s.kind {
+                            "mailpit" => format!(", inbox on {p}"),
+                            _ => format!(", console on {p}"),
+                        })
                         .unwrap_or_default();
                     println!(
                         "{} {} {:<9} port {:<6} {state}{inbox}",
@@ -775,6 +778,9 @@ fn run() -> Result<()> {
                 }
                 if let Some(m) = c.messages {
                     println!("{m} messages");
+                }
+                for (n, b) in c.buckets {
+                    println!("{n:<32} {:>10} KB", b / 1024);
                 }
             }
             ServiceCmd::CreateDb { id, name } => anvil::databases::create(&cfg, &id, &name)?,

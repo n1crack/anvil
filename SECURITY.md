@@ -41,6 +41,7 @@ Anvil is meant for your own machine only:
     cosign signature is not checked).
   - PostgreSQL: SHA-256 from the `.sha256` file next to each theseus-rs build.
   - Redis: SHA-256 from the `redis/redis-hashes` list.
+  - Versity S3 Gateway: SHA-256 from the release's `checksums.txt`.
   - Composer: SHA-256 from `composer.phar.sha256`.
   - Rust: SHA-256 from the `rustup-init.sha256` file next to the installer.
   - Python: uv, pinned to the SHA-256 its release lists, installs

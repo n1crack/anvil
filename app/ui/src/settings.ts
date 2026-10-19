@@ -675,6 +675,7 @@ const SOFTWARE: [string, string, string, string, string][] = [
     "Built on this Mac",
   ],
   ["Mailpit", "Catches the mail apps send", "MIT", "https://mailpit.axllent.org", "Downloaded"],
+  ["Versity S3 Gateway", "S3-compatible file storage", "Apache-2.0", "https://github.com/versity/versitygw", "Downloaded"],
   ["Tauri", "The app’s windows and menu bar", "MIT OR Apache-2.0", "https://tauri.app", "Bundled"],
 ];
 

@@ -28,7 +28,7 @@ export let services: ServiceRow[] = [];
 let svcSelected = localStorage.getItem("service");
 // After a removal that kept the data: a muted line over the list says where it is.
 let keptNote = "";
-const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp" };
+const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp", versitygw: "S3" };
 
 async function serviceCall(cmd: string, args?: Record<string, unknown>) {
   try {
@@ -180,7 +180,7 @@ export function renderService() {
       el(
         "p",
         "muted",
-        "Add MySQL, PostgreSQL, Redis or Mailpit. Each one gets its own name, port and data, and you can add as many as you need.",
+        "Add MySQL, PostgreSQL, Redis, Mailpit or S3 storage. Each one gets its own name, port and data, and you can add as many as you need.",
       ),
       add,
     );
@@ -211,6 +211,10 @@ export function renderService() {
   const inbox = $('[data-svc-open="inbox"]', root);
   inbox.hidden = !svc.web;
   inbox.disabled = !svc.running;
+  if (svc.kind !== "mailpit") {
+    inbox.title = "Open the web console; sign in with the keys in Connect";
+    inbox.setAttribute("aria-label", "Open the web console");
+  }
   // The data folder opens in Finder: the outline folder icon, as on an app's page.
   const data = $('[data-svc-open="data"]', root);
   data.title = `Show ~/.anvil/data/${svc.id} in Finder`;
@@ -242,6 +246,7 @@ export function renderService() {
   };
   portInput("#svc-port-edit", svc.port, false);
   $(".svc-web", root).hidden = !svc.web_port;
+  if (svc.kind !== "mailpit") $('label[for="svc-web-edit"]', root).textContent = "Console port";
   if (svc.web_port) portInput("#svc-web-edit", svc.web_port, true);
   const fix = svc.suggested_port ?? svc.suggested_web_port;
   if (fix && !svc.running) {
@@ -360,7 +365,7 @@ export async function copy(text, btn) {
 /** Remove a service; a second question decides whether its data goes too. */
 async function removeService(svc) {
   // One question; the default button (Return) keeps the data, Escape cancels.
-  const what = svc.kind === "mailpit" ? "caught mail" : svc.kind === "redis" ? "saved keys" : "databases";
+  const what = { mailpit: "caught mail", redis: "saved keys", versitygw: "buckets" }[svc.kind] ?? "databases";
   const answer = await window.__TAURI__.dialog.message(
     `${svc.id} stops and is removed from Anvil. Keep its ${what} to find them again if you add ${svc.id} later.`,
     {
@@ -380,19 +385,22 @@ async function removeService(svc) {
 let svcKinds: any[] = [];
 let svcKind = localStorage.getItem("serviceKind") ?? "mysql";
 
-// Monochrome glyphs: a database for MySQL and PostgreSQL, layers for Redis, a letter for Mailpit.
+// Monochrome glyphs: a database for MySQL and PostgreSQL, layers for Redis, a letter for
+// Mailpit, a bucket for S3.
 const SVC_ICONS: Record<string, string> = {
   db: "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3",
   redis: "M12 3 3 7.5l9 4.5 9-4.5L12 3Zm-9 9 9 4.5 9-4.5M3 16.5 12 21l9-4.5",
-  mail: "M3.5 6.5h17v11h-17zM3.5 7l8.5 6.5L20.5 7",
+  mailpit: "M3.5 6.5h17v11h-17zM3.5 7l8.5 6.5L20.5 7",
+  versitygw: "M4 6c0-1.4 3.6-2.5 8-2.5s8 1.1 8 2.5-3.6 2.5-8 2.5S4 7.4 4 6Zm0 0 2 13c.2 1 2.8 1.5 6 1.5s5.8-.5 6-1.5l2-13",
 };
 const svcIcon = (kind: string) =>
-  `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="${SVC_ICONS[kind === "redis" ? "redis" : kind === "mailpit" ? "mail" : "db"]}"/></svg>`;
+  `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="${SVC_ICONS[kind] ?? SVC_ICONS.db}"/></svg>`;
 const SVC_ABOUT: Record<string, string> = {
   mysql: "Relational database",
   postgres: "Relational database",
   redis: "Cache, queues and sessions",
   mailpit: "Catches the mail apps send",
+  versitygw: "S3-compatible file storage",
 };
 
 const svcPicker = picker({
@@ -709,6 +717,10 @@ function drawContents(svc, root, c) {
         ),
       );
     }
+  } else if (svc.kind === "versitygw") {
+    // Buckets are folders in the data folder; make more from an app or the web console.
+    for (const [name, size] of c.buckets) line(name, bytes(size));
+    if (!c.buckets.length) line("No buckets", null).classList.add("muted");
   } else {
     // The inbox opens from the header's envelope.
     const n = c.messages ?? 0;

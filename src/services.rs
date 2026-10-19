@@ -1,4 +1,4 @@
-//! Databases, cache and mail, added like containers: pick a kind, name and
+//! Databases, cache, mail and S3 storage, added like containers: pick a kind, name and
 //! port, and Anvil runs it. Each kind's program is installed once into
 //! `~/.anvil/services/<kind>` and shared; every service has its own port, data
 //! in `~/.anvil/data/<id>` and log. Nothing exists until it's added.
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-pub const SERVICES: [&str; 4] = ["mysql", "postgres", "redis", "mailpit"];
+pub const SERVICES: [&str; 5] = ["mysql", "postgres", "redis", "mailpit", "versitygw"];
 
 /// Versions offered per kind, newest first; checked against the download sites.
 /// Postgres comes from theseus-rs builds, Redis is built from download.redis.io.
@@ -26,6 +26,7 @@ pub fn versions(kind: &str) -> &'static [&'static str] {
         "mysql" => &["9.7.2", "8.4.11", "8.0.46"],
         "postgres" => &["18.6.0", "17.11.0", "16.15.0", "15.19.0", "14.24.0"],
         "redis" => &["8.10.2", "7.4.11", "7.2.16"],
+        "versitygw" => &["1.9.0"],
         _ => &["1.31.6"],
     }
 }
@@ -68,6 +69,11 @@ pub fn license(kind: &str, version: &str) -> License {
             "RSALv2-SSPLv1-AGPLv3",
             "RSALv2, SSPLv1 or AGPLv3, your choice",
             "https://redis.io/legal/licenses/",
+        ),
+        "versitygw" => (
+            "Apache-2.0",
+            "the Apache License 2.0",
+            "https://github.com/versity/versitygw/blob/main/LICENSE",
         ),
         _ => (
             "MIT",
@@ -188,7 +194,7 @@ pub struct ServiceConfig {
     /// Start with Anvil.
     pub enabled: bool,
     pub port: Option<u16>,
-    /// Mailpit's web inbox port.
+    /// Mailpit's web inbox or the S3 gateway's web console port.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub web_port: Option<u16>,
     /// Free-form labels, e.g. "queue" or "client-x".
@@ -208,7 +214,7 @@ pub struct ServiceInfo {
     pub category: &'static str,
     pub version: String,
     pub port: u16,
-    /// Mailpit's web inbox.
+    /// Mailpit's web inbox, the S3 gateway's web console.
     pub web: Option<String>,
     pub web_port: Option<u16>,
     pub installed: bool,
@@ -230,6 +236,7 @@ pub fn name(id: &str) -> &'static str {
         "mysql" => "MySQL",
         "postgres" => "PostgreSQL",
         "redis" => "Redis",
+        "versitygw" => "Versity S3 Gateway",
         _ => "Mailpit",
     }
 }
@@ -238,6 +245,7 @@ fn category(id: &str) -> &'static str {
     match id {
         "mysql" | "postgres" => "Database",
         "redis" => "Cache & Queue",
+        "versitygw" => "Object Storage",
         _ => "Mail",
     }
 }
@@ -254,21 +262,36 @@ fn default_port(id: &str) -> u16 {
         "mysql" => 3306,
         "postgres" => 5432,
         "redis" => 6379,
+        "versitygw" => 7070,
         _ => 1025, // Mailpit SMTP
     }
 }
 
-const MAILPIT_WEB: u16 = 8025;
+/// The usual port of a kind's web page: Mailpit's inbox, the S3 gateway's console.
+fn default_web_port(kind: &str) -> Option<u16> {
+    match kind {
+        "mailpit" => Some(8025),
+        "versitygw" => Some(7071),
+        _ => None,
+    }
+}
 
-/// Mailpit's web inbox port; only Mailpit has one.
+/// The web page's port, for the kinds that have one.
 pub fn web_port(cfg: &Config, id: &str) -> Option<u16> {
-    (kind_of(cfg, id).ok() == Some("mailpit")).then(|| {
+    let usual = default_web_port(kind_of(cfg, id).ok()?)?;
+    Some(
         cfg.services
             .get(id)
             .and_then(|s| s.web_port)
-            .unwrap_or(MAILPIT_WEB)
-    })
+            .unwrap_or(usual),
+    )
 }
+
+/// The S3 gateway's one account and the bucket its first start makes. Fixed: it
+/// listens on 127.0.0.1 only, and the .env lines show them anyway.
+pub const S3_ACCESS_KEY: &str = "anvil";
+pub const S3_SECRET_KEY: &str = "anvil-secret";
+pub const S3_BUCKET: &str = "anvil";
 
 pub fn port(cfg: &Config, id: &str) -> u16 {
     cfg.services
@@ -351,6 +374,7 @@ fn binary(kind: &str, version: &str) -> PathBuf {
         "mysql" => d.join("bin/mysqld"),
         "postgres" => d.join("bin/postgres"),
         "redis" => d.join("bin/redis-server"),
+        "versitygw" => d.join("versitygw"),
         _ => d.join("mailpit"),
     }
 }
@@ -528,7 +552,7 @@ fn insert(
         None => free_port(&taken, default_port(kind)),
     };
     taken.push(port);
-    let web = (kind == "mailpit").then(|| free_port(&taken, MAILPIT_WEB));
+    let web = default_web_port(kind).map(|p| free_port(&taken, p));
     cfg.services.insert(
         id.clone(),
         ServiceConfig {
@@ -603,6 +627,15 @@ pub fn install(id: &str, version: &str) -> Result<()> {
                 fetch_tgz(&url, d, true, Some(&sum))
             }
             "redis" => build_redis(d, version),
+            "versitygw" => {
+                let os = if mac { "Darwin" } else { "Linux" };
+                let arch = if arm { "arm64" } else { "x86_64" };
+                let file = format!("versitygw_v{version}_{os}_{arch}.tar.gz");
+                let base =
+                    format!("https://github.com/versity/versitygw/releases/download/v{version}");
+                let sum = published_sum(&format!("{base}/checksums.txt"), &file)?;
+                fetch_tgz(&format!("{base}/{file}"), d, true, Some(&sum))
+            }
             _ => {
                 let os = if mac { "darwin" } else { "linux" };
                 let arch = if arm { "arm64" } else { "amd64" };
@@ -741,6 +774,9 @@ pub fn env_lines(cfg: &Config, id: &str) -> String {
             "DB_CONNECTION=pgsql\nDB_HOST=127.0.0.1\nDB_PORT={p}\nDB_USERNAME=postgres\nDB_PASSWORD=\nDATABASE_URL=postgres://postgres@127.0.0.1:{p}/postgres"
         ),
         "redis" => format!("REDIS_HOST=127.0.0.1\nREDIS_PORT={p}\nREDIS_URL=redis://127.0.0.1:{p}"),
+        "versitygw" => format!(
+            "FILESYSTEM_DISK=s3\nAWS_ACCESS_KEY_ID={S3_ACCESS_KEY}\nAWS_SECRET_ACCESS_KEY={S3_SECRET_KEY}\nAWS_DEFAULT_REGION=us-east-1\nAWS_BUCKET={S3_BUCKET}\nAWS_ENDPOINT=http://127.0.0.1:{p}\nAWS_USE_PATH_STYLE_ENDPOINT=true"
+        ),
         _ => format!("MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT={p}"),
     }
 }
@@ -772,10 +808,9 @@ fn check_port(cfg: &Config, id: &str, port: u16) -> Result<()> {
 }
 
 pub fn set_web_port(cfg: &mut Config, id: &str, port: Option<u16>) -> Result<()> {
-    if kind_of(cfg, id)? != "mailpit" {
-        bail!("Only Mailpit has a web port");
-    }
-    check_port(cfg, id, port.unwrap_or(MAILPIT_WEB))?;
+    let usual =
+        default_web_port(kind_of(cfg, id)?).with_context(|| format!("{id} has no web port"))?;
+    check_port(cfg, id, port.unwrap_or(usual))?;
     cfg.services.entry(id.into()).or_default().web_port = port;
     save(cfg)
 }
@@ -803,6 +838,11 @@ fn init(cfg: &Config, kind: &str, id: &str, log: &fs::File) -> Result<()> {
             .stdout(log.try_clone()?)
             .stderr(log.try_clone()?)
             .status()?,
+        // Every folder in the data folder is a bucket, so the first one is just made.
+        "versitygw" => {
+            fs::create_dir_all(data.join(S3_BUCKET))?;
+            return Ok(());
+        }
         _ => {
             fs::create_dir_all(&data)?;
             return Ok(());
@@ -844,12 +884,20 @@ fn command(cfg: &Config, id: &str) -> Command {
             c.args(["--port", &port, "--bind", "127.0.0.1", "--dir"])
                 .arg(&data);
         }
+        "versitygw" => {
+            let web = format!("127.0.0.1:{}", web_port(cfg, id).unwrap_or(7071));
+            c.env("ROOT_ACCESS_KEY", S3_ACCESS_KEY)
+                .env("ROOT_SECRET_KEY", S3_SECRET_KEY)
+                .args(["--port", &format!("127.0.0.1:{port}"), "--webui", &web])
+                .args(["--cors-allow-origin", &format!("http://{web}"), "posix"])
+                .arg(&data);
+        }
         _ => {
             c.args([
                 "--smtp",
                 &format!("127.0.0.1:{port}"),
                 "--listen",
-                &format!("127.0.0.1:{}", web_port(cfg, id).unwrap_or(MAILPIT_WEB)),
+                &format!("127.0.0.1:{}", web_port(cfg, id).unwrap_or(8025)),
                 "--database",
             ])
             .arg(data.join("mailpit.db"));
@@ -1121,6 +1169,7 @@ mod tests {
         assert_eq!(license("redis", "8.10.2").id, "redis:RSALv2-SSPLv1-AGPLv3");
         assert_eq!(license("redis", "7.4.11").id, "redis:RSALv2-SSPLv1");
         assert_eq!(license("redis", "7.2.16").id, "redis:BSD-3-Clause");
+        assert_eq!(license("versitygw", "1.9.0").id, "versitygw:Apache-2.0");
         // Every offered version has an https link to its text.
         for kind in SERVICES {
             for v in versions(kind) {
@@ -1269,6 +1318,48 @@ mod tests {
             .collect();
         assert!(args.windows(2).any(|w| w == ["--listen", "127.0.0.1:8026"]));
         assert!(args.windows(2).any(|w| w == ["--smtp", "127.0.0.1:1025"]));
+    }
+
+    #[test]
+    fn s3_gateway_listens_locally_with_its_console_and_env() {
+        let mut cfg = Config::default();
+        let id = insert(&mut cfg, "versitygw", Some("files"), Some(17070), None).unwrap();
+        assert_eq!(version(&cfg, &id), "1.9.0");
+        let web = web_port(&cfg, &id).unwrap();
+        assert_ne!(web, 17070);
+
+        let c = command(&cfg, &id);
+        assert_eq!(c.get_program(), binary("versitygw", "1.9.0"));
+        let args: Vec<String> = c
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.windows(2).any(|w| w == ["--port", "127.0.0.1:17070"]));
+        let ui = format!("127.0.0.1:{web}");
+        assert!(args.windows(2).any(|w| w[0] == "--webui" && w[1] == ui));
+        // The backend and its root folder come last: posix <data>.
+        assert_eq!(args[args.len() - 2], "posix");
+        assert!(args.last().unwrap().ends_with("data/files"));
+        let envs: Vec<_> = c.get_envs().collect();
+        assert!(envs.contains(&("ROOT_ACCESS_KEY".as_ref(), Some(S3_ACCESS_KEY.as_ref()))));
+        assert!(envs.contains(&("ROOT_SECRET_KEY".as_ref(), Some(S3_SECRET_KEY.as_ref()))));
+
+        let env = env_lines(&cfg, &id);
+        for line in [
+            "AWS_ENDPOINT=http://127.0.0.1:17070",
+            "AWS_USE_PATH_STYLE_ENDPOINT=true",
+            "AWS_BUCKET=anvil",
+            "AWS_ACCESS_KEY_ID=anvil",
+            "AWS_SECRET_ACCESS_KEY=anvil-secret",
+        ] {
+            assert!(env.lines().any(|l| l == line), "{line} in {env}");
+        }
+        // Its console port moves like Mailpit's inbox port; others have none.
+        cfg.services.get_mut(&id).unwrap().web_port = Some(17099);
+        assert_eq!(web_port(&cfg, &id), Some(17099));
+        cfg.services
+            .insert("redis".into(), ServiceConfig::default());
+        assert!(set_web_port(&mut cfg, "redis", Some(17100)).is_err());
     }
 
     #[test]

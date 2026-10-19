@@ -58,6 +58,12 @@ Until 1.0.0, minor versions may contain breaking changes.
   --no-git --https`; also `--framework`, `--node`, `--[no-]ts` and
   `--[no-]tailwind`. A flag the template doesn't offer is refused, and
   `anvil new --help` lists which templates each one applies to.
+- S3 storage as a service: the Versity S3 Gateway (Apache-2.0), downloaded and
+  checked against its release's SHA-256 list. Buckets are folders in
+  `~/.anvil/data/<name>`; the first start makes an `anvil` bucket. Connect
+  shows the keys and the Laravel `.env` lines (`AWS_ENDPOINT`,
+  `AWS_USE_PATH_STYLE_ENDPOINT=true`, `AWS_BUCKET`), and the header opens its
+  web console.
 
 ### Changed
 

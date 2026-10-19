@@ -1,5 +1,6 @@
 //! What's inside a running service: databases in MySQL and PostgreSQL, keys in
-//! Redis, messages in Mailpit. Talks to the server with its own bundled client.
+//! Redis, messages in Mailpit, buckets in the S3 gateway. Talks to the server with
+//! its own bundled client.
 
 use crate::Config;
 use crate::services::{kind_of, port, program_dir, web_port};
@@ -17,6 +18,8 @@ pub struct Contents {
     pub memory: Option<String>,
     /// Caught messages (Mailpit).
     pub messages: Option<u64>,
+    /// Buckets with their size in bytes (the S3 gateway).
+    pub buckets: Vec<(String, u64)>,
 }
 
 /// Databases the server creates for itself; they can't be dropped from Anvil.
@@ -135,6 +138,24 @@ pub fn contents(cfg: &Config, id: &str) -> Result<Contents> {
                 .lines()
                 .find_map(|l| l.strip_prefix("used_memory_human:"))
                 .map(|m| m.trim().to_string());
+        }
+        // A bucket is a folder of the data folder; read there, no S3 signing needed.
+        "versitygw" => {
+            let dirs: Vec<_> = std::fs::read_dir(crate::services::data(id))?
+                .flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+                .map(|e| e.path())
+                .collect();
+            let sizes = crate::resources::du(&dirs);
+            c.buckets = dirs
+                .iter()
+                .map(|d| {
+                    let name = d.file_name().unwrap_or_default().to_string_lossy();
+                    (name.into_owned(), sizes.get(d).copied().unwrap_or(0))
+                })
+                .collect();
+            c.buckets.sort();
         }
         _ => {
             let web = web_port(cfg, id).context("no inbox port")?;

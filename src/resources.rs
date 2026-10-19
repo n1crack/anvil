@@ -393,7 +393,7 @@ fn rules_for(site: &Site) -> Vec<Rule> {
 /// counters of all requested paths above it. Nested paths cost nothing extra.
 /// Symlinks aren't followed, and a hard-linked file counts once per requested
 /// path, so every size equals `du -sk <path>` run on its own.
-fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
+pub(crate) fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
     use std::collections::HashSet;
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -846,6 +846,9 @@ pub fn services_used(cfg: &Config, site: &Site, live: &BTreeMap<String, u32>) ->
             get("MAIL_PORT").and_then(|p| p.parse().ok()),
             host("MAIL_HOST"),
         ));
+    }
+    if let Some(url) = get("AWS_ENDPOINT") {
+        wanted.push(("S3 storage".into(), url_port(url), url_host(url)));
     }
 
     let local_ports: Vec<u16> = wanted
