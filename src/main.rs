@@ -58,7 +58,7 @@ enum Cmd {
         key: String,
         value: Option<String>,
     },
-    /// Databases, cache, mail and S3 storage: mysql, postgres, redis, mailpit, versitygw
+    /// Databases, cache, mail and S3 storage: mysql, postgres, redis, mailpit, versitygw, silo
     Service {
         #[command(subcommand)]
         cmd: ServiceCmd,
@@ -268,7 +268,7 @@ enum ServiceCmd {
     /// Add a service: `add redis`, `add redis cache --port 6380`. Downloads the
     /// program the first time (Redis is built from source).
     Add {
-        /// mysql, postgres, redis, mailpit or versitygw (S3)
+        /// mysql, postgres, redis, mailpit, versitygw or silo (both S3)
         kind: String,
         /// Defaults to the kind, then `<kind>-2`…
         name: Option<String>,

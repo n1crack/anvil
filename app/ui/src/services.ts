@@ -28,7 +28,7 @@ export let services: ServiceRow[] = [];
 let svcSelected = localStorage.getItem("service");
 // After a removal that kept the data: a muted line over the list says where it is.
 let keptNote = "";
-const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp", versitygw: "S3" };
+const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp", versitygw: "S3", silo: "Si" };
 
 async function serviceCall(cmd: string, args?: Record<string, unknown>) {
   try {
@@ -365,7 +365,7 @@ export async function copy(text, btn) {
 /** Remove a service; a second question decides whether its data goes too. */
 async function removeService(svc) {
   // One question; the default button (Return) keeps the data, Escape cancels.
-  const what = { mailpit: "caught mail", redis: "saved keys", versitygw: "buckets" }[svc.kind] ?? "databases";
+  const what = { mailpit: "caught mail", redis: "saved keys", versitygw: "buckets", silo: "buckets" }[svc.kind] ?? "databases";
   const answer = await window.__TAURI__.dialog.message(
     `${svc.id} stops and is removed from Anvil. Keep its ${what} to find them again if you add ${svc.id} later.`,
     {
@@ -393,6 +393,7 @@ const SVC_ICONS: Record<string, string> = {
   mailpit: "M3.5 6.5h17v11h-17zM3.5 7l8.5 6.5L20.5 7",
   versitygw: "M4 6c0-1.4 3.6-2.5 8-2.5s8 1.1 8 2.5-3.6 2.5-8 2.5S4 7.4 4 6Zm0 0 2 13c.2 1 2.8 1.5 6 1.5s5.8-.5 6-1.5l2-13",
 };
+SVC_ICONS.silo = SVC_ICONS.versitygw;
 const svcIcon = (kind: string) =>
   `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="${SVC_ICONS[kind] ?? SVC_ICONS.db}"/></svg>`;
 const SVC_ABOUT: Record<string, string> = {
@@ -401,6 +402,7 @@ const SVC_ABOUT: Record<string, string> = {
   redis: "Cache, queues and sessions",
   mailpit: "Catches the mail apps send",
   versitygw: "S3-compatible file storage",
+  silo: "S3-compatible file storage",
 };
 
 const svcPicker = picker({
@@ -723,7 +725,7 @@ function drawContents(svc, root, c) {
         ),
       );
     }
-  } else if (svc.kind === "versitygw") {
+  } else if (svc.kind === "versitygw" || svc.kind === "silo") {
     // Buckets are folders in the data folder; make more from an app or the web console.
     for (const [name, size] of c.buckets) line(name, bytes(size));
     if (!c.buckets.length) line("No buckets", null).classList.add("muted");

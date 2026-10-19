@@ -1,5 +1,5 @@
 //! What's inside a running service: databases in MySQL and PostgreSQL, keys in
-//! Redis, messages in Mailpit, buckets in the S3 gateway. Talks to the server with
+//! Redis, messages in Mailpit, buckets in S3 storage. Talks to the server with
 //! its own bundled client.
 
 use crate::Config;
@@ -18,7 +18,7 @@ pub struct Contents {
     pub memory: Option<String>,
     /// Caught messages (Mailpit).
     pub messages: Option<u64>,
-    /// Buckets with their size in bytes (the S3 gateway).
+    /// Buckets with their size in bytes (S3 storage).
     pub buckets: Vec<(String, u64)>,
 }
 
@@ -140,7 +140,7 @@ pub fn contents(cfg: &Config, id: &str) -> Result<Contents> {
                 .map(|m| m.trim().to_string());
         }
         // A bucket is a folder of the data folder; read there, no S3 signing needed.
-        "versitygw" => {
+        "versitygw" | "silo" => {
             let dirs: Vec<_> = std::fs::read_dir(crate::services::data(id))?
                 .flatten()
                 .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))

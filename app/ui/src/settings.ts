@@ -676,6 +676,7 @@ const SOFTWARE: [string, string, string, string, string][] = [
   ],
   ["Mailpit", "Catches the mail apps send", "MIT", "https://mailpit.axllent.org", "Downloaded"],
   ["Versity S3 Gateway", "S3-compatible file storage", "Apache-2.0", "https://github.com/versity/versitygw", "Downloaded"],
+  ["SILO", "S3-compatible file storage, a MinIO fork", "AGPL-3.0", "https://silo.pgsty.com", "Downloaded"],
   ["Tauri", "The app’s windows and menu bar", "MIT OR Apache-2.0", "https://tauri.app", "Bundled"],
 ];
 

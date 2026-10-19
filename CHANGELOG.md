@@ -64,6 +64,9 @@ Until 1.0.0, minor versions may contain breaking changes.
   shows the keys and the Laravel `.env` lines (`AWS_ENDPOINT`,
   `AWS_USE_PATH_STYLE_ENDPOINT=true`, `AWS_BUCKET`), and the header opens its
   web console.
+- SILO (AGPL-3.0), the maintained MinIO fork, as a second S3 storage service:
+  ports 9000 and 9001 for its web console, the same keys, `anvil` bucket and
+  `.env` lines, downloaded and checked against its release's SHA-256 list.
 - Security check in the Packages tab: "Check security" on the Composer or Node
   tab runs that package manager's own audit (`composer audit`, or `npm`,
   `pnpm`, `yarn` or `bun audit`, picked by the lock file) with the app's PHP and

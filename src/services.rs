@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-pub const SERVICES: [&str; 5] = ["mysql", "postgres", "redis", "mailpit", "versitygw"];
+pub const SERVICES: [&str; 6] = ["mysql", "postgres", "redis", "mailpit", "versitygw", "silo"];
 
 /// Versions offered per kind, newest first; checked against the download sites.
 /// Postgres comes from theseus-rs builds, Redis is built from download.redis.io.
@@ -27,6 +27,8 @@ pub fn versions(kind: &str) -> &'static [&'static str] {
         "postgres" => &["18.6.0", "17.11.0", "16.15.0", "15.19.0", "14.24.0"],
         "redis" => &["8.10.2", "7.4.11", "7.2.16"],
         "versitygw" => &["1.9.0"],
+        // SILO's own version number; its release is RELEASE.2026-10-18T00-00-00Z.
+        "silo" => &["20261018000000"],
         _ => &["1.31.6"],
     }
 }
@@ -74,6 +76,11 @@ pub fn license(kind: &str, version: &str) -> License {
             "Apache-2.0",
             "the Apache License 2.0",
             "https://github.com/versity/versitygw/blob/main/LICENSE",
+        ),
+        "silo" => (
+            "AGPL-3.0",
+            "the GNU Affero General Public License 3.0",
+            "https://github.com/pgsty/silo/blob/main/LICENSE",
         ),
         _ => (
             "MIT",
@@ -194,7 +201,7 @@ pub struct ServiceConfig {
     /// Start with Anvil.
     pub enabled: bool,
     pub port: Option<u16>,
-    /// Mailpit's web inbox or the S3 gateway's web console port.
+    /// Mailpit's web inbox or S3 storage's web console port.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub web_port: Option<u16>,
     /// Free-form labels, e.g. "queue" or "client-x".
@@ -214,7 +221,7 @@ pub struct ServiceInfo {
     pub category: &'static str,
     pub version: String,
     pub port: u16,
-    /// Mailpit's web inbox, the S3 gateway's web console.
+    /// Mailpit's web inbox, S3 storage's web console.
     pub web: Option<String>,
     pub web_port: Option<u16>,
     pub installed: bool,
@@ -237,6 +244,7 @@ pub fn name(id: &str) -> &'static str {
         "postgres" => "PostgreSQL",
         "redis" => "Redis",
         "versitygw" => "Versity S3 Gateway",
+        "silo" => "SILO (MinIO fork)",
         _ => "Mailpit",
     }
 }
@@ -245,7 +253,7 @@ fn category(id: &str) -> &'static str {
     match id {
         "mysql" | "postgres" => "Database",
         "redis" => "Cache & Queue",
-        "versitygw" => "Object Storage",
+        "versitygw" | "silo" => "Object Storage",
         _ => "Mail",
     }
 }
@@ -263,15 +271,17 @@ fn default_port(id: &str) -> u16 {
         "postgres" => 5432,
         "redis" => 6379,
         "versitygw" => 7070,
+        "silo" => 9000,
         _ => 1025, // Mailpit SMTP
     }
 }
 
-/// The usual port of a kind's web page: Mailpit's inbox, the S3 gateway's console.
+/// The usual port of a kind's web page: Mailpit's inbox, S3 storage's console.
 fn default_web_port(kind: &str) -> Option<u16> {
     match kind {
         "mailpit" => Some(8025),
         "versitygw" => Some(7071),
+        "silo" => Some(9001),
         _ => None,
     }
 }
@@ -287,7 +297,7 @@ pub fn web_port(cfg: &Config, id: &str) -> Option<u16> {
     )
 }
 
-/// The S3 gateway's one account and the bucket its first start makes. Fixed: it
+/// S3 storage's one account and the bucket its first start makes. Fixed: it
 /// listens on 127.0.0.1 only, and the .env lines show them anyway.
 pub const S3_ACCESS_KEY: &str = "anvil";
 pub const S3_SECRET_KEY: &str = "anvil-secret";
@@ -375,6 +385,7 @@ fn binary(kind: &str, version: &str) -> PathBuf {
         "postgres" => d.join("bin/postgres"),
         "redis" => d.join("bin/redis-server"),
         "versitygw" => d.join("versitygw"),
+        "silo" => d.join("silo"),
         _ => d.join("mailpit"),
     }
 }
@@ -636,6 +647,18 @@ pub fn install(id: &str, version: &str) -> Result<()> {
                 let sum = published_sum(&format!("{base}/checksums.txt"), &file)?;
                 fetch_tgz(&format!("{base}/{file}"), d, true, Some(&sum))
             }
+            "silo" => {
+                let os = if mac { "darwin" } else { "linux" };
+                let arch = if arm { "arm64" } else { "amd64" };
+                let file = format!("silo_{version}.0.0_{os}_{arch}.tar.gz");
+                let base = format!(
+                    "https://github.com/pgsty/silo/releases/download/{}",
+                    silo_tag(version)
+                );
+                let sums = format!("{base}/silo_{version}.0.0_checksums.txt");
+                let sum = published_sum(&sums, &file)?;
+                fetch_tgz(&format!("{base}/{file}"), d, false, Some(&sum))
+            }
             _ => {
                 let os = if mac { "darwin" } else { "linux" };
                 let arch = if arm { "arm64" } else { "amd64" };
@@ -654,6 +677,15 @@ pub fn install(id: &str, version: &str) -> Result<()> {
         fs::write(d.join("VERSION"), version)?;
         Ok(())
     })
+}
+
+/// SILO's release tag for its version number: 20261018000000 is
+/// RELEASE.2026-10-18T00-00-00Z.
+fn silo_tag(v: &str) -> String {
+    let p = |a: usize, b: usize| v.get(a..b).unwrap_or("");
+    let (y, mo, d) = (p(0, 4), p(4, 6), p(6, 8));
+    let (h, mi, s) = (p(8, 10), p(10, 12), p(12, 14));
+    format!("RELEASE.{y}-{mo}-{d}T{h}-{mi}-{s}Z")
 }
 
 /// Mailpit publishes no checksums file; GitHub records a SHA-256 of every
@@ -774,7 +806,7 @@ pub fn env_lines(cfg: &Config, id: &str) -> String {
             "DB_CONNECTION=pgsql\nDB_HOST=127.0.0.1\nDB_PORT={p}\nDB_USERNAME=postgres\nDB_PASSWORD=\nDATABASE_URL=postgres://postgres@127.0.0.1:{p}/postgres"
         ),
         "redis" => format!("REDIS_HOST=127.0.0.1\nREDIS_PORT={p}\nREDIS_URL=redis://127.0.0.1:{p}"),
-        "versitygw" => format!(
+        "versitygw" | "silo" => format!(
             "AWS_ACCESS_KEY_ID={S3_ACCESS_KEY}\nAWS_SECRET_ACCESS_KEY={S3_SECRET_KEY}\nAWS_DEFAULT_REGION=us-east-1\nAWS_BUCKET={S3_BUCKET}\nAWS_ENDPOINT=http://127.0.0.1:{p}\nAWS_USE_PATH_STYLE_ENDPOINT=true"
         ),
         _ => format!("MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT={p}"),
@@ -838,8 +870,9 @@ fn init(cfg: &Config, kind: &str, id: &str, log: &fs::File) -> Result<()> {
             .stdout(log.try_clone()?)
             .stderr(log.try_clone()?)
             .status()?,
-        // Every folder in the data folder is a bucket, so the first one is just made.
-        "versitygw" => {
+        // Every folder in the data folder is a bucket, so the first one is just made;
+        // SILO takes it as one too when it formats the empty folder.
+        "versitygw" | "silo" => {
             fs::create_dir_all(data.join(S3_BUCKET))?;
             return Ok(());
         }
@@ -891,6 +924,21 @@ fn command(cfg: &Config, id: &str) -> Command {
                 .args(["--port", &format!("127.0.0.1:{port}"), "--webui", &web])
                 .args(["--cors-allow-origin", &format!("http://{web}"), "posix"])
                 .arg(&data);
+        }
+        "silo" => {
+            // Its config and certs folders go in the data folder instead of ~/.silo;
+            // both are needed, either one left out is made there anyway.
+            let own = data.join(".silo");
+            let web = format!("127.0.0.1:{}", web_port(cfg, id).unwrap_or(9001));
+            c.env("MINIO_ROOT_USER", S3_ACCESS_KEY)
+                .env("MINIO_ROOT_PASSWORD", S3_SECRET_KEY)
+                .arg("server")
+                .arg(&data)
+                .args(["--address", &format!("127.0.0.1:{port}")])
+                .args(["--console-address", &web, "--config-dir"])
+                .arg(&own)
+                .arg("--certs-dir")
+                .arg(own.join("certs"));
         }
         _ => {
             c.args([
@@ -1170,6 +1218,7 @@ mod tests {
         assert_eq!(license("redis", "7.4.11").id, "redis:RSALv2-SSPLv1");
         assert_eq!(license("redis", "7.2.16").id, "redis:BSD-3-Clause");
         assert_eq!(license("versitygw", "1.9.0").id, "versitygw:Apache-2.0");
+        assert_eq!(license("silo", "20261018000000").id, "silo:AGPL-3.0");
         // Every offered version has an https link to its text.
         for kind in SERVICES {
             for v in versions(kind) {
@@ -1360,6 +1409,54 @@ mod tests {
         cfg.services
             .insert("redis".into(), ServiceConfig::default());
         assert!(set_web_port(&mut cfg, "redis", Some(17100)).is_err());
+    }
+
+    #[test]
+    fn silo_serves_its_data_folder_locally_with_its_console_and_env() {
+        assert_eq!(silo_tag("20261018000000"), "RELEASE.2026-10-18T00-00-00Z");
+        assert_eq!(silo_tag("20260903131801"), "RELEASE.2026-09-03T13-18-01Z");
+
+        let mut cfg = Config::default();
+        let id = insert(&mut cfg, "silo", Some("objects"), Some(19000), None).unwrap();
+        assert_eq!(version(&cfg, &id), "20261018000000");
+        let web = web_port(&cfg, &id).unwrap();
+        assert_ne!(web, 19000);
+
+        let c = command(&cfg, &id);
+        assert_eq!(c.get_program(), binary("silo", "20261018000000"));
+        let args: Vec<String> = c
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args[0], "server");
+        assert!(args[1].ends_with("data/objects"));
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--address", "127.0.0.1:19000"])
+        );
+        let ui = format!("127.0.0.1:{web}");
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--console-address" && w[1] == ui)
+        );
+        // Nothing goes to ~/.silo: config and certs live with the data.
+        let own = format!("{}/.silo", args[1]);
+        assert!(args.windows(2).any(|w| w == ["--config-dir", own.as_str()]));
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--certs-dir" && w[1].starts_with(&own))
+        );
+        let envs: Vec<_> = c.get_envs().collect();
+        assert!(envs.contains(&("MINIO_ROOT_USER".as_ref(), Some(S3_ACCESS_KEY.as_ref()))));
+        assert!(envs.contains(&("MINIO_ROOT_PASSWORD".as_ref(), Some(S3_SECRET_KEY.as_ref()))));
+
+        let env = env_lines(&cfg, &id);
+        assert!(
+            env.lines()
+                .any(|l| l == "AWS_ENDPOINT=http://127.0.0.1:19000")
+        );
+        assert!(env.lines().any(|l| l == "AWS_USE_PATH_STYLE_ENDPOINT=true"));
+        assert!(!env.contains("FILESYSTEM_DISK"));
     }
 
     #[test]
