@@ -625,6 +625,8 @@ const mockHandle = (cmd, a) => {
     case "worktree_remove":
       if (window.mockRemoveFail && !a.force) throw window.mockRemoveFail;
       return mockSnap;
+    case "worktree_new_db":
+      return window.mockNewDb ?? { choices: ["copy", "empty", "share"], default: "copy", main_database: "shop" };
     case "worktree_db":
       if (window.mockDbFail) throw window.mockDbFail;
       mockSnap.worktrees[a.site].db = a.choice;
@@ -859,6 +861,7 @@ const mockHandle = (cmd, a) => {
         trim_app_logs: true,
         notifications: true,
         https_default: true,
+        worktree_db: "copy",
         login: false,
         config_dir: "/Users/x/Library/Application Support/Anvil",
       };

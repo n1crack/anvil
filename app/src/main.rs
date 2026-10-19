@@ -124,7 +124,7 @@ fn worktree_view(
         MainDb::External => (Some(w::db_name(s)), None),
     };
     WorktreeView {
-        db: rec.db,
+        db: w::choice(cfg, s),
         choices: w::choices(cfg, s),
         prepared: w::prepared(cfg, s),
         database,
@@ -2133,7 +2133,14 @@ fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) ->
 /// Set once at setup: what `prepare` tells the window through while a copy runs.
 static HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
-/// A new worktree of the app `site`, next to it (`worktrees::add`).
+/// The New Worktree dialog's Database choice for a worktree of the app `site`.
+#[tauri::command(async)]
+fn worktree_new_db(site: String) -> Res<anvil::worktrees::NewDb> {
+    let cfg = anvil::load().map_err(err)?;
+    Ok(anvil::worktrees::new_db(&cfg, &site_in(&cfg, &site)?))
+}
+
+/// A new worktree of the app `site`, next to it (`worktrees::add`), with the database `db`.
 #[tauri::command(async)]
 fn worktree_add(
     handle: AppHandle,
@@ -2141,8 +2148,9 @@ fn worktree_add(
     site: String,
     branch: String,
     new: bool,
+    db: Option<anvil::worktrees::DbChoice>,
 ) -> Res<Snapshot> {
-    let cfg = anvil::load().map_err(err)?;
+    let mut cfg = anvil::load().map_err(err)?;
     let main = site_in(&cfg, &site)?;
     // A linked app may have worktrees; an alias (a link to another app's folder) is that app.
     let alias = main.linked
@@ -2152,7 +2160,11 @@ fn worktree_add(
     if main.worktree_of.is_some() || alias {
         return Err(format!("{site} isn't an app's own folder"));
     }
-    anvil::worktrees::add(&cfg, &main, &branch, new).map_err(err)?;
+    let folder = anvil::worktrees::add(&cfg, &main, &branch, new, db).map_err(err)?;
+    if let Some(choice) = db {
+        // Before anything of it runs: its first use makes the database chosen.
+        cfg = edit(|c| anvil::worktrees::set_db_at(c, &folder, choice))?.0;
+    }
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
 }
@@ -2766,6 +2778,7 @@ struct Settings {
     trim_app_logs: bool,
     notifications: bool,
     https_default: bool,
+    worktree_db: anvil::worktrees::DbChoice,
     login: bool,
     config_dir: std::path::PathBuf,
 }
@@ -2890,6 +2903,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         trim_app_logs: cfg.trim_app_logs,
         notifications: cfg.notifications,
         https_default: cfg.https_default == Some(true),
+        worktree_db: cfg.worktree_db,
         hidden: cfg.hidden.clone(),
         paths: cfg.paths,
         tld: cfg.tld,
@@ -3028,6 +3042,20 @@ fn set_dock_icon(handle: AppHandle, on: bool) -> Res<Settings> {
     );
     update_dock(&handle);
     s
+}
+
+/// Settings › General › Database for new worktrees: also what one opened outside Anvil
+/// uses until it has its own, so the PHP-FPM pools follow.
+#[tauri::command(async)]
+fn set_worktree_db(handle: AppHandle, choice: anvil::worktrees::DbChoice) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.worktree_db = choice;
+            Ok(())
+        },
+        true,
+    )
 }
 
 /// Settings › General › Notifications (`notify`).
@@ -3542,6 +3570,7 @@ fn main() {
             remove_site,
             unhide_site,
             worktree_add,
+            worktree_new_db,
             worktree_remove,
             worktree_db,
             worktree_prepare,
@@ -3587,6 +3616,7 @@ fn main() {
             set_dock_icon,
             set_trim_app_logs,
             set_notifications,
+            set_worktree_db,
             set_login,
             open_config_dir,
             services,

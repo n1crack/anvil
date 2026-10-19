@@ -680,6 +680,8 @@ export function ask(label: string, placeholder?: string, preview?: (v: string) =
   const hint = $("#ask-hint");
   const box = $("#ask-check");
   box.hidden = !check;
+  $("#ask-db-row").hidden = $("#ask-db-note").hidden = true; // newWorktree shows them
+
   $("span", box).textContent = check ?? "";
   $("#ask-new").checked = false;
   const base = "Return to add, Esc to cancel";
@@ -695,7 +697,7 @@ export function ask(label: string, placeholder?: string, preview?: (v: string) =
   };
   return new Promise((resolve) => {
     const done = (value) => {
-      form.hidden = box.hidden = true;
+      form.hidden = box.hidden = $("#ask-db-row").hidden = $("#ask-db-note").hidden = true;
       form.onsubmit = input.onkeydown = input.oninput = null;
       resolve(value);
     };
@@ -724,9 +726,24 @@ const mayHaveWorktrees = (s) =>
   !s.worktree_of && !(s.linked && snap.sites.some((o) => o.name !== s.name && !o.linked && o.path === s.path));
 late.mayHaveWorktrees = mayHaveWorktrees;
 
+/** Asks for the branch, whether it's new, and its database: what main's allows, Settings'
+ * default picked (none to pick when main has no database settings). */
 async function newWorktree(s) {
-  const branch = await ask(`New worktree of ${s.name}`, "Branch, e.g. feature/login", undefined, "New branch");
-  if (branch) await call("worktree_add", { site: s.name, branch, new: $("#ask-new").checked });
+  const db = await invoke("worktree_new_db", { site: s.name }).catch(() => null);
+  const answer = ask(`New worktree of ${s.name}`, "Branch, e.g. feature/login", undefined, "New branch");
+  const sel = $("#ask-db");
+  const note = $("#ask-db-note");
+  if (db?.main_database) {
+    const order = ["copy", "share", "empty"].filter((c) => db.choices.includes(c));
+    sel.replaceChildren(...order.map((c) => new Option(DB_CHOICES[c], c)));
+    sel.value = db.default;
+    note.textContent = shareNote(db.main_database);
+    sel.onchange = () => (note.hidden = sel.value !== "share");
+    sel.onchange();
+    $("#ask-db-row").hidden = false;
+  }
+  const branch = await answer;
+  if (branch) await call("worktree_add", { site: s.name, branch, new: $("#ask-new").checked, db: db?.main_database ? sel.value : null });
 }
 late.newWorktree = newWorktree;
 
@@ -1203,6 +1220,7 @@ function projectNeeds(s, root) {
 }
 
 const DB_CHOICES = { copy: "Copy of main", empty: "Empty", share: "Share main's" };
+const shareNote = (db: string) => `Migrations and commands from the terminal run on ${db}; tests still get their own database.`;
 const prepareErrors = new Map<string, string>(); // a failed Prepare database, across re-renders
 const preparing = new Set<string>();
 const dbErrors = new Map<string, string>(); // a refused database choice, across re-renders
@@ -1253,7 +1271,8 @@ function worktreeLines(s, root) {
       call("state");
     };
     dd.append(" ", sel);
-    if (share) dd.append(el("div", "muted", `Not recommended: migrations and tests here change ${main}'s data`));
+    if (share)
+      dd.append(el("div", "muted", shareNote(v.main_database && v.main_database !== `${main}'s` ? v.main_database : `${main}'s database`)));
     else if (v.preparing) dd.append(el("div", "muted", v.preparing));
     else if (v.pending) {
       const b = el("button", "inline-action", preparing.has(s.name) ? "Preparing…" : "Prepare database");

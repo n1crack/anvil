@@ -184,3 +184,16 @@ describe("about", () => {
     expect($("#update-notes").textContent).toBe("Faster starts.");
   });
 });
+
+describe("general", () => {
+  test("Database for new worktrees shows the stored default and stores a new one", async () => {
+    await open("general");
+    const sel = $("#worktree-db") as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.textContent)).toEqual(["Copy of main", "Share main's", "Empty"]);
+    expect(sel.value).toBe("copy");
+    sel.value = "empty";
+    sel.dispatchEvent(new Event("change"));
+    await wait();
+    expect(w.mockCalls.at(-1)).toEqual(["set_worktree_db", { choice: "empty" }]);
+  });
+});

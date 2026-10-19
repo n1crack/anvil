@@ -246,6 +246,7 @@ export interface Settings {
   trim_app_logs: boolean;
   notifications: boolean;
   https_default: boolean;
+  worktree_db: "copy" | "empty" | "share";
   login: boolean;
   config_dir: string;
 }

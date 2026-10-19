@@ -90,6 +90,14 @@
         </label>
         <div class="row"><span>Applications answer at<small id="ports"></small></span><span id="address" class="value"></span></div>
         <label class="row">
+          <span>Database for new worktrees<small>Also what a worktree opened outside Anvil uses. Tests never run on main’s database.</small></span>
+          <select id="worktree-db">
+            <option value="copy">Copy of main</option>
+            <option value="share">Share main's</option>
+            <option value="empty">Empty</option>
+          </select>
+        </label>
+        <label class="row">
           <span>HTTPS for new applications<small>Each application can still turn it on or off: right-click › Use HTTPS, or its Settings tab.</small></span>
           <input id="https-default" type="checkbox" role="switch">
         </label>

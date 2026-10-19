@@ -1618,7 +1618,7 @@ describe("worktrees", () => {
     expect(calls("worktree_db").at(-1)![1]).toEqual({ site: wt, choice: "share" });
     // Share warns inline.
     expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop's database");
-    expect(dbRow().textContent).toContain("Not recommended: migrations and tests here change shop's data");
+    expect(dbRow().textContent).toContain("Migrations and commands from the terminal run on shop; tests still get their own database.");
   });
 
   test("before its database is made all three choices show; a refused one says why inline", async () => {
@@ -1791,10 +1791,54 @@ describe("worktrees", () => {
     expect($("#ask-check").textContent).toContain("New branch");
     ($("#ask-input") as HTMLInputElement).value = "feature/login";
     ($("#ask-new") as HTMLInputElement).checked = true;
+    // The database: what main's allows, Settings' default picked; Share says what it means.
+    const db = $("#ask-db") as HTMLSelectElement;
+    expect($("#ask-db-row").hidden).toBe(false);
+    expect([...db.options].map((o) => o.textContent)).toEqual(["Copy of main", "Share main's", "Empty"]);
+    expect(db.value).toBe("copy");
+    expect($("#ask-db-note").hidden).toBe(true);
+    db.value = "share";
+    db.dispatchEvent(new Event("change"));
+    expect($("#ask-db-note").hidden).toBe(false);
+    expect($("#ask-db-note").textContent).toBe(
+      "Migrations and commands from the terminal run on shop; tests still get their own database.",
+    );
     $("#ask").dispatchEvent(new Event("submit"));
     await wait(60);
-    expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "feature/login", new: true });
+    expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "feature/login", new: true, db: "share" });
     expect($("#ask-check").hidden).toBe(true);
+    expect($("#ask-db-row").hidden).toBe(true);
+    expect($("#ask-db-note").hidden).toBe(true);
+  });
+
+  test("New Worktree… offers only what main's database allows, and nothing without one", async () => {
+    const open = async () => {
+      await show({}, "shop");
+      $('#list [data-name="shop"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await wait(80);
+      (w.mockMenu as any[]).find((i) => i.text === "New Worktree…").action();
+      await wait();
+    };
+    try {
+      w.mockNewDb = { choices: ["share", "empty"], default: "share", main_database: "shop" };
+      await open();
+      const db = $("#ask-db") as HTMLSelectElement;
+      expect([...db.options].map((o) => o.value)).toEqual(["share", "empty"]);
+      expect(db.value).toBe("share");
+      expect($("#ask-db-note").hidden).toBe(false);
+      $("#ask-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await wait();
+      expect($("#ask-db-row").hidden).toBe(true);
+      w.mockNewDb = { choices: ["copy", "empty", "share"], default: "copy", main_database: null };
+      await open();
+      expect($("#ask-db-row").hidden).toBe(true);
+      ($("#ask-input") as HTMLInputElement).value = "x";
+      $("#ask").dispatchEvent(new Event("submit"));
+      await wait(60);
+      expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "x", new: false, db: null });
+    } finally {
+      delete w.mockNewDb;
+    }
   });
 
   test("Remove Worktree… says what's uncommitted, offers to delete its database, and removes anyway", async () => {

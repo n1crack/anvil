@@ -570,6 +570,7 @@ export function render() {
   const [scheme, port, std] = s.https_default ? ["https", s.https_port, 443] : ["http", s.http_port, 80];
   $("#address").textContent = `${scheme}://name.${s.tld}${port === std ? "" : `:${port}`}`;
   $("#https-default").checked = s.https_default;
+  $("#worktree-db").value = s.worktree_db;
   // .localhost works without setup; another suffix needs the resolver step once.
   const tld = $("#tld");
   tld.replaceChildren(new Option(".test", "test"), new Option(".localhost (no password needed)", "localhost"));
@@ -630,6 +631,7 @@ $("#dock").onchange = (e) => call("set_dock_icon", { on: e.target.checked });
 $("#trim-logs").onchange = (e) => call("set_trim_app_logs", { on: e.target.checked });
 $("#notifications").onchange = (e) => call("set_notifications", { on: e.target.checked });
 $("#https-default").onchange = (e) => call("set_https_default", { on: e.target.checked });
+$("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.value });
 $("#theme").onchange = (e) => call("set_theme", { theme: e.target.value || null });
 $("#editor").onchange = (e) => call("set_editor", { editor: e.target.value || null });
 $("#terminal").onchange = (e) => call("set_terminal", { terminal: e.target.value || null });
