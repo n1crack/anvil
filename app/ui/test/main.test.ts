@@ -1923,10 +1923,13 @@ describe("worktrees", () => {
   });
 
   test("the Settings tab's Worktrees section: each hook, where it comes from, Use preset", async () => {
+    w.mockProblems = ["this app: copyy isn't a hooks field, or its value isn't the right kind"];
     await show({}, "shop");
     await wait(80);
     const box = $('[data-panel="settings"] .wt-hooks');
     expect(box.hidden).toBe(false);
+    expect(box.querySelector(".error-text")!.textContent).toBe("this app: copyy isn't a hooks field, or its value isn't the right kind");
+    delete w.mockProblems;
     const rows = [...box.querySelectorAll(".row")].map((r) => r.querySelector("dt")!.textContent);
     expect(rows).toEqual(["Worktrees", "Copy files", "Copy the database too", "Env keys", "Check keys", "After create"]);
     expect(box.textContent).toContain("Laravel preset, edited in Settings › Worktrees");

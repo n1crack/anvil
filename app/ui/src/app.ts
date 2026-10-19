@@ -1280,6 +1280,11 @@ async function renderHooks(s, root) {
       );
     head.append(" ", reset);
   }
+  // A layer with a mistake (a typo in config.toml or .anvil.toml): one line each.
+  for (const p of v.hooks.problems ?? []) {
+    const line = el("small", "error-text", p);
+    head.append(line);
+  }
   const top = el("div", "row");
   top.append(el("dt", null, "Worktrees"), head);
   const rows = FIELDS.map(([field, name]) => {

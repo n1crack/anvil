@@ -563,6 +563,9 @@ fn print_hooks(h: &worktrees::Resolved) {
     };
     let on = if h.copy_database { "on" } else { "off" };
     println!("{}", bold(format!("{} preset", h.preset)));
+    for p in &h.problems {
+        println!("{}", yellow(p));
+    }
     println!("copy           {}  {}", list(&h.copy), from("copy"));
     println!("copy_database  {on}  {}", from("copy_database"));
     let keys: Vec<String> = h.keys.iter().map(|(k, v)| format!("{k}={v}")).collect();

@@ -656,6 +656,7 @@ const mockHandle = (cmd, a) => {
             after_create: ".anvil.toml",
           },
           preset: "Laravel",
+          problems: window.mockProblems ?? [],
         },
         own: { keys: { APP_URL: "{url}", DB_DATABASE: "{db}" } },
       };

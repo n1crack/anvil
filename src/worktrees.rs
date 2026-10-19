@@ -37,8 +37,8 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 /// One layer of an app's worktree hooks (`resolve`): each field set, or left to the next layer.
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+/// Read leniently (see `Deserialize`): it sits inside config.toml, which a typo here must not break.
+#[derive(Serialize, Debug, Clone, Default, PartialEq)]
 pub struct Hooks {
     /// Files or folders copied from the main checkout into a new worktree (git leaves out
     /// ignored ones); a `*` in the last part matches any run of characters.
@@ -59,11 +59,37 @@ pub struct Hooks {
     /// install its lock file asks for (left out without package.json).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after_create: Option<Vec<String>>,
+    /// What isn't one of these, or not of its kind, kept as written (`check_hooks` says so).
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 impl Hooks {
     pub fn is_empty(&self) -> bool {
         *self == Hooks::default()
+    }
+}
+
+impl<'de> Deserialize<'de> for Hooks {
+    /// Each field that reads as its kind; anything else goes to `unknown`.
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut map = BTreeMap::<String, serde_json::Value>::deserialize(d)?;
+        fn take<T: serde::de::DeserializeOwned>(
+            map: &mut BTreeMap<String, serde_json::Value>,
+            k: &str,
+        ) -> Option<T> {
+            let t = serde_json::from_value(map.get(k)?.clone()).ok()?;
+            map.remove(k);
+            Some(t)
+        }
+        Ok(Hooks {
+            copy: take(&mut map, "copy"),
+            copy_database: take(&mut map, "copy_database"),
+            keys: take(&mut map, "keys"),
+            check: take(&mut map, "check"),
+            after_create: take(&mut map, "after_create"),
+            unknown: map,
+        })
     }
 }
 
@@ -172,6 +198,7 @@ pub fn preset(cfg: &Config, id: &str) -> Hooks {
         keys: edited.keys.or(shipped.keys),
         check: edited.check.or(shipped.check),
         after_create: edited.after_create.or(shipped.after_create),
+        unknown: edited.unknown,
     }
 }
 
@@ -188,6 +215,8 @@ pub struct Resolved {
     pub from: BTreeMap<&'static str, String>,
     /// The name of the preset its kind uses.
     pub preset: &'static str,
+    /// What is wrong with a layer, one line each.
+    pub problems: Vec<String>,
 }
 
 /// The hooks of the app `app` (main checkout `main`, of kind `kind`), field by field, the
@@ -222,6 +251,25 @@ pub fn resolve(cfg: &Config, app: &str, main: &Path, kind: &str) -> Resolved {
         (format!("{name} preset"), preset(cfg, id)),
         ("Settings".into(), settings),
     ];
+    // A layer with a mistake (a typo in config.toml, say): said, its good fields still used.
+    let problems = layers
+        .iter()
+        .flat_map(|(layer, h)| {
+            let mut out: Vec<String> = h
+                .unknown
+                .keys()
+                .map(|k| {
+                    format!("{layer}: {k} isn't a hooks field, or its value isn't the right kind")
+                })
+                .collect();
+            let rest = Hooks {
+                unknown: BTreeMap::new(),
+                ..h.clone()
+            };
+            out.extend(check_hooks(&rest).err().map(|e| format!("{layer}: {e}")));
+            out
+        })
+        .collect();
     let mut from = BTreeMap::new();
     let mut pick = |field: &'static str, has: fn(&Hooks) -> bool| {
         let (layer, hooks) = layers
@@ -244,6 +292,7 @@ pub fn resolve(cfg: &Config, app: &str, main: &Path, kind: &str) -> Resolved {
         after_create: after_create.unwrap_or_default(),
         from,
         preset: name,
+        problems,
     }
 }
 
@@ -281,6 +330,11 @@ fn placeholders(s: &str) -> impl Iterator<Item = &str> {
 
 /// What's wrong with a hooks layer, if anything: for the forms and `.anvil.toml`.
 pub fn check_hooks(h: &Hooks) -> Result<(), String> {
+    if let Some(k) = h.unknown.keys().next() {
+        return Err(format!(
+            "{k} isn't a hooks field, or its value isn't the right kind"
+        ));
+    }
     let key = |k: &str| {
         !k.is_empty()
             && !k.starts_with(|c: char| c.is_ascii_digit())
@@ -3254,6 +3308,31 @@ pub(crate) mod tests {
             crate::project::error(&main).unwrap(),
             ".anvil.toml: [worktree] \"../x\" isn't a path inside the project"
         );
+    }
+
+    #[test]
+    fn a_hooks_typo_is_that_apps_error_not_the_configs() {
+        let text = "[sites.shop.worktree]\ncopyy = [\".env\"]\ncheck = 5\nkeys = { APP_URL = \"{url}\" }\n";
+        let cfg: Config = toml::from_str(text).expect("the rest of the config still loads");
+        let own = &cfg.sites["shop"].worktree;
+        assert_eq!(own.keys.as_ref().unwrap()["APP_URL"], "{url}");
+        assert_eq!(own.check, None, "a value of the wrong kind isn't used");
+        // Kept as written, so a save doesn't lose it.
+        let saved = toml::to_string(&cfg).unwrap();
+        assert!(
+            saved.contains("copyy") && saved.contains("check = 5"),
+            "{saved}"
+        );
+        let (main, _) = repo("typo");
+        let r = resolve(&cfg, "shop", &main, "laravel");
+        assert_eq!(
+            r.problems,
+            [
+                "this app: check isn't a hooks field, or its value isn't the right kind",
+                "this app: copyy isn't a hooks field, or its value isn't the right kind"
+            ]
+        );
+        assert_eq!(r.from["check"], "Laravel preset");
     }
 
     #[test]
