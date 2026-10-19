@@ -5,3 +5,5 @@ app/ui/dist/
 # Written by `pnpm credits` at build time.
 app/ui/public/credits.json
 app/ui/public/THIRD_PARTY_NOTICES.txt
+# Written by app/bundle-cli.sh for the app bundle.
+app/binaries/

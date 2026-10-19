@@ -3061,6 +3061,10 @@ fn main() {
                     anvil::services::migrate_files(&cfg);
                     anvil::apps::kill_all_orphans();
                     anvil::apps::clear_stale_logs();
+                    // Shims rewritten, so they follow the app when it's moved or updated.
+                    if anvil::shims::ready() {
+                        let _ = anvil::shims::install(&anvil::home());
+                    }
                     // Log retention now and hourly, off the start's way.
                     std::thread::spawn(|| {
                         loop {

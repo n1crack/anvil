@@ -82,7 +82,8 @@ jobs:
             fi
           done
           cd app
-          cargo tauri build --target universal-apple-darwin --bundles app,dmg
+          # tauri.cli.conf.json puts the anvil CLI inside the app (Contents/MacOS/anvil).
+          cargo tauri build --target universal-apple-darwin --bundles app,dmg --config tauri.cli.conf.json
 
       - name: Build the CLI
         run: |

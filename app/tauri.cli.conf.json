@@ -1,0 +1,8 @@
+{
+  "build": {
+    "beforeBuildCommand": { "script": "sh ../bundle-cli.sh && pnpm build", "cwd": "ui" }
+  },
+  "bundle": {
+    "externalBin": ["binaries/anvil"]
+  }
+}

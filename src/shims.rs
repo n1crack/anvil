@@ -53,6 +53,19 @@ pub fn install(home: &Path) -> Result<()> {
         )?;
         fs::set_permissions(&file, fs::Permissions::from_mode(0o755))?;
     }
+    // `anvil` itself, so the CLI inside the app works in a terminal. Only a known
+    // path: a bare "anvil" would run this shim again.
+    if cli.is_absolute() {
+        let file = dir.join("anvil");
+        fs::write(
+            &file,
+            format!(
+                "#!/bin/sh\nexec {} \"$@\"\n",
+                sh_quote(&cli.to_string_lossy())
+            ),
+        )?;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755))?;
+    }
     Ok(())
 }
 

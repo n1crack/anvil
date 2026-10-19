@@ -20,6 +20,7 @@ pnpm --dir app/ui install
 cargo install tauri-cli --version '^2' --locked
 cd app && cargo tauri dev        # the app with the UI hot-reloading
 cd app && cargo tauri build      # target/release/bundle/macos/Anvil.app
+cd app && cargo tauri build --config tauri.cli.conf.json   # with the anvil CLI inside, as released
 ```
 
 `cargo tauri` builds the UI itself (`pnpm build` in `app/ui`). Plain `cargo

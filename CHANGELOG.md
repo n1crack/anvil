@@ -45,6 +45,8 @@ Until 1.0.0, minor versions may contain breaking changes.
   app logs weekly" (on by default) cuts an app's `storage/logs/*.log` over
   10 MB to its last 1 MB and deletes daily logs older than 14 days.
 - The CLI uses color on a terminal; `NO_COLOR` turns it off.
+- The macOS app carries the `anvil` CLI: setup puts it on PATH with the other
+  terminal commands, so the CLI needs no separate install.
 
 ### Changed
 
