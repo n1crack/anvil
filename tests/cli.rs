@@ -595,3 +595,36 @@ fn paths_from_the_command_line_stay_inside() {
     assert!(out.contains("outside the project"), "{out}");
     assert!(canary.join("logs/laravel.log").exists());
 }
+
+#[test]
+fn worktree_add_without_a_terminal_lists_after_create_and_runs_nothing() {
+    let env = Env::new("after-create");
+    let shop = env.root.join("sites/shop");
+    write(&shop.join("artisan"), "");
+    let git = |args: &[&str]| {
+        let ok = Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(&shop)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "artisan"]);
+    git(&["commit", "-q", "-m", "i"]);
+    let parked = env.root.join("sites");
+    write(
+        &env.home.join("config.toml"),
+        &format!("paths = [{parked:?}]\n[sites.shop.worktree]\nafter_create = [\"touch ran\"]\n"),
+    );
+    // `output()` gives the CLI no terminal: nothing to ask, so nothing runs.
+    let out = env.ok(&["worktree", "add", "feat", "--new", "--app", "shop"]);
+    assert!(
+        out.contains("Not run (no terminal to ask): touch ran"),
+        "{out}"
+    );
+    assert!(env.root.join("sites/shop--feat").is_dir());
+    assert!(!env.root.join("sites/shop--feat/ran").exists());
+}
