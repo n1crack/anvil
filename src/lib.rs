@@ -11,6 +11,7 @@ pub mod dns;
 pub mod git;
 pub mod logs;
 pub mod mcp;
+pub mod octane;
 pub mod opcache;
 pub mod packages;
 pub mod phpext;
@@ -187,8 +188,9 @@ pub struct ProcessConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
     /// Left out when the app's processes start together (Dev start); started by hand only.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub manual: bool,
+    /// Unset: the row's default (Octane's is on, every other row's off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual: Option<bool>,
     /// Added in Anvil, not detected: `command` is what it runs and the id is its name.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub added: bool,
@@ -1810,10 +1812,21 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             addresses(site, &names),
             caddy_path(&site.root)
         );
-        if let Some(upstream) = php_upstream(site) {
-            s += &format!("\tphp_fastcgi {upstream}\n");
+        let fpm = php_upstream(site).map(|upstream| format!("php_fastcgi {upstream}\n"));
+        // Octane's row while it runs; PHP-FPM when it doesn't answer (stopped, crashed).
+        // A file served for an error keeps the error's status unless told otherwise.
+        if let Some(port) = processes::octane_row(cfg, site).and_then(|p| p.port) {
+            s += &format!("\treverse_proxy 127.0.0.1:{port}\n\thandle_errors 502 {{\n");
+            if let Some(fpm) = &fpm {
+                s += &format!("\t\t{fpm}");
+            }
+            s += "\t\tfile_server {\n\t\t\thide .*\n\t\t\tstatus 200\n\t\t}\n\t}\n}\n";
+        } else {
+            if let Some(fpm) = &fpm {
+                s += &format!("\t{fpm}");
+            }
+            s += "\tfile_server {\n\t\thide .*\n\t}\n}\n";
         }
-        s += "\tfile_server {\n\t\thide .*\n\t}\n}\n";
         if site.secure {
             s += &redirect(&names);
         }
@@ -3801,6 +3814,48 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&lint.stdout)
         );
+    }
+
+    /// An Octane app's address goes to its Octane row's port, and to PHP-FPM (pages and
+    /// files, answered 200) whenever Octane doesn't answer: stopped or crashed, never a 502.
+    #[test]
+    fn caddy_falls_back_to_fpm() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        fs::write(
+            dir.path().join("composer.json"),
+            r#"{"require": {"laravel/octane": "^2.22"}}"#,
+        )
+        .unwrap();
+        let mut app = site("shop", path, Some("8.4"));
+        app.kind = "laravel".into();
+        let mut cfg = Config::default();
+        let port = processes::octane_row(&cfg, &app).unwrap().port.unwrap();
+        let out = caddyfile(&cfg, std::slice::from_ref(&app));
+        let sock = fpm_socket(&app).unwrap();
+        let block = format!(
+            "\nshop.test {{\n\troot * \"{path}\"\n\tencode\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors 502 {{\n\t\tphp_fastcgi unix/{}\n\t\tfile_server {{\n\t\t\thide .*\n\t\t\tstatus 200\n\t\t}}\n\t}}\n}}\n",
+            sock.display()
+        );
+        assert!(out.contains(&block), "{out}");
+        // The row hidden: PHP-FPM only, as before.
+        cfg.sites
+            .entry("shop".into())
+            .or_default()
+            .processes
+            .insert(
+                "octane".into(),
+                ProcessConfig {
+                    hidden: true,
+                    ..Default::default()
+                },
+            );
+        let out = caddyfile(&cfg, std::slice::from_ref(&app));
+        assert!(!out.contains("reverse_proxy"), "{out}");
+        assert!(out.contains(&format!(
+            "\tphp_fastcgi unix/{}\n\tfile_server",
+            sock.display()
+        )));
     }
 
     #[test]

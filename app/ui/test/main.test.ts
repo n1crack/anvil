@@ -1686,6 +1686,45 @@ describe("project file", () => {
       await wait(80);
     }
   });
+
+  test("missing_line_offers_extension: Add turns it on for the app, Building… and errors inline", async () => {
+    w.mockSnap.projects = {
+      shop: [{ kind: "ext", version: "xdebug", install: "xdebug", label: "xdebug", met: false, overridden: null }],
+    };
+    w.mockDelay = { app_ext: 100 };
+    const line = () => $$('[data-panel="overview"] .row').find((r) => r.querySelector("dt")!.textContent === "Project")!;
+    const button = () => line().querySelector("button") as HTMLButtonElement;
+    try {
+      await wait(550);
+      w.refresh();
+      await wait(80);
+      await select("shop");
+      expect(line().querySelector("dd")!.firstChild!.textContent).toBe("This project asks for xdebug");
+      expect(button().textContent).toBe("Add xdebug");
+      button().click();
+      await wait(10);
+      expect(calls("app_ext").at(-1)![1]).toEqual({ site: "shop", name: "xdebug", on: true });
+      expect([button().textContent, button().disabled]).toEqual(["Building…", true]);
+      await wait(150);
+      expect([button().textContent, button().disabled]).toEqual(["Add xdebug", false]);
+
+      delete w.mockDelay.app_ext;
+      w.mockExtError = "Building xdebug failed";
+      button().click();
+      await wait(80);
+      expect(line().textContent).toContain("Building xdebug failed");
+      expect($$('[role="alert"]:not([hidden]), .toast:not([hidden])').length).toBe(0);
+    } finally {
+      delete w.mockExtError;
+      delete w.mockSnap.projects;
+      const shop = w.mockSnap.sites.find((s: any) => s.name === "shop");
+      shop.ext = [];
+      shop.own_master = false;
+      w.mockDelay = {};
+      w.refresh();
+      await wait(80);
+    }
+  });
 });
 
 describe("run settings", () => {

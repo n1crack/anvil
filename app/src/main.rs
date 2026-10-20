@@ -1160,8 +1160,9 @@ fn process_run(
             })
         {
             let key = anvil::processes::key(&s.name, &p.id);
-            let started =
-                prepare(&app, &s).and_then(|()| anvil::lock(&app.apps).start_process(&s, &p, &cfg));
+            let started = prepare(&app, &s)
+                .and_then(|()| anvil::octane::prepare(&s, &p))
+                .and_then(|()| anvil::lock(&app.apps).start_process(&s, &p, &cfg));
             if let Err(e) = started {
                 anvil::lock(&app.app_errors).insert(key, err(e));
             }
@@ -1299,8 +1300,9 @@ fn prepare(app: &App, site: &Site) -> anyhow::Result<()> {
 }
 
 fn start_process(app: &App, cfg: &Config, site: &Site, p: &anvil::processes::Process) {
-    let started =
-        prepare(app, site).and_then(|()| anvil::lock(&app.apps).start_process(site, p, cfg));
+    let started = prepare(app, site)
+        .and_then(|()| anvil::octane::prepare(site, p))
+        .and_then(|()| anvil::lock(&app.apps).start_process(site, p, cfg));
     if let Err(e) = started {
         let key = anvil::processes::key(&site.name, &p.id);
         anvil::lock(&app.app_errors).insert(key, err(e));
@@ -1670,6 +1672,7 @@ fn set_process(
             if let Some(p) = p {
                 // Bound first: an `if let` scrutinee's guard would live through the block.
                 let started = prepare(&app, &s)
+                    .and_then(|()| anvil::octane::prepare(&s, &p))
                     .and_then(|()| anvil::lock(&app.apps).start_process(&s, &p, &cfg));
                 if let Err(e) = started {
                     anvil::lock(&app.app_errors).insert(key, err(e));
@@ -1687,11 +1690,15 @@ fn set_process(
     Ok(overview(&app, &cfg, &s))
 }
 
-/// What the web server routes for an app's server rows: a change needs a reload.
+/// What the web server routes for an app's server rows and Octane: a change needs a reload.
 fn routes(c: &Config, s: &Site) -> Vec<(String, String, u16)> {
     anvil::processes::server_rows(c, s)
         .into_iter()
         .map(|r| (r.id, r.host, r.port))
+        .chain(
+            anvil::processes::octane_row(c, s)
+                .map(|p| (p.id, String::new(), p.port.unwrap_or_default())),
+        )
         .collect()
 }
 

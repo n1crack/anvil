@@ -705,6 +705,9 @@ impl Apps {
         if self.running(&key) {
             return Ok(());
         }
+        // Done by the caller beforehand, so this is quick; without its binary Octane would
+        // offer to download one into the project.
+        crate::octane::prepare(site, p)?;
         self.spawn(&key, &site.path, &p.command, process_env(site, p, cfg)?)?;
         self.processes.insert(key);
         Ok(())
@@ -839,6 +842,20 @@ pub(crate) fn process_env(
 ) -> Result<Vec<(String, String)>> {
     let mut env = crate::processes::env(cfg, site, false)?;
     env.extend(p.port.map(|port| ("PORT".to_string(), port.to_string())));
+    // Octane finds its server's binary on PATH; behind HTTPS it makes https:// URLs.
+    if p.id == crate::octane::ID
+        && let Some(server) = crate::octane::server(&site.path)
+    {
+        if let Some((_, path)) = env.iter_mut().find(|(k, _)| k == "PATH") {
+            *path = crate::prepend_path(&crate::octane::dir(server), path);
+        }
+        if site.secure {
+            env.push(("OCTANE_HTTPS".into(), "true".into()));
+        }
+        if server == crate::octane::Server::FrankenPhp {
+            crate::octane::frankenphp_env(cfg, site, &mut env)?;
+        }
+    }
     env.push((
         "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),
         format!(".{}", cfg.tld),

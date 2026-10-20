@@ -123,7 +123,7 @@ export interface Leftover {
 
 /** One thing a project's .anvil.toml asks for. */
 export interface Need {
-  /** "php", "node" or a service kind. */
+  /** "php", "node", "ext" (a PHP extension) or a service kind. */
   kind: string;
   /** As the file says it; "" is any version. */
   version: string;

@@ -1,7 +1,7 @@
 //! PHP extensions from PECL (xdebug, pcov, apcu, igbinary, msgpack), built on this Mac
 //! with phpize against the source tree OPcache configured for the same exact version.
 
-use crate::opcache::{install_so, installed_full, source_tree, tools_error};
+use crate::opcache::{install_so, installed_full, tools_error};
 use crate::{Config, fetch_tgz, home, php_dir, run};
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
@@ -110,17 +110,8 @@ pub fn built(minor: &str, name: &str) -> bool {
 pub fn build(minor: &str, name: &str) -> Result<()> {
     let ext = find(name)?;
     let _held = build_lock(minor, name, name)?;
-    let (full, src) = source_tree(minor)?;
+    let (full, stage) = crate::opcache::stage(minor)?;
     let bin = tools()?;
-    let stage = src.join("stage");
-    let staged = stage.join(".anvil-staged");
-    if !staged.exists() {
-        run(crate::platform::command("make")
-            .args(["-s", "install-headers", "install-build", "install-programs"])
-            .current_dir(&src))
-        .map_err(|e| tools_error("PHP's headers", e))?;
-        fs::write(&staged, "")?;
-    }
     println!("Building {name} {} for PHP {full}…", ext.version);
     let dir = home()
         .join("build")
@@ -448,14 +439,14 @@ pub fn ini_args(ini: &BTreeMap<String, String>, minor: &str, names: &[String]) -
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::ENV_LOCK;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
     /// A `php` in a temp ANVIL_HOME that says it is `full`.
-    fn fake_php(minor: &str, full: &str) {
+    pub(crate) fn fake_php(minor: &str, full: &str) {
         let dir = php_dir(minor);
         fs::create_dir_all(&dir).unwrap();
         let php = dir.join("php");
@@ -463,7 +454,7 @@ mod tests {
         fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    fn fake_so(minor: &str, full: &str, name: &str) -> String {
+    pub(crate) fn fake_so(minor: &str, full: &str, name: &str) -> String {
         let so = so_path(minor, full, name);
         fs::create_dir_all(so.parent().unwrap()).unwrap();
         fs::write(&so, "").unwrap();

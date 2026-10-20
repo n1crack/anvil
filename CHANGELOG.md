@@ -10,6 +10,21 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Laravel Octane: an app with `laravel/octane` gets an `octane` process
+  (RoadRunner), left out of Dev start, on a private port of its own. While it
+  runs, the app's address is served by Octane; when it stops or crashes,
+  PHP-FPM serves the next request, never an error page. Anvil downloads
+  RoadRunner 2025.1.15 once into its own folder (checked against its
+  SHA-256) and never writes `rr` or `.rr.yaml` into the project. A worktree's
+  Octane uses its own port and database. It runs two workers, not one per
+  core (140 MB instead of 455 MB on a 12-core Mac); edit the command for more.
+  FrankenPHP (`OCTANE_SERVER=frankenphp`) too: Anvil downloads FrankenPHP
+  1.13.1 (177 MB, checked against its SHA-256) once the row first starts. It
+  has PHP 8.5 inside, so an app on another version is told so on its row and
+  PHP-FPM keeps serving it. It listens on 127.0.0.1 only, gets the app's
+  php.ini values, and keeps its own extensions: the ones Anvil builds can't
+  load into it. Octane itself copies `public/frankenphp-worker.php` into the
+  project, as `octane:install` does.
 - A web root of your own for an app Anvil serves (PHP, static): a folder inside
   the project (`web`, `dist`, `.`) in the app's Settings, or `anvil app root
   <site> [<dir>]` (`--reset` goes back to `public/` when present). A worktree
@@ -34,6 +49,11 @@ Until 1.0.0, minor versions may contain breaking changes.
   `anvil app ext <site> add|remove <ext>`, e.g. Xdebug for the app you debug
   only. That app, and any other address of the same folder, gets a PHP-FPM of
   its own; its terminal `php` and processes load the same extensions.
+- A project's `.anvil.toml` can ask for PHP extensions: `extensions =
+  ["xdebug"]`. One not on for the app or its PHP version shows in the
+  Overview's Project line with Add, which turns it on for that app (building
+  it first if needed); `anvil project --apply` does the same. A name Anvil
+  doesn't offer is reported, like an unknown version.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service
   start|stop <id>` ask the running app to do it, so the change shows there at
   once, and print each process's state (`api: running`). Without the app open

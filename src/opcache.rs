@@ -95,7 +95,55 @@ pub fn build(minor: &str) -> Result<()> {
     }
     install_so(&built, &so_path(minor))?;
     println!("OPcache built for PHP {full}");
+    // Extensions need only the staged headers: keep those, not the whole tree.
+    stage_in(&src)?;
+    prune(&src);
     Ok(())
+}
+
+/// The installed PHP `minor`'s headers, phpize and php-config (`<tree>/stage`), all
+/// extensions build against: staged once from the configured tree, which then goes
+/// (286 MB for 8.4, against 6.7 MB staged).
+pub fn stage(minor: &str) -> Result<(String, PathBuf)> {
+    let full = installed_full(minor)?;
+    let stage = home()
+        .join("cache")
+        .join("php-src")
+        .join(&full)
+        .join("stage");
+    if stage.join(".anvil-staged").exists() {
+        return Ok((full, stage));
+    }
+    let (full, src) = source_tree(minor)?;
+    stage_in(&src)?;
+    prune(&src);
+    Ok((full, stage))
+}
+
+fn stage_in(src: &Path) -> Result<()> {
+    let staged = src.join("stage").join(".anvil-staged");
+    if !staged.exists() {
+        run(crate::platform::command("make")
+            .args(["-s", "install-headers", "install-build", "install-programs"])
+            .current_dir(src))
+        .map_err(|e| tools_error("PHP's headers", e))?;
+        fs::write(&staged, "")?;
+    }
+    Ok(())
+}
+
+/// Everything in the source folder but its staged headers.
+fn prune(src: &Path) {
+    for e in fs::read_dir(src).into_iter().flatten().flatten() {
+        if e.file_name() != "stage" {
+            let p = e.path();
+            let _ = if p.is_dir() && !p.is_symlink() {
+                fs::remove_dir_all(&p)
+            } else {
+                fs::remove_file(&p)
+            };
+        }
+    }
 }
 
 /// The exact version (`8.4.23`) of the installed PHP `minor`.
@@ -112,9 +160,9 @@ pub(crate) fn installed_full(minor: &str) -> Result<String> {
 }
 
 /// php.net's source of the installed PHP `minor`'s exact version, verified and
-/// configured like that binary, in `~/.anvil/cache/php-src/<full>`: made once, then
-/// reused by OPcache and extensions. `make install-headers` puts the headers, phpize
-/// and php-config in its `stage` folder. Returns the full version and the folder.
+/// configured like that binary, in `~/.anvil/cache/php-src/<full>`, until a build has
+/// staged its headers, phpize and php-config in its `stage` folder (`stage`), which
+/// is all that stays. Returns the full version and the folder.
 pub fn source_tree(minor: &str) -> Result<(String, PathBuf)> {
     let full = installed_full(minor)?;
     let src = home().join("cache").join("php-src").join(&full);
@@ -124,7 +172,7 @@ pub fn source_tree(minor: &str) -> Result<(String, PathBuf)> {
     }
     println!("Getting PHP {full}'s source…");
     let sum = source_sum(&full)?;
-    let _ = fs::remove_dir_all(&src);
+    prune(&src);
     fetch_tgz(
         &format!("https://www.php.net/distributions/php-{full}.tar.gz"),
         &src,
@@ -335,6 +383,24 @@ mod tests {
             {"filename": "php-8.4.23.tar.xz", "sha256": "1ab9"}
         ]});
         assert_eq!(sum_from(&some, "8.4.23").unwrap(), "f43b");
+    }
+
+    #[test]
+    fn only_the_stage_stays() {
+        let dir = std::env::temp_dir().join(format!("anvil-prune-{}", std::process::id()));
+        fs::create_dir_all(dir.join("stage/include")).unwrap();
+        fs::create_dir_all(dir.join("Zend")).unwrap();
+        fs::write(dir.join(".anvil-configured"), "").unwrap();
+        fs::write(dir.join("stage/.anvil-staged"), "").unwrap();
+        prune(&dir);
+        let left: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(left, ["stage"]);
+        assert!(dir.join("stage/.anvil-staged").exists());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

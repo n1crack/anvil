@@ -800,7 +800,7 @@ fn project_cmd(
         println!(
             "{}",
             dim(format!(
-                "{} asks for no PHP, Node.js or services.",
+                "{} asks for no PHP, Node.js, services or extensions.",
                 file.display()
             ))
         );
@@ -816,6 +816,8 @@ fn project_cmd(
         let state = match (&n.overridden, n.met, n.kind.as_str()) {
             (Some(v), ..) => dim(format!("you chose {v} in Anvil")),
             (None, true, "php" | "node") => green("installed"),
+            (None, true, "ext") => green("on"),
+            (None, false, "ext") => yellow("not on"),
             (None, true, _) => green("added"),
             (None, false, "php" | "node") => yellow("not installed"),
             (None, false, _) => yellow(format!("not added (adds {})", n.install)),
@@ -836,6 +838,10 @@ fn project_cmd(
         match n.kind.as_str() {
             "php" => php_install(cfg, &n.install)?,
             "node" => runtimes::install("node", &n.install)?,
+            "ext" => {
+                *cfg = phpext::add_site(&s.name, &n.install)?;
+                control::notify_changed();
+            }
             kind => add_service(cfg, kind, None, None, Some(&n.install), accept_license)?,
         }
     }

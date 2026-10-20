@@ -62,7 +62,7 @@ pub fn apply_process_change(
     }
     p.autostart = change.autostart.unwrap_or(p.autostart);
     p.hidden = change.hidden.unwrap_or(p.hidden);
-    p.manual = change.manual.unwrap_or(p.manual);
+    p.manual = change.manual.or(p.manual);
     if let Some(host) = change.host {
         p.host = match host {
             Some(h) => {
@@ -250,7 +250,64 @@ pub fn detect_with(site: &Site, cfg: Option<&crate::Config>) -> Vec<Process> {
 }
 
 fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>) -> Vec<Process> {
-    apply_settings(site, cfg, detect_base(site, php, cache, cfg))
+    let mut procs = detect_base(site, php, cache, cfg);
+    procs.extend(cfg.and_then(|c| octane_row(c, site)));
+    apply_settings(site, cfg, procs)
+}
+
+/// The Octane row of a Laravel app with laravel/octane (`octane::server`), left out of
+/// Dev start, on a private port of its own; while it runs the app's address goes to it
+/// (`caddyfile`). `None` when hidden, or when .anvil.toml lists the app's processes.
+pub fn octane_row(cfg: &crate::Config, site: &Site) -> Option<Process> {
+    if !apps::is_php(&site.kind)
+        || crate::project::load(&site.path).is_some_and(|f| !f.processes.is_empty())
+        || cfg
+            .sites
+            .get(settings_of(site))
+            .and_then(|s| s.processes.get(crate::octane::ID))
+            .is_some_and(|p| p.hidden)
+    {
+        return None;
+    }
+    let server = crate::octane::server(&site.path)?;
+    let (port, rpc) = octane_ports(cfg, site);
+    let command = crate::octane::command(site, server, port, Some(rpc)).unwrap_or_else(|_| {
+        format!(
+            "php artisan octane:start --server={} --host=127.0.0.1 --port={port} --workers=2",
+            server.name()
+        )
+    });
+    Some(Process {
+        id: crate::octane::ID.into(),
+        name: crate::octane::ID.into(),
+        command,
+        source: "laravel/octane",
+        server: true,
+        port: Some(port),
+        manual: true,
+        ..Default::default()
+    })
+}
+
+/// The Octane row's port and its server's second one (RoadRunner's RPC), stable per app
+/// and clear of the ports other apps and services are set to.
+pub fn octane_ports(cfg: &crate::Config, site: &Site) -> (u16, u16) {
+    let mut taken = taken_ports(cfg, site);
+    let port = apps::hashed_port(&format!("{}@octane", site.name), 49000, &taken, cfg);
+    taken.push(port);
+    let rpc = apps::hashed_port(&format!("{}@octane-rpc", site.name), 49000, &taken, cfg);
+    (port, rpc)
+}
+
+/// Ports set for apps (and this one's own) and services.
+fn taken_ports(cfg: &crate::Config, site: &Site) -> Vec<u16> {
+    let mut taken: Vec<u16> = cfg.sites.values().filter_map(|s| s.port).collect();
+    taken.extend(site.port);
+    for id in crate::services::instances(cfg) {
+        taken.push(crate::services::port(cfg, &id));
+        taken.extend(crate::services::web_port(cfg, &id));
+    }
+    taken
 }
 
 /// Whose process settings an app follows: a worktree shares its app's.
@@ -293,7 +350,9 @@ fn apply_settings(
         if let Some(c) = set.get(&p.id) {
             // A worktree's processes don't start with Anvil (dozens of agent worktrees would).
             p.autostart = c.autostart && site.worktree_of.is_none();
-            p.manual = c.manual;
+            if let Some(manual) = c.manual {
+                p.manual = manual;
+            }
             if let Some(command) = &c.command {
                 p.command = command.clone();
                 p.edited = !c.added;
@@ -542,12 +601,7 @@ fn all_rows(cfg: &crate::Config, site: &Site) -> Vec<(Process, ServerRow)> {
     if !apps::runs_process(&site.kind) || own.is_some_and(|f| !f.processes.is_empty()) {
         return vec![];
     }
-    let mut taken: Vec<u16> = cfg.sites.values().filter_map(|s| s.port).collect();
-    taken.extend(site.port);
-    for id in crate::services::instances(cfg) {
-        taken.push(crate::services::port(cfg, &id));
-        taken.extend(crate::services::web_port(cfg, &id));
-    }
+    let mut taken = taken_ports(cfg, site);
     let mut prefixes: Vec<String> = vec![];
     let set = |id: &str| cfg.sites.get(settings_of(site))?.processes.get(id);
     let mut procs = package_scripts(&site.path).0;
@@ -2161,5 +2215,154 @@ echo '{DEV_JSON}'
         // Composer's scripts are a PHP app's only.
         assert_eq!(one_off_scripts(&site(&dir, "vite")).len(), 2);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A Laravel app in a temp folder whose composer.json requires laravel/octane.
+    fn octane_app(tag: &str) -> (PathBuf, Site) {
+        let dir = std::env::temp_dir().join(format!("anvil-octane-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("composer.json"),
+            r#"{"require": {"laravel/framework": "^12.0", "laravel/octane": "^2.22"}}"#,
+        )
+        .unwrap();
+        let s = site(&dir, "laravel");
+        (dir, s)
+    }
+
+    #[test]
+    fn octane_row_is_manual_with_private_port() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        let (dir, s) = octane_app("row");
+        let php = dir.join("php");
+        let cache = home.path().join("cache");
+        let mut cfg = crate::Config::default();
+        let octane = |cfg: &crate::Config| {
+            detect_in(&s, &php, &cache, Some(cfg))
+                .into_iter()
+                .find(|p| p.id == "octane")
+        };
+        let p = octane(&cfg).expect("an Octane row");
+        let port = p.port.expect("a private port");
+        assert!(p.manual, "left out of Dev start");
+        assert!(!p.autostart);
+        assert!(p.server);
+        assert_eq!(p.source, "laravel/octane");
+        let rr = crate::octane::dir(crate::octane::Server::RoadRunner);
+        assert_eq!(
+            p.command,
+            format!(
+                "php artisan octane:start --server=roadrunner --host=127.0.0.1 --port={port} --workers=2 --rpc-port={} --rr-config={}",
+                octane_ports(&cfg, &s).1,
+                crate::shims::sh_quote(&rr.join("rr.yaml").display().to_string())
+            )
+        );
+        // The project's own .rr.yaml is used where it has one.
+        fs::write(dir.join(".rr.yaml"), "version: '3'\n").unwrap();
+        assert!(octane(&cfg).unwrap().command.ends_with(&format!(
+            "--rr-config={}",
+            crate::shims::sh_quote(&dir.join(".rr.yaml").display().to_string())
+        )));
+        // Dev start turned on sticks, though it isn't the row's default.
+        let change = |manual, hidden| ProcessChange {
+            manual,
+            hidden,
+            ..Default::default()
+        };
+        let site_cfg = cfg.sites.entry("shop".into()).or_default();
+        apply_process_change(site_cfg, "octane", change(Some(false), None)).unwrap();
+        assert!(!octane(&cfg).unwrap().manual);
+        // An HTTPS app's Octane makes https:// URLs, as PHP-FPM's does.
+        let mut secure = s.clone();
+        secure.secure = true;
+        let env = apps::process_env(&secure, &p, &cfg).unwrap();
+        assert!(env.contains(&("OCTANE_HTTPS".into(), "true".into())));
+        let path = &env.iter().find(|(k, _)| k == "PATH").unwrap().1;
+        assert!(path.starts_with(&format!("{}:", rr.display())), "{path}");
+        assert!(
+            !apps::process_env(&s, &p, &cfg)
+                .unwrap()
+                .iter()
+                .any(|(k, _)| k == "OCTANE_HTTPS")
+        );
+        // Hidden: no row, and no Octane route for the web server.
+        let site_cfg = cfg.sites.entry("shop".into()).or_default();
+        apply_process_change(site_cfg, "octane", change(None, Some(true))).unwrap();
+        assert!(octane(&cfg).is_none());
+        assert!(octane_row(&cfg, &s).is_none());
+        cfg.sites.clear();
+        // .anvil.toml's processes replace what is detected.
+        fs::write(dir.join(".anvil.toml"), "[processes]\nweb = \"php -S x\"\n").unwrap();
+        assert!(octane(&cfg).is_none());
+        fs::remove_file(dir.join(".anvil.toml")).unwrap();
+        // Not a PHP app, or no laravel/octane: no row.
+        assert!(octane_row(&cfg, &site(&dir, "vite")).is_none());
+        fs::write(dir.join("composer.json"), "{}").unwrap();
+        assert!(octane(&cfg).is_none());
+        fs::remove_dir_all(&dir).unwrap();
+        unsafe { std::env::remove_var("ANVIL_HOME") };
+    }
+
+    #[test]
+    fn octane_port_is_private_and_free() {
+        let (dir, s) = octane_app("port");
+        let mut cfg = crate::Config::default();
+        let (port, rpc) = octane_ports(&cfg, &s);
+        assert_eq!(octane_ports(&cfg, &s), (port, rpc), "stable");
+        assert_ne!(port, rpc);
+        for p in [port, rpc] {
+            assert!((49000..53100).contains(&p), "{p}");
+            assert!(![cfg.http_port, cfg.https_port].contains(&p));
+        }
+        // Another app's dev server on that port: Octane moves, as package.json rows do.
+        cfg.sites.entry("next".into()).or_default().port = Some(port);
+        cfg.services.entry("redis".into()).or_default().port = Some(rpc);
+        let (moved, moved_rpc) = octane_ports(&cfg, &s);
+        assert_ne!(moved, port);
+        assert_ne!(moved_rpc, rpc);
+        assert_ne!(moved, rpc);
+        assert_eq!(octane_row(&cfg, &s).unwrap().port, Some(moved));
+        // Another app has its own.
+        let mut other = s.clone();
+        other.name = "blog".into();
+        assert_ne!(octane_ports(&cfg, &other).0, moved);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn worktree_octane_gets_its_env() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        let (cfg, wt) = crate::worktrees::tests::worktree_site(
+            "octane",
+            "DB_CONNECTION=mysql\nDB_DATABASE=shop\n",
+        );
+        let composer = r#"{"require": {"laravel/octane": "^2.22"}}"#;
+        fs::write(wt.path.join("composer.json"), composer).unwrap();
+        let main_dir = wt.path.parent().unwrap().join("main");
+        fs::write(main_dir.join("composer.json"), composer).unwrap();
+        let mut main = wt.clone();
+        main.name = "shop".into();
+        main.path = main_dir;
+        main.worktree_of = None;
+        let p = octane_row(&cfg, &wt).unwrap();
+        assert_ne!(
+            p.port,
+            octane_row(&cfg, &main).unwrap().port,
+            "a port of its own"
+        );
+        assert!(p.command.contains(&format!("--port={} ", p.port.unwrap())));
+        let env = apps::process_env(&wt, &p, &cfg).unwrap();
+        let get = |k: &str| crate::worktrees::tests::get(&env, k);
+        assert_eq!(get("DB_DATABASE"), Some("shop_feature_x"), "never main's");
+        assert_eq!(get("APP_URL"), Some("http://shop--feature-x.test"));
+        fs::remove_dir_all(wt.path.parent().unwrap()).unwrap();
+        unsafe { std::env::remove_var("ANVIL_HOME") };
     }
 }

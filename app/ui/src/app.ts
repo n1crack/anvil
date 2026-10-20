@@ -1422,16 +1422,18 @@ function fromFile(s, kind: string): string | null {
 }
 
 const installing = new Set<string>(); // "php:8.3" while it installs, across re-renders
+const needExtErrors = new Map<string, string>(); // app -> why the line's Add of an extension failed
 
 /** One quiet line when the app's .anvil.toml asks for something Anvil doesn't have yet:
- * Install for PHP and Node.js, Add opens the add-service sheet with the kind and version. */
+ * Install for PHP and Node.js, Add opens the add-service sheet with the kind and version,
+ * Add for an extension turns it on for this app (built first unless built). */
 function projectNeeds(s, root) {
   const missing = (snap.projects?.[s.name] ?? []).filter((n) => !n.met && !n.overridden);
   if (!missing.length) return;
   const labels = missing.map((n) => n.label);
   const list = labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}` : labels[0];
   const dd = el("dd", "muted", `This project asks for ${list}`);
-  const fail = el("span", "muted");
+  const fail = el("span", "muted", needExtErrors.has(s.name) ? ` ${needExtErrors.get(s.name)}` : "");
   for (const n of missing) {
     const runtime = n.kind === "php" || n.kind === "node";
     const key = `${n.kind}:${n.install}`;
@@ -1439,6 +1441,28 @@ function projectNeeds(s, root) {
     if (installing.has(key)) {
       b.disabled = true;
       b.textContent = `Installing ${n.label}…`;
+    }
+    if (n.kind === "ext") {
+      const building = `${s.name}@${n.install}`;
+      if (appExtBuilding.has(building)) {
+        b.disabled = true;
+        b.textContent = "Building…";
+      }
+      b.onclick = async () => {
+        if (appExtBuilding.has(building)) return;
+        appExtBuilding.add(building);
+        needExtErrors.delete(s.name);
+        render();
+        try {
+          await askSnap("app_ext", { site: s.name, name: n.install, on: true });
+        } catch (e) {
+          needExtErrors.set(s.name, String(e));
+        }
+        appExtBuilding.delete(building);
+        render();
+      };
+      dd.append(" ", b);
+      continue;
     }
     b.onclick = async () => {
       if (!runtime) return late.openAddService({ kind: n.kind, version: n.install });

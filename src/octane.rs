@@ -1,0 +1,502 @@
+//! Laravel Octane: which server an app asks for, and that server's binary, fetched once
+//! into `~/.anvil/octane/<server>/<version>/` and checked against its SHA-256.
+
+use crate::{Site, home};
+use anyhow::{Result, bail};
+use std::path::{Path, PathBuf};
+
+/// The process id (and name) of an app's Octane row.
+pub const ID: &str = "octane";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Server {
+    RoadRunner,
+    FrankenPhp,
+    Swoole,
+}
+
+impl Server {
+    /// As `octane:start --server=` takes it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Server::RoadRunner => "roadrunner",
+            Server::FrankenPhp => "frankenphp",
+            Server::Swoole => "swoole",
+        }
+    }
+}
+
+/// RoadRunner 2025.1.x: Octane 2.22 flags v3 as possibly incompatible.
+const RR_VERSION: &str = "2025.1.15";
+/// The release publishes no checksums file: these are the SHA-256 digests GitHub lists for
+/// its macOS assets (`gh api repos/roadrunner-server/roadrunner/releases/tags/v2025.1.15`).
+const RR_ARM64: &str = "cc0521bd31478cc39403c2f090fc73db45e87e33a66b6783e9bcf096f321729a";
+const RR_AMD64: &str = "2059b1564de0352c8d010ffc9f630f9da2174e9430ee1a6aa83d6c2b38bdc6c6";
+
+/// FrankenPHP, a single binary with its own PHP inside. No checksums file either: the
+/// digests GitHub lists (`gh api repos/php/frankenphp/releases/tags/v1.13.1`).
+const FP_VERSION: &str = "1.13.1";
+const FP_ARM64: &str = "0cb3b88e0f18b51fb9d1d71977be2dd871199d5cdf986a6d20e32a841686a426";
+const FP_AMD64: &str = "b9123b427cb357eac076b1f316f71589cfe5c3db4ad2449114e243563d794a89";
+/// The PHP inside that release: `frankenphp version` says "FrankenPHP v1.13.1 PHP 8.5.11
+/// Caddy v2.11.7". Checked against the binary when it is installed (`install_frankenphp`),
+/// so a version bump can't leave this behind; known before the 180 MB download, so an app
+/// on another PHP is told so without it.
+const FP_PHP: &str = "8.5";
+
+/// The server of an app with `laravel/octane`: `OCTANE_SERVER` in its `.env`, else
+/// `config/octane.php`'s default, else RoadRunner. `None` without laravel/octane.
+pub fn server(dir: &Path) -> Option<Server> {
+    let composer: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("composer.json")).ok()?).ok()?;
+    ["require", "require-dev"]
+        .iter()
+        .any(|k| composer[k].get("laravel/octane").is_some())
+        .then_some(())?;
+    let name = crate::resources::dotenv(dir)
+        .remove("OCTANE_SERVER")
+        .or_else(|| config_default(&std::fs::read_to_string(dir.join("config/octane.php")).ok()?));
+    Some(match name.as_deref() {
+        Some("frankenphp") => Server::FrankenPhp,
+        Some("swoole" | "openswoole") => Server::Swoole,
+        _ => Server::RoadRunner,
+    })
+}
+
+/// `x` of `env('OCTANE_SERVER', 'x')` in config/octane.php.
+fn config_default(php: &str) -> Option<String> {
+    let rest = &php[php.find("env('OCTANE_SERVER'")? + "env('OCTANE_SERVER'".len()..];
+    let rest = rest.trim_start().strip_prefix(',')?.trim_start();
+    let quote = rest.chars().next().filter(|c| matches!(c, '\'' | '"'))?;
+    let rest = &rest[1..];
+    Some(rest[..rest.find(quote)?].to_string())
+}
+
+/// Where the server's binary goes: `~/.anvil/octane/<server>/<version>/`.
+pub fn dir(server: Server) -> PathBuf {
+    let version = match server {
+        Server::FrankenPhp => FP_VERSION,
+        _ => RR_VERSION,
+    };
+    home().join("octane").join(server.name()).join(version)
+}
+
+/// The server's binary, downloaded, verified and unpacked the first time.
+pub fn ensure(server: Server) -> Result<PathBuf> {
+    match server {
+        Server::RoadRunner => {}
+        Server::FrankenPhp => {
+            let (arch, sum) = match crate::platform()?.1 {
+                "mac_arm64" => ("arm64", FP_ARM64),
+                "mac_amd64" => ("x86_64", FP_AMD64),
+                p => bail!("Anvil has no FrankenPHP for {p}"),
+            };
+            let url = format!(
+                "https://github.com/php/frankenphp/releases/download/v{FP_VERSION}/frankenphp-mac-{arch}"
+            );
+            return install_frankenphp(&url, sum, &dir(server));
+        }
+        Server::Swoole => {
+            bail!("Anvil runs Octane with RoadRunner or FrankenPHP for now, not swoole")
+        }
+    }
+    let (arch, sum, zip) = match crate::platform()?.1 {
+        "mac_arm64" => ("darwin-arm64", RR_ARM64, false),
+        "mac_amd64" => ("darwin-amd64", RR_AMD64, true),
+        p => bail!("Anvil has no RoadRunner for {p}"),
+    };
+    let ext = if zip { "zip" } else { "tar.gz" };
+    let url = format!(
+        "https://github.com/roadrunner-server/roadrunner/releases/download/v{RR_VERSION}/roadrunner-{RR_VERSION}-{arch}.{ext}"
+    );
+    install(&url, sum, &dir(server), zip)
+}
+
+/// `rr` out of the release archive at `url` into `dir`, once it matches `sum`, with an
+/// empty `rr.yaml` beside it (see `command`).
+fn install(url: &str, sum: &str, dir: &Path, zip: bool) -> Result<PathBuf> {
+    let rr = dir.join("rr");
+    if rr.is_file() {
+        return Ok(rr);
+    }
+    crate::replace_dir(dir, |d| {
+        let file = crate::download(url, Some(sum))?;
+        // Just the binary; the archive keeps it in a folder of its own.
+        let mut unpack = if zip {
+            let mut c = crate::platform::command("unzip");
+            c.args(["-q", "-j"]).arg(&file).arg("*/rr").arg("-d").arg(d);
+            c
+        } else {
+            let mut c = crate::platform::command("tar");
+            c.arg("-xzf")
+                .arg(&file)
+                .arg("-C")
+                .arg(d)
+                .args(["--strip-components=1", "*/rr"]);
+            c
+        };
+        let ok = crate::run(&mut unpack);
+        let _ = std::fs::remove_file(&file);
+        ok?;
+        anyhow::ensure!(d.join("rr").is_file(), "{url} has no rr in it");
+        Ok(std::fs::write(d.join("rr.yaml"), "")?)
+    })?;
+    Ok(rr)
+}
+
+/// The FrankenPHP binary at `url` as `dir/frankenphp`, once it matches `sum` and runs the
+/// PHP `FP_PHP` says.
+fn install_frankenphp(url: &str, sum: &str, dir: &Path) -> Result<PathBuf> {
+    let bin = dir.join("frankenphp");
+    if bin.is_file() {
+        return Ok(bin);
+    }
+    crate::replace_dir(dir, |d| {
+        let file = crate::download(url, Some(sum))?;
+        let to = d.join("frankenphp");
+        let moved = std::fs::rename(&file, &to);
+        let _ = std::fs::remove_file(&file);
+        moved?;
+        crate::platform::set_mode(&to, 0o755)?;
+        let out = crate::platform::command(&to).arg("version").output()?;
+        let version = String::from_utf8_lossy(&out.stdout);
+        anyhow::ensure!(
+            version.contains(&format!(" PHP {FP_PHP}.")),
+            "FrankenPHP {FP_VERSION} doesn't run PHP {FP_PHP}: {}",
+            version.trim()
+        );
+        Ok(())
+    })?;
+    Ok(bin)
+}
+
+/// The Caddyfile Anvil gives FrankenPHP: the app's own Octane's, listening on 127.0.0.1
+/// only. Octane's binds every interface (`http://:<port>`), whatever `--host` says.
+fn caddyfile(site: &Site) -> PathBuf {
+    home()
+        .join("run")
+        .join(format!("octane-{}.Caddyfile", crate::pool(site)))
+}
+
+/// Write `caddyfile(site)` from the app's vendor/laravel/octane.
+fn write_caddyfile(site: &Site) -> Result<()> {
+    let stub = site
+        .path
+        .join("vendor/laravel/octane/src/Commands/stubs/Caddyfile");
+    let Ok(text) = std::fs::read_to_string(&stub) else {
+        bail!("laravel/octane isn't in vendor yet: run composer install");
+    };
+    let Some(rest) = text.trim_start().strip_prefix('{') else {
+        bail!("{} doesn't start with its global options", stub.display());
+    };
+    let file = caddyfile(site);
+    std::fs::create_dir_all(file.parent().unwrap_or(Path::new("/")))?;
+    Ok(std::fs::write(
+        file,
+        format!("{{\n\tdefault_bind 127.0.0.1\n{rest}"),
+    )?)
+}
+
+/// FrankenPHP's environment over an app process's: Anvil's extensions are built for
+/// Anvil's PHP (not thread-safe) and can't load into FrankenPHP's own (thread-safe, with
+/// its own extensions), so its `PHP_INI_SCAN_DIR` has the app's php.ini values (PHP-FPM's,
+/// and OPcache's and Xdebug's settings) but no extension lines. Its Caddy keeps its state
+/// under Anvil's folder, not the user's own Caddy's.
+pub(crate) fn frankenphp_env(
+    cfg: &crate::Config,
+    site: &Site,
+    env: &mut Vec<(String, String)>,
+) -> Result<()> {
+    env.retain(|(k, _)| k != "PHP_INI_SCAN_DIR");
+    let mut args: Vec<String> = crate::phpext::php_args_with(cfg, FP_PHP, &site.ext)
+        .chunks(2)
+        .filter(|d| !d[1].starts_with("extension=") && !d[1].starts_with("zend_extension="))
+        .flatten()
+        .cloned()
+        .collect();
+    let mut ini = cfg.ini.clone();
+    ini.extend(site.ini.clone());
+    for (k, v) in ini {
+        args.extend(["-d".into(), format!("{k}={v}")]);
+    }
+    let dir = home()
+        .join("run")
+        .join(format!("frankenphp-{}.d", crate::pool(site)));
+    env.extend(crate::phpext::scan_env_in(&dir, &args)?);
+    let data = home().join("octane/frankenphp/data");
+    env.push(("XDG_CONFIG_HOME".into(), data.display().to_string()));
+    env.push(("XDG_DATA_HOME".into(), data.display().to_string()));
+    Ok(())
+}
+
+/// The command of the app's Octane row on `port`; `admin` is RoadRunner's RPC port,
+/// FrankenPHP's admin port (Octane's default, 2019, would clash between apps).
+/// Err with the reason when Anvil can't run that server for the app.
+///
+/// RoadRunner: Octane writes an empty `.rr.yaml` into the project unless it's given one,
+/// so it gets the project's own when there is one, else Anvil's empty one; `rr` itself is
+/// found on PATH (`apps::process_env`), never in the project. Two workers, not one per
+/// core: measured on a 12-core Mac, 140 MB against 455 MB idle, and no slower in dev.
+pub fn command(site: &Site, server: Server, port: u16, admin: Option<u16>) -> Result<String> {
+    let mut c = format!(
+        "php artisan octane:start --server={} --host=127.0.0.1 --port={port} --workers=2",
+        server.name()
+    );
+    match server {
+        Server::RoadRunner => {
+            let own = site.path.join(".rr.yaml");
+            let config = if own.is_file() {
+                own
+            } else {
+                dir(server).join("rr.yaml")
+            };
+            if let Some(rpc) = admin {
+                c += &format!(" --rpc-port={rpc}");
+            }
+            c += &format!(
+                " --rr-config={}",
+                crate::shims::sh_quote(&config.display().to_string())
+            );
+            Ok(c)
+        }
+        // `frankenphp` is found on PATH too. Octane copies public/frankenphp-worker.php
+        // into the project if it isn't there (as `octane:install` does): no flag avoids it.
+        Server::FrankenPhp => {
+            let php = site.php.as_deref().unwrap_or("no PHP version");
+            if php != FP_PHP {
+                bail!("FrankenPHP runs PHP {FP_PHP}; this app is on {php}");
+            }
+            if let Some(admin) = admin {
+                c += &format!(" --admin-port={admin}");
+            }
+            c += &format!(
+                " --caddyfile={}",
+                crate::shims::sh_quote(&caddyfile(site).display().to_string())
+            );
+            Ok(c)
+        }
+        Server::Swoole => {
+            bail!("Anvil runs Octane with RoadRunner or FrankenPHP for now, not swoole")
+        }
+    }
+}
+
+/// Before the Octane row `p` of `site` starts: the reason it can't, or its server's
+/// binary in place (the download happens here, outside the app's process lock).
+pub fn prepare(site: &Site, p: &crate::processes::Process) -> Result<()> {
+    if p.id != ID {
+        return Ok(());
+    }
+    let Some(server) = server(&site.path) else {
+        return Ok(());
+    };
+    command(site, server, p.port.unwrap_or_default(), None)?;
+    if server == Server::FrankenPhp {
+        write_caddyfile(site)?;
+    }
+    ensure(server).map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn detects_server_from_env_config_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        assert_eq!(server(d), None, "no composer.json");
+        fs::write(
+            d.join("composer.json"),
+            r#"{"require": {"laravel/framework": "^12.0"}}"#,
+        )
+        .unwrap();
+        assert_eq!(server(d), None, "no laravel/octane");
+        // require-dev counts too; nothing else says which: RoadRunner.
+        fs::write(
+            d.join("composer.json"),
+            r#"{"require-dev": {"laravel/octane": "^2.22"}}"#,
+        )
+        .unwrap();
+        assert_eq!(server(d), Some(Server::RoadRunner));
+        // config/octane.php's default.
+        fs::create_dir(d.join("config")).unwrap();
+        fs::write(
+            d.join("config/octane.php"),
+            "<?php\nreturn [\n    'server' => env('OCTANE_SERVER', 'frankenphp'),\n];\n",
+        )
+        .unwrap();
+        assert_eq!(server(d), Some(Server::FrankenPhp));
+        // The .env wins over the config.
+        fs::write(d.join(".env"), "APP_NAME=shop\nOCTANE_SERVER=\"swoole\"\n").unwrap();
+        assert_eq!(server(d), Some(Server::Swoole));
+        fs::write(d.join(".env"), "OCTANE_SERVER=roadrunner\n").unwrap();
+        assert_eq!(server(d), Some(Server::RoadRunner));
+    }
+
+    /// A Laravel app on `php` in `dir` asking for FrankenPHP.
+    fn frankenphp_app(dir: &Path, php: &str) -> Site {
+        fs::write(
+            dir.join("composer.json"),
+            r#"{"require": {"laravel/octane": "^2.22"}}"#,
+        )
+        .unwrap();
+        fs::write(dir.join(".env"), "OCTANE_SERVER=frankenphp\n").unwrap();
+        let mut s = crate::tests::site("shop", dir.to_str().unwrap(), Some(php));
+        s.kind = "laravel".into();
+        s
+    }
+
+    #[test]
+    fn frankenphp_runs_only_its_own_php() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        let app = tempfile::tempdir().unwrap();
+        let mut s = frankenphp_app(app.path(), "8.4");
+        let err = command(&s, Server::FrankenPhp, 49001, Some(49002)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "FrankenPHP runs PHP 8.5; this app is on 8.4"
+        );
+        // The row says so when started, before any download.
+        let cfg = crate::Config::default();
+        let row = crate::processes::octane_row(&cfg, &s).unwrap();
+        assert_eq!(
+            prepare(&s, &row).unwrap_err().to_string(),
+            "FrankenPHP runs PHP 8.5; this app is on 8.4"
+        );
+        assert!(!dir(Server::FrankenPhp).exists(), "nothing downloaded");
+        s.php = None;
+        assert!(command(&s, Server::FrankenPhp, 49001, None).is_err());
+        s.php = Some("8.5".into());
+        assert!(command(&s, Server::FrankenPhp, 49001, None).is_ok());
+        unsafe { std::env::remove_var("ANVIL_HOME") };
+    }
+
+    #[test]
+    fn frankenphp_gets_admin_port() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        let app = tempfile::tempdir().unwrap();
+        let mut s = frankenphp_app(app.path(), "8.5");
+        let file = caddyfile(&s);
+        assert_eq!(
+            command(&s, Server::FrankenPhp, 49001, Some(49002)).unwrap(),
+            format!(
+                "php artisan octane:start --server=frankenphp --host=127.0.0.1 --port=49001 --workers=2 --admin-port=49002 --caddyfile={}",
+                crate::shims::sh_quote(&file.display().to_string())
+            )
+        );
+        let mut cfg = crate::Config::default();
+        let row = crate::processes::octane_row(&cfg, &s).unwrap();
+        let (port, admin) = crate::processes::octane_ports(&cfg, &s);
+        assert!(row.command.contains(&format!("--port={port} ")));
+        assert!(row.command.contains(&format!("--admin-port={admin} ")));
+
+        // Octane's own Caddyfile, bound to 127.0.0.1 rather than every interface.
+        assert_eq!(
+            write_caddyfile(&s).unwrap_err().to_string(),
+            "laravel/octane isn't in vendor yet: run composer install"
+        );
+        let stubs = app.path().join("vendor/laravel/octane/src/Commands/stubs");
+        fs::create_dir_all(&stubs).unwrap();
+        fs::write(
+            stubs.join("Caddyfile"),
+            "{\n\t{$CADDY_GLOBAL_OPTIONS}\n}\n\n{$CADDY_SERVER_SERVER_NAME} {\n}\n",
+        )
+        .unwrap();
+        write_caddyfile(&s).unwrap();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "{\n\tdefault_bind 127.0.0.1\n\n\t{$CADDY_GLOBAL_OPTIONS}\n}\n\n{$CADDY_SERVER_SERVER_NAME} {\n}\n"
+        );
+
+        // php.ini values reach FrankenPHP's PHP; Anvil's extensions, built for its own, don't.
+        crate::phpext::tests::fake_php("8.5", "8.5.1");
+        crate::phpext::tests::fake_so("8.5", "8.5.1", "apcu");
+        cfg.php_ext.insert("8.5".into(), vec!["apcu".into()]);
+        cfg.ini.insert("memory_limit".into(), "1G".into());
+        s.ini.insert("upload_max_filesize".into(), "64M".into());
+        let env = crate::apps::process_env(&s, &row, &cfg).unwrap();
+        let get = |k: &str| env.iter().find(|(x, _)| x == k).map(|(_, v)| v.clone());
+        let scan = get("PHP_INI_SCAN_DIR").unwrap();
+        let ini = fs::read_to_string(Path::new(scan.split(':').next().unwrap()).join("anvil.ini"))
+            .unwrap();
+        assert!(ini.contains("memory_limit=1G\n"), "{ini}");
+        assert!(ini.contains("upload_max_filesize=64M\n"), "{ini}");
+        assert!(!ini.contains("extension="), "{ini}");
+        assert_eq!(
+            env.iter().filter(|(k, _)| k == "PHP_INI_SCAN_DIR").count(),
+            1
+        );
+        let data = home
+            .path()
+            .join("octane/frankenphp/data")
+            .display()
+            .to_string();
+        assert_eq!(
+            get("XDG_CONFIG_HOME"),
+            Some(data.clone()),
+            "not the user's Caddy's"
+        );
+        assert_eq!(get("XDG_DATA_HOME"), Some(data));
+        let path = get("PATH").unwrap();
+        assert!(path.starts_with(&format!("{}:", dir(Server::FrankenPhp).display())));
+        unsafe { std::env::remove_var("ANVIL_HOME") };
+    }
+
+    #[test]
+    fn binary_sum_mismatch_refuses() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        // A release archive as RoadRunner ships it: rr inside a folder of its own.
+        let src = home.path().join("src");
+        fs::create_dir_all(src.join("roadrunner-x")).unwrap();
+        fs::write(src.join("roadrunner-x/rr"), "#!/bin/sh\n").unwrap();
+        let tgz = home.path().join("rr.tar.gz");
+        crate::run(
+            crate::platform::command("tar")
+                .arg("-czf")
+                .arg(&tgz)
+                .arg("-C")
+                .arg(&src)
+                .arg("roadrunner-x"),
+        )
+        .unwrap();
+        let url = format!("file://{}", tgz.display());
+        let dir = home.path().join("octane/roadrunner/x");
+        let bad = "0".repeat(64);
+        let err = install(&url, &bad, &dir, false).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "The download of rr.tar.gz didn't match its published checksum"
+        );
+        assert!(!dir.exists(), "nothing of it is kept");
+        let out = crate::platform::command("openssl")
+            .args(["dgst", "-sha256", "-r"])
+            .arg(&tgz)
+            .output()
+            .unwrap();
+        let sum = String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_string();
+        let rr = install(&url, &sum, &dir, false).unwrap();
+        assert_eq!(rr, dir.join("rr"));
+        assert!(rr.is_file());
+        // Octane's own .rr.yaml would land in the project: Anvil's empty one is used instead.
+        assert!(dir.join("rr.yaml").is_file());
+        // Once there, it isn't fetched again.
+        fs::remove_file(&tgz).unwrap();
+        assert_eq!(install(&url, &sum, &dir, false).unwrap(), rr);
+        unsafe { std::env::remove_var("ANVIL_HOME") };
+    }
+}
