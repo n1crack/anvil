@@ -26,6 +26,9 @@ contain breaking changes.
 
 ### Changed
 
+- Settings: the sidebar is grouped (app, Languages, Plugins), and a plugin that is on gets its own page.
+- Settings › PHP: each version's extensions, OPcache included, in a list behind "Extensions n/6"; building OPcache asks first.
+- Settings: Make default and Uninstall are quiet text actions; Uninstall asks in the row.
 - Switches show a muted green when on.
 - Sidebar: worktrees fold under their app; a lock shows HTTP or HTTPS.
 - Packages tab: key packages as badges, with Check outdated and Check security.

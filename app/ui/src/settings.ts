@@ -86,7 +86,7 @@ function versionRow(
   v: { installed: boolean; default?: boolean; pinned_by?: string[] },
   busy: boolean,
   blocked: boolean,
-  act: { install: () => void; uninstall: () => void; makeDefault?: () => void },
+  act: { install: () => void; uninstall: () => void; makeDefault?: () => void; note?: string },
   extra?: { slot: HTMLElement; error?: HTMLElement; below?: HTMLElement },
 ) {
   const row = document.createElement("div");
@@ -116,12 +116,13 @@ function versionRow(
     actions.append(b);
   } else if (!v.default) {
     actions.classList.add("on-hover");
-    if (act.makeDefault) actions.append(button("Make default", act.makeDefault));
-    if (!pinned) {
-      const u = button("Uninstall", act.uninstall);
-      u.title = `Uninstall ${label}`;
-      actions.append(u);
-    }
+    const idle = () => {
+      const acts: HTMLElement[] = [];
+      if (act.makeDefault) acts.push(textAct("Make default", act.makeDefault));
+      if (!pinned) acts.push(textAct("Uninstall", () => confirmInRow(actions, `Uninstall? ${act.note ?? ""}`.trim(), "Uninstall", act.uninstall, idle)));
+      actions.replaceChildren(...acts);
+    };
+    idle();
   }
   row.append(name, actions);
   if (extra?.below) row.append(extra.below);
@@ -130,6 +131,27 @@ function versionRow(
     row.append(extra.error);
   }
   return row;
+}
+
+/** A quiet text action at a row's end: no button frame, brighter on hover. */
+function textAct(label: string, onClick: () => void) {
+  const b = Object.assign(document.createElement("button"), { className: "text-act", textContent: label, type: "button" });
+  b.onclick = onClick;
+  return b;
+}
+
+/** Asks in the row itself, no dialog: the question, Cancel, and the action in red text. */
+function confirmInRow(box: HTMLElement, question: string, label: string, onYes: () => void, restore: () => void) {
+  const yes = textAct(label, () => {
+    yes.disabled = no.disabled = true;
+    onYes();
+  });
+  yes.classList.add("danger");
+  const no = textAct("Cancel", restore);
+  box.classList.add("asking");
+  box.replaceChildren(Object.assign(document.createElement("span"), { className: "muted", textContent: question }), no, yes);
+  // Back to the row's actions once the mouse is elsewhere and nothing was chosen.
+  box.closest(".row")?.addEventListener("mouseleave", () => no.isConnected && !no.disabled && (box.classList.remove("asking"), restore()), { once: true });
 }
 
 async function loadRuntimes() {
@@ -158,6 +180,7 @@ function renderLanguages() {
           {
             install: () => installRuntime(rt.id, v),
             uninstall: () => uninstallRuntime(rt, v),
+            note: "Apps on it switch to another version.",
           },
         ),
       ),
@@ -181,11 +204,6 @@ async function installRuntime(id: string, version: string) {
 }
 
 async function uninstallRuntime(rt, v: string) {
-  const ok = await window.__TAURI__.dialog.ask(
-    `No application is pinned to it. Those using it automatically switch to another installed version, or stop starting until one is installed.`,
-    { title: `Uninstall ${rt.name} ${v}?`, kind: "warning", okLabel: "Uninstall", cancelLabel: "Cancel" },
-  );
-  if (!ok) return;
   try {
     await invoke("runtime_uninstall", { id: rt.id, version: v });
   } catch (e) {
@@ -247,7 +265,13 @@ function renderPackageManagers() {
         actions.append(b);
       } else if (pm.anvil) {
         actions.classList.add("on-hover");
-        actions.append(button("Uninstall", () => uninstallPm(pm.name)));
+        const idle = () =>
+          actions.replaceChildren(
+            textAct("Uninstall", () =>
+              confirmInRow(actions, "Uninstall? Apps find the next one on their PATH.", "Uninstall", () => pmAction(pm.name, "package_manager_uninstall", "Uninstalling…"), idle),
+            ),
+          );
+        idle();
       }
       row.append(name, where, actions);
       return row;
@@ -266,16 +290,6 @@ async function pmAction(name: string, cmd: string, label: string) {
   }
   pmBusy.delete(name);
   await loadPackageManagers();
-}
-
-async function uninstallPm(name: string) {
-  const ok = await window.__TAURI__.dialog.ask(`Apps that call ${name} find the next one on their PATH, if any.`, {
-    title: `Uninstall ${name}?`,
-    kind: "warning",
-    okLabel: "Uninstall",
-    cancelLabel: "Cancel",
-  });
-  if (ok) pmAction(name, "package_manager_uninstall", "Uninstalling…");
 }
 
 /* ---------- Storage ---------- */
@@ -602,6 +616,7 @@ export function render() {
   $("#mcp").checked = s.mcp;
   $("#mcp-line").hidden = !s.mcp;
   $("#tunnel").checked = s.tunnel;
+  pluginPages();
   renderMailCatcher();
   renderDbViewer();
   renderPresets();
@@ -636,18 +651,8 @@ export function render() {
             render();
           },
           makeDefault: () => call("set_default_php", { version: v.version }),
-          uninstall: async () => {
-            const ok = await window.__TAURI__.dialog.ask(
-              "No application is pinned to it. One whose .anvil.toml asks for it uses the default PHP version.",
-              {
-                title: `Uninstall PHP ${v.version}?`,
-                kind: "warning",
-                okLabel: "Uninstall",
-                cancelLabel: "Cancel",
-              },
-            );
-            if (ok) call("php_uninstall", { version: v.version });
-          },
+          uninstall: () => call("php_uninstall", { version: v.version }),
+          note: "Apps asking for it use the default.",
         },
         phpParts(v),
       ),
@@ -662,19 +667,31 @@ export function render() {
 const opcacheErrors = new Map<string, string>();
 const extErrors = new Map<string, string>(); // version -> why its last extension change failed
 
-/** OPcache's fixed slot after "PHP 8.x" (so Default and Pinned by stay aligned), the
- * Extensions line of an installed version and, after a failed build, the reason under
- * the row, with the tools when they are missing. */
+const extsOpen = new Set<string>(); // PHP versions whose extension list is open
+
+/** After "PHP 8.x", in a fixed slot so Default and Pinned by stay aligned: "Extensions 2/6",
+ * which opens the version's list below the row (OPcache first, then the catalog's). After
+ * a failed build, the reason under the row, with the tools when they are missing. */
 function phpParts(v: Settings["php"][number]) {
   const slot = Object.assign(document.createElement("span"), { className: "ver-opcache" });
-  if (installing.has(`opcache@${v.version}`) || v.opcache_building) {
-    slot.innerHTML = `<span class="spin-dot"></span><span class="muted">Adding OPcache…</span>`;
-  } else if (v.installed && v.opcache === "missing") {
-    slot.append(button("Add OPcache", () => addOpcache(v.version)));
-  } else if (v.installed) {
-    slot.textContent = "OPcache";
+  let below: HTMLElement | undefined;
+  if (v.installed) {
+    const open = extsOpen.has(v.version);
+    const on = v.extensions.filter((e) => e.on && e.built).length + (v.opcache === "missing" ? 0 : 1);
+    const busy = v.opcache_building || installing.has(`opcache@${v.version}`) || v.extensions.some((e) => e.building || installing.has(`ext@${v.version}@${e.name}`));
+    const t = Object.assign(document.createElement("button"), { type: "button", className: "ext-toggle" });
+    t.setAttribute("aria-expanded", String(open));
+    t.innerHTML = `<span></span><span class="chevron" aria-hidden="true">›</span>`;
+    t.firstElementChild!.textContent = `Extensions ${on}/${v.extensions.length + 1}`;
+    if (busy) t.prepend(Object.assign(document.createElement("span"), { className: "spin-dot" }));
+    t.onclick = () => {
+      if (open) extsOpen.delete(v.version);
+      else extsOpen.add(v.version);
+      render();
+    };
+    slot.append(t);
+    if (open) below = extensionsList(v);
   }
-  const below = v.installed ? extensionsLine(v) : undefined;
   const reason = opcacheErrors.get(v.version) ?? extErrors.get(v.version);
   if (!reason) return { slot, below };
   const error = Object.assign(document.createElement("div"), { className: "ver-error" });
@@ -683,25 +700,42 @@ function phpParts(v: Settings["php"][number]) {
   return { slot, error, below };
 }
 
-/** "Extensions" and a switch per catalog extension, on for every app on the version.
- * One being built says so on its label and holds its switch; one on without a build for
- * this PHP (a build that failed, a PHP installed since) shows off, "Not built": on builds it. */
-function extensionsLine(v: Settings["php"][number]) {
-  const line = Object.assign(document.createElement("div"), { className: "ver-exts" });
-  line.append(Object.assign(document.createElement("span"), { className: "ver-exts-label", textContent: "Extensions" }));
+/** A version's extensions, one line each. OPcache is built once for the version and then
+ * always on: unbuilt, "Build" asks first (minutes). The others switch on for every app on the
+ * version; one being built says so and holds its switch; one on without a build for this
+ * PHP (a failed build, a PHP installed since) shows off, "Not built": on builds it. */
+function extensionsList(v: Settings["php"][number]) {
+  const list = Object.assign(document.createElement("div"), { className: "ext-list" });
+  const op = Object.assign(document.createElement("div"), { className: "ext-line" });
+  const opName = Object.assign(document.createElement("span"), { className: "ext-name", textContent: "OPcache" });
+  const opEnd = Object.assign(document.createElement("span"), { className: "ext-end" });
+  if (installing.has(`opcache@${v.version}`) || v.opcache_building) {
+    opEnd.innerHTML = `<span class="spin-dot"></span><span class="muted">Building… a few minutes</span>`;
+  } else if (v.opcache === "missing") {
+    const idle = () =>
+      opEnd.replaceChildren(
+        Object.assign(document.createElement("span"), { className: "muted", textContent: "Not built" }),
+        textAct("Build", () => confirmInRow(opEnd, `Build OPcache for PHP ${v.version}? It takes a few minutes.`, "Build", () => addOpcache(v.version), idle)),
+      );
+    idle();
+  } else opEnd.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "On" }));
+  op.append(opName, opEnd);
+  list.append(op);
   for (const e of v.extensions) {
     const building = e.building || installing.has(`ext@${v.version}@${e.name}`);
     const unbuilt = e.on && !e.built && !building;
-    const label = Object.assign(document.createElement("label"), { className: "ver-ext" });
+    const line = Object.assign(document.createElement("label"), { className: "ext-line" });
+    const end = Object.assign(document.createElement("span"), { className: "ext-end" });
+    if (building) end.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Building…" }));
+    if (unbuilt) end.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Not built" }));
     const input = Object.assign(document.createElement("input"), { type: "checkbox", checked: e.on && !unbuilt, disabled: building });
     input.setAttribute("role", "switch");
     input.onchange = () => setExtension(v.version, e.name, input.checked);
-    label.append(input, Object.assign(document.createElement("span"), { className: "ver-ext-name", textContent: e.name }));
-    if (building) label.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Building…" }));
-    if (unbuilt) label.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Not built" }));
-    line.append(label);
+    end.append(input);
+    line.append(Object.assign(document.createElement("span"), { className: "ext-name", textContent: e.name }), end);
+    list.append(line);
   }
-  return line;
+  return list;
 }
 
 /** On builds the extension first unless it is built for this PHP (seconds to a minute),
@@ -823,6 +857,17 @@ $("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.c
 $("#mcp").onchange = (e) => call("set_mcp", { on: e.target.checked });
 $("#tunnel").onchange = (e) => call("set_tunnel", { on: e.target.checked });
 $("#mail-catcher").onchange = (e) => call("set_mail_catcher", { on: e.target.checked });
+
+/** A plugin that is on has a page of its own under Plugins in the sidebar; turned off
+ * while it's shown, the list of plugins takes its place. */
+function pluginPages() {
+  const on = { "plugin-mcp": s.mcp, "plugin-tunnel": s.tunnel, "plugin-mail": s.mail_catcher, "plugin-db": s.db_viewer || !!dbViewerBusy };
+  for (const [page, shown] of Object.entries(on)) {
+    const b = $(`.nav [data-page="${page}"]`);
+    b.hidden = !shown;
+    if (!shown && b.getAttribute("aria-current") === "true") $('.nav [data-page="plugins"]').click();
+  }
+}
 
 /** Settings › Plugins › Database viewer: turning it on downloads Adminer first, said in
  * its own line; a failure shows there and leaves it off. */

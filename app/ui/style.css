@@ -1310,10 +1310,15 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 /* A macOS source list: icon and name, a rounded neutral fill on the selected row. */
 .nav {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 1px;
   padding: 0 10px;
 }
+/* The settings' list fills the sidebar: About sits at its foot. */
+.settings .nav { flex: 1; min-height: 0; padding-bottom: 12px; overflow-y: auto; }
+.nav-fill { flex: 1; min-height: 14px; }
+.nav button[hidden] { display: none; }
 
 .nav button {
   display: flex;
@@ -1418,7 +1423,32 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .ver-opcache + .ver-pinned { margin-left: 0; }
 
 .page .row.ver.has-error,
-.page .row.ver:has(.ver-exts) { flex-wrap: wrap; }
+.page .row.ver:has(.ver-exts),
+.page .row.ver:has(.ext-list) { flex-wrap: wrap; }
+
+/* PHP: "Extensions 2/6 ›" after the version opens its list under the row. */
+.ext-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--steel-raised);
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ext-toggle:hover { color: var(--text); }
+.ext-toggle .chevron { display: inline-block; transition: transform 0.2s ease; }
+.ext-toggle[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+.ext-list { display: grid; flex-basis: 100%; margin: 6px 0 4px 24px; border-top: 1px solid var(--line); }
+.ext-line { display: flex; align-items: center; justify-content: space-between; min-height: 32px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.ext-line:last-child { border-bottom: 0; }
+.ext-end { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; }
+.ext-line input[type="checkbox"][role="switch"] { transform: scale(0.8); transform-origin: right center; }
+.ext-line input:disabled { opacity: 0.45; }
 
 /* PHP: the version's extensions, a small switch each, lined up under the version. */
 .ver-exts {
@@ -1464,7 +1494,8 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .ver .on-hover { visibility: hidden; }
 
 .ver:hover .on-hover,
-.ver:focus-within .on-hover { visibility: visible; }
+.ver:focus-within .on-hover,
+.actions-inline.on-hover.asking { visibility: visible; }
 
 .ver .spin-dot { color: var(--muted); }
 
@@ -3353,3 +3384,16 @@ html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui
   padding: 8px 0;
   background: var(--steel-pane);
 }
+
+/* A row's quiet actions (Make default, Uninstall): text, no frame; a question asked in the
+ * row ends in the action in red text. */
+.page button.text-act,
+.text-act { height: 22px; padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 12px; }
+.page button.text-act:hover,
+.text-act:hover { background: none; color: var(--text); }
+.page button.text-act.danger,
+.text-act.danger { color: var(--danger); font-weight: 600; }
+.text-act:disabled { opacity: 0.5; }
+.actions-inline:has(.text-act) { gap: 12px; }
+.actions-inline.asking { font-size: 12px; white-space: nowrap; }
+.ver .ver-name { white-space: nowrap; }

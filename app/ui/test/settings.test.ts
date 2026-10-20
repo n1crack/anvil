@@ -40,20 +40,22 @@ describe("sidebar", () => {
     expect(head.tagName).not.toBe("BUTTON");
     // Windows-only pages (Performance) are in the markup but hidden on macOS and Linux.
     expect($$(".nav button.windows-only").map((b) => b.dataset.page)).toEqual(["performance"]);
-    expect(text(".nav button:not(.windows-only)")).toEqual([
+    // The app's pages, then Languages, then Plugins (a page per plugin that is on), About at the foot.
+    expect(text(".nav button:not(.windows-only):not([hidden])")).toEqual([
       "General",
+      "Worktrees",
+      "Storage",
+      "Shortcuts",
       "PHP",
       "Node.js",
       "Go",
       "Rust",
       ".NET",
       "Python",
-      "Worktrees",
-      "Storage",
-      "Plugins",
-      "Shortcuts",
+      "All plugins",
       "About",
     ]);
+    expect(text(".nav-head")).toEqual(["Languages", "Plugins"]);
     expect($$(".nav button").every((b) => b.querySelector("svg"))).toBe(true);
     expect($("[data-page='languages']")).toBeNull();
     // Each language its own glyph, drawn in currentColor by the stylesheet (no fill of its own).
@@ -73,8 +75,13 @@ describe("versions", () => {
     expect(def.classList.contains("is-default")).toBe(true);
     expect(def.querySelector(".ver-mark svg")).not.toBeNull();
     expect(def.querySelector(".ver-default")?.textContent).toBe("Default");
-    expect(def.querySelectorAll("button").length).toBe(0);
-    expect([...rows[0].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Make default", "Uninstall"]);
+    expect(def.querySelectorAll(".actions-inline button").length).toBe(0);
+    expect([...rows[0].querySelectorAll(".actions-inline button")].map((b) => b.textContent)).toEqual(["Make default", "Uninstall"]);
+    // Uninstall asks in the row, no dialog; Cancel puts the actions back.
+    (rows[0].querySelectorAll(".actions-inline button")[1] as HTMLElement).click();
+    expect(rows[0].querySelector(".actions-inline")!.textContent).toBe("Uninstall? Apps asking for it use the default.CancelUninstall");
+    (rows[0].querySelectorAll(".actions-inline button")[0] as HTMLElement).click();
+    expect([...rows[0].querySelectorAll(".actions-inline button")].map((b) => b.textContent)).toEqual(["Make default", "Uninstall"]);
     for (const r of rows.slice(2)) {
       expect(r.classList.contains("missing")).toBe(true);
       expect([...r.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Install"]);
@@ -88,7 +95,7 @@ describe("versions", () => {
       await open("php");
       const row = $$("#versions .ver")[0];
       expect(row.querySelector(".ver-pinned")?.textContent).toBe("Pinned by shop");
-      expect([...row.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Make default"]);
+      expect([...row.querySelectorAll(".actions-inline button")].map((b) => b.textContent)).toEqual(["Make default"]);
     } finally {
       delete w.mockPhpPins;
       w.refresh();
@@ -98,12 +105,12 @@ describe("versions", () => {
 
   test("installing shows progress in the row and holds the other Install buttons", async () => {
     w.mockDelay.php_install = 100;
-    $$("#versions .ver")[2].querySelector("button")!.click();
+    ($$("#versions .ver")[2].querySelector(".actions-inline button") as HTMLElement).click();
     await wait(10);
     const rows = $$("#versions .ver");
     expect(rows[2].querySelector(".spin-dot")).not.toBeNull();
     expect(rows[2].textContent).toContain("Installing…");
-    expect((rows[3].querySelector("button") as HTMLButtonElement).disabled).toBe(true);
+    expect((rows[3].querySelector(".actions-inline button") as HTMLButtonElement).disabled).toBe(true);
     await wait(150);
   });
 
@@ -126,49 +133,74 @@ describe("versions", () => {
     }
   }
 
-  test("row_shows_opcache_state: OPcache on built-in and ready versions, Add OPcache on a missing one", () =>
+  const toggle = (v: string) => phpRow(v).querySelector(".ext-toggle") as HTMLElement | null;
+  async function openExts(v: string) {
+    if (toggle(v)!.getAttribute("aria-expanded") !== "true") toggle(v)!.click();
+    await wait(10);
+  }
+  const lines = (v: string) => [...phpRow(v).querySelectorAll<HTMLElement>(".ext-line")];
+  const line = (v: string, name: string) => lines(v).find((l) => l.querySelector(".ext-name")?.textContent === name)!;
+  const exts = (v: string) =>
+    lines(v)
+      .slice(1)
+      .map((l) => ({
+        name: l.querySelector(".ext-name")?.textContent,
+        on: (l.querySelector("input[role=switch]") as HTMLInputElement).checked,
+        text: l.textContent,
+      }));
+  const extSwitch = (v: string, name: string) => line(v, name).querySelector("input") as HTMLInputElement;
+
+  test("row_shows_opcache_state: Extensions n/6 after an installed version opens its list, OPcache first", () =>
     withOpcache83(async () => {
-      expect(phpRow("8.5").querySelector(".ver-opcache")?.textContent).toBe("OPcache");
-      expect(phpRow("8.4").querySelector(".ver-opcache")?.textContent).toBe("OPcache");
-      expect(buttons(phpRow("8.5"))).not.toContain("Add OPcache");
-      const r83 = phpRow("8.3");
-      expect(r83.querySelector(".ver-opcache")?.textContent).toBe("Add OPcache");
-      expect(r83.querySelector(".ver-opcache button")).not.toBeNull();
-      // Not installed: nothing about OPcache.
-      expect(phpRow("8.2").querySelector(".ver-opcache")?.textContent).toBe("");
+      expect(toggle("8.5")!.textContent).toBe("Extensions 1/6›");
+      expect(toggle("8.3")!.textContent).toBe("Extensions 0/6›");
+      // Not installed: nothing about extensions.
+      expect(toggle("8.2")).toBeNull();
+      expect(lines("8.5").length).toBe(0);
+      await openExts("8.5");
+      expect(lines("8.5").map((l) => l.querySelector(".ext-name")!.textContent)).toEqual(["OPcache", "xdebug", "pcov", "apcu", "igbinary", "msgpack"]);
+      expect(line("8.5", "OPcache").textContent).toBe("OPcacheOn");
+      await openExts("8.3");
+      expect(line("8.3", "OPcache").textContent).toBe("OPcacheNot builtBuild");
     }));
 
-  test("a window opened during a build says Adding OPcache… too", () =>
+  test("a window opened during a build says Building… on OPcache too", () =>
     withOpcache83(async () => {
       w.mockOpcacheBuilding = ["8.3"];
       try {
         w.refresh();
         await open("php");
-        expect(phpRow("8.3").querySelector(".ver-opcache")?.textContent).toBe("Adding OPcache…");
-        expect(buttons(phpRow("8.3"))).not.toContain("Add OPcache");
+        expect(toggle("8.3")!.querySelector(".spin-dot")).not.toBeNull();
+        await openExts("8.3");
+        expect(line("8.3", "OPcache").textContent).toBe("OPcacheBuilding… a few minutes");
       } finally {
         delete w.mockOpcacheBuilding;
       }
     }));
 
-  test("add_opcache_is_inline: Adding OPcache… on the row until it resolves, then OPcache", () =>
+  test("add_opcache_is_inline: Build asks in the row, then Building… until it resolves, then On", () =>
     withOpcache83(async () => {
       w.mockDelay.php_opcache = 100;
-      (phpRow("8.3").querySelector(".ver-opcache button") as HTMLButtonElement).click();
+      await openExts("8.3");
+      (line("8.3", "OPcache").querySelector(".text-act") as HTMLElement).click();
+      expect(w.mockCalls.at(-1)?.[0]).not.toBe("php_opcache");
+      expect(line("8.3", "OPcache").textContent).toBe("OPcacheBuild OPcache for PHP 8.3? It takes a few minutes.CancelBuild");
+      (line("8.3", "OPcache").querySelector(".text-act.danger") as HTMLElement).click();
       await wait(10);
       expect(w.mockCalls.at(-1)).toEqual(["php_opcache", { version: "8.3" }]);
-      expect(phpRow("8.3").querySelector(".ver-opcache")?.textContent).toBe("Adding OPcache…");
-      expect(phpRow("8.3").querySelector(".spin-dot")).not.toBeNull();
-      expect(buttons(phpRow("8.3"))).not.toContain("Add OPcache");
+      expect(line("8.3", "OPcache").textContent).toBe("OPcacheBuilding… a few minutes");
       await wait(150);
-      expect(phpRow("8.3").querySelector(".ver-opcache")?.textContent).toBe("OPcache");
+      expect(line("8.3", "OPcache").textContent).toBe("OPcacheOn");
+      expect(toggle("8.3")!.textContent).toBe("Extensions 1/6›");
       expect($$('[role="alert"]:not([hidden]), .toast').length).toBe(0);
     }));
 
   test("row_offers_the_tools: a build without the command line tools says so on the row and offers them", () =>
     withOpcache83(async () => {
       w.mockOpcacheError = "Building OPcache failed — OPcache needs the Xcode Command Line Tools: xcode-select --install";
-      (phpRow("8.3").querySelector(".ver-opcache button") as HTMLButtonElement).click();
+      await openExts("8.3");
+      (line("8.3", "OPcache").querySelector(".text-act") as HTMLElement).click();
+      (line("8.3", "OPcache").querySelector(".text-act.danger") as HTMLElement).click();
       await wait(30);
       const r = phpRow("8.3");
       expect(r.querySelector(".ver-error")?.textContent).toContain("xcode-select --install");
@@ -180,30 +212,19 @@ describe("versions", () => {
       expect(w.mockCalls.at(-1)).toEqual(["xcode_tools_install", undefined]);
     }));
 
-  const exts = (v: string) =>
-    [...(phpRow(v).querySelectorAll(".ver-ext") as NodeListOf<HTMLElement>)].map((l) => ({
-      name: l.querySelector(".ver-ext-name")?.textContent,
-      on: (l.querySelector("input[role=switch]") as HTMLInputElement).checked,
-      text: l.textContent,
-    }));
-  const extSwitch = (v: string, name: string) =>
-    [...phpRow(v).querySelectorAll(".ver-ext")]
-      .find((l) => l.querySelector(".ver-ext-name")?.textContent === name)!
-      .querySelector("input") as HTMLInputElement;
-
-  test("extensions_switches_per_version: the catalog as switches under each installed version only", () =>
+  test("extensions_switches_per_version: the catalog as switches in each installed version's list", () =>
     withOpcache83(async () => {
       w.mockExt = { "8.4": ["xdebug"] };
       w.refresh();
       await open("php");
       try {
-        expect(phpRow("8.4").querySelector(".ver-exts-label")?.textContent).toBe("Extensions");
+        expect(toggle("8.4")!.textContent).toBe("Extensions 2/6›");
+        await openExts("8.4");
+        await openExts("8.3");
         expect(exts("8.4")).toEqual(
           ["xdebug", "pcov", "apcu", "igbinary", "msgpack"].map((name) => ({ name, on: name === "xdebug", text: name })),
         );
         expect(exts("8.3").every((e) => !e.on)).toBe(true);
-        // Not installed: no Extensions line.
-        expect(phpRow("8.2").querySelector(".ver-exts")).toBeNull();
         // Off: one call, for that version and extension.
         extSwitch("8.4", "xdebug").click();
         await wait(30);
@@ -225,10 +246,11 @@ describe("versions", () => {
       }
     }));
 
-  test("building_is_inline: Building… on the switch's label until it resolves; an error under the row", () =>
+  test("building_is_inline: Building… on the extension's line until it resolves; an error under the row", () =>
     withOpcache83(async () => {
       w.mockDelay.php_ext = 100;
       try {
+        await openExts("8.4");
         extSwitch("8.4", "apcu").click();
         await wait(10);
         expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "apcu", on: true }]);
@@ -387,6 +409,25 @@ describe("plugins", () => {
     box.dispatchEvent(new Event("change"));
     await wait();
     expect($("#mcp-line").hidden).toBe(true);
+  });
+
+  test("a plugin that is on gets its page under Plugins; turned off while shown, All plugins takes its place", async () => {
+    await open("plugins");
+    const nav = () => text(".nav button.plugin-nav:not([hidden])");
+    expect(nav()).toEqual([]);
+    const box = $("#tunnel") as HTMLInputElement;
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    await wait();
+    expect(nav()).toEqual(["Tunnel"]);
+    await open("plugin-tunnel");
+    expect($("#plugin-tunnel").hidden).toBe(false);
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    await wait();
+    expect(nav()).toEqual([]);
+    expect($("#plugins").hidden).toBe(false);
+    expect($('.nav [data-page="plugins"]').getAttribute("aria-current")).toBe("true");
   });
 
   test("Tunnel is off until switched on", async () => {
