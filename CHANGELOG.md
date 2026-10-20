@@ -23,6 +23,17 @@ Until 1.0.0, minor versions may contain breaking changes.
   the public host; a Laravel app that doesn't trust proxies is told its links
   still point to `<app>.test`. `anvil app share <app>` does the same in a
   terminal until Ctrl-C.
+- Mail catcher (`mail_catcher = true`): an SMTP listener on 127.0.0.1
+  (`mail_port`, 2525 by default) inside the app and `anvil start` that only
+  accepts and stores, never relays. Each app's processes, terminal PHP and web
+  requests get `MAIL_MAILER=smtp`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME=<app>`
+  (and `MAIL_URL`, `MAILER_DSN`), which win over `.env` in Laravel and Symfony,
+  so each app's mail lands in an inbox of its own under `~/.anvil/mail/<app>`;
+  mail from no known app goes to `_other`. Test runs keep their own mailer
+  (phpunit.xml's `MAIL_MAILER=array`). An inbox keeps its newest 500 messages
+  or 50 MB; Disk lists them as cleanable. `anvil app mail <app>` lists the
+  latest, `--open <id>` prints one with its files and links. A taken port is
+  reported and the web server runs on without it.
 - Mail: an app whose `.env` sends mail to an Anvil Mailpit (`MAIL_MAILER=smtp`
   to this computer on that Mailpit's SMTP port) gets a Mail line on its
   Overview: Open inbox while Mailpit runs, Start while it doesn't. Other apps

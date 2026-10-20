@@ -10,6 +10,7 @@ pub mod databases;
 pub mod dns;
 pub mod git;
 pub mod logs;
+pub mod mail;
 pub mod mcp;
 pub mod octane;
 pub mod opcache;
@@ -129,6 +130,13 @@ pub struct Config {
     /// Settings › Plugins › Tunnel: an app's Overview offers Share (`tunnel`). Stored only when on.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub tunnel: bool,
+    /// Settings › Plugins › Mail catcher (`mail`): an SMTP listener with an inbox per app.
+    /// Stored only when on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mail_catcher: bool,
+    /// The catcher's SMTP port; unset is `mail::DEFAULT_PORT`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mail_port: Option<u16>,
     /// Settings › PHP › Extensions: catalog extensions (`phpext::CATALOG`) loaded for
     /// every app on a version, by minor version. Stored only when there are some.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -173,6 +181,9 @@ pub struct SiteConfig {
     /// The app's own worktree hooks (its Settings tab), over `.anvil.toml`'s and the preset's.
     #[serde(default, skip_serializing_if = "worktrees::Hooks::is_empty")]
     pub worktree: worktrees::Hooks,
+    /// The Mail tab's "Don't catch": the app keeps its own mail setup while the catcher is on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mail_uncaught: bool,
 }
 
 /// What the user changed about one process of an app (see `processes::set_process`).
@@ -236,6 +247,8 @@ impl Default for Config {
             worktrees: BTreeMap::new(),
             mcp: false,
             tunnel: false,
+            mail_catcher: false,
+            mail_port: None,
             php_ext: BTreeMap::new(),
         }
     }
@@ -643,6 +656,8 @@ fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
         processes: BTreeMap::new(),
         // The app's, read through `worktree_of` (`worktrees::hooks`).
         worktree: worktrees::Hooks::default(),
+        // A worktree has an inbox of its own, so its own switch.
+        mail_uncaught: o.is_some_and(|s| s.mail_uncaught),
     }
 }
 
@@ -1843,7 +1858,18 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             open(site, &names),
             caddy_path(&site.root)
         );
-        let fpm = php_upstream(site).map(|upstream| format!("php_fastcgi {upstream}\n"));
+        // The mail catcher's env as FastCGI params: no pool of its own needed, and
+        // PHP-FPM and Windows' php-cgi read them alike (Laravel: `$_SERVER` over `.env`).
+        let mail = mail::env(cfg, site);
+        let fpm = php_upstream(site).map(|upstream| match mail.is_empty() {
+            true => format!("php_fastcgi {upstream}\n"),
+            false => format!(
+                "php_fastcgi {upstream} {{\n{}\t}}\n",
+                mail.iter()
+                    .map(|(k, v)| format!("\t\tenv {k} \"{v}\"\n"))
+                    .collect::<String>()
+            ),
+        });
         // Octane's row while it runs; PHP-FPM when it doesn't answer (stopped, crashed).
         // A file served for an error keeps the error's status unless told otherwise.
         if let Some(port) = processes::octane_row(cfg, site).and_then(|p| p.port) {
@@ -2597,6 +2623,10 @@ pub struct Server {
     children: Vec<Child>,
     /// What each child is, parallel to `children`.
     labels: Vec<String>,
+    /// Settings › Plugins › Mail catcher's SMTP listener, while it's on.
+    mail: Option<mail::Listener>,
+    /// Why the mail catcher isn't listening though it's on (its port is taken).
+    pub mail_error: Option<String>,
 }
 
 impl Server {
@@ -2626,6 +2656,8 @@ impl Server {
         let mut server = Server {
             children: vec![],
             labels: vec![],
+            mail: None,
+            mail_error: None,
         };
         for v in versions.iter().filter(|_| cfg!(windows)) {
             server.start_cgi(cfg, v, &sites)?;
@@ -2692,6 +2724,15 @@ impl Server {
             }))
             .collect();
         fs::write(pid_file(), pids.join("\n"))?;
+
+        // The web server runs without it: the error shows in Settings and the Mail tab.
+        if cfg.mail_catcher {
+            let apps = sites.iter().map(|s| s.name.clone()).collect();
+            match mail::listen(mail::port(cfg), mail::root(), apps) {
+                Ok(l) => server.mail = Some(l),
+                Err(e) => server.mail_error = Some(format!("{e:#}")),
+            }
+        }
 
         // ponytail: the DNS port is bound once per process; changing dns_port needs a restart of the process.
         *DNS_TLD.write().unwrap_or_else(|e| e.into_inner()) = cfg.tld.clone();
@@ -2811,6 +2852,7 @@ impl Server {
     /// first, the pid it names.
     pub fn take_all(&mut self) -> Vec<Stopping> {
         self.labels.clear();
+        self.mail = None;
         let mut files = vec![pid_file()];
         self.children
             .drain(..)
@@ -2981,6 +3023,8 @@ mod tests {
         let mut server = Server {
             children: vec![spawn("sleep 30"), spawn("exit 3")],
             labels: vec!["PHP 8.4 FPM".into(), "Caddy".into()],
+            mail: None,
+            mail_error: None,
         };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let why = loop {
@@ -4212,6 +4256,30 @@ mod tests {
             "\tphp_fastcgi unix/{}\n\tfile_server",
             sock.display()
         )));
+    }
+
+    #[test]
+    fn php_gets_the_mail_catchers_env_from_caddy() {
+        // FastCGI params: PHP-FPM's shared pool and Windows' php-cgi read them alike.
+        let sites = [
+            site("shop", "/s/shop/public", Some("8.4")),
+            site("blog", "/s/blog", Some("8.4")),
+        ];
+        let mut cfg = Config::default();
+        assert!(!caddyfile(&cfg, &sites).contains("MAIL_"));
+        cfg.mail_catcher = true;
+        cfg.sites.entry("blog".into()).or_default().mail_uncaught = true;
+        let out = caddyfile(&cfg, &sites);
+        let shop = &out[out.find("shop.test").unwrap()..out.find("blog.test").unwrap()];
+        assert!(
+            shop.contains(" {\n\t\tenv MAIL_MAILER \"smtp\"\n"),
+            "{shop}"
+        );
+        assert!(shop.contains("\t\tenv MAIL_USERNAME \"shop\"\n"), "{shop}");
+        assert!(!out[out.find("blog.test").unwrap()..].contains("MAIL_"));
+        // A changed port re-serves.
+        cfg.mail_port = Some(2600);
+        assert!(caddyfile(&cfg, &sites).contains("env MAIL_PORT \"2600\""));
     }
 
     #[test]

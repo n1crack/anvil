@@ -1142,6 +1142,13 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
         "Only history; new lines keep coming",
     ));
     entries.push((
+        "Caught mail".into(),
+        crate::mail::root(),
+        "Logs",
+        Safety::Safe,
+        "The mail catcher's inboxes; each keeps its newest 500 or 50 MB",
+    ));
+    entries.push((
         "Build leftovers".into(),
         h.join("build"),
         "Cache",
@@ -1190,6 +1197,7 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
         h.join("build"),
         h.join("octane"),
         h.join("tunnel"),
+        crate::mail::root(),
         crate::phpext::tools_dir(),
     ]
     .contains(&p)
@@ -1520,11 +1528,15 @@ mod tests {
         let cf = dir.path().join("tunnel/2026.10.2");
         std::fs::create_dir_all(&cf).unwrap();
         std::fs::write(cf.join("cloudflared"), vec![1u8; 5_000]).unwrap();
+        let inbox = dir.path().join("mail/shop");
+        std::fs::create_dir_all(&inbox).unwrap();
+        std::fs::write(inbox.join("1-0.eml"), vec![1u8; 5_000]).unwrap();
         let (_, items) = anvil_disk();
         for (label, gone) in [
             ("Build tools", &tools),
             ("Octane servers", &rr),
             ("Tunnel (cloudflared)", &cf),
+            ("Caught mail", &inbox),
         ] {
             let item = items.iter().find(|i| i.label == label).unwrap();
             assert!(item.safety == Safety::Safe);

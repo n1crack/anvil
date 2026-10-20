@@ -429,10 +429,19 @@ enum AppCmd {
         site: String,
         process: Option<String>,
     },
-    /// The inbox address of the Anvil Mailpit the app's .env sends mail to
-    Mail { site: String },
     /// Share the app at a temporary public address (a Cloudflare quick tunnel) until Ctrl-C
     Share { site: String },
+    /// The app's latest mails, oldest first, while the mail catcher (Settings › Plugins)
+    /// catches them; else the inbox address of the Anvil Mailpit its .env sends to
+    Mail {
+        site: String,
+        /// Print one message: its headers, attachments, links and text
+        #[arg(long, value_name = "ID")]
+        open: Option<String>,
+        /// How many mails
+        #[arg(short, default_value_t = 20)]
+        n: usize,
+    },
     /// The latest requests Caddy served for the app, oldest first: time, method, status,
     /// duration, size and path. Static assets (Vite's, Next's, maps) only with --assets
     Requests {
@@ -552,6 +561,15 @@ fn start(cfg: &Config) -> Result<()> {
     }
     for c in site_name_clashes(cfg) {
         eprintln!("  {}", yellow(c));
+    }
+    match &server.mail_error {
+        Some(e) => eprintln!("  {}", style::error(e)),
+        None if now.mail_catcher => println!(
+            "  {} on {}",
+            green("Mail catcher"),
+            cyan(format!("127.0.0.1:{}", anvil::mail::port(&now)))
+        ),
+        None => {}
     }
     println!(
         "{}, logs in {}. Ctrl-C to stop.",
@@ -938,6 +956,44 @@ fn print_states(rows: &serde_json::Value, label: &str, keep: impl Fn(&serde_json
 
 /// `anvil app start|stop|restart <site> [<process>]`, done by the app.
 /// `14:02:33 POST   419    12 ms   1.2 KB /login`; the host only when it isn't the app's.
+fn human_size(b: u64) -> String {
+    match b {
+        b if b < 1024 => format!("{b} B"),
+        b if b < 1_048_576 => format!("{:.1} KB", b as f64 / 1024.0),
+        b => format!("{:.1} MB", b as f64 / 1_048_576.0),
+    }
+}
+
+/// One caught mail: who, what, its files and links, then its text (the HTML when it has none).
+fn print_mail(m: &anvil::mail::Message) {
+    let s = &m.summary;
+    let line = |k: &str, v: &str| {
+        if !v.is_empty() {
+            println!("{} {v}", dim(format!("{k:<8}")));
+        }
+    };
+    line("From", &s.from);
+    line("To", &s.to.join(", "));
+    line("Cc", &m.cc.join(", "));
+    line("Subject", &s.subject);
+    line("Date", m.date.as_deref().unwrap_or_default());
+    for a in m.attachments.iter().filter(|a| !a.inline) {
+        line(
+            "File",
+            &format!("{} ({}, {})", a.name, a.mime, human_size(a.size as u64)),
+        );
+    }
+    for l in &m.links {
+        line("Link", l);
+    }
+    println!();
+    match (&m.text, &m.html) {
+        (Some(t), _) => println!("{}", t.trim_end()),
+        (None, Some(h)) => println!("{}", h.trim_end()),
+        _ => println!("{}", dim("(no text)")),
+    }
+}
+
 fn print_request(r: &requests::Request, host: &str) {
     let at = r.ts as u64;
     let status = format!("{:<3}", r.status);
@@ -954,11 +1010,7 @@ fn print_request(r: &requests::Request, host: &str) {
     } else {
         format!("{:.2} s", ms / 1000.0)
     };
-    let size = match r.size {
-        b if b < 1024 => format!("{b} B"),
-        b if b < 1_048_576 => format!("{:.1} KB", b as f64 / 1024.0),
-        b => format!("{:.1} MB", b as f64 / 1_048_576.0),
-    };
+    let size = human_size(r.size);
     let own = r.host.split(':').next() == Some(host);
     println!(
         "{} {:<6} {status} {took:>8} {size:>8} {}{}",
@@ -1565,11 +1617,48 @@ fn run() -> Result<()> {
             AppCmd::Stop { site, process } => run_in_app(site, process, "stop")?,
             AppCmd::Restart { site, process } => run_in_app(site, process, "restart")?,
             AppCmd::Share { site } => share(&cfg, &site)?,
-            AppCmd::Mail { site } => {
+            AppCmd::Mail { site, open, n } => {
                 let s = sites(&cfg)
                     .into_iter()
                     .find(|s| s.name == site_name(&site))
                     .with_context(|| format!("No site named {site}"))?;
+                if anvil::mail::caught(&cfg, &s.name) {
+                    let dir = anvil::mail::root().join(&s.name);
+                    match open {
+                        Some(id) => print_mail(&anvil::mail::read(&dir, &id)?),
+                        None => {
+                            let all = anvil::mail::list(&dir);
+                            if all.is_empty() {
+                                println!("{}", dim(format!("No mail from {} yet", s.name)));
+                            }
+                            for m in all.iter().take(n).rev() {
+                                println!(
+                                    "{} {}  {}  {}  {}",
+                                    dim(format!(
+                                        "{}:{:02}",
+                                        platform::local_clock(m.ts / 1000),
+                                        m.ts / 1000 % 60
+                                    )),
+                                    cyan(&m.id),
+                                    m.to.join(", "),
+                                    bold(if m.subject.is_empty() {
+                                        "(no subject)"
+                                    } else {
+                                        &m.subject
+                                    }),
+                                    dim(human_size(m.size)),
+                                );
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
+                if open.is_some() {
+                    bail!(
+                        "Anvil doesn't catch {}'s mail: turn on Settings › Plugins › Mail catcher",
+                        s.name
+                    );
+                }
                 let id = resources::mailpit_for(&cfg, &s.path).with_context(|| {
                     format!(
                         "{}'s .env doesn't send mail to an Anvil Mailpit (MAIL_MAILER=smtp, MAIL_HOST=127.0.0.1, MAIL_PORT=its SMTP port)",

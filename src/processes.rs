@@ -1143,6 +1143,10 @@ pub fn env(cfg: &crate::Config, site: &Site, test: bool) -> anyhow::Result<Vec<(
     }
     env.push(("PATH".into(), path));
     env.extend(crate::worktrees::checked_env(cfg, site, test)?);
+    // Not a test run's: phpunit.xml's MAIL_MAILER=array doesn't replace a set variable.
+    if !test {
+        env.extend(crate::mail::env(cfg, site));
+    }
     Ok(env)
 }
 
@@ -1340,6 +1344,27 @@ mod tests {
             branch: None,
             aliases: vec![],
         }
+    }
+
+    #[test]
+    fn app_processes_send_to_the_mail_catcher_but_test_runs_dont() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Site {
+            php: None,
+            ..site(dir.path(), "node")
+        };
+        let cfg = crate::Config {
+            mail_catcher: true,
+            ..crate::Config::default()
+        };
+        let user = |test| {
+            env(&cfg, &s, test)
+                .unwrap()
+                .into_iter()
+                .any(|(k, v)| k == "MAIL_USERNAME" && v == "shop")
+        };
+        assert!(user(false));
+        assert!(!user(true));
     }
 
     #[test]

@@ -231,17 +231,24 @@ fn known_worktree(cfg: &Config, site: Option<&Site>, cwd: &Path) -> Result<()> {
 }
 
 /// A worktree's own database and prefixes (`worktrees::checked_env`), so a terminal
-/// `php artisan migrate` stays off the main app's; a test run's test database.
+/// `php artisan migrate` stays off the main app's; a test run's test database; the mail
+/// catcher's `MAIL_*`.
 fn extra_env(
     cfg: &Config,
     site: Option<&Site>,
     tool: &str,
     args: &[String],
 ) -> Result<Vec<(String, String)>> {
-    match site {
-        Some(s) => crate::worktrees::checked_env(cfg, s, is_test_run(tool, args)),
-        None => Ok(Vec::new()),
+    let Some(s) = site else {
+        return Ok(Vec::new());
+    };
+    let test = is_test_run(tool, args);
+    let mut env = crate::worktrees::checked_env(cfg, s, test)?;
+    // The mail catcher's, as the app's processes get it (`processes::env`).
+    if !test {
+        env.extend(crate::mail::env(cfg, s));
     }
+    Ok(env)
 }
 
 fn resolve_for(
@@ -659,6 +666,25 @@ mod tests {
             let (_, _, env) = resolve_with("php", &wt.join("app"), &cfg, false).unwrap();
             assert!(has_db(&env), "{env:?}");
         }
+    }
+
+    #[test]
+    fn a_terminal_php_sends_to_the_mail_catcher_but_a_test_run_doesnt() {
+        let site = crate::tests::site("shop", "/s/shop/public", Some("8.4"));
+        let cfg = Config {
+            mail_catcher: true,
+            ..Config::default()
+        };
+        let user = |args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+            extra_env(&cfg, Some(&site), "php", &args)
+                .unwrap()
+                .into_iter()
+                .any(|(k, v)| k == "MAIL_USERNAME" && v == "shop")
+        };
+        assert!(user(&["artisan", "tinker"]));
+        // phpunit.xml's MAIL_MAILER=array doesn't replace a set variable.
+        assert!(!user(&["artisan", "test"]));
     }
 
     #[test]
