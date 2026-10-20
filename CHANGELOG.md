@@ -39,6 +39,7 @@ contain breaking changes.
 
 ### Fixed
 
+- Share no longer says the web server isn't running when it is.
 - Tunnel: a shared app whose HTTPS is turned on keeps working at its public address.
 - An address no app has answers "No app at …" (404) instead of an empty page.
 - Apps inside a dot folder (`~/.sites/shop`) returned 404 for their files.

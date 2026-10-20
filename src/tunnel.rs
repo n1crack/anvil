@@ -95,9 +95,10 @@ pub fn ensure() -> Result<PathBuf> {
     Ok(bin())
 }
 
-/// cloudflared's arguments for `site`: Caddy on this computer with the app's Host. An
-/// HTTPS app's http:// redirects, so it goes to https with the name its certificate has
-/// (Anvil's own CA, which cloudflared doesn't know).
+/// cloudflared's arguments for `site`: Caddy on this computer with the app's Host, at
+/// the port a browser here uses (`port`). An HTTPS app's http:// redirects, so it goes
+/// to https with the name its certificate has (Anvil's own CA, which cloudflared
+/// doesn't know).
 fn args(cfg: &Config, site: &Site, config: &Path) -> Vec<String> {
     let mut a: Vec<String> = ["tunnel", "--no-autoupdate", "--config"]
         .map(String::from)
@@ -105,14 +106,26 @@ fn args(cfg: &Config, site: &Site, config: &Path) -> Vec<String> {
     a.push(config.display().to_string());
     a.push("--url".into());
     if site.secure {
-        a.push(format!("https://127.0.0.1:{}", cfg.https_port));
+        a.push(format!("https://127.0.0.1:{}", port(cfg, site)));
         a.extend(["--origin-server-name".into(), site.host.clone()]);
         a.push("--no-tls-verify".into());
     } else {
-        a.push(format!("http://127.0.0.1:{}", cfg.http_port));
+        a.push(format!("http://127.0.0.1:{}", port(cfg, site)));
     }
     a.extend(["--http-host-header".into(), site.host.clone()]);
     a
+}
+
+/// Where cloudflared reaches Caddy: 80 or 443 once pf forwards them, the way a browser
+/// here does. On macOS, connections straight to Caddy's own ports behind those rules
+/// can hang half-open (seen: every one to 127.0.0.1:8443 timing out, while 443 answered
+/// at once), which made Share say the web server wasn't running.
+fn port(cfg: &Config, site: &Site) -> u16 {
+    if site.secure {
+        crate::public_https_port(cfg)
+    } else {
+        crate::public_http_port(cfg)
+    }
 }
 
 /// The public address cloudflared printed.
@@ -250,11 +263,7 @@ impl Shares {
             if s.args != args(cfg, site, &config_file()) {
                 // A Caddy just started takes a moment to listen. Failing (the web server
                 // down), the tunnel is gone, as it would be then anyway.
-                let port = if site.secure {
-                    cfg.https_port
-                } else {
-                    cfg.http_port
-                };
+                let port = port(cfg, site);
                 let until = Instant::now() + Duration::from_secs(5);
                 while !crate::port_answers(port) && Instant::now() < until {
                     std::thread::sleep(Duration::from_millis(100));
@@ -282,12 +291,7 @@ impl Shares {
         if let Some(old) = self.take(&site.name) {
             old.wait(crate::apps::GRACE);
         }
-        let port = if site.secure {
-            cfg.https_port
-        } else {
-            cfg.http_port
-        };
-        if !crate::port_answers(port) {
+        if !crate::port_answers(port(cfg, site)) {
             bail!("Anvil's web server isn't running");
         }
         let bin = ensure()?;
