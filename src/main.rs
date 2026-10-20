@@ -1659,10 +1659,17 @@ fn run() -> Result<()> {
             let mut svc = services::Services::default();
             for u in resources::services_used(&cfg, &s, &svc.pids()) {
                 println!(
-                    "  uses {:<12} port {:<6} {:?}{}",
+                    "  uses {:<12} port {:<6} {}{}",
                     u.label,
                     u.port.map_or("-".into(), |p| p.to_string()),
-                    u.source,
+                    match u.source {
+                        resources::Source::Anvil => "Anvil",
+                        resources::Source::Docker => "Docker",
+                        resources::Source::Local => "local",
+                        resources::Source::Remote => "remote",
+                        resources::Source::None if u.port.is_some() => "not running",
+                        resources::Source::None => "",
+                    },
                     u.detail.map_or(String::new(), |d| format!(" ({d})"))
                 );
             }
