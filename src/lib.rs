@@ -1780,10 +1780,14 @@ pub fn sigterm(pid: u32) {
 }
 
 /// When a process started, as `ps` prints it (`Sat Oct 18 10:02:03 2026`). With the pid
-/// it names one process: a reused pid has another start time.
+/// it names one process: a reused pid has another start time. In one locale and time
+/// zone: `ps` follows LANG and TZ, and an Anvil started from a terminal has others
+/// than one started from Finder.
 pub(crate) fn started(pid: u32) -> Option<String> {
     let o = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .env("LC_ALL", "C")
+        .env("TZ", "UTC")
         .output()
         .ok()?;
     let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -1792,12 +1796,15 @@ pub(crate) fn started(pid: u32) -> Option<String> {
 
 /// Clean up after an Anvil that died without stopping its children (crash, SIGKILL).
 /// The pid file is `owner pid` followed by one line per child: `pid` or `pid started`.
-/// Children are only killed when the owner is gone and the process is still the one
-/// Anvil started: the same start time when recorded (a dev server's shell `exec`s its
-/// command, so its command line no longer names Anvil), else a command line that runs
-/// one of our binaries. With `group`, child pids are process-group leaders and the
-/// whole group is killed.
+/// Children are only stopped when the owner is gone and the process is still the one
+/// Anvil started: the same start time when recorded, or a command line naming the
+/// file's Anvil home (a dev shell's `anvil:<home>:<key>` tag; a start time recorded
+/// before `started` fixed its locale reads differently). With `group`, child pids are
+/// process-group leaders and the whole group stops, also when only the leader ended
+/// (no other process can take a pid while its group lives). SIGTERM, SIGKILL after
+/// `apps::GRACE`, and only then is the pid file removed.
 pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
+    use nix::sys::signal::{kill, killpg};
     let Ok(file) = fs::read_to_string(pid_file) else {
         return;
     };
@@ -1805,34 +1812,48 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     if pids.next().is_none_or(alive) {
         return;
     }
-    let ours = home().display().to_string();
-    let mut killed = false;
+    // Every pid file is `<home>/run/<name>`.
+    let ours = pid_file
+        .parent()
+        .and_then(Path::parent)
+        .map(|h| h.display().to_string());
+    let named = |pid: &str| {
+        Command::new("ps")
+            .args(["-p", pid, "-o", "command="])
+            .output()
+            .is_ok_and(|o| {
+                ours.as_ref()
+                    .is_some_and(|h| String::from_utf8_lossy(&o.stdout).contains(h))
+            })
+    };
+    let signal =
+        |p: Pid, s: Option<Signal>| (if group { killpg(p, s) } else { kill(p, s) }).is_ok();
+    let mut stopping = vec![];
     for line in pids {
         let (pid, at) = line
             .split_once(' ')
             .map_or((line, None), |(p, at)| (p, Some(at)));
-        let same = match (at, pid.parse()) {
-            (Some(at), Ok(n)) => started(n).as_deref() == Some(at),
-            (Some(_), Err(_)) => false,
-            (None, _) => Command::new("ps")
-                .args(["-p", pid, "-o", "command="])
-                .output()
-                .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&ours)),
+        let Ok(n) = pid.parse::<u32>() else {
+            continue;
         };
-        if let (true, Ok(p)) = (same, pid.parse()) {
-            let p = Pid::from_raw(p);
-            let _ = if group {
-                nix::sys::signal::killpg(p, Signal::SIGTERM)
-            } else {
-                nix::sys::signal::kill(p, Signal::SIGTERM)
-            };
-            killed = true;
+        let p = Pid::from_raw(n as i32);
+        let same = if alive(pid) {
+            at.is_some_and(|at| started(n).as_deref() == Some(at)) || named(pid)
+        } else {
+            group && signal(p, None)
+        };
+        if same && signal(p, Some(Signal::SIGTERM)) {
+            stopping.push(p);
         }
     }
-    let _ = fs::remove_file(pid_file);
-    if killed {
-        std::thread::sleep(std::time::Duration::from_millis(500)); // let ports close
+    let deadline = std::time::Instant::now() + apps::GRACE;
+    while stopping.iter().any(|p| signal(*p, None)) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
+    for p in stopping {
+        signal(p, Some(Signal::SIGKILL));
+    }
+    let _ = fs::remove_file(pid_file);
 }
 
 /// Whether something listens on this Mac's `port`.

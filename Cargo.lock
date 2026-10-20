@@ -113,6 +113,7 @@ dependencies = [
  "anvil",
  "anyhow",
  "base64 0.22.1",
+ "ctrlc",
  "serde",
  "serde_json",
  "tauri",

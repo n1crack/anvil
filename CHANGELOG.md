@@ -48,6 +48,11 @@ Until 1.0.0, minor versions may contain breaking changes.
 - Uninstalling a Node.js, Go, Rust or Python version apps are pinned to is
   refused, as for PHP, naming the apps; Settings shows them on the version
   and offers no Uninstall until they are unpinned.
+- Dev processes an Anvil left running when it was killed no longer keep
+  holding their ports, shown as stopped: the next Anvil stops them, child
+  processes included, also when it was started from somewhere else (Finder,
+  a terminal), and only then forgets them. Killing Anvil (SIGTERM) now stops
+  everything as Quit does.
 
 ## [0.1.0] - 2026-10-19
 

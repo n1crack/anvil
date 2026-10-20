@@ -1390,6 +1390,67 @@ mod tests {
     }
 
     #[test]
+    fn startup_stops_whole_orphan_groups_before_dropping_their_pid_files() {
+        use nix::sys::signal::{Signal, killpg};
+        use nix::unistd::Pid;
+        let dir = project(&[("groups/x", "")]);
+        let home = dir.join("home");
+        fs::create_dir_all(home.join("run")).unwrap();
+        let mut gone = Command::new("true").spawn().unwrap();
+        gone.wait().unwrap();
+        // A dev shell as `spawn` starts it: its own group, Anvil's tag as $0, a child in
+        // its group. Reaped once it ends, as launchd reaps an orphan.
+        let shell = |key: &str, script: &str| {
+            let tag = format!("anvil:{}:{key}", home.display());
+            let mut c = Command::new("/bin/sh")
+                .args(["-c", script, &tag])
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let pid = c.id();
+            std::thread::spawn(move || c.wait());
+            pid
+        };
+        let file = |key, pid: u32, at: &str| {
+            fs::write(pid_in(&home, key), format!("{}\n{pid} {at}", gone.id())).unwrap()
+        };
+        // Its start time as `ps` wrote it for an Anvil started from a Turkish terminal; a
+        // relaunch from Finder reads "Tue Oct 20 …" for the same process.
+        let dev = shell("shop@dev", "sleep 60 & wait");
+        let tr = Command::new("ps")
+            .args(["-p", &dev.to_string(), "-o", "lstart="])
+            .env("LC_ALL", "tr_TR.UTF-8")
+            .output()
+            .unwrap();
+        file("shop@dev", dev, String::from_utf8_lossy(&tr.stdout).trim());
+        // Its leader ended; its child still holds the port.
+        let start = shell("shop@start", "sleep 60 & sleep 0.3");
+        file("shop@start", start, &crate::started(start).unwrap());
+        while crate::alive(&start.to_string()) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // Ignores SIGTERM: SIGKILL after GRACE.
+        let queue = shell("shop@queue", "trap '' TERM; sleep 60 & wait");
+        file("shop@queue", queue, &crate::started(queue).unwrap());
+        std::thread::sleep(Duration::from_millis(100)); // the trap is set
+
+        orphans_in(&home);
+        std::thread::sleep(Duration::from_millis(100)); // SIGKILL lands
+        let left: Vec<_> = [("dev", dev), ("start", start), ("queue", queue)]
+            .into_iter()
+            .filter(|(_, g)| killpg(Pid::from_raw(*g as i32), None).is_ok())
+            .collect();
+        for (_, g) in &left {
+            let _ = killpg(Pid::from_raw(*g as i32), Signal::SIGKILL);
+        }
+        assert!(left.is_empty(), "still running: {left:?}");
+        for key in ["shop@dev", "shop@start", "shop@queue"] {
+            assert!(!pid_in(&home, key).exists(), "{key}'s pid file is left");
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn run_once_ends_without_a_crash() {
         let dir = project(&[("once/x", "")]);
         let mut apps = Apps::in_home(dir.join("home"));

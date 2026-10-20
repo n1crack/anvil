@@ -3905,6 +3905,11 @@ fn main() {
         ])
         .setup(|app| {
             let _ = HANDLE.set(app.handle().clone());
+            // SIGTERM (a logout, `kill`), SIGINT and SIGHUP quit as Quit does, stopping
+            // everything: by default they end Anvil at once and its dev processes run on
+            // with no Anvil that knows them.
+            let h = app.handle().clone();
+            let _ = ctrlc::set_handler(move || h.exit(0));
             // Clicking a notification brings Anvil forward.
             use tauri_plugin_notification::NotificationExt;
             let h = app.handle().clone();
