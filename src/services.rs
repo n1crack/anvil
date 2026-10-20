@@ -1574,6 +1574,8 @@ mod tests {
 
     #[test]
     fn silo_serves_its_data_folder_locally_with_its_console_and_env() {
+        // Its paths come from ANVIL_HOME, which other tests set.
+        let _env = crate::lock(&crate::ENV_LOCK);
         assert_eq!(silo_tag("20261018000000"), "RELEASE.2026-10-18T00-00-00Z");
         assert_eq!(silo_tag("20260903131801"), "RELEASE.2026-09-03T13-18-01Z");
 
