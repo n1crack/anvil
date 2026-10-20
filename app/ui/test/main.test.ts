@@ -83,7 +83,7 @@ describe("https", () => {
     const box = $("#app-https") as HTMLInputElement;
     expect(box.checked).toBe(true);
     expect($(".https-cell small").textContent).toBe("Serve at https:// with a trusted local certificate; http:// redirects there");
-    expect($("#site .site-meta .lock")).not.toBeNull();
+    expect($("#site .site-meta .lock.on")).not.toBeNull();
     w.mockDelay = { set_secure: 200 };
     box.checked = false;
     box.dispatchEvent(new Event("change"));
@@ -97,11 +97,12 @@ describe("https", () => {
     const now = $("#app-https") as HTMLInputElement;
     expect([now.checked, now.disabled]).toEqual([false, false]);
     expect(($(".https-cell .securing") as HTMLElement).hidden).toBe(true);
-    expect($("#site .site-meta .lock")).toBeNull();
+    // Plain HTTP: a red open lock.
+    expect($("#site .site-meta .lock.off")).not.toBeNull();
     now.checked = true;
     now.dispatchEvent(new Event("change"));
     await wait(80);
-    expect($("#site .site-meta .lock")).not.toBeNull();
+    expect($("#site .site-meta .lock.on")).not.toBeNull();
     await select("stack");
     expect($("#app-https")).toBeNull();
   });
@@ -2191,7 +2192,10 @@ describe("worktrees", () => {
 
   test("a worktree's Overview: what it is, its own database with the choice, what stays shared", async () => {
     await show();
-    expect($('[data-panel="overview"] .worktree-of').textContent).toBe("Worktree of shop · branch feature/login");
+    // The header says whose worktree it is, its mark a branch; no line of its own.
+    expect($("#site .meta").textContent).toContain("worktree of shop");
+    expect($("#site .site-title .mark").classList.contains("wt-mark")).toBe(true);
+    expect($('[data-panel="overview"] .worktree-of')).toBeNull();
     expect(dbRow().querySelector("dd")!.firstChild!.textContent).toBe("shop_feature_x (copy of shop)");
     // Made already: nothing left to choose, nothing that would remake it.
     expect(dbRow().querySelector("select")).toBeNull();
@@ -2681,6 +2685,27 @@ describe("sidebar worktrees", () => {
     document.querySelector(".pop")?.remove();
   });
 
+  test("Logs and Packages are hidden while there's nothing in them", async () => {
+    const [logs, pkgs] = [w.mockLogSources, w.mockPackages];
+    try {
+      w.mockLogSources = [];
+      w.mockPackages = { ...pkgs, ecosystems: [] };
+      await select("notes");
+      await select("shop");
+      await wait(60);
+      expect($('#site .tabs [data-tab="logs"]').hidden).toBe(true);
+      expect($('#site .tabs [data-tab="packages"]').hidden).toBe(true);
+    } finally {
+      w.mockLogSources = logs;
+      w.mockPackages = pkgs;
+      await select("notes");
+      await select("shop");
+      await wait(60);
+    }
+    expect($('#site .tabs [data-tab="logs"]').hidden).toBe(false);
+    expect($('#site .tabs [data-tab="packages"]').hidden).toBe(false);
+  });
+
   test("Overview › Aliases: a group of its own, a row per address that opens it, Remove confirmed in the row; a worktree's without Remove", async () => {
     const before = w.mockSnap.sites;
     try {
@@ -2689,8 +2714,8 @@ describe("sidebar worktrees", () => {
       expect(box.hidden).toBe(false);
       const rows = [...box.querySelectorAll<HTMLElement>(".row")];
       expect(rows.map((r) => r.querySelector(".alias-go")!.textContent)).toEqual(["admin.shop.test", "api.shop.test"]);
-      // A lock for HTTPS only (api.shop is plain http).
-      expect(rows.map((r) => !!r.querySelector(".lock"))).toEqual([true, false]);
+      // A green closed lock for HTTPS, a red open one for plain HTTP (api.shop).
+      expect(rows.map((r) => r.querySelector(".lock")!.className)).toEqual(["lock on", "lock off"]);
       (rows[0].querySelector(".alias-go") as HTMLElement).click();
       expect(calls("open_url").at(-1)![1]).toEqual({ url: "https://admin.shop.test" });
       expect((box.querySelector(".aliases-add") as HTMLElement).hidden).toBe(false);
@@ -2708,8 +2733,8 @@ describe("sidebar worktrees", () => {
       const wt = $('[data-panel="overview"] .aliases');
       expect(wt.querySelectorAll(".alias-remove").length).toBe(0);
       expect((wt.querySelector(".aliases-add") as HTMLElement).hidden).toBe(true);
-      expect(wt.querySelector(".aliases-from")!.textContent).toBe("from shop");
-      (wt.querySelector(".aliases-app") as HTMLElement).click();
+      expect(wt.querySelector(".aliases-none")!.textContent).toBe("Added and removed on shop");
+      (wt.querySelector(".aliases-none .app-link") as HTMLElement).click();
       await wait(60);
       expect($(`#list [data-name="shop"]`).getAttribute("aria-current")).toBe("true");
     } finally {

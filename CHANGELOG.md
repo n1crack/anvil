@@ -208,6 +208,14 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Changed
 
+- Addresses carry a lock before them everywhere (sidebar, header, Aliases, the
+  address list): green and closed for HTTPS, red and open for plain HTTP.
+- A worktree's header shows a branch for its mark and "worktree of <app>"
+  linking to the app; its Overview drops the separate "Worktree of" line, and
+  its Aliases end with "Added and removed on <app>".
+- The Requests tab shows new requests within a quarter second (was 2 s), and
+  the Requests and Logs filter bars stay under the header while scrolling.
+- Logs and Packages tabs are hidden while there's nothing in them.
 - An app's Overview has an Aliases group under its lines: a row per address
   (a lock for HTTPS) that opens it, Remove asked in the row itself (the folder
   stays), and Add Alias. A worktree's lists the aliases derived from its app's,

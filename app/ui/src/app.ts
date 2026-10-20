@@ -32,6 +32,15 @@ const BRANCH = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="tru
 
 const LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
+const OPEN_LOCK = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.9-.7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+/** Before an address: a green closed lock for HTTPS, a red open one for plain HTTP. */
+function lockOf(secure: boolean) {
+  const lock = el("span", `lock ${secure ? "on" : "off"}`);
+  lock.innerHTML = secure ? LOCK : OPEN_LOCK;
+  lock.title = secure ? "HTTPS" : "HTTP, not encrypted";
+  return lock;
+}
+
 let snapAt = 0; // when the last snapshot arrived
 let snapAsked = 0; // numbers each request for a snapshot…
 let snapShown = 0; // …and this one's is in `snap`
@@ -351,12 +360,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
     busy.append(el("span", "spin-dot"));
     busy.title = s.secure ? "Turning off HTTPS…" : "Turning on HTTPS…";
     $(".name", text).append(busy);
-  } else if (s.secure) {
-    const lock = el("span", "lock");
-    lock.innerHTML = LOCK;
-    lock.title = "HTTPS";
-    $(".name", text).append(lock);
-  }
+  } else $(".name", text).prepend(lockOf(s.secure));
   // In a folder's section the path only repeats the heading; linked apps and groups keep it.
   if (path && !child) $(".sub", text).textContent = tilde(s.path) + (s.path.includes("\\") ? "\\" : "/");
   else $(".sub", text).remove();
@@ -1084,12 +1088,7 @@ export function drawMeta() {
     // A stopped server can't answer: the address looks and acts off.
     link.classList.toggle("off", !snap.running);
     link.title = snap.running ? "Open in browser (⌘O)" : "Start Anvil to open this address";
-    if (s.secure && !securing.has(s.name)) {
-      const lock = el("span", "lock");
-      lock.innerHTML = LOCK;
-      lock.title = "HTTPS";
-      addr.append(lock);
-    }
+    if (!securing.has(s.name)) addr.append(lockOf(s.secure));
     addr.append(link);
     if (securing.has(s.name)) {
       const busy = el("span", "securing", s.secure ? "Turning off HTTPS…" : "Turning on HTTPS…");
@@ -1107,6 +1106,7 @@ export function drawMeta() {
     }
     parts.push(addr);
   }
+  if (s.worktree_of) parts.push(appLink("worktree of ", s.worktree_of));
   parts.push(el("span", null, kindLabel(s.kind)));
   const secs = touchedOf(s, () => selected === s.name && drawMeta());
   if (secs) {
@@ -1195,17 +1195,59 @@ function aliasPop(anchor, sites) {
       close();
       invoke("open_url", { url: url(a) }).catch((e) => showError(String(e)));
     };
-    const lock = el("span", "alias-lock");
-    if (a.secure) {
-      lock.innerHTML = LOCK;
-      lock.title = "HTTPS";
-    }
-    go.append(lock, el("span", "alias-url", url(a).replace(/^https?:\/\//, "")), el("span", "alias-open", "Open"));
+    go.append(lockOf(a.secure), el("span", "alias-url", url(a).replace(/^https?:\/\//, "")), el("span", "alias-open", "Open"));
     pop.append(go);
     return go;
   });
   const close = popAt(anchor, pop, buttons[0], "left");
 }
+
+/** "<words><app>", the app's name a link that selects it. */
+function appLink(words: string, app: string, tag = "span", cls: string | null = null) {
+  const box = el(tag, cls);
+  const a = el("a", "app-link", app);
+  a.href = "#";
+  a.onclick = (e) => {
+    e.preventDefault();
+    select(app);
+  };
+  box.append(words, a);
+  return box;
+}
+
+/** Logs and Packages only once there's something in them: asked once per app and run
+ * state (an app that starts writes logs), not on every redraw. A Compose project's Logs
+ * are its containers' (containers.ts). */
+let tabsAsked = "";
+// The header's height, for what sticks under it (the Requests and Logs filter bars).
+const topSize = new ResizeObserver(([e]) => $("#site").style.setProperty("--top-h", `${(e.target as HTMLElement).offsetHeight}px`));
+function hideEmptyTabs(s, root) {
+  const key = `${s.name}:${snap.app_states[s.name] ?? ""}`;
+  const logs = $('.tabs [data-tab="logs"]', root);
+  const pkgs = $('.tabs [data-tab="packages"]', root);
+  if (key === tabsAsked) {
+    // A redraw: keep what was found.
+    logs.hidden = s.kind !== "compose" && tabsHad.logs === false;
+    pkgs.hidden = tabsHad.pkgs === false;
+    return;
+  }
+  tabsAsked = key;
+  tabsHad = {};
+  if (s.kind !== "compose")
+    invoke("log_sources", { site: s.name })
+      .then((l: any[]) => {
+        tabsHad.logs = l.length > 0;
+        if (selected === s.name) $('#site .tabs [data-tab="logs"]').hidden = !tabsHad.logs;
+      })
+      .catch(() => {});
+  invoke("packages", { site: s.name })
+    .then((p: any) => {
+      tabsHad.pkgs = p.ecosystems.length > 0;
+      if (selected === s.name) $('#site .tabs [data-tab="packages"]').hidden = !tabsHad.pkgs;
+    })
+    .catch(() => {});
+}
+let tabsHad: { logs?: boolean; pkgs?: boolean } = {};
 
 /** Overview › Aliases: a group of its own under the app's lines, one row per address with
  * Open, and the app's with Remove (after a confirm) and Add Alias. A worktree's are derived
@@ -1216,18 +1258,6 @@ function aliasesLine(s, root) {
   const main = isMain(s);
   box.hidden = !serves(s) || (!main && !list.length);
   if (box.hidden) return;
-  // A worktree's come from its app's: its name goes there, where they're changed.
-  const from = $(".aliases-from", box);
-  from.replaceChildren();
-  if (!main) {
-    const app = el("a", "aliases-app", s.worktree_of);
-    app.href = "#";
-    app.onclick = (e) => {
-      e.preventDefault();
-      select(s.worktree_of);
-    };
-    from.append("from ", app);
-  }
   const add = $(".aliases-add", box);
   add.hidden = !main;
   add.onclick = () => addAlias(s);
@@ -1242,13 +1272,7 @@ function aliasesLine(s, root) {
       e.preventDefault();
       invoke("open_url", { url: url(a) }).catch((err) => showError(String(err)));
     };
-    if (a.secure) {
-      const lock = el("span", "lock");
-      lock.innerHTML = LOCK;
-      lock.title = "HTTPS";
-      dt.append(lock);
-    }
-    dt.append(go);
+    dt.append(lockOf(a.secure), go);
     const dd = el("dd", "res-cells");
     const idle = () => {
       if (!main) return dd.replaceChildren();
@@ -1269,7 +1293,9 @@ function aliasesLine(s, root) {
     row.append(dt, dd);
     return row;
   });
-  if (!rows.length) rows.push(el("p", "muted aliases-none", "None yet: another address for this app, e.g. admin." + s.host));
+  // A worktree's are its app's, under its own name: changed there.
+  if (!main) rows.push(appLink("Added and removed on ", s.worktree_of, "p", "muted aliases-none"));
+  else if (!rows.length) rows.push(el("p", "muted aliases-none", "None yet: another address for this app, e.g. admin." + s.host));
   $("dl", box).replaceChildren(...rows);
 }
 
@@ -1329,8 +1355,12 @@ export function renderSite() {
   const process = PROCESS_KINDS.has(s.kind);
 
   root.replaceChildren($("#site-tpl").content.cloneNode(true));
+  topSize.disconnect();
+  topSize.observe($(".site-top", root));
   $(".site-name", root).textContent = s.name;
-  $(".site-title .mark", root).replaceWith(Object.assign(mark(s), { className: "mark big" }));
+  // A worktree's mark is a branch, not its app's letter: it's a branch of another app.
+  const big = s.worktree_of ? Object.assign(el("span"), { innerHTML: BRANCH }) : mark(s);
+  $(".site-title .mark", root).replaceWith(Object.assign(big, { className: `mark big${s.worktree_of ? " wt-mark" : ""}` }));
   if (s.hiddenApp) {
     // Not served: the header and a notice, no tabs.
     for (const x of root.querySelectorAll(".site-meta, .head-side, .run-error, .tabs, [role=tabpanel]")) x.remove();
@@ -1351,6 +1381,7 @@ export function renderSite() {
   $('.tabs [data-tab="requests"]', root).hidden = s.kind === "compose" || s.kind === "folder";
   // Only while the mail catcher is on (Settings › Plugins); its switch lives in the tab.
   $('.tabs [data-tab="mail"]', root).hidden = !snap.catcher || s.kind === "compose" || s.kind === "folder";
+  hideEmptyTabs(s, root);
   for (const b of root.querySelectorAll(".tabs [role=tab]")) b.onclick = () => showTab(root, b.dataset.tab);
   $(".tabs", root).onkeydown = (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
@@ -1693,7 +1724,6 @@ function worktreeLines(s, root) {
   if (!v) return;
   const main = s.worktree_of;
   const group = $('[data-panel="overview"] .group', root);
-  group.before(el("p", "worktree-of muted", `Worktree of ${main} · ${s.branch ? `branch ${s.branch}` : "detached"}`));
   const rows: HTMLElement[] = [];
   const add = (dt: string, dd: HTMLElement) => {
     const r = el("div", "row");

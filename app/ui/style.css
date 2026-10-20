@@ -394,11 +394,12 @@ button, select, input { font: inherit; color: inherit; }
   animation: spin 0.7s linear infinite;
 }
 
-/* HTTPS: a small lock after the name. */
+/* Before an address or an app's name: green closed lock for HTTPS, red open one for HTTP. */
+.lock.on { color: var(--ok); }
+.lock.off { color: var(--danger); }
 .item .name .lock {
   display: inline-flex;
-  margin-left: 5px;
-  color: var(--muted);
+  margin-right: 5px;
   vertical-align: -1px;
 }
 
@@ -690,8 +691,8 @@ button, select, input { font: inherit; color: inherit; }
 }
 .alias-row:hover,
 .alias-row:focus-visible { background: color-mix(in srgb, var(--text) 9%, transparent); outline: none; }
-.alias-lock { display: grid; place-items: center; color: var(--muted); }
-.alias-lock svg { width: 11px; height: 11px; }
+.alias-row .lock { display: grid; place-items: center; }
+.alias-row .lock svg { width: 11px; height: 11px; }
 .alias-url { overflow: hidden; font: 12px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; text-overflow: ellipsis; }
 .alias-open { color: var(--muted); font-size: 11px; opacity: 0; }
 .alias-row:hover .alias-open,
@@ -3225,7 +3226,6 @@ body.activity {
 .pop-confirm.wide { flex-wrap: wrap; justify-content: flex-end; max-width: 380px; }
 .pop-confirm.wide p,
 .pop-confirm.wide label { flex-basis: 100%; margin: 0; }
-.worktree-of { margin: 0 0 10px; }
 
 .sheet-actions .primary:hover,
 .pop-confirm .primary:hover,
@@ -3303,10 +3303,9 @@ html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui
 .aliases-head { display: flex; align-items: center; gap: 8px; margin: 20px 0 8px; }
 .aliases-head .res-sub { margin: 0; }
 .aliases-head .aliases-add { margin-left: auto; }
-.aliases-from { font-size: 12px; }
 .aliases-none { margin: 0; padding: 10px 14px; font-size: 12px; }
 .alias-line dt { flex-direction: row; align-items: center; gap: 6px; }
-.alias-line .lock { display: inline-grid; color: var(--muted); }
+.alias-line .lock { display: inline-grid; }
 .alias-line .lock svg { width: 11px; height: 11px; }
 .alias-go { color: var(--text); font: 12.5px ui-monospace, "SF Mono", Menlo, monospace; text-decoration: none; }
 .alias-go:hover { text-decoration: underline; }
@@ -3316,5 +3315,16 @@ html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui
 .alias-remove.danger { color: var(--danger); font-weight: 600; }
 .alias-line:not(:hover) .alias-remove:only-child { opacity: 0; }
 .alias-remove:focus-visible { opacity: 1; }
-.aliases-app { color: var(--text); text-decoration: none; }
-.aliases-app:hover { text-decoration: underline; }
+.app-link { color: var(--text); text-decoration: none; }
+.app-link:hover { text-decoration: underline; }
+/* A worktree's big mark: its branch glyph, not a letter. */
+.mark.big.wt-mark svg { width: 22px; height: 22px; color: var(--muted); }
+/* Requests and Logs: the filter bar stays under the app's header while the list scrolls. */
+.logs-bar {
+  position: sticky;
+  top: calc(var(--top-h, 0px) - 8px);
+  z-index: 1;
+  margin: 0;
+  padding: 8px 0;
+  background: var(--steel-pane);
+}

@@ -201,10 +201,11 @@ function toggle(v, li) {
   li.append(box);
 }
 
-/** New requests every 2 s, only while the tab is shown in a window that can be seen. */
+/** New requests every 250 ms, only while the tab is shown in a window that can be seen:
+ * with nothing new that's a stat of the log and an empty read. */
 export function poll(on: boolean) {
   clearInterval(timer ?? undefined);
-  timer = on ? setInterval(tick, 2000) : null;
+  timer = on ? setInterval(tick, 250) : null;
 }
 
 export async function tick() {
