@@ -35,7 +35,7 @@ git clone https://github.com/n1crack/anvil && cd anvil
 cargo install --path .
 ```
 
-That installs the CLI. To build the desktop app as well, see [The desktop app](https://anvil.tr/docs/getting-started#the-macos-app-optional).
+That installs the CLI. To build the desktop app as well, see [The desktop app](https://anvil.tr/docs/getting-started#the-desktop-app-optional).
 
 ## Quick start
 
