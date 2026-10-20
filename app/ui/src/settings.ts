@@ -914,11 +914,8 @@ function loadPerformance() {
     .catch((e) => showError(String(e)));
 }
 
-const guide = $("#perf-guide") as HTMLAnchorElement;
-guide.onclick = (e) => {
-  e.preventDefault();
-  confirmOpen(guide, "https://learn.microsoft.com/windows/dev-drive/");
-};
+const guide = $("#perf-guide") as HTMLElement;
+guide.onclick = () => confirmOpen(guide, "https://learn.microsoft.com/windows/dev-drive/");
 
 /** A bubble under a credit's name: its site opens only on Open, so a stray click
  * while reading the list doesn't throw a browser window up. */
