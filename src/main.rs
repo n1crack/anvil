@@ -303,7 +303,7 @@ enum ServiceCmd {
     Add {
         /// mysql, postgres, redis, mailpit, versitygw or silo (both S3)
         kind: String,
-        /// Defaults to the kind, then `<kind>-2`…
+        /// Defaults to a readable one no service has, like `redis-swift-ember`
         name: Option<String>,
         #[arg(long)]
         port: Option<u16>,
