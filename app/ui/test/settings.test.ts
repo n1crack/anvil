@@ -38,7 +38,9 @@ describe("sidebar", () => {
     const head = $$(".nav-head")[0];
     expect(head.textContent).toBe("Languages");
     expect(head.tagName).not.toBe("BUTTON");
-    expect(text(".nav button")).toEqual([
+    // Windows-only pages (Performance) are in the markup but hidden on macOS and Linux.
+    expect($$(".nav button.windows-only").map((b) => b.dataset.page)).toEqual(["performance"]);
+    expect(text(".nav button:not(.windows-only)")).toEqual([
       "General",
       "PHP",
       "Node.js",
