@@ -26,7 +26,8 @@ Until 1.0.0, minor versions may contain breaking changes.
   add|remove|list [--php <version>]`. Anvil builds each on your Mac from PECL
   against the PHP you run (checked against checksums pinned in Anvil; needs
   the Xcode command line tools), and the web, the terminal's `php` and an
-  app's PHP processes load the same ones. Xdebug starts only when a request
+  app's processes load the same ones, as does a PHP those start (queue
+  workers, `npm run dev` → `php artisan`, composer scripts). Xdebug starts only when a request
   asks for it (`xdebug.start_with_request=trigger`). Off keeps the build, so
   on again is instant; a new patch release of PHP builds them again.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service

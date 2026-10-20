@@ -218,6 +218,47 @@ pub fn php_args(cfg: &Config, minor: &str) -> Vec<String> {
     args
 }
 
+/// `PHP_INI_SCAN_DIR` for a PHP Anvil starts on `minor` other than PHP-FPM (the shims,
+/// an app's processes): `php_args` as an ini file in `php_dir(minor)/conf.d`, so a PHP
+/// those start in turn (PHP_BINARY: queue:listen's workers; `npm run dev` → `php
+/// artisan`; composer scripts) loads the same. Never with the `-d`s too: loaded twice
+/// warns. `None` when there is nothing to load.
+pub fn scan_env(cfg: &Config, minor: &str) -> Result<Option<(String, String)>> {
+    scan_env_in(&php_dir(minor).join("conf.d"), &php_args(cfg, minor))
+}
+
+/// `args` (`-d` pairs) as `dir/anvil.ini`, rewritten only when it differs, and the
+/// `PHP_INI_SCAN_DIR` that reads it: ours first, then the user's own, else PHP's
+/// built-in folder (the empty entry). An Anvil folder in the user's (a terminal opened
+/// from an app process) is left out: never two of Anvil's at once.
+pub(crate) fn scan_env_in(dir: &Path, args: &[String]) -> Result<Option<(String, String)>> {
+    if args.is_empty() {
+        return Ok(None);
+    }
+    let text: String = args.chunks(2).map(|c| format!("{}\n", c[1])).collect();
+    let file = dir.join("anvil.ini");
+    if fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
+        fs::create_dir_all(dir)?;
+        let tmp = dir.join(format!(".anvil.ini.{}", std::process::id()));
+        fs::write(&tmp, &text)?;
+        fs::rename(&tmp, &file)?;
+    }
+    let home = home();
+    let theirs = std::env::var("PHP_INI_SCAN_DIR").unwrap_or_default();
+    let mut dirs = vec![dir.display().to_string()];
+    if theirs.is_empty() {
+        dirs.push(String::new());
+    } else {
+        dirs.extend(
+            theirs
+                .split(':')
+                .filter(|p| !Path::new(p).starts_with(&home))
+                .map(String::from),
+        );
+    }
+    Ok(Some(("PHP_INI_SCAN_DIR".into(), dirs.join(":"))))
+}
+
 /// phpize, configure and make in `dir` against the staged PHP; the built `.so`.
 fn compile(dir: &Path, stage: &Path, bin: &Path, name: &str) -> Result<PathBuf> {
     let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
@@ -481,6 +522,42 @@ mod tests {
         assert!(add("8.4", "swoole").is_err());
         let e = add("8.3", "apcu").err().unwrap();
         assert!(e.to_string().contains("not installed"), "{e}");
+    }
+
+    #[test]
+    fn scan_dir_ini_and_the_users_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK; so does PHP_INI_SCAN_DIR.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let conf = dir.path().join("php/8.4/conf.d");
+        let args: Vec<String> = ["-d", "zend_extension=/o.so", "-d", "opcache.enable=1"]
+            .map(String::from)
+            .into();
+        assert_eq!(scan_env_in(&conf, &[]).unwrap(), None);
+        assert!(!conf.exists(), "nothing to load: no file");
+        let env = |theirs: Option<&str>| {
+            match theirs {
+                // SAFETY: as above.
+                Some(t) => unsafe { std::env::set_var("PHP_INI_SCAN_DIR", t) },
+                None => unsafe { std::env::remove_var("PHP_INI_SCAN_DIR") },
+            }
+            scan_env_in(&conf, &args).unwrap().unwrap().1
+        };
+        let ours = conf.display().to_string();
+        assert_eq!(env(None), format!("{ours}:"), "then PHP's built-in folder");
+        assert_eq!(
+            fs::read_to_string(conf.join("anvil.ini")).unwrap(),
+            "zend_extension=/o.so\nopcache.enable=1\n"
+        );
+        assert_eq!(env(Some("/etc/php.d")), format!("{ours}:/etc/php.d"));
+        // From an app process (ours already there, maybe another version's): once.
+        let other = dir.path().join("php/8.3/conf.d");
+        assert_eq!(
+            env(Some(&format!("{}::/etc/php.d", other.display()))),
+            format!("{ours}::/etc/php.d")
+        );
+        unsafe { std::env::remove_var("PHP_INI_SCAN_DIR") };
     }
 
     #[test]

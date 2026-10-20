@@ -917,11 +917,12 @@ fn cli_php_ext_add_lists_it() {
     let env = Env::new("php-ext");
     env.write_config(&config_with_free_ports());
     env.fake("php/8.4/php-fpm");
-    // Says it is 8.4.23 when asked; otherwise prints the arguments it got.
+    // Says it is 8.4.23 when asked; otherwise prints the arguments it got and the ini
+    // file in its first scan dir.
     let php = env.home.join("php/8.4/php");
     write(
         &php,
-        "#!/bin/sh\nif [ \"$1\" = -n ]; then printf 8.4.23; else printf '%s\\n' \"$@\"; fi\n",
+        "#!/bin/sh\nif [ \"$1\" = -n ]; then printf 8.4.23; exit; fi\nprintf '%s\\n' \"$@\"\nd=${PHP_INI_SCAN_DIR%%:*}\n[ -z \"$d\" ] || cat \"$d/anvil.ini\"\n",
     );
     fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
     // Built before: turning it on needs no build.
@@ -935,12 +936,9 @@ fn cli_php_ext_add_lists_it() {
     let line = |name: &str| list.lines().find(|l| l.starts_with(name)).unwrap();
     assert!(line("apcu").contains("on"), "{list}");
     assert!(line("xdebug").contains("off"), "{list}");
-    // The terminal's php loads it, as PHP-FPM does.
+    // The terminal's php loads it, as PHP-FPM does: from its scan dir, not `-d`.
     let out = env.ok(&["shim", "php", "-v"]);
-    assert!(
-        out.contains(&format!("extension={}", so.display())),
-        "{out}"
-    );
+    assert_eq!(out.trim(), format!("-v\nextension={}", so.display()));
 
     let e = env.fails(&["php", "ext", "add", "apcu", "--php", "8.3"]);
     assert!(e.contains("not installed"), "{e}");

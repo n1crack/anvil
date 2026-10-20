@@ -1012,30 +1012,6 @@ pub fn with_ansi(command: &str) -> String {
     }
 }
 
-/// `command` run by the app's PHP with what PHP-FPM loads (`phpext::php_args`: OPcache,
-/// the version's extensions), when it starts with PHP: `php …`, or Anvil's PHP by its
-/// path (a composer.json script). `--ansi` is added first (`with_ansi`).
-/// ponytail: a PHP started further down (`npm run dev` → `php artisan …`, or PHP_BINARY,
-/// e.g. queue:listen's workers) goes without; an ini in PHP_INI_SCAN_DIR would reach those.
-pub fn with_php_args(cfg: &crate::Config, site: &Site, command: &str) -> String {
-    let command = with_ansi(command);
-    let Some(v) = site.php.as_deref() else {
-        return command;
-    };
-    let args = crate::phpext::php_args(cfg, v);
-    let php = crate::shims::sh_quote(&crate::php_dir(v).join("php").display().to_string());
-    let rest = command
-        .strip_prefix("php ")
-        .or_else(|| command.strip_prefix(&format!("{php} ")));
-    match rest {
-        Some(rest) if !args.is_empty() => {
-            let args: Vec<_> = args.iter().map(|a| crate::shims::sh_quote(a)).collect();
-            format!("{php} {} {rest}", args.join(" "))
-        }
-        _ => command,
-    }
-}
-
 /// Key for the process manager, pid and log files: `<site>@<process>`. Site
 /// names never contain `@`, so a key can't be another app's name.
 pub fn key(site: &str, process: &str) -> String {
@@ -1063,9 +1039,10 @@ pub fn address(cfg: &crate::Config, site: &Site, id: &str) -> Option<String> {
     ))
 }
 
-/// Anvil's PHP for the app, its Node.js and the package managers installed from
-/// Settings, first on PATH, with Node's caches kept in Anvil's folder; a worktree's
-/// own database and prefixes (`worktrees::checked_env`; `test`: a test run's database).
+/// Anvil's PHP for the app with what PHP-FPM loads (`phpext::scan_env`), its Node.js and
+/// the package managers installed from Settings, first on PATH, with Node's caches kept
+/// in Anvil's folder; a worktree's own database and prefixes (`worktrees::checked_env`;
+/// `test`: a test run's database).
 pub fn env(cfg: &crate::Config, site: &Site, test: bool) -> anyhow::Result<Vec<(String, String)>> {
     let mut env = vec![];
     let mut path = crate::env_path();
@@ -1081,6 +1058,7 @@ pub fn env(cfg: &crate::Config, site: &Site, test: bool) -> anyhow::Result<Vec<(
     }
     if let Some(v) = &site.php {
         path = crate::prepend_path(&crate::php_dir(v), &path);
+        env.extend(crate::phpext::scan_env(cfg, v)?);
     }
     env.push(("PATH".into(), path));
     env.extend(crate::worktrees::checked_env(cfg, site, test)?);
@@ -1890,25 +1868,37 @@ echo '{DEV_JSON}'
         let so = crate::phpext::so_path("8.4", "8.4.23", "apcu");
         fs::create_dir_all(so.parent().unwrap()).unwrap();
         fs::write(&so, "").unwrap();
+        fs::write(php.with_file_name("php-fpm"), "").unwrap();
+        fs::create_dir_all(dir.path().join("bin")).unwrap();
+        fs::write(dir.path().join("bin/composer.phar"), "").unwrap();
         let s = site(dir.path(), "laravel");
         let mut cfg = crate::Config::default();
-        let run = |cfg: &crate::Config, c: &str| with_php_args(cfg, &s, c);
+        let scan = |env: &[(String, String)]| {
+            env.iter()
+                .find(|(k, _)| k == "PHP_INI_SCAN_DIR")
+                .map(|(_, v)| v.clone())
+        };
+        let shim = |cfg: &crate::Config, tool: &str| {
+            crate::shims::resolve_with(tool, dir.path(), cfg, false).unwrap()
+        };
         // Nothing to load (no OPcache built, no extensions): as before.
-        assert_eq!(run(&cfg, "php artisan pail"), "php artisan pail --ansi");
+        assert_eq!(scan(&env(&cfg, &s, false).unwrap()), None);
+        assert_eq!(scan(&shim(&cfg, "php").2), None);
 
         cfg.php_ext.insert("8.4".into(), vec!["apcu".into()]);
-        let php = crate::shims::sh_quote(&php.display().to_string());
-        let ext = format!("'-d' 'extension={}'", so.display());
+        let conf_d = crate::php_dir("8.4").join("conf.d");
+        let want = Some(format!("{}:", conf_d.display()));
+        assert_eq!(scan(&env(&cfg, &s, false).unwrap()), want, "app processes");
         assert_eq!(
-            run(&cfg, "php artisan queue:listen"),
-            format!("{php} {ext} artisan queue:listen --ansi")
+            fs::read_to_string(conf_d.join("anvil.ini")).unwrap(),
+            format!("extension={}\n", so.display())
         );
-        assert_eq!(
-            run(&cfg, &format!("{php} '/x/composer.phar' run-script lint")),
-            format!("{php} {ext} '/x/composer.phar' run-script lint")
-        );
-        assert_eq!(run(&cfg, "npm run dev"), "npm run dev");
-        assert_eq!(run(&cfg, "phpunit"), "phpunit");
+        // The shims: the scan dir, never the `-d`s too (loaded twice warns).
+        let (_, args, e) = shim(&cfg, "php");
+        assert_eq!((args.is_empty(), scan(&e)), (true, want.clone()));
+        let (_, args, e) = shim(&cfg, "composer");
+        assert_eq!(args.len(), 1, "only the phar: {args:?}");
+        assert_eq!(scan(&e), want);
     }
 
     #[test]
