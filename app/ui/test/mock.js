@@ -7,6 +7,8 @@ const mockSite = (name, kind, extra = {}) => ({
   secure: true,
   path: `/Users/x/Sites/${name}`,
   root: `/Users/x/Sites/${name}/public`,
+  root_custom: null,
+  root_detected: "public",
   php: kind === "laravel" ? "8.4" : null,
   php_pinned: false,
   ini: {},
@@ -866,6 +868,13 @@ const mockHandle = (cmd, a) => {
       const h = mockSnap.hidden.find((x) => x.name === a.site);
       mockSnap.hidden = mockSnap.hidden.filter((x) => x !== h);
       mockSnap.sites.push(mockSite(h.name, h.kind));
+      return mockSnap;
+    }
+    case "set_root": {
+      const s = mockSnap.sites.find((x) => x.name === a.site);
+      if (a.dir === "dist") throw `dist isn't a folder in ${s.path}`;
+      s.root_custom = a.dir;
+      s.root = `${s.path}/${a.dir ?? s.root_detected}`;
       return mockSnap;
     }
     case "set_secure": {

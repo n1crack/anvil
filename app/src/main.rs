@@ -2592,6 +2592,19 @@ fn set_secure(handle: AppHandle, app: State<App>, site: String, on: bool) -> Res
     snapshot(&app)
 }
 
+/// The app's web root, relative to its project folder; `None` goes back to the detected one.
+#[tauri::command(async)]
+fn set_root(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    dir: Option<String>,
+) -> Res<Snapshot> {
+    let (cfg, ()) = edit(|c| anvil::set_site_root(c, &site, dir.as_deref()))?;
+    sites_changed(&handle, &app, &cfg);
+    snapshot(&app)
+}
+
 /// Whether sites without their own choice get HTTPS.
 #[tauri::command(async)]
 fn set_https_default(handle: AppHandle, on: bool) -> Res<Settings> {
@@ -3828,6 +3841,7 @@ fn main() {
             set_group,
             set_site_ini,
             set_secure,
+            set_root,
             set_https_default,
             allow_next_origin,
             set_runtime,
@@ -4171,6 +4185,8 @@ mod tests {
             secure: false,
             path: dir.into(),
             root: dir.into(),
+            root_custom: None,
+            root_detected: ".".into(),
             php: None,
             php_pinned: false,
             ini: Default::default(),

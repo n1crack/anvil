@@ -1214,7 +1214,7 @@ export function renderSite() {
   // Nothing is served from a folder or a Compose project: no web root, no HTTPS.
   if (!serves(s)) {
     $('[data-field="root"]', root).closest(".row")?.remove();
-    $(".serves-only", root)?.remove();
+    for (const x of root.querySelectorAll(".serves-only")) x.remove();
   }
 
   if (process) renderRun(s, root);
@@ -1239,6 +1239,8 @@ export function renderSite() {
   for (const v of snap.php_installed) php.add(new Option(`PHP ${v}`, v));
   php.value = s.php_pinned ? s.php : "";
   php.onchange = () => call("set_php", { site: s.name, version: php.value || null });
+
+  if (!process && serves(s)) webRoot(s, root);
 
   // Per-app php.ini overrides; placeholders show what applies without one.
   const base = { memory_limit: "512M", upload_max_filesize: "100M", max_execution_time: "120" };
@@ -1282,6 +1284,35 @@ export function renderSite() {
   window.renderSiteServices?.(s, root);
   window.renderPackages?.(s, root);
   if (mayHaveWorktrees(s)) renderHooks(s, root);
+}
+
+const rootErrors = new Map<string, [string, string]>(); // app -> [what was typed, why refused]
+
+/** The Settings tab's Web root: a folder inside the project, the detected one as the
+ * placeholder, Reset when set; a refusal stays under the field with what was typed. */
+function webRoot(s, root) {
+  const input = $("#app-root", root);
+  const reset = $(".root-reset", root);
+  const fail = $(".root-error", root);
+  const failed = rootErrors.get(s.name);
+  input.value = failed?.[0] ?? s.root_custom ?? "";
+  input.placeholder = s.root_detected === "." ? "Project folder (detected)" : `${s.root_detected} (detected)`;
+  fail.textContent = failed?.[1] ?? "";
+  fail.hidden = !failed;
+  reset.hidden = !s.root_custom;
+  const save = async (dir: string | null) => {
+    try {
+      const ok = await askSnap("set_root", { site: s.name, dir });
+      rootErrors.delete(s.name);
+      if (ok) render();
+    } catch (e) {
+      rootErrors.set(s.name, [input.value, String(e)]);
+      fail.textContent = String(e);
+      fail.hidden = false;
+    }
+  };
+  input.onchange = () => save(input.value.trim() || null);
+  reset.onclick = () => save(null);
 }
 
 const FROM = (from: string) => (from === "this app" ? "Set for this app" : `From ${from === "Settings" ? "Settings › Worktrees" : from}`);

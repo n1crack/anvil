@@ -10,6 +10,11 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- A web root of your own for an app Anvil serves (PHP, static): a folder inside
+  the project (`web`, `dist`, `.`) in the app's Settings, or `anvil app root
+  <site> [<dir>]` (`--reset` goes back to `public/` when present). A worktree
+  serves the same folder of its own checkout. A web root that's gone shows a
+  page saying so, never the project folder.
 - PHP 8.1 to 8.4 get OPcache: Anvil builds it from php.net's source of the
   same version on your Mac (checked against php.net's checksum; needs the Xcode
   command line tools), and every version serves with OPcache tuned for

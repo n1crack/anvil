@@ -131,6 +131,14 @@
             <small>Serve at https:// with a trusted local certificate; http:// redirects there</small>
           </dd>
         </div>
+        <div class="row php-only serves-only">
+          <dt><label for="app-root" title="The folder Anvil serves, inside the project folder">Web root</label></dt>
+          <dd class="root-cell">
+            <input id="app-root" spellcheck="false" autocomplete="off">
+            <button class="inline-action root-reset" hidden>Reset</button>
+            <small class="root-error" hidden></small>
+          </dd>
+        </div>
         <div class="row php-only">
           <dt><label for="php">PHP version</label></dt>
           <dd><select id="php"></select></dd>

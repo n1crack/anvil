@@ -105,6 +105,40 @@ describe("https", () => {
   });
 });
 
+describe("web root", () => {
+  test("the Settings tab's Web root: detected as the placeholder, set inline, a refusal under it, Reset; none for proxied or Compose apps", async () => {
+    await select("shop");
+    const input = () => $("#app-root") as HTMLInputElement;
+    const reset = () => $(".root-reset");
+    const fail = () => $(".root-error");
+    expect([input().value, input().placeholder, reset().hidden, fail().hidden]).toEqual(["", "public (detected)", true, true]);
+    input().value = " web ";
+    input().dispatchEvent(new Event("change"));
+    await wait(80);
+    expect(calls("set_root").at(-1)![1]).toEqual({ site: "shop", dir: "web" });
+    expect([input().value, reset().hidden]).toEqual(["web", false]);
+    expect($('[data-field="root"]').textContent).toBe("~/Sites/shop/web");
+
+    input().value = "dist";
+    input().dispatchEvent(new Event("change"));
+    await wait(80);
+    expect(fail().textContent).toBe("dist isn't a folder in /Users/x/Sites/shop");
+    expect(fail().hidden).toBe(false);
+    expect($("#error").hidden).toBe(true);
+    expect(input().value).toBe("dist");
+
+    reset().click();
+    await wait(80);
+    expect(calls("set_root").at(-1)![1]).toEqual({ site: "shop", dir: null });
+    expect([input().value, reset().hidden, fail().hidden]).toEqual(["", true, true]);
+
+    await select("vuefinder");
+    expect((input().closest(".row") as HTMLElement).hidden).toBe(true);
+    await select("stack");
+    expect(input()).toBeNull();
+  });
+});
+
 describe("sidebar", () => {
   test("an app's dot: green while anything of it runs, amber while starting, red after a crash", async () => {
     w.mockSnap.app_states = { shop: "running", vuefinder: "starting", notes: "crashed" };

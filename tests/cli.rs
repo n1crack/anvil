@@ -345,6 +345,22 @@ fn config_round_trip() {
     env.ok(&["app", "php", "shop"]);
     assert_eq!(env.config().sites["shop"].php, None);
 
+    // An app's web root: shown, set relative to the project, refused outside it, reset.
+    assert!(env.ok(&["app", "root", "shop"]).starts_with(". (detected"));
+    fs::create_dir_all(parked.join("shop/web")).unwrap();
+    env.ok(&["app", "root", "shop", "web/"]);
+    assert_eq!(env.config().sites["shop"].root.as_deref(), Some("web"));
+    assert!(env.ok(&["app", "root", "shop"]).starts_with("web ("));
+    assert!(env.ok(&["sites"]).contains("shop/web"));
+    for bad in ["dist", "../front", "/tmp", "we\"b"] {
+        env.fails(&["app", "root", "shop", bad]);
+    }
+    let err = env.fails(&["app", "root", "front", "."]);
+    assert!(err.contains("no web root"), "{err}");
+    assert_eq!(env.config().sites["shop"].root.as_deref(), Some("web"));
+    env.ok(&["app", "root", "shop", "--reset"]);
+    assert_eq!(env.config().sites["shop"].root, None);
+
     // The old spellings are gone.
     assert!(
         env.fails(&["use", "8.3", "--site", "shop"])

@@ -1234,6 +1234,8 @@ mod tests {
             secure: false,
             path: dir.into(),
             root: dir.into(),
+            root_custom: None,
+            root_detected: ".".into(),
             php: Some("8.4".into()),
             php_pinned: false,
             ini: Default::default(),

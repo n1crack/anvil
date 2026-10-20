@@ -146,6 +146,10 @@ pub struct SiteConfig {
     /// HTTPS on or off; unset follows `Config::https_default`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub https: Option<bool>,
+    /// The web root, relative to the project folder (`web`, `dist`, `.`), so a worktree
+    /// serves the same folder of its own checkout; unset is `public/` when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
     /// Per-process settings of the app's other processes, by process id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub processes: BTreeMap<String, ProcessConfig>,
@@ -225,8 +229,12 @@ pub struct Site {
     pub secure: bool,
     /// Project folder.
     pub path: PathBuf,
-    /// Web root: `public/` when present, otherwise the project folder.
+    /// Web root: `root_custom` in the project folder, else `root_detected`.
     pub root: PathBuf,
+    /// The web root the user set (`SiteConfig::root`), relative to the project folder.
+    pub root_custom: Option<String>,
+    /// The web root Anvil would pick: `public` when present, else `.` (the project folder).
+    pub root_detected: String,
     /// PHP version in effect (site override or the default).
     pub php: Option<String>,
     /// True when the site has its own PHP version instead of the default.
@@ -578,6 +586,7 @@ fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
         kind: pick(|s| s.kind.clone()),
         command: pick(|s| s.command.clone()),
         https: o.and_then(|s| s.https).or_else(|| m.and_then(|s| s.https)),
+        root: pick(|s| s.root.clone()),
         ini: o
             .filter(|s| !s.ini.is_empty())
             .or(m)
@@ -600,11 +609,15 @@ fn site_at(
     parked_in: Option<PathBuf>,
     own: Option<&SiteConfig>,
 ) -> Site {
-    let public = path.join("public");
-    let root = if public.is_dir() {
-        public
+    let root_detected = if path.join("public").is_dir() {
+        "public"
     } else {
-        path.clone()
+        "."
+    };
+    let root_custom = own.and_then(|s| s.root.clone());
+    let root = match root_custom.as_deref().unwrap_or(root_detected) {
+        "." => path.clone(),
+        rel => path.join(rel),
     };
     let pinned = own.and_then(|s| s.php.clone());
     let ini = own.map(|s| s.ini.clone()).unwrap_or_default();
@@ -664,6 +677,8 @@ fn site_at(
         name,
         path,
         root,
+        root_custom,
+        root_detected: root_detected.into(),
         linked: parked_in.is_none(),
         parked_in,
     }
@@ -1254,6 +1269,72 @@ pub fn set_secure(cfg: &mut Config, site: &str, on: bool) -> Result<()> {
     save(cfg)
 }
 
+/// A web root as stored: relative to the project folder, inside it, `.` for the folder
+/// itself. It ends up quoted in the Caddyfile and in an error page there, so nothing that
+/// could end the quote or read as a Caddy placeholder gets through.
+pub fn web_root(dir: &str) -> Result<String> {
+    let d = dir.trim();
+    if d.is_empty() {
+        bail!("Name a folder inside the project, such as public, or . for the project folder");
+    }
+    if d.contains(['"', '\\', '`', '{', '}', '\n', '\r']) {
+        bail!("A web root can't hold quotes, backslashes, braces or line breaks");
+    }
+    if d.starts_with(['/', '~']) {
+        bail!("The web root is relative to the project folder (public, web, dist), not {d}");
+    }
+    let mut parts = vec![];
+    for c in Path::new(d).components() {
+        match c {
+            std::path::Component::Normal(p) => parts.push(p.to_string_lossy().into_owned()),
+            std::path::Component::CurDir => {}
+            _ => bail!("The web root has to be inside the project folder; {d} leaves it"),
+        }
+    }
+    Ok(if parts.is_empty() {
+        ".".into()
+    } else {
+        parts.join("/")
+    })
+}
+
+/// Only apps Anvil serves from a folder (PHP, static) have a web root: not a proxied dev
+/// server, a Compose project or a plain folder.
+pub fn has_web_root(s: &Site) -> Result<()> {
+    if apps::runs_process(&s.kind) || !apps::serves(&s.kind) {
+        bail!(
+            "{} is a {} app, which Anvil doesn't serve from a folder, so it has no web root",
+            s.name,
+            apps::label(&s.kind)
+        );
+    }
+    Ok(())
+}
+
+/// Serve the app from `dir`, a folder inside its project (see `web_root`); `None` goes
+/// back to `public/` when present, else the project folder. Only for apps Anvil serves
+/// itself: a proxied dev server or Compose project has no web root of Anvil's.
+pub fn set_site_root(cfg: &mut Config, site: &str, dir: Option<&str>) -> Result<()> {
+    let name = site_name(site);
+    let root = match dir {
+        None => None,
+        Some(d) => {
+            let s = sites(cfg)
+                .into_iter()
+                .find(|s| s.name == name)
+                .with_context(|| format!("No site named {site}"))?;
+            has_web_root(&s)?;
+            let rel = web_root(d)?;
+            if !s.path.join(&rel).is_dir() {
+                bail!("{rel} isn't a folder in {}", s.path.display());
+            }
+            Some(rel)
+        }
+    };
+    cfg.sites.entry(name).or_default().root = root;
+    save(cfg)
+}
+
 pub fn set_site_ini(cfg: &mut Config, site: &str, key: &str, value: Option<&str>) -> Result<()> {
     let key = key.trim();
     let entry = cfg.sites.entry(site_name(site)).or_default();
@@ -1386,6 +1467,30 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             .contains(['"', '\\', '\n', '\r'])
         {
             continue;
+        }
+        // A web root set by the user: one edited by hand to leave the project isn't served;
+        // one that's gone says so rather than serving the project folder.
+        if let Some(dir) = &site.root_custom {
+            if web_root(dir).is_err() {
+                continue;
+            }
+            if !site.root.is_dir() {
+                s += &format!(
+                    "\n{} {{\n\theader Content-Type \"text/html; charset=utf-8\"\n\trespond `{}` 502\n}}\n",
+                    addresses(site, &names),
+                    error_page(
+                        &format!("{}'s web root {dir} doesn't exist", site.name),
+                        &format!(
+                            "Create the folder, or choose another web root in the app's Settings (anvil app root {}).",
+                            site.name
+                        ),
+                    ),
+                );
+                if site.secure {
+                    s += &redirect(&names);
+                }
+                continue;
+            }
         }
         if let Err(reason) = worktrees::web_env(cfg, site) {
             s += &format!(
@@ -2296,6 +2401,8 @@ mod tests {
             secure: true,
             path: root.into(),
             root: root.into(),
+            root_custom: None,
+            root_detected: ".".into(),
             php: php.map(Into::into),
             php_pinned: false,
             ini: BTreeMap::new(),
@@ -2314,6 +2421,105 @@ mod tests {
             branch: None,
             aliases: vec![],
         }
+    }
+
+    #[test]
+    fn a_web_root_is_a_folder_inside_the_project() {
+        assert_eq!(web_root(" web/ ").unwrap(), "web");
+        assert_eq!(web_root("./dist/app").unwrap(), "dist/app");
+        assert_eq!(web_root(".").unwrap(), ".");
+        for bad in [
+            "",
+            "/var/www",
+            "~/site",
+            "..",
+            "../other",
+            "web/../../x",
+            "we\"b",
+            "we\\b",
+            "web\n}",
+            "we`b",
+            "{env.HOME}",
+        ] {
+            assert!(web_root(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_web_root_set_by_the_user_is_stored_relative_and_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
+        let shop = dir.path().join("shop");
+        fs::create_dir_all(shop.join("public")).unwrap();
+        fs::create_dir_all(shop.join("web")).unwrap();
+        fs::write(shop.join("index.php"), "").unwrap();
+        let api = dir.path().join("api");
+        fs::create_dir_all(api.join("web")).unwrap();
+        fs::write(api.join("go.mod"), "module api\n").unwrap();
+        let mut cfg = Config::default();
+        cfg.links.insert("shop".into(), shop.clone());
+        cfg.links.insert("api".into(), api);
+        let get = |cfg: &Config| sites(cfg).into_iter().find(|s| s.name == "shop").unwrap();
+
+        // Unset: public/ as before.
+        let s = get(&cfg);
+        assert_eq!((s.root.clone(), s.root_custom), (shop.join("public"), None));
+        assert_eq!(s.root_detected, "public");
+
+        set_site_root(&mut cfg, "shop", Some("./web/")).unwrap();
+        assert_eq!(cfg.sites["shop"].root.as_deref(), Some("web"));
+        assert_eq!(get(&cfg).root, shop.join("web"));
+        set_site_root(&mut cfg, "shop", Some(".")).unwrap();
+        assert_eq!(get(&cfg).root, shop);
+
+        let err = set_site_root(&mut cfg, "shop", Some("dist")).unwrap_err();
+        assert!(err.to_string().contains("dist isn't a folder"), "{err}");
+        assert!(set_site_root(&mut cfg, "shop", Some("../api")).is_err());
+        assert!(set_site_root(&mut cfg, "shop", Some(shop.to_str().unwrap())).is_err());
+        assert_eq!(cfg.sites["shop"].root.as_deref(), Some("."));
+        let err = set_site_root(&mut cfg, "api", Some("web")).unwrap_err();
+        assert!(err.to_string().contains("no web root"), "{err}");
+
+        set_site_root(&mut cfg, "shop", None).unwrap();
+        assert_eq!(cfg.sites["shop"].root, None);
+        assert_eq!(get(&cfg).root, shop.join("public"));
+    }
+
+    #[test]
+    fn caddyfile_serves_a_set_web_root_and_says_when_it_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::default();
+        let mut shop = site("shop", dir.path().to_str().unwrap(), Some("8.4"));
+        shop.root = dir.path().join("web");
+        shop.root_custom = Some("web".into());
+        let out = caddyfile(&cfg, std::slice::from_ref(&shop));
+        assert!(out.contains("shop's web root web doesn't exist"), "{out}");
+        assert!(!out.contains("root *"), "never the project folder instead");
+
+        fs::create_dir(dir.path().join("web")).unwrap();
+        let out = caddyfile(&cfg, std::slice::from_ref(&shop));
+        let want = format!("root * \"{}\"", dir.path().join("web").display());
+        assert!(out.contains(&want), "{out}");
+
+        // Edited by hand to leave the project: not served at all.
+        shop.root_custom = Some("../web".into());
+        assert!(!caddyfile(&cfg, &[shop]).contains("shop.test"));
+    }
+
+    #[test]
+    fn a_worktree_serves_its_apps_web_root_inside_its_own_checkout() {
+        let (root, mut cfg) = parked_worktree("web-root");
+        for wt in ["shop", "shop--x"] {
+            fs::create_dir_all(root.join("sites").join(wt).join("web")).unwrap();
+        }
+        cfg.sites.entry("shop".into()).or_default().root = Some("web".into());
+        let all = sites(&cfg);
+        let wt = all.iter().find(|s| s.name == "shop--x").unwrap();
+        assert_eq!(wt.root, root.join("sites/shop--x/web"));
+        assert_eq!(wt.root_custom.as_deref(), Some("web"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// A git repository at `dir` with one commit holding `index.php`.

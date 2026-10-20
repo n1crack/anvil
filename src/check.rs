@@ -241,6 +241,8 @@ mod tests {
             secure: false,
             path: app.clone(),
             root: app,
+            root_custom: None,
+            root_detected: ".".into(),
             php: None,
             php_pinned: false,
             ini: Default::default(),

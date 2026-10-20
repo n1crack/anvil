@@ -372,6 +372,14 @@ enum AppCmd {
         site: String,
         version: Option<String>,
     },
+    /// Show the app's web root, set it to a folder inside the project (`web`, `dist`,
+    /// `.`), or go back to the detected one (`public/` when present) with --reset
+    Root {
+        site: String,
+        dir: Option<String>,
+        #[arg(long, conflicts_with = "dir")]
+        reset: bool,
+    },
     /// Set a php.ini value for the app, or clear it by leaving out the value
     Ini {
         site: String,
@@ -1241,6 +1249,28 @@ fn run() -> Result<()> {
         },
         Cmd::App { cmd } => match cmd {
             AppCmd::Php { site, version } => edit(&mut cfg, |c| set_site_php(c, &site, version))?,
+            AppCmd::Root {
+                site,
+                dir: None,
+                reset: false,
+            } => {
+                let s = sites(&cfg)
+                    .into_iter()
+                    .find(|s| s.name == site_name(&site))
+                    .with_context(|| format!("No site named {site}"))?;
+                has_web_root(&s)?;
+                match &s.root_custom {
+                    Some(dir) => println!("{dir} {}", dim(format!("({})", s.root.display()))),
+                    None => println!(
+                        "{} {}",
+                        s.root_detected,
+                        dim(format!("(detected, {})", s.root.display()))
+                    ),
+                }
+            }
+            AppCmd::Root { site, dir, .. } => {
+                edit(&mut cfg, |c| set_site_root(c, &site, dir.as_deref()))?
+            }
             AppCmd::Ini { site, key, value } => {
                 edit(&mut cfg, |c| set_site_ini(c, &site, &key, value.as_deref()))?
             }

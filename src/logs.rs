@@ -940,6 +940,8 @@ mod tests {
             secure: false,
             path: dir.clone(),
             root: dir.clone(),
+            root_custom: None,
+            root_detected: ".".into(),
             php: None,
             php_pinned: false,
             ini: Default::default(),

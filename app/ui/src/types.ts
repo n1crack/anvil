@@ -7,6 +7,10 @@ export interface Site {
   secure: boolean;
   path: string;
   root: string;
+  /** The web root the user set, relative to the project folder. */
+  root_custom: string | null;
+  /** The one Anvil picks without it: `public` when present, else `.`. */
+  root_detected: string;
   php: string | null;
   php_pinned: boolean;
   ini: Record<string, string>;
