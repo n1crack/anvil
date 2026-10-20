@@ -21,7 +21,7 @@ It comes as a desktop app and a CLI.
 
 ### macOS (Apple Silicon)
 
-With [Homebrew](https://brew.sh), add Anvil's tap once:
+Available with the first release; until then, [build from source](#build-from-source). With [Homebrew](https://brew.sh), add Anvil's tap once:
 
 ```sh
 brew tap n1crack/anvil

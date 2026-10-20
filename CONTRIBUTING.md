@@ -6,7 +6,7 @@ larger changes, open an issue first so we can agree on the approach.
 ## Build
 
 You need macOS, [Rust](https://rustup.rs) (stable), the Xcode command line
-tools, and [pnpm](https://pnpm.io) for the app's UI.
+tools, and [Node.js](https://nodejs.org) with [pnpm](https://pnpm.io) for the app's UI (`brew install node pnpm`).
 
 ```sh
 cargo build --workspace          # the anvil CLI and the desktop app
