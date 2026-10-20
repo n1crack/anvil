@@ -1205,12 +1205,15 @@ fn env_with(
     // What its processes would load: main's `.env` (copied in), then its own files
     // over it, in the order its framework loads them (the last one wins).
     let symfony = site.kind == "symfony";
-    let mut files = vec![crate::resources::dotenv_file(
-        &main.join(base_env(&main, symfony)),
-    )];
-    for f in runtime_env(&site.path, symfony, test) {
-        files.push(crate::resources::dotenv_file(&site.path.join(f)));
-    }
+    let mut names = vec![base_env(&main, symfony).to_string()];
+    names.extend(runtime_env(&site.path, symfony, test));
+    let files: Vec<_> = names
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            crate::resources::dotenv_file(&if i == 0 { &main } else { &site.path }.join(f))
+        })
+        .collect();
     let last = |k: &str| {
         files
             .iter()
@@ -1299,6 +1302,41 @@ fn env_with(
             names.iter().any(|d| is_mains_database(site, d))
         }
     };
+    // A database key Anvil doesn't set (Django's POSTGRES_DB, a second connection's
+    // DB_LEGACY_DATABASE) left at main's value, in main's file of that name or as main's
+    // database. Taking a DB_KEYS key out shares; a server's host, user or a number (a Redis
+    // index, a port) isn't a database.
+    let other = |k: &str| {
+        names_db(k)
+            && !DB_KEYS.contains(&k)
+            && !keys.contains_key(k)
+            && !["_HOST", "_USER", "_USERNAME", "_PASSWORD", "_ENGINE"]
+                .iter()
+                .any(|s| k.ends_with(s))
+    };
+    let named: std::collections::BTreeSet<&String> = files
+        .iter()
+        .flat_map(|f| f.keys())
+        .filter(|k| other(k))
+        .collect();
+    for k in named {
+        // The value its processes get, and the file it comes from.
+        let Some((name, v)) = names
+            .iter()
+            .zip(&files)
+            .rev()
+            .find_map(|(n, f)| Some((n, f.get(k).filter(|v| !v.is_empty())?)))
+        else {
+            continue;
+        };
+        let theirs = crate::resources::dotenv_file(&main.join(name));
+        let number = v.chars().all(|c| c.is_ascii_digit());
+        if !number && !in_worktree(v) && (theirs.get(k) == Some(v) || mains(v)) {
+            return Err(format!(
+                "{k} in {name} is {app}'s value; give it one of its own in {app}'s worktree keys, in its Settings tab under Worktrees ({{db}} for the worktree's own)"
+            ));
+        }
+    }
     if let Some((k, _)) = env.iter().find(|(k, v)| is_db(k) && mains(v)) {
         return Err(format!(
             "{k} names {app}'s database; take it out of {app}'s own worktree keys, in its Settings tab under Worktrees, to share that database"
@@ -3987,6 +4025,38 @@ pub(crate) mod tests {
         // A test run still never gets main's: its own database.
         let test = checked_env(&cfg, &site, true).unwrap();
         assert_eq!(get(&test, "DB_DATABASE"), Some("shop_feature_x"));
+    }
+
+    #[test]
+    fn a_database_key_anvil_doesnt_set_refuses_main_s_value() {
+        // Django's names, a second Laravel connection: the copied `.env` gives main's.
+        let dotenv = "DB_CONNECTION=pgsql\nDB_DATABASE=shop\nPOSTGRES_DB=shop\nREDIS_DB=0\nDATABASE_HOST=127.0.0.1\nDATABASE_USER=shop\n";
+        let (mut cfg, site) = worktree_site("other-db-keys", dotenv);
+        fs::write(site.path.join(".env"), dotenv).unwrap();
+        assert_eq!(
+            env_err(&cfg, &site),
+            "POSTGRES_DB in .env is shop's value; give it one of its own in shop's worktree keys, in its Settings tab under Worktrees ({db} for the worktree's own)"
+        );
+        // A value of its own in the worktree's file passes; main's in another file refuses.
+        let mine = dotenv.replace("POSTGRES_DB=shop", "POSTGRES_DB=shop_x");
+        fs::write(site.path.join(".env"), &mine).unwrap();
+        assert!(env(&cfg, &site).is_ok());
+        let main = main_of(&site.path).unwrap();
+        fs::write(main.join(".env.local"), "DB_LEGACY_DATABASE=shop_old\n").unwrap();
+        fs::write(
+            site.path.join(".env.local"),
+            "DB_LEGACY_DATABASE=shop_old\n",
+        )
+        .unwrap();
+        assert!(
+            env_err(&cfg, &site).starts_with("DB_LEGACY_DATABASE in .env.local is shop's value")
+        );
+        // Given a value in the keys: the worktree's own.
+        let mut keys = shipped("laravel").keys.unwrap();
+        keys.insert("DB_LEGACY_DATABASE".into(), "{db}".into());
+        cfg.sites.entry("shop".into()).or_default().worktree.keys = Some(keys);
+        let env = env(&cfg, &site).unwrap();
+        assert_eq!(get(&env, "DB_LEGACY_DATABASE"), Some("shop_feature_x"));
     }
 
     #[test]
