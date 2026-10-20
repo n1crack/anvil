@@ -1037,12 +1037,24 @@ button.proc-name:hover { text-decoration: underline; }
 
 /* Run ▾: the app's scripts, each with its script muted. */
 .dev-run-menu { display: flex; flex-direction: column; min-width: 180px; max-width: 320px; max-height: 360px; padding: 4px; overflow-y: auto; }
-/* Where the scripts come from: the file's name in small bold monospace over its scripts,
- * which sit a little in; a line between the sources. */
-.dev-run-group { padding: 6px 8px 3px; color: var(--muted); font: 600 10.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-.dev-run-group:not(:first-child) { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
-.dev-run-group ~ .dev-run-item { padding-left: 16px; }
-.dev-run-item { display: flex; align-items: baseline; gap: 12px; padding: 5px 8px; border: 0; border-radius: var(--radius-s); background: none; color: var(--text); font-size: 12px; text-align: left; }
+/* Where the scripts come from: a label on a faint band, not something to click; each
+ * script below it carries Run's >_ so it reads as a command. */
+.dev-run-group { margin: 0 0 2px; padding: 4px 8px; border-radius: var(--radius-s); background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--muted); font: 600 10.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.dev-run-group:not(:first-child) { margin-top: 6px; }
+.dev-run-item::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  background: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l-3.5 3.5M7.5 12h6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l-3.5 3.5M7.5 12h6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.dev-run-item:hover::before, .dev-run-item:focus-visible::before { background: var(--text); }
+.dev-run-item { position: relative; display: flex; align-items: baseline; gap: 12px; padding: 5px 8px 5px 28px; border: 0; border-radius: var(--radius-s); background: none; color: var(--text); font-size: 12px; text-align: left; }
 .dev-run-item:hover, .dev-run-item:focus-visible { background: var(--selected); outline: none; }
 .dev-run-name { flex: none; }
 
