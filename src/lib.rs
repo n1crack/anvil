@@ -298,35 +298,9 @@ pub fn user_home() -> PathBuf {
 /// The config, or the defaults when there is none yet. Any other read error is
 /// reported: treating it as "no config" would let the next save wipe it.
 pub fn load() -> Result<Config> {
-    let (cfg, migrated) = read()?;
-    if !migrated {
-        return Ok(cfg);
-    }
-    // The migration is a change like any other: saved under the lock.
-    update(|_| Ok(()))?;
-    Ok(read()?.0)
-}
-
-/// The config as on disk, migrated in memory; `true` when the migration changed it.
-fn read() -> Result<(Config, bool)> {
     match fs::read_to_string(home().join("config.toml")) {
-        Ok(s) => {
-            let mut cfg: Config = toml::from_str(&s).context("config.toml is invalid")?;
-            let migrated = cfg.https_default.is_none();
-            if migrated {
-                // Every site used to be HTTPS: the ones there now keep it, new ones get HTTP.
-                for site in sites(&cfg) {
-                    cfg.sites
-                        .entry(site.name)
-                        .or_default()
-                        .https
-                        .get_or_insert(true);
-                }
-                cfg.https_default = Some(false);
-            }
-            Ok((cfg, migrated))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((Config::default(), false)),
+        Ok(s) => toml::from_str(&s).context("config.toml is invalid"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
         Err(e) => Err(e).context("couldn't read config.toml"),
     }
 }
@@ -343,11 +317,7 @@ pub fn update<T>(f: impl FnOnce(&mut Config) -> Result<T>) -> Result<(Config, T)
     fs::create_dir_all(home())?;
     let file = fs::File::create(home().join("config.lock")).context("couldn't open config.lock")?;
     file.lock().context("couldn't lock config.lock")?;
-    let (mut cfg, migrated) = read()?;
-    if migrated {
-        // Saved before `f`, so a `load` inside it sees the migrated file.
-        save(&cfg)?;
-    }
+    let mut cfg = load()?;
     let out = f(&mut cfg)?;
     // ponytail: most core setters save themselves too, so this can write twice; harmless.
     save(&cfg)?;
@@ -2946,11 +2916,10 @@ mod tests {
     }
 
     #[test]
-    fn an_old_config_is_told_apart_from_a_new_one() {
-        let old: Config = toml::from_str("tld = \"test\"\n").unwrap();
-        assert_eq!(old.https_default, None);
-        let new: Config = toml::from_str(&toml::to_string(&Config::default()).unwrap()).unwrap();
-        assert_eq!(new.https_default, Some(false));
+    fn a_config_without_https_default_serves_http() {
+        let cfg: Config = toml::from_str("tld = \"test\"\n").unwrap();
+        assert_eq!(cfg.https_default, None);
+        assert!(cfg.sites.values().all(|s| s.https.is_none()));
     }
 
     #[test]
