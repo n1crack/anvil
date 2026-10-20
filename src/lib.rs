@@ -1332,10 +1332,21 @@ pub fn set_default_php(cfg: &mut Config, version: &str) -> Result<()> {
 }
 
 /// Pin a site to a PHP version, or back to the default with `None`.
+/// A setting for an app Anvil doesn't know would only leave an empty entry behind.
+fn known_site(cfg: &Config, site: &str) -> Result<()> {
+    let name = site_name(site);
+    if sites(cfg).iter().any(|s| s.name == name) {
+        Ok(())
+    } else {
+        bail!("No site named {site}")
+    }
+}
+
 pub fn set_site_php(cfg: &mut Config, site: &str, version: Option<String>) -> Result<()> {
     if let Some(v) = &version {
         php_offered(v).map_err(anyhow::Error::msg)?;
     }
+    known_site(cfg, site)?;
     if let Some(v) = &version
         && !installed_php().contains(v)
     {
@@ -1573,6 +1584,7 @@ pub fn set_https_default(cfg: &mut Config, on: bool) {
 }
 
 pub fn set_secure(cfg: &mut Config, site: &str, on: bool) -> Result<()> {
+    known_site(cfg, site)?;
     cfg.sites.entry(site_name(site)).or_default().https = Some(on);
     save(cfg)
 }
@@ -1644,6 +1656,7 @@ pub fn set_site_root(cfg: &mut Config, site: &str, dir: Option<&str>) -> Result<
 }
 
 pub fn set_site_ini(cfg: &mut Config, site: &str, key: &str, value: Option<&str>) -> Result<()> {
+    known_site(cfg, site)?;
     let key = key.trim();
     let entry = cfg.sites.entry(site_name(site)).or_default();
     match value.map(str::trim) {
@@ -1890,6 +1903,7 @@ pub fn set_site_app(
     port: Option<Option<u16>>,
     autostart: Option<bool>,
 ) -> Result<()> {
+    known_site(cfg, site)?;
     let entry = cfg.sites.entry(site_name(site)).or_default();
     if let Some(kind) = kind {
         if let Some(k) = &kind
@@ -3586,6 +3600,39 @@ mod tests {
     }
 
     /// PHP 8.0 is end of life: install, default and pin say so, before any download.
+    #[test]
+    fn settings_for_an_unknown_app_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
+        let mut cfg = Config::default();
+        let no = "No site named ghost";
+        assert_eq!(
+            set_site_php(&mut cfg, "ghost", None)
+                .unwrap_err()
+                .to_string(),
+            no
+        );
+        assert_eq!(
+            set_site_ini(&mut cfg, "ghost", "memory_limit", Some("1G"))
+                .unwrap_err()
+                .to_string(),
+            no
+        );
+        assert_eq!(
+            set_secure(&mut cfg, "ghost", true).unwrap_err().to_string(),
+            no
+        );
+        assert_eq!(
+            set_site_app(&mut cfg, "ghost", None, None, None, Some(true))
+                .unwrap_err()
+                .to_string(),
+            no
+        );
+        assert!(cfg.sites.is_empty());
+    }
+
     #[test]
     fn php_8_0_is_not_offered() {
         assert_eq!(PHP_VERSIONS, ["8.5", "8.4", "8.3", "8.2", "8.1"]);
