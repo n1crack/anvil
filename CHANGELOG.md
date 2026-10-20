@@ -208,8 +208,10 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Changed
 
-- Sidebar: a worktree has a branch mark with the same run badge as an app,
-  under its app's mark on a line joining them. A linked app's worktrees nest
+- Sidebar: an app's worktrees sit on a band a tone darker, each with a branch
+  mark carrying the same run badge as an app. The header's address list opens
+  under its "+N", a tone darker, one row per address without its scheme (a
+  lock for HTTPS); the whole row opens it. A linked app's worktrees nest
   under it too, and its aliases are no longer rows of their own (its header
   lists them). Aliases are added to the app only: its worktrees get theirs
   from it, so Add Alias is gone from a worktree's menu and refused for one.

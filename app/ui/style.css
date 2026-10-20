@@ -35,6 +35,8 @@
   --group-text: color-mix(in srgb, var(--heat-text) 70%, var(--text));
   --sidebar-bg: transparent; /* the native vibrancy shows through */
   --card: var(--steel-hover); /* the sidebar's grouped rows */
+  --kids-bg: color-mix(in srgb, var(--card) 80%, #000); /* an app's worktrees under it */
+  --pop-deep: color-mix(in srgb, var(--steel-raised) 78%, #000); /* a list in a bubble */
   --switch-on: color-mix(in srgb, var(--text) 52%, transparent); /* light enough for the white knob */
 
   /* A process's name color in Watch (blue, purple, pink, orange, green, cyan), as
@@ -77,6 +79,8 @@
     --group-text: #a8410f;
     --sidebar-bg: rgba(246, 246, 248, 0.72);
     --card: rgba(255, 255, 255, 0.78);
+    --kids-bg: rgba(0, 0, 0, 0.035);
+    --pop-deep: #ebebee;
     --switch-on: var(--text);
 
     --pc0: #1d4ed8; --pc1: #6d28d9; --pc2: #be123c; --pc3: #c2410c; --pc4: #15803d; --pc5: #0e7490;
@@ -282,8 +286,9 @@ button, select, input { font: inherit; color: inherit; }
 .kids.closed,
 .fold.closed { grid-template-rows: 0fr; }
 
-/* A worktree: a small branch mark centred under its app's mark, on a line that joins them;
-   its branch where the app's name starts. */
+/* A worktree: a small branch mark centred under its app's mark, its branch where the app's
+   name starts; an app's worktrees sit on a band a tone darker than the list. */
+.kids > div { background: var(--kids-bg); }
 .item.child {
   --indent: 4px;
   grid-template-columns: 24px 1fr auto;
@@ -293,15 +298,6 @@ button, select, input { font: inherit; color: inherit; }
   padding-bottom: 5px;
 }
 .item.child::before { left: 56px; }
-.item.child::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 27.5px;
-  border-left: 1px solid var(--edge);
-}
-.kids > div > .item.child:last-child::after { bottom: 50%; }
 .item.child .mark-box { z-index: 1; width: 24px; height: 24px; }
 
 .item.child .name { font-weight: 400; color: var(--muted); }
@@ -652,11 +648,35 @@ button, select, input { font: inherit; color: inherit; }
 }
 .alias-chip:hover { color: var(--text); }
 
-/* Every address of an app, from the "+N" chip. */
-.alias-pop { display: grid; gap: 4px; }
-.alias-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.alias-url { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-.alias-pop button { height: 24px; padding: 0 10px; }
+/* Every address of an app, from the "+N" chip: a row each, the whole row opens it. A tone
+   darker than other bubbles, so it reads as a list over the header. */
+.pop.alias-pop {
+  display: grid;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--pop-deep);
+}
+.alias-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+.alias-row:hover,
+.alias-row:focus-visible { background: color-mix(in srgb, var(--text) 9%, transparent); outline: none; }
+.alias-lock { display: grid; place-items: center; color: var(--muted); }
+.alias-lock svg { width: 11px; height: 11px; }
+.alias-url { overflow: hidden; font: 12px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; text-overflow: ellipsis; }
+.alias-open { color: var(--muted); font-size: 11px; opacity: 0; }
+.alias-row:hover .alias-open,
+.alias-row:focus-visible .alias-open { opacity: 1; }
 
 /* Right of the name: run state, and under it the apps that open the folder. */
 .head-side {

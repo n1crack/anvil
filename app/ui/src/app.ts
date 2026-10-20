@@ -1174,23 +1174,28 @@ function browserBridge(s, root) {
 /** Every address of an app, each with its own Open. */
 function aliasPop(anchor, sites) {
   const pop = el("div", "alias-pop");
+  // Each address once, without its scheme: a lock says HTTPS, as in the list.
   const buttons = sites.map((a) => {
-    const row = el("div", "alias-row");
-    const go = el("button", null, "Open");
+    const go = el("button", "alias-row");
     go.onclick = () => {
       close();
       invoke("open_url", { url: url(a) }).catch((e) => showError(String(e)));
     };
-    row.append(el("span", "alias-url", url(a).replace("https://", "")), go);
-    pop.append(row);
+    const lock = el("span", "alias-lock");
+    if (a.secure) {
+      lock.innerHTML = LOCK;
+      lock.title = "HTTPS";
+    }
+    go.append(lock, el("span", "alias-url", url(a).replace(/^https?:\/\//, "")), el("span", "alias-open", "Open"));
+    pop.append(go);
     return go;
   });
-  const close = popAt(anchor, pop, buttons[0]);
+  const close = popAt(anchor, pop, buttons[0], "left");
 }
 
-/** A small bubble under `anchor`, right-aligned with it. Esc or a click elsewhere
+/** A small bubble under `anchor`, right-aligned with it (or left). Esc or a click elsewhere
  * closes it; the close function is returned. */
-export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | null) {
+export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | null, align: "left" | "right" = "right") {
   document.querySelector(".pop")?.remove();
   pop.classList.add("pop");
   pop.setAttribute("role", "dialog");
@@ -1203,7 +1208,12 @@ export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | n
     if (e.key === "Escape") close();
   });
   const r = anchor.getBoundingClientRect();
-  Object.assign(pop.style, { top: `${r.bottom + window.scrollY + 6}px`, right: `${document.documentElement.clientWidth - r.right}px` });
+  Object.assign(
+    pop.style,
+    align === "left"
+      ? { top: `${r.bottom + window.scrollY + 6}px`, left: `${r.left}px` }
+      : { top: `${r.bottom + window.scrollY + 6}px`, right: `${document.documentElement.clientWidth - r.right}px` },
+  );
   document.body.append(pop);
   document.addEventListener("mousedown", outside, true);
   focus?.focus();
