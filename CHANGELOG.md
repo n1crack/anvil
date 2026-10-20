@@ -17,7 +17,9 @@ Until 1.0.0, minor versions may contain breaking changes.
   when laravel/octane was added while Anvil ran; when it stops or crashes,
   PHP-FPM serves the next request, never an error page. Anvil downloads
   RoadRunner 2025.1.15 once into its own folder (checked against its
-  SHA-256) and never writes `rr` or `.rr.yaml` into the project. A worktree's
+  SHA-256) and never writes `rr` or `.rr.yaml` into the project; Disk lists
+  the downloads as cleanable, and a newer pinned version replaces the old
+  one. A worktree's
   Octane uses its own port and database. It runs two workers, not one per
   core (140 MB instead of 455 MB on a 12-core Mac); edit the command for more.
   FrankenPHP (`OCTANE_SERVER=frankenphp`) too: Anvil downloads FrankenPHP

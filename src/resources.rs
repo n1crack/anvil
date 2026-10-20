@@ -1072,6 +1072,13 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
         "Built again when a PHP extension needs them",
     ));
     entries.push((
+        "Octane servers".into(),
+        h.join("octane"),
+        "Cache",
+        Safety::Safe,
+        "Downloaded again when an app's Octane starts",
+    ));
+    entries.push((
         "Logs".into(),
         h.join("log"),
         "Logs",
@@ -1123,8 +1130,13 @@ fn cache_dirs(h: &Path) -> Vec<PathBuf> {
 pub fn clean_anvil(path: &str) -> Result<u64> {
     let h = home();
     let p = PathBuf::from(path);
-    let is_cache =
-        p == h.join("build") || p == crate::phpext::tools_dir() || cache_dirs(&h).contains(&p);
+    let is_cache = [
+        h.join("build"),
+        h.join("octane"),
+        crate::phpext::tools_dir(),
+    ]
+    .contains(&p)
+        || cache_dirs(&h).contains(&p);
     if p != h.join("log") && !is_cache {
         bail!("Anvil doesn't clean {path}");
     }
@@ -1363,11 +1375,16 @@ mod tests {
         let tools = crate::phpext::tools_dir();
         std::fs::create_dir_all(tools.join("bin")).unwrap();
         std::fs::write(tools.join("bin/m4"), vec![1u8; 5_000]).unwrap();
+        let rr = dir.path().join("octane/roadrunner/2025.1.15");
+        std::fs::create_dir_all(&rr).unwrap();
+        std::fs::write(rr.join("rr"), vec![1u8; 5_000]).unwrap();
         let (_, items) = anvil_disk();
-        let item = items.iter().find(|i| i.label == "Build tools").unwrap();
-        assert!(item.safety == Safety::Safe);
-        assert!(clean_anvil(&item.path).unwrap() > 0);
-        assert!(!tools.exists());
+        for (label, gone) in [("Build tools", &tools), ("Octane servers", &rr)] {
+            let item = items.iter().find(|i| i.label == label).unwrap();
+            assert!(item.safety == Safety::Safe);
+            assert!(clean_anvil(&item.path).unwrap() > 0);
+            assert!(!gone.exists());
+        }
     }
 
     #[test]

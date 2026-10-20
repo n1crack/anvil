@@ -147,6 +147,24 @@ fn prune(src: &Path) {
     }
 }
 
+/// `cache/php-src/<full>` of a patch release no longer installed goes (its staged headers
+/// serve no build again): after an install brought another, or before one is fetched.
+pub fn prune_sources() {
+    let fulls: Vec<String> = crate::installed_php()
+        .iter()
+        .filter_map(|m| installed_full(m).ok())
+        .collect();
+    for e in fs::read_dir(home().join("cache").join("php-src"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        if !fulls.iter().any(|f| *f == e.file_name().to_string_lossy()) {
+            let _ = fs::remove_dir_all(e.path());
+        }
+    }
+}
+
 /// The exact version (`8.4.23`) of the installed PHP `minor`.
 pub(crate) fn installed_full(minor: &str) -> Result<String> {
     let out = crate::platform::command(crate::php_bin(minor))
@@ -173,6 +191,7 @@ pub fn source_tree(minor: &str) -> Result<(String, PathBuf)> {
     }
     println!("Getting PHP {full}'s source…");
     let sum = source_sum(&full)?;
+    prune_sources();
     prune(&src);
     fetch_tgz(
         &format!("https://www.php.net/distributions/php-{full}.tar.gz"),
@@ -324,6 +343,26 @@ mod tests {
         assert!(!args.iter().any(|a| a.starts_with("zend_extension")));
         assert!(args.contains(&"opcache.enable=1".into()));
         assert_eq!(state("8.5"), State::BuiltIn);
+    }
+
+    #[test]
+    fn sources_of_patches_no_longer_installed_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        crate::phpext::tests::fake_php("8.4", "8.4.23");
+        fs::write(php_dir("8.4").join(crate::PHP_SERVER), "").unwrap();
+        let src = home().join("cache/php-src");
+        for full in ["8.4.22", "8.4.23", "8.3.30"] {
+            fs::create_dir_all(src.join(full).join("stage")).unwrap();
+        }
+        prune_sources();
+        let left: Vec<_> = fs::read_dir(&src)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["8.4.23"]);
     }
 
     #[test]

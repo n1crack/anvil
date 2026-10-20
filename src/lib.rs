@@ -1239,6 +1239,7 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     })?
     .0;
     println!("PHP {full} installed in {}", dir.display());
+    opcache::prune_sources();
     if opcache::BUILDS.contains(&minor)
         && let Err(e) = opcache::build(minor)
     {
@@ -2505,6 +2506,40 @@ pub fn stop_all(list: Vec<Stopping>, grace: std::time::Duration) {
 }
 
 /// Running PHP-FPM pools and the web server.
+/// The files Anvil generates in `run` for one app (its own PHP-FPM master's config, its
+/// php.ini folders, Octane's Caddyfile) whose app is gone, or on another PHP version.
+fn prune_run(sites: &[Site]) {
+    let mut keep = BTreeSet::new();
+    for s in sites {
+        let p = pool(s);
+        if let Some(v) = &s.php {
+            keep.insert(format!("php-{v}-{p}-fpm.conf"));
+            keep.insert(format!("php-{v}-{p}.d"));
+        }
+        keep.insert(format!("swoole-{p}.d"));
+        keep.insert(format!("frankenphp-{p}.d"));
+        keep.insert(format!("octane-{p}.Caddyfile"));
+    }
+    let run = home().join("run");
+    for e in fs::read_dir(&run).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let ours = (name.starts_with("php-")
+            && name.contains("-site-")
+            && (name.ends_with("-fpm.conf") || name.ends_with(".d")))
+            || ((name.starts_with("swoole-site-") || name.starts_with("frankenphp-site-"))
+                && name.ends_with(".d"))
+            || (name.starts_with("octane-site-") && name.ends_with(".Caddyfile"));
+        if ours && !keep.contains(&name) {
+            let path = e.path();
+            let _ = if e.file_type().is_ok_and(|t| t.is_dir()) {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+        }
+    }
+}
+
 pub struct Server {
     children: Vec<Child>,
     /// What each child is, parallel to `children`.
@@ -2529,6 +2564,7 @@ impl Server {
             }
         }
         state_dirs()?;
+        prune_run(&sites);
 
         let mut server = Server {
             children: vec![],
@@ -3065,6 +3101,57 @@ mod tests {
     fn add_worktree(main: &Path, at: &Path, branch: &str) {
         let at = at.to_str().unwrap();
         crate::worktrees::tests::git(main, &["worktree", "add", "-q", at, "-b", branch]);
+    }
+
+    #[test]
+    fn run_keeps_generated_files_of_apps_that_are_there() {
+        let _env = lock(&ENV_LOCK);
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let run = dir.path().join("run");
+        let files = [
+            "php-8.4-site-shop-fpm.conf",
+            "php-8.3-site-shop-fpm.conf",
+            "php-8.4-site-gone-fpm.conf",
+            "octane-site-shop.Caddyfile",
+            "octane-site-gone.Caddyfile",
+            "php-8.4-fpm.conf",
+            "Caddyfile",
+            "site-gone.sock",
+        ];
+        let dirs = [
+            "php-8.4-site-shop.d",
+            "php-8.4-site-gone.d",
+            "swoole-site-gone.d",
+            "frankenphp-site-shop.d",
+            "frankenphp-site-gone.d",
+        ];
+        for d in dirs {
+            fs::create_dir_all(run.join(d)).unwrap();
+            fs::write(run.join(d).join("anvil.ini"), "").unwrap();
+        }
+        for f in files {
+            fs::write(run.join(f), "").unwrap();
+        }
+        prune_run(&[site("shop", "/s/shop", Some("8.4"))]);
+        let mut left: Vec<String> = fs::read_dir(&run)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "Caddyfile",
+                "frankenphp-site-shop.d",
+                "octane-site-shop.Caddyfile",
+                "php-8.4-fpm.conf",
+                "php-8.4-site-shop-fpm.conf",
+                "php-8.4-site-shop.d",
+                "site-gone.sock",
+            ]
+        );
     }
 
     #[test]
