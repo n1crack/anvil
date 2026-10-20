@@ -17,6 +17,18 @@ pub struct Ext {
     pub sha256: &'static str,
     /// Loaded with `zend_extension=`, which PHP reads only when it starts.
     pub zend: bool,
+    /// Not offered for a version or an app (`offered`): built and loaded for one process
+    /// only (Swoole, for Octane's).
+    pub hidden: bool,
+    /// What the build needs beyond phpize's defaults, for the PHP `minor`.
+    pub recipe: Option<fn(&str) -> Result<Recipe>>,
+}
+
+/// Environment and `./configure` flags an extension's build adds.
+#[derive(Default)]
+pub struct Recipe {
+    pub env: Vec<(String, String)>,
+    pub flags: Vec<String>,
 }
 
 /// Each builds for PHP 8.1 to 8.5. igbinary's 3.2.17RC1 is the first with 8.5 support
@@ -28,6 +40,8 @@ pub const CATALOG: &[Ext] = &[
         version: "3.5.3",
         sha256: "f073de91bea046106abf4d6071c963ea71e58571df6ce58948ceca89d121cb2d",
         zend: true,
+        hidden: false,
+        recipe: None,
     },
     Ext {
         name: "pcov",
@@ -35,6 +49,8 @@ pub const CATALOG: &[Ext] = &[
         version: "1.0.12",
         sha256: "23255c8c9335a9636ccb743f5302436a97a582a0bbde9869485be911bbc15da8",
         zend: false,
+        hidden: false,
+        recipe: None,
     },
     Ext {
         name: "apcu",
@@ -42,6 +58,8 @@ pub const CATALOG: &[Ext] = &[
         version: "5.1.28",
         sha256: "ca9c1820810a168786f8048a4c3f8c9e3fd941407ad1553259fb2e30b5f057bf",
         zend: false,
+        hidden: false,
+        recipe: None,
     },
     Ext {
         name: "igbinary",
@@ -49,6 +67,8 @@ pub const CATALOG: &[Ext] = &[
         version: "3.2.17RC1",
         sha256: "91da821443db125282a6aea039f24588dd28ff5d71e8187f6ecc41165bceafbc",
         zend: false,
+        hidden: false,
+        recipe: None,
     },
     Ext {
         name: "msgpack",
@@ -56,8 +76,39 @@ pub const CATALOG: &[Ext] = &[
         version: "3.0.1",
         sha256: "e30be355ab79aaea4568692fbd6073fd7c7f50ea8d3cf12edce40fc0c921d868",
         zend: false,
+        hidden: false,
+        recipe: None,
+    },
+    // Octane's server; loaded only into the Octane process (`octane::swoole_env`).
+    Ext {
+        name: "swoole",
+        pecl: "swoole",
+        version: "6.2.3",
+        sha256: "21dfa1c4a4a09f4d1cb4b154f7defdc91fbabafc8d44a77f8f618b9742c67304",
+        zend: false,
+        hidden: true,
+        recipe: Some(swoole_recipe),
     },
 ];
+
+/// The OpenSSL releases Anvil's PHP builds link statically (`OPENSSL_VERSION_TEXT`), whose
+/// headers Swoole compiles against: SHA-256 of GitHub's release tarballs, as the release's
+/// `.sha256` file and GitHub's asset digest both list them.
+const OPENSSL: [(&str, &str); 2] = [
+    (
+        "3.6.1",
+        "b1bfedcd5b289ff22aee87c9d600f515767ebf45f77168cb6d64f231f518a82e",
+    ),
+    (
+        "3.6.2",
+        "aaf51a1fe064384f811daeaeb4ec4dce7340ec8bd893027eee676af31e83a04f",
+    ),
+];
+
+/// The catalog the extensions UI, `anvil php ext` and `.anvil.toml` offer.
+pub fn offered() -> impl Iterator<Item = &'static Ext> {
+    CATALOG.iter().filter(|e| !e.hidden)
+}
 
 /// GNU m4 and autoconf, which phpize needs and the Xcode Command Line Tools lack (macOS's
 /// m4 1.4.6 is too old for autoconf). SHA-256 of ftp.gnu.org's tarballs, whose GPG
@@ -88,8 +139,7 @@ pub fn tools_dir() -> PathBuf {
 }
 
 fn find(name: &str) -> Result<&'static Ext> {
-    CATALOG
-        .iter()
+    offered()
         .find(|e| e.name == name)
         .with_context(|| format!("{name} is not in Anvil's catalog"))
 }
@@ -109,8 +159,13 @@ pub fn built(minor: &str, name: &str) -> bool {
 
 /// Build `name` for the installed PHP `minor` and put it in place once PHP loads it.
 pub fn build(minor: &str, name: &str) -> Result<()> {
-    let ext = find(name)?;
+    let ext = CATALOG
+        .iter()
+        .find(|e| e.name == name)
+        .with_context(|| format!("{name} is not in Anvil's catalog"))?;
     let _held = build_lock(minor, name, name)?;
+    // First: it may refuse before anything is downloaded.
+    let recipe = ext.recipe.map_or(Ok(Recipe::default()), |r| r(minor))?;
     let (full, stage) = crate::opcache::stage(minor)?;
     let bin = tools()?;
     println!("Building {name} {} for PHP {full}…", ext.version);
@@ -126,7 +181,7 @@ pub fn build(minor: &str, name: &str) -> Result<()> {
         Some(ext.sha256),
     )
     .with_context(|| format!("couldn't get {file} from pecl.php.net"))?;
-    let ok = compile(&dir, &stage, &bin, name).and_then(|so| {
+    let ok = compile(&dir, &stage, &bin, name, &recipe).and_then(|so| {
         check_loads(minor, ext, &so)?;
         install_so(&so, &so_path(minor, &full, name))
     });
@@ -332,20 +387,19 @@ pub(crate) fn scan_env_in(dir: &Path, args: &[String]) -> Result<Option<(String,
 }
 
 /// phpize, configure and make in `dir` against the staged PHP; the built `.so`.
-fn compile(dir: &Path, stage: &Path, bin: &Path, name: &str) -> Result<PathBuf> {
+fn compile(dir: &Path, stage: &Path, bin: &Path, name: &str, recipe: &Recipe) -> Result<PathBuf> {
     let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let mut configure = vec![
+        "--quiet".into(),
+        format!(
+            "--with-php-config={}",
+            stage.join("bin/php-config").display()
+        ),
+    ];
+    configure.extend(recipe.flags.iter().cloned());
     let steps: [(&Path, Vec<String>); 3] = [
         (&stage.join("bin/phpize"), vec![]),
-        (
-            Path::new("./configure"),
-            vec![
-                "--quiet".into(),
-                format!(
-                    "--with-php-config={}",
-                    stage.join("bin/php-config").display()
-                ),
-            ],
-        ),
+        (Path::new("./configure"), configure),
         (Path::new("make"), vec!["-s".into(), format!("-j{jobs}")]),
     ];
     for (prog, args) in steps {
@@ -353,6 +407,7 @@ fn compile(dir: &Path, stage: &Path, bin: &Path, name: &str) -> Result<PathBuf> 
             .args(args)
             .env("PHP_AUTOCONF", bin.join("autoconf"))
             .env("PHP_AUTOHEADER", bin.join("autoheader"))
+            .envs(recipe.env.iter().cloned())
             .current_dir(dir))
         .map_err(|e| tools_error(name, e))?;
     }
@@ -383,6 +438,95 @@ fn directive(ext: &Ext) -> &'static str {
     } else {
         "extension"
     }
+}
+
+/// Swoole against the PHP binary's own OpenSSL: the headers of that exact release, no
+/// libraries (`SSL_LIBS=" "`: the symbols come from the binary when the `.so` loads), no
+/// Homebrew on PATH (its pkg-config would bring brotli or another OpenSSL). Sockets
+/// support stays off: it needs PHP's sockets headers, which the staged tree lacks, and
+/// Octane doesn't use it. 6.2.3 lacks `sw_usleep` on macOS (fixed upstream after it).
+fn swoole_recipe(minor: &str) -> Result<Recipe> {
+    let out = Command::new(php_dir(minor).join("php"))
+        .args(["-n", "-r", "echo OPENSSL_VERSION_TEXT;"])
+        .output()
+        .with_context(|| format!("PHP {minor} is not installed"))?;
+    let inc = openssl_headers(&String::from_utf8_lossy(&out.stdout))?;
+    let inc = format!("-I{}", inc.display());
+    let path = format!(
+        "{}:/usr/bin:/bin:/usr/sbin:/sbin",
+        tools_dir().join("bin").display()
+    );
+    let env = [
+        ("PATH", path.as_str()),
+        ("SSL_CFLAGS", &inc),
+        ("SSL_LIBS", " "),
+        ("CRYPTO_CFLAGS", &inc),
+        ("CRYPTO_LIBS", " "),
+        ("CXXFLAGS", "-g -O2 -Dsw_usleep=usleep"),
+    ];
+    Ok(Recipe {
+        env: env.map(|(k, v)| (k.to_string(), v.to_string())).into(),
+        flags: vec!["--disable-brotli".into()],
+    })
+}
+
+/// The pinned OpenSSL release `text` (`OPENSSL_VERSION_TEXT`) names and its SHA-256.
+fn openssl_pin(text: &str) -> Result<(&'static str, &'static str)> {
+    let version = text.split_whitespace().nth(1).unwrap_or_default();
+    OPENSSL
+        .iter()
+        .find(|(v, _)| *v == version)
+        .copied()
+        .with_context(|| {
+            format!(
+                "Swoole needs the headers of this PHP's OpenSSL ({}), which Anvil has no checksum for",
+                text.trim()
+            )
+        })
+}
+
+/// The `include` folder with OpenSSL's headers for the release `text` names, generated
+/// once from its verified source into `cache/openssl/<version>`; the 55 MB source goes.
+fn openssl_headers(text: &str) -> Result<PathBuf> {
+    let (version, sum) = openssl_pin(text)?;
+    let dir = home().join("cache").join("openssl").join(version);
+    if dir.join("include/openssl/opensslv.h").is_file() {
+        return Ok(dir.join("include"));
+    }
+    println!("Getting OpenSSL {version}'s headers, which Swoole needs (once)…");
+    let src = home().join("build").join(format!("openssl-{version}"));
+    let _ = fs::remove_dir_all(&src);
+    let file = format!("openssl-{version}");
+    let target = match std::env::consts::ARCH {
+        "aarch64" => "darwin64-arm64-cc",
+        _ => "darwin64-x86_64-cc",
+    };
+    let ok = fetch_tgz(
+        &format!("https://github.com/openssl/openssl/releases/download/{file}/{file}.tar.gz"),
+        &src,
+        true,
+        Some(sum),
+    )
+    .with_context(|| format!("couldn't get {file} from GitHub"))
+    .and_then(|()| {
+        for args in [
+            vec!["./Configure", target, "no-shared", "no-tests"],
+            vec!["make", "-s", "build_generated"],
+        ] {
+            run(Command::new(args[0]).args(&args[1..]).current_dir(&src))
+                .map_err(|e| tools_error("OpenSSL's headers", e))?;
+        }
+        crate::replace_dir(&dir, |d| {
+            fs::create_dir_all(d.join("include"))?;
+            Ok(fs::rename(
+                src.join("include/openssl"),
+                d.join("include/openssl"),
+            )?)
+        })
+    });
+    let _ = fs::remove_dir_all(&src);
+    ok?;
+    Ok(dir.join("include"))
 }
 
 /// m4 and autoconf in `~/.anvil/tools`, built from GNU's source the first time; their
@@ -435,7 +579,7 @@ pub fn ini_args(ini: &BTreeMap<String, String>, minor: &str, names: &[String]) -
         return vec![];
     };
     let mut args = vec![];
-    for ext in CATALOG.iter().filter(|e| names.iter().any(|n| n == e.name)) {
+    for ext in offered().filter(|e| names.iter().any(|n| n == e.name)) {
         let so = so_path(minor, &full, ext.name);
         if !so.exists() {
             continue;
@@ -482,12 +626,16 @@ pub(crate) mod tests {
     fn catalog_is_pinned() {
         let hex = |s: &str| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit());
         let names: Vec<_> = CATALOG.iter().map(|e| e.name).collect();
-        assert_eq!(names, ["xdebug", "pcov", "apcu", "igbinary", "msgpack"]);
+        assert_eq!(
+            names,
+            ["xdebug", "pcov", "apcu", "igbinary", "msgpack", "swoole"]
+        );
         for e in CATALOG {
             assert!(hex(e.sha256), "{}", e.name);
             assert!(!e.version.is_empty() && !e.pecl.is_empty(), "{}", e.name);
             assert_eq!(e.zend, e.name == "xdebug", "{}", e.name);
         }
+        assert!(OPENSSL.iter().all(|(_, s)| hex(s)));
         assert_eq!(
             GNU.map(|(n, v, _)| (n, v)),
             [("m4", "1.4.19"), ("autoconf", "2.72")]
@@ -655,8 +803,8 @@ pub(crate) mod tests {
 
     #[test]
     fn build_errors_are_clear() {
-        let e = build("8.4", "swoole").unwrap_err();
-        assert_eq!(e.to_string(), "swoole is not in Anvil's catalog");
+        let e = build("8.4", "redis").unwrap_err();
+        assert_eq!(e.to_string(), "redis is not in Anvil's catalog");
         let e = tools_error(
             "xdebug",
             anyhow::anyhow!("\"make\" exited with exit status: 2"),
@@ -666,5 +814,48 @@ pub(crate) mod tests {
             format!("{e:#}").starts_with("Building xdebug failed"),
             "{e:#}"
         );
+    }
+
+    #[test]
+    fn swoole_is_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let names: Vec<_> = offered().map(|e| e.name).collect();
+        assert_eq!(names, ["xdebug", "pcov", "apcu", "igbinary", "msgpack"]);
+        fake_php("8.4", "8.4.23");
+        fs::write(php_dir("8.4").join("php-fpm"), "").unwrap();
+        fake_so("8.4", "8.4.23", "swoole");
+        crate::save(&Config::default()).unwrap();
+        let e = add("8.4", "swoole").err().unwrap();
+        assert_eq!(e.to_string(), "swoole is not in Anvil's catalog");
+        assert!(add_site("shop", "swoole").is_err());
+        // Built, and in the config by hand: still never loaded for the version.
+        let mut cfg = Config::default();
+        cfg.php_ext.insert("8.4".into(), vec!["swoole".into()]);
+        assert!(php_args(&cfg, "8.4").is_empty());
+        assert!(ini_args(&cfg.ini, "8.4", &["swoole".into()]).is_empty());
+    }
+
+    #[test]
+    fn unpinned_openssl_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        assert_eq!(openssl_pin("OpenSSL 3.6.2 7 Apr 2026").unwrap().0, "3.6.2");
+        assert_eq!(
+            openssl_pin("OpenSSL 3.5.0 8 Apr 2025")
+                .unwrap_err()
+                .to_string(),
+            "Swoole needs the headers of this PHP's OpenSSL (OpenSSL 3.5.0 8 Apr 2025), which Anvil has no checksum for"
+        );
+        // A PHP on an OpenSSL Anvil has no pin for: refused before any download.
+        fake_php("8.4", "'OpenSSL 3.5.0 8 Apr 2025'");
+        let e = build("8.4", "swoole").unwrap_err();
+        assert!(e.to_string().contains("no checksum"), "{e}");
+        assert!(!dir.path().join("cache").exists(), "nothing downloaded");
+        assert!(!dir.path().join("build").exists());
     }
 }

@@ -57,9 +57,9 @@ pub fn parse(text: &str) -> Result<ProjectFile, String> {
     if let Some(e) = f
         .extensions
         .iter()
-        .find(|e| !crate::phpext::CATALOG.iter().any(|c| c.name == *e))
+        .find(|e| !crate::phpext::offered().any(|c| c.name == *e))
     {
-        let names: Vec<_> = crate::phpext::CATALOG.iter().map(|c| c.name).collect();
+        let names: Vec<_> = crate::phpext::offered().map(|c| c.name).collect();
         return Err(format!("unknown extension {e}: use {}", names.join(", ")));
     }
     for (kind, v) in &f.services {

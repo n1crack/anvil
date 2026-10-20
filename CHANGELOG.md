@@ -27,6 +27,13 @@ Until 1.0.0, minor versions may contain breaking changes.
   app with one of those on is told so on its row instead of starting without
   it. Octane itself copies `public/frankenphp-worker.php` into the
   project, as `octane:install` does.
+  Swoole (`OCTANE_SERVER=swoole`), experimental on macOS: Anvil builds
+  Swoole 6.2.3 for the app's PHP (8.2 to 8.5) on your Mac when the row first
+  starts (about a minute; checked against its SHA-256), against the headers of
+  the OpenSSL release that PHP has inside, fetched once from OpenSSL's GitHub
+  release and checked too (2.9 MB kept, a cleanable cache). Swoole loads into
+  the Octane process only, never PHP-FPM or the app's other processes. Two
+  workers and one task worker: 200 MB, not 533 MB with one per core.
 - A web root of your own for an app Anvil serves (PHP, static): a folder inside
   the project (`web`, `dist`, `.`) in the app's Settings, or `anvil app root
   <site> [<dir>]` (`--reset` goes back to `public/` when present). A worktree

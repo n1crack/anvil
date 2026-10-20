@@ -1110,7 +1110,7 @@ fn run() -> Result<()> {
                 ExtCmd::List { .. } => {}
             }
             if let ExtCmd::List { .. } = cmd {
-                for e in phpext::CATALOG {
+                for e in phpext::offered() {
                     let state = match (phpext::on(&cfg, &v, e.name), phpext::built(&v, e.name)) {
                         (true, true) => green("on"),
                         (true, false) => {
