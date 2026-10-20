@@ -600,6 +600,12 @@ pub fn ps_of(groups: &[u32], pids: &[u32]) -> Vec<Ps> {
         ids.map(|i| i.to_string()).collect::<Vec<_>>().join(",")
     };
     let own = nix::unistd::getpgrp().as_raw() as u32;
+    // Linux's ps (procps) has no group selector: its -g is a session.
+    if cfg!(target_os = "linux") {
+        let mut table = ps();
+        table.retain(|p| p.pgid == own || groups.contains(&p.pgid) || pids.contains(&p.pid));
+        return table;
+    }
     let groups = list(&mut groups.iter().copied().chain([own]));
     let pids = list(&mut pids.iter().copied());
     let mut select = vec!["-g", &groups];

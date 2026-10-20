@@ -701,8 +701,12 @@ mod tests {
 
     #[test]
     fn names_and_simple_templates() {
-        let parent = std::env::temp_dir().join(format!("anvil-create-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&parent);
+        // The log is under ANVIL_HOME: another test may point it elsewhere meanwhile.
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        let parent = home.path().join("apps");
         fs::create_dir_all(&parent).unwrap();
         let none = Options::new();
         create("static", "site", &parent, &none, LOG_SIZE).unwrap();
@@ -718,7 +722,7 @@ mod tests {
         let log = fs::read_to_string(log_file("repo")).unwrap();
         assert!(log.starts_with("==> Set up\n"), "{log}");
         assert!(log.ends_with("Done\n"), "{log}");
-        fs::remove_dir_all(parent).unwrap();
+        unsafe { std::env::remove_var("ANVIL_HOME") };
     }
 
     #[test]

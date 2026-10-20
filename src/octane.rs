@@ -118,24 +118,30 @@ fn install(url: &str, sum: &str, dir: &Path, zip: bool) -> Result<PathBuf> {
         return Ok(rr);
     }
     crate::replace_dir(dir, |d| {
-        let file = crate::download(url, Some(sum))?;
         // Just the binary; the archive keeps it in a folder of its own.
-        let mut unpack = if zip {
-            let mut c = crate::platform::command("unzip");
-            c.args(["-q", "-j"]).arg(&file).arg("*/rr").arg("-d").arg(d);
-            c
+        if zip {
+            let file = crate::download(url, Some(sum))?;
+            let ok = crate::run(
+                crate::platform::command("unzip")
+                    .args(["-q", "-j"])
+                    .arg(&file)
+                    .arg("*/rr")
+                    .arg("-d")
+                    .arg(d),
+            );
+            let _ = std::fs::remove_file(&file);
+            ok?;
         } else {
-            let mut c = crate::platform::command("tar");
-            c.arg("-xzf")
-                .arg(&file)
-                .arg("-C")
-                .arg(d)
-                .args(["--strip-components=1", "*/rr"]);
-            c
-        };
-        let ok = crate::run(&mut unpack);
-        let _ = std::fs::remove_file(&file);
-        ok?;
+            // All of it, then all but rr goes: a member pattern needs GNU tar's
+            // --wildcards, which bsdtar (macOS, Windows) refuses.
+            crate::fetch_tgz(url, d, true, Some(sum))?;
+            for e in std::fs::read_dir(d)?.flatten() {
+                if e.file_name() != "rr" {
+                    let p = e.path();
+                    let _ = std::fs::remove_dir_all(&p).or_else(|_| std::fs::remove_file(&p));
+                }
+            }
+        }
         anyhow::ensure!(d.join("rr").is_file(), "{url} has no rr in it");
         Ok(std::fs::write(d.join("rr.yaml"), "")?)
     })?;
@@ -727,6 +733,7 @@ mod tests {
         let src = home.path().join("src");
         fs::create_dir_all(src.join("roadrunner-x")).unwrap();
         fs::write(src.join("roadrunner-x/rr"), "#!/bin/sh\n").unwrap();
+        fs::write(src.join("roadrunner-x/LICENSE"), "").unwrap();
         let tgz = home.path().join("rr.tar.gz");
         crate::run(
             crate::platform::command("tar")
@@ -767,6 +774,7 @@ mod tests {
         assert!(home.path().join("octane/roadrunner/data").exists());
         // Octane's own .rr.yaml would land in the project: Anvil's empty one is used instead.
         assert!(dir.join("rr.yaml").is_file());
+        assert!(!dir.join("LICENSE").exists(), "only rr of the archive");
         // Once there, it isn't fetched again.
         fs::remove_file(&tgz).unwrap();
         assert_eq!(install(&url, &sum, &dir, false).unwrap(), rr);

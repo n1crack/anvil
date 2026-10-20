@@ -1201,6 +1201,13 @@ mod tests {
     fn results_are_compact_json_with_structured_content() {
         let h = home();
         app(&h, "shop", "folder");
+        // Caddy on 80 itself: the address is the same whether or not this machine
+        // forwards 80 (macOS's pf daemon), and on Linux, which has none.
+        crate::update(|c| {
+            c.http_port = 80;
+            Ok(())
+        })
+        .unwrap();
         let res = result("apps", json!({}));
         let text = res["content"][0]["text"].as_str().unwrap();
         assert!(!text.contains('\n'), "{text}");
