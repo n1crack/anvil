@@ -4,6 +4,7 @@
 //! ```toml
 //! php = "8.4"
 //! node = "22"
+//! extensions = ["xdebug"]   # from `phpext::CATALOG`, for this app
 //!
 //! [services]
 //! mysql = "8.4"   # "" means any version
@@ -29,6 +30,9 @@ pub struct ProjectFile {
     pub php: Option<String>,
     #[serde(default)]
     pub node: Option<String>,
+    /// PHP extensions from Anvil's catalog.
+    #[serde(default)]
+    pub extensions: Vec<String>,
     /// Service kind -> version ("" for any).
     #[serde(default)]
     pub services: BTreeMap<String, String>,
@@ -49,6 +53,14 @@ pub fn parse(text: &str) -> Result<ProjectFile, String> {
         && (v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()))
     {
         return Err(format!("node = \"{v}\": use a major version, e.g. \"22\""));
+    }
+    if let Some(e) = f
+        .extensions
+        .iter()
+        .find(|e| !crate::phpext::CATALOG.iter().any(|c| c.name == *e))
+    {
+        let names: Vec<_> = crate::phpext::CATALOG.iter().map(|c| c.name).collect();
+        return Err(format!("unknown extension {e}: use {}", names.join(", ")));
     }
     for (kind, v) in &f.services {
         if !services::SERVICES.contains(&kind.as_str()) {
@@ -123,7 +135,7 @@ pub fn node(dir: &Path, installed: &[String]) -> Option<String> {
 /// One thing the file asks for.
 #[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct Need {
-    /// "php", "node" or a service kind.
+    /// "php", "node", "ext" or a service kind.
     pub kind: String,
     /// As the file says it ("" for any version).
     pub version: String,
@@ -131,7 +143,7 @@ pub struct Need {
     pub install: String,
     /// "PHP 8.3", "Redis", "MySQL 8.4".
     pub label: String,
-    /// Installed, or a service of this kind and version is added.
+    /// Installed, a service of this kind and version is added, or the extension is on.
     pub met: bool,
     /// The version the user chose in Anvil instead (PHP and Node.js only).
     pub overridden: Option<String>,
@@ -145,13 +157,15 @@ impl Need {
 }
 
 /// What the file asks for against what Anvil has: the user's PHP and Node.js
-/// choices, the installed versions and the added services as (kind, version).
+/// choices, the installed versions, the added services as (kind, version) and the
+/// extensions on for the app (its own and its PHP version's).
 pub fn needs_in(
     f: &ProjectFile,
     pins: (Option<&str>, Option<&str>),
     php: &[String],
     node: &[String],
     added: &[(&str, String)],
+    exts: &[String],
 ) -> Vec<Need> {
     let runtime =
         |kind: &str, label: &str, want: &Option<String>, pin: Option<&str>, have: &[String]| {
@@ -186,6 +200,14 @@ pub fn needs_in(
             overridden: None,
         });
     }
+    out.extend(f.extensions.iter().map(|e| Need {
+        kind: "ext".into(),
+        version: e.clone(),
+        install: e.clone(),
+        label: e.clone(),
+        met: exts.contains(e),
+        overridden: None,
+    }));
     out
 }
 
@@ -202,12 +224,17 @@ pub fn needs(cfg: &Config, site: &Site) -> Vec<Need> {
         .iter()
         .filter_map(|id| Some((services::kind_of(cfg, id).ok()?, services::version(cfg, id))))
         .collect();
+    let mut exts = site.ext.clone();
+    if let Some(v) = &site.php {
+        exts.extend(cfg.php_ext.get(v).into_iter().flatten().cloned());
+    }
     needs_in(
         &f,
         (php_pin, node_pin),
         &crate::installed_php(),
         &crate::runtimes::installed("node"),
         &added,
+        &exts,
     )
 }
 
@@ -282,11 +309,40 @@ mod tests {
     }
 
     #[test]
+    fn toml_extensions_missing_and_applied() {
+        let e = parse("extensions = [\"xdebug\", \"imagick\"]\n").unwrap_err();
+        assert!(
+            e.starts_with("unknown extension imagick: use xdebug, pcov"),
+            "{e}"
+        );
+        let f = parse("extensions = [\"xdebug\", \"apcu\"]\n").unwrap();
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let n = needs_in(&f, (None, None), &[], &[], &[], &[]);
+        assert_eq!(
+            n.iter()
+                .map(|n| (
+                    n.kind.as_str(),
+                    n.install.as_str(),
+                    n.label.as_str(),
+                    n.missing()
+                ))
+                .collect::<Vec<_>>(),
+            [
+                ("ext", "xdebug", "xdebug", true),
+                ("ext", "apcu", "apcu", true)
+            ]
+        );
+        // On for the app or for its PHP version: both count once applied.
+        let n = needs_in(&f, (None, None), &[], &[], &[], &s(&["apcu", "xdebug"]));
+        assert!(n.iter().all(|n| n.met && !n.missing()));
+    }
+
+    #[test]
     fn says_whats_met_missing_and_overridden() {
         let f = parse(GOOD).unwrap();
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         // Nothing there: everything is missing, with what adding would get.
-        let n = needs_in(&f, (None, None), &[], &[], &[]);
+        let n = needs_in(&f, (None, None), &[], &[], &[], &[]);
         let labels: Vec<_> = n
             .iter()
             .filter(|n| n.missing())
@@ -300,7 +356,7 @@ mod tests {
             ("mysql", "8.0.46".to_string()),
             ("redis", "7.2.16".to_string()),
         ];
-        let n = needs_in(&f, (None, None), &s(&["8.4"]), &s(&["22"]), &added);
+        let n = needs_in(&f, (None, None), &s(&["8.4"]), &s(&["22"]), &added, &[]);
         let missing: Vec<_> = n
             .iter()
             .filter(|n| n.missing())
@@ -311,10 +367,17 @@ mod tests {
             ("mysql", "8.4.11".to_string()),
             ("redis", "7.2.16".to_string()),
         ];
-        let n = needs_in(&f, (None, None), &s(&["8.4"]), &s(&["22"]), &added);
+        let n = needs_in(&f, (None, None), &s(&["8.4"]), &s(&["22"]), &added, &[]);
         assert!(n.iter().all(|n| !n.missing()));
         // The user's own PHP choice replaces the file's: not missing, though not installed.
-        let n = needs_in(&f, (Some("8.3"), None), &s(&["8.3"]), &s(&["22"]), &added);
+        let n = needs_in(
+            &f,
+            (Some("8.3"), None),
+            &s(&["8.3"]),
+            &s(&["22"]),
+            &added,
+            &[],
+        );
         assert_eq!(
             (n[0].met, n[0].overridden.as_deref(), n[0].missing()),
             (false, Some("8.3"), false)

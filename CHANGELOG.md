@@ -34,6 +34,11 @@ Until 1.0.0, minor versions may contain breaking changes.
   `anvil app ext <site> add|remove <ext>`, e.g. Xdebug for the app you debug
   only. That app, and any other address of the same folder, gets a PHP-FPM of
   its own; its terminal `php` and processes load the same extensions.
+- A project's `.anvil.toml` can ask for PHP extensions: `extensions =
+  ["xdebug"]`. One not on for the app or its PHP version shows in the
+  Overview's Project line with Add, which turns it on for that app (building
+  it first if needed); `anvil project --apply` does the same. A name Anvil
+  doesn't offer is reported, like an unknown version.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service
   start|stop <id>` ask the running app to do it, so the change shows there at
   once, and print each process's state (`api: running`). Without the app open
