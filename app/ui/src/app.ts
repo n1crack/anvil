@@ -303,6 +303,15 @@ export function markBox(m, badge) {
   return box;
 }
 
+/** An app's aliases: the other names linked to its folder. The app is the parked one, else the
+ * first by name, as Anvil picks it; an alias has none. A worktree's are derived from them. */
+function aliasesOf(s) {
+  if (s.worktree_of) return s.aliases.map((host) => ({ host, secure: s.secure }));
+  const same = snap.sites.filter((k) => !k.worktree_of && k.path === s.path);
+  const main = same.find((k) => !k.linked) ?? same.sort((a, b) => a.name.localeCompare(b.name))[0];
+  return main === s ? same.filter((k) => k !== s) : [];
+}
+
 export function row(s, { child = false, kids = 0, path = true, kind: showKind = true } = {}) {
   const b = document.createElement("button");
   b.className = child ? "item child" : "item";
@@ -335,6 +344,13 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
     lock.innerHTML = LOCK;
     lock.title = "HTTPS";
     $(".name", text).append(lock);
+  }
+  // Its other addresses as a count; the header lists them.
+  const aliases = s.hiddenApp ? [] : aliasesOf(s);
+  if (aliases.length) {
+    const more = el("span", "alias-count", `+${aliases.length}`);
+    more.title = aliases.map((a) => a.host).join("\n");
+    $(".name", text).append(more);
   }
   // In a folder's section the path only repeats the heading; linked apps and groups keep it.
   if (path && !child) $(".sub", text).textContent = tilde(s.path) + (s.path.includes("\\") ? "\\" : "/");
@@ -516,16 +532,16 @@ function renderList() {
     return;
   }
 
-  // Worktrees nest under their app. A linked name pointing at a parked project's folder is
-  // an alias: it shows in that app's header, not as a row.
-  const apps = new Set(snap.sites.filter((s) => !s.linked && !s.worktree_of).map((s) => s.name));
+  // Worktrees nest under their app, linked or parked. Another name linked to an app's folder
+  // is an alias: a count on the app's row, listed in its header, not a row of its own.
+  const alias = new Set(snap.sites.filter((s) => !s.worktree_of).flatMap((s) => aliasesOf(s).map((a) => a.name)));
+  const apps = new Set(snap.sites.filter((s) => !s.worktree_of && !alias.has(s.name)).map((s) => s.name));
   // A worktree whose app is gone stands alone, in its folder's section else Linked.
   const orphan = (s) => s.worktree_of && !apps.has(s.worktree_of);
   const parked = [...snap.sites.filter((s) => (!s.linked && !s.worktree_of) || (orphan(s) && s.parked_in)), ...hiddenApps];
   const wts = new Map<string, any[]>();
   for (const s of snap.sites) if (s.worktree_of && !orphan(s)) wts.set(s.worktree_of, [...(wts.get(s.worktree_of) ?? []), s]);
-  const parkedPaths = new Set(parked.map((s) => s.path));
-  const linked = snap.sites.filter((s) => (s.linked && !parkedPaths.has(s.path)) || (orphan(s) && !s.parked_in));
+  const linked = snap.sites.filter((s) => (s.linked && !s.worktree_of && !alias.has(s.name)) || (orphan(s) && !s.parked_in));
 
   const order = sortBy === "modified" ? (a, b) => b.modified - a.modified : (a, b) => a.name.localeCompare(b.name);
 
@@ -606,7 +622,7 @@ function renderList() {
         false,
       );
     }
-    section("Linked", linked, false);
+    section("Linked", linked, true);
   }
 
   if (!count) {
@@ -1065,11 +1081,7 @@ export function drawMeta() {
     }
     // Aliases are linked names for the same folder.
     // A worktree's are the hosts derived from its app's aliases.
-    const aliases = s.worktree_of
-      ? s.aliases.map((host) => ({ host, secure: s.secure }))
-      : s.linked
-        ? []
-        : snap.sites.filter((k) => k.linked && k.path === s.path);
+    const aliases = aliasesOf(s);
     if (aliases.length) {
       const chip = el("button", "alias-chip", `+${aliases.length}`);
       chip.title = "All addresses";

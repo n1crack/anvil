@@ -199,6 +199,11 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Changed
 
+- Sidebar: a worktree's branch starts where its app's name does, its run dot
+  under the app's mark on a line joining them. An app's aliases (other names
+  linked to its folder) show as a count after its name, the addresses on
+  hover, instead of rows of their own; a linked app's worktrees nest under it
+  too, as a parked app's do.
 - `anvil start` refuses while the Anvil app runs, which already serves your
   apps.
 - Removing a worktree names the files git doesn't keep that go with its

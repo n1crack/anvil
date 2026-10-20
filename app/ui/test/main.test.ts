@@ -2610,7 +2610,11 @@ describe("sidebar worktrees", () => {
     expect($$("#list .alias").length).toBe(0);
     expect($(`#list [data-name="admin.shop"]`)).toBeNull();
     const kids = $$("#list .kids .item.child");
-    expect(kids.map((k) => k.querySelector(".name")!.textContent)).toEqual(["agent/1a2b", "feature/login"]);
+    expect(kids.map((k) => k.querySelector(".name")!.firstChild!.textContent)).toEqual(["agent/1a2b", "feature/login"]);
+    // Their app's and their own other addresses as a count, the hosts on hover.
+    expect($(`#list [data-name="shop"] .alias-count`).textContent).toBe("+2");
+    expect($(`#list [data-name="shop"] .alias-count`).title).toBe("admin.shop.test\napi.shop.test");
+    expect(kids.map((k) => k.querySelector(".alias-count")?.textContent)).toEqual(["+1", "+1"]);
     expect(kids.map((k) => k.querySelector(".dot")!.classList.contains("on"))).toEqual([false, true]);
     const disc = $(`#list [data-name="shop"] .disclosure`);
     expect(disc.querySelector("svg")).toBeTruthy();
@@ -2632,6 +2636,30 @@ describe("sidebar worktrees", () => {
     $("#site .alias-chip").click();
     expect($$(".alias-pop .alias-url").map((e) => e.textContent)).toContain("admin--feature-login.test");
     document.querySelector(".pop")?.remove();
+  });
+
+  test("a linked app keeps its worktrees under it and its alias as a count, not a row", async () => {
+    const before = w.mockSnap.sites;
+    const p = "/Users/x/Code/api";
+    w.mockSnap.sites = [
+      ...before,
+      w.mockSite("api", "laravel", { linked: true, parked_in: null, path: p }),
+      w.mockSite("backend", "laravel", { linked: true, parked_in: null, path: p }),
+      w.mockSite("api--x", "laravel", { worktree_of: "api", branch: "x", parked_in: null, path: "/Users/x/Code/api-wt/x", aliases: ["backend--x.test"] }),
+    ];
+    try {
+      await refresh();
+      expect($(`#list [data-name="backend"]`)).toBeNull();
+      expect($(`#list [data-name="api"] .alias-count`).textContent).toBe("+1");
+      const kid = $(`#list [data-name="api--x"]`);
+      expect(kid.classList.contains("child")).toBe(true);
+      expect(kid.closest(".kids")!.previousElementSibling!.getAttribute("data-name")).toBe("api");
+      await select("api");
+      expect($("#site .alias-chip").textContent).toBe("+1");
+    } finally {
+      w.mockSnap.sites = before;
+      await refresh();
+    }
   });
 
   test("a worktree whose app is gone still shows, as a plain row with its branch", async () => {

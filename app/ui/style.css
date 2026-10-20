@@ -282,15 +282,31 @@ button, select, input { font: inherit; color: inherit; }
 .kids.closed,
 .fold.closed { grid-template-rows: 0fr; }
 
-/* A worktree: a dot, then the branch; no mark, so two columns. */
+/* A worktree: the branch where its app's name starts, its run dot under the app's mark on a
+   line that joins the worktrees to their app. */
 .item.child {
-  --indent: 26px;
+  --indent: 44px;
   grid-template-columns: 1fr auto;
   min-height: 34px;
 }
+.item.child::before { left: 56px; }
+.item.child::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 27.5px;
+  border-left: 1px solid var(--edge);
+}
+.kids > div > .item.child:last-child::after { bottom: 50%; }
 
-.item.child .name { font-weight: 400; }
-.item.child > .dot { position: absolute; left: 17px; top: calc(50% - 4px); }
+.item.child .name { font-weight: 400; color: var(--muted); }
+.item.child[aria-current="true"] .name,
+.item.child:hover .name { color: var(--text); }
+.item.child > .dot { position: absolute; z-index: 1; left: 24px; top: calc(50% - 4px); }
+
+/* An app's other addresses, as a count after its name. */
+.alias-count { margin-left: 6px; color: var(--muted); font-size: 11px; font-weight: 400; }
 .item.compact { min-height: 40px; padding-top: 4px; padding-bottom: 4px; }
 
 .item:hover { background: var(--steel-hover); }
