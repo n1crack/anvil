@@ -585,8 +585,43 @@ pub fn ps() -> Vec<Ps> {
 
 #[cfg(not(windows))]
 pub fn ps() -> Vec<Ps> {
+    table(&["-A"])
+}
+
+/// `ps` of the process groups `groups`, the pids `pids` and Anvil's own group (where the
+/// web server's and services' children are), not of every process: what the Processes
+/// window measures. Nothing to measure, nothing run.
+#[cfg(not(windows))]
+pub fn ps_of(groups: &[u32], pids: &[u32]) -> Vec<Ps> {
+    if groups.is_empty() && pids.is_empty() {
+        return vec![];
+    }
+    let list = |ids: &mut dyn Iterator<Item = u32>| {
+        ids.map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+    };
+    let own = nix::unistd::getpgrp().as_raw() as u32;
+    let groups = list(&mut groups.iter().copied().chain([own]));
+    let pids = list(&mut pids.iter().copied());
+    let mut select = vec!["-g", &groups];
+    if !pids.is_empty() {
+        select.extend(["-p", &pids]);
+    }
+    table(&select)
+}
+
+/// The whole table on Windows, read without running anything.
+#[cfg(windows)]
+pub fn ps_of(_groups: &[u32], _pids: &[u32]) -> Vec<Ps> {
+    ps()
+}
+
+#[cfg(not(windows))]
+fn table(select: &[&str]) -> Vec<Ps> {
     let out = crate::platform::command("ps")
-        .args(["-A", "-o", "pid=,ppid=,pgid=,rss=,%cpu=,command="])
+        .args(select)
+        .args(["-o", "pid=,ppid=,pgid=,rss=,%cpu=,command="])
+        // A Turkish terminal's "0,5" isn't a number to `parse`; every row would be dropped.
+        .env("LC_ALL", "C")
         .output();
     let Ok(out) = out else { return vec![] };
     String::from_utf8_lossy(&out.stdout)
@@ -1395,6 +1430,38 @@ pub fn touched(dir: &Path) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn ps_of_reads_only_the_groups_and_pids_asked_for() {
+        use std::os::unix::process::CommandExt;
+        assert!(ps_of(&[], &[]).is_empty());
+        let mut leader = crate::platform::command("sh")
+            .args(["-c", "sleep 30 & wait"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let g = leader.id();
+        let mut single = crate::platform::command("sleep").arg("30").spawn().unwrap();
+        // Its child, in its group, may take a moment to start.
+        let mut table = vec![];
+        for _ in 0..100 {
+            table = ps_of(&[g], &[single.id()]);
+            if table.iter().filter(|p| p.pgid == g).count() == 2 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let _ = leader.kill();
+        let _ = single.kill();
+        let _ = (leader.wait(), single.wait());
+        assert_eq!(table.iter().filter(|p| p.pgid == g).count(), 2);
+        assert!(table.iter().any(|p| p.pid == single.id() && p.rss > 0));
+        // Not every process: launchd/init (pid 1) is in none of them.
+        assert!(!table.iter().any(|p| p.pid == 1));
+        let (_, memory) = usage(&table, g, true);
+        assert!(memory > 0);
+    }
 
     #[test]
     fn mail_goes_to_the_mailpit_on_its_smtp_port() {

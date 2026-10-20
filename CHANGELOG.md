@@ -120,8 +120,19 @@ Until 1.0.0, minor versions may contain breaking changes.
 - Removing a worktree names the files git doesn't keep that go with its
   folder (its SQLite database, an edited `.env`) before you confirm. `anvil
   worktree remove` asks on a terminal and elsewhere refuses until `--yes`.
+- Polling costs less while a window is open. The Overview, the Containers tab,
+  the app list and the Processes window share one `docker ps` per 2 s, and a
+  compose file's services are read again only when a compose or `.env` file
+  changes, not twice per 2 s. The Processes window measures only the
+  processes Anvil started instead of listing every process on the Mac.
+- The Processes window says why Docker couldn't list the containers ("Docker
+  isn't running") instead of leaving them out without a word.
 
 ### Fixed
+
+- The Processes window and an app's Resources tab show CPU and memory when
+  Anvil was started from a terminal whose language writes decimal commas
+  (Turkish); they showed nothing measured.
 
 - An app whose folder is inside a folder starting with a dot (`~/.sites/shop`)
   no longer answers 404 for its files (CSS, images, a static site's every

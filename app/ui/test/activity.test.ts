@@ -231,4 +231,15 @@ describe("long-open window", () => {
     showError(null, "act");
     expect($("#error").hidden).toBe(true);
   });
+
+  test("Docker's error shows until a poll lists the containers again", async () => {
+    const { load } = await import("../src/activity");
+    activity.docker_error = "Docker isn't running";
+    await load();
+    expect($("#error").hidden).toBe(false);
+    expect($("#error").textContent).toBe("Docker isn't running");
+    activity.docker_error = null;
+    await load();
+    expect($("#error").hidden).toBe(true);
+  });
 });

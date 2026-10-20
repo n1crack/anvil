@@ -236,6 +236,8 @@ export interface Activity {
   web: ActivityRow[];
   apps: { site: string; rows: ActivityRow[] }[];
   services: ActivityRow[];
+  /** Why Docker couldn't list the containers, when an app has a compose file. */
+  docker_error: string | null;
 }
 
 interface ServiceInfo {

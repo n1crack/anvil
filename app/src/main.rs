@@ -205,10 +205,9 @@ fn app_states(
         .collect()
 }
 
-/// Folders with a running container, from one `docker ps`, and only when an app has a
-/// compose file. Kept a few seconds: the snapshot is asked for often.
+/// Folders with a running container, from the shared `docker ps`, and only when an app has
+/// a compose file. An answer up to 5 s old does: the snapshot is asked for often.
 /// ponytail: a container started outside Anvil shows within 5 s, or at the next change.
-static CONTAINERS: Mutex<Option<(std::time::Instant, Vec<std::path::PathBuf>)>> = Mutex::new(None);
 fn running_containers(sites: &[Site]) -> Vec<std::path::PathBuf> {
     if !sites
         .iter()
@@ -216,20 +215,12 @@ fn running_containers(sites: &[Site]) -> Vec<std::path::PathBuf> {
     {
         return vec![];
     }
-    let mut cache = anvil::lock(&CONTAINERS);
-    if let Some((at, dirs)) = cache.as_ref()
-        && at.elapsed() < std::time::Duration::from_secs(5)
-    {
-        return dirs.clone();
-    }
-    let dirs: Vec<_> = anvil::compose::running()
+    anvil::compose::running(std::time::Duration::from_secs(5))
         .unwrap_or_default()
         .into_iter()
         .filter(|(_, c)| c.state == "running")
         .map(|(d, _)| d)
-        .collect();
-    *cache = Some((std::time::Instant::now(), dirs.clone()));
-    dirs
+        .collect()
 }
 
 fn err(e: anyhow::Error) -> String {
@@ -723,7 +714,7 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
             // A file that can't be read (unset variables) may still have containers up.
             Err(e) => {
                 let real = anvil::platform::canonicalize(&site.path).ok();
-                let up: Vec<_> = anvil::compose::running()
+                let up: Vec<_> = anvil::compose::running(anvil::compose::TICK)
                     .unwrap_or_default()
                     .into_iter()
                     .filter(|(dir, _)| {
@@ -836,6 +827,8 @@ struct Activity {
     web: Vec<Row>,
     apps: Vec<AppGroup>,
     services: Vec<Row>,
+    /// Why docker couldn't list the containers, when an app has a compose file.
+    docker_error: Option<String>,
 }
 
 fn row(key: String, name: String, state: &'static str, actions: bool) -> Row {
@@ -901,17 +894,29 @@ fn activity(app: State<App>) -> Res<Activity> {
         (services.info(&cfg), services.pids())
     };
 
-    // One `docker ps` for every project, and only when an app has a compose file.
-    let containers = if sites
+    // One `docker ps` for every project (this tick's, shared), and only when an app has a
+    // compose file; why it failed shows.
+    let (containers, docker_error) = if sites
         .iter()
         .any(|s| anvil::compose::file(&s.path).is_some())
     {
-        anvil::compose::running().unwrap_or_default()
+        match anvil::compose::running(anvil::compose::TICK) {
+            Ok(c) => (c, None),
+            Err(e) => (vec![], Some(err(e))),
+        }
     } else {
-        vec![]
+        (vec![], None)
     };
 
-    let table = anvil::resources::ps();
+    // Only what Anvil started: the apps' process groups, the servers' and services' pids.
+    let table = anvil::resources::ps_of(
+        &listed.iter().map(|(_, pid, _)| *pid).collect::<Vec<_>>(),
+        &web_pids
+            .iter()
+            .map(|(_, pid)| *pid)
+            .chain(service_pids.values().copied())
+            .collect::<Vec<_>>(),
+    );
     let web = web_pids
         .into_iter()
         .map(|(label, pid)| {
@@ -1023,6 +1028,7 @@ fn activity(app: State<App>) -> Res<Activity> {
         web,
         apps: groups,
         services,
+        docker_error,
     })
 }
 
@@ -1234,7 +1240,6 @@ fn container_run(app: State<App>, site: String, service: String, action: String)
         return Err(format!("{site} has no compose file"));
     }
     anvil::compose::action(&s.path, &service, &action).map_err(err)?;
-    *anvil::lock(&CONTAINERS) = None;
     Ok(overview(&app, &cfg, &s))
 }
 
@@ -1247,7 +1252,6 @@ fn containers_run(app: State<App>, site: String, action: String) -> Res<Overview
         return Err(format!("{site} has no compose file"));
     }
     anvil::compose::project_action(&s.path, &action).map_err(err)?;
-    *anvil::lock(&CONTAINERS) = None;
     Ok(overview(&app, &cfg, &s))
 }
 

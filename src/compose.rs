@@ -7,9 +7,10 @@ use serde::Serialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime};
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Container {
     pub service: String,
     pub state: String,
@@ -17,6 +18,9 @@ pub struct Container {
     pub ports: Vec<u16>,
     /// How an exited container ended; None while it runs or when it never ran.
     pub exit_code: Option<i64>,
+    /// Started by `docker compose run`, not one of the project's services.
+    #[serde(skip)]
+    pub oneoff: bool,
 }
 
 pub fn file(dir: &Path) -> Option<PathBuf> {
@@ -159,88 +163,90 @@ fn readable(err: &str, dir: &Path) -> String {
     msg
 }
 
-type Row = (String, String, Option<String>, Vec<u16>, Option<i64>);
-
-/// Read `docker compose ps --format json`: one object per line (v2+) or a JSON array (older).
-pub(crate) fn parse_ps(json_lines: &str) -> Vec<Row> {
-    let mut values: Vec<serde_json::Value> = Vec::new();
-    for v in serde_json::Deserializer::from_str(json_lines)
-        .into_iter::<serde_json::Value>()
-        .map_while(|v| v.ok())
-    {
-        match v {
-            serde_json::Value::Array(a) => values.extend(a),
-            v => values.push(v),
-        }
-    }
-    values
-        .iter()
-        .filter_map(|v| {
-            let text = |k: &str| v.get(k)?.as_str().map(str::to_string);
-            let mut ports: Vec<u16> = v["Publishers"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|p| p["PublishedPort"].as_u64()?.try_into().ok())
-                .filter(|p| *p != 0)
-                .collect();
-            // IPv4 and IPv6 publish the same port twice.
-            ports.sort_unstable();
-            ports.dedup();
-            Some((
-                text("Service")?,
-                text("State").unwrap_or_default(),
-                text("Health").filter(|h| !h.is_empty()),
-                ports,
-                v["ExitCode"]
-                    .as_i64()
-                    .filter(|_| text("State").as_deref() == Some("exited")),
-            ))
-        })
-        .collect()
-}
-
 const READ: Duration = Duration::from_secs(5);
 
-fn containers_with(docker: &Path, dir: &Path) -> Result<Vec<Container>> {
-    let services = compose(docker, dir, &["config", "--services"], READ)?;
-    let ps = compose(docker, dir, &["ps", "--all", "--format", "json"], READ)?;
-    let ps = parse_ps(&ps);
+/// The folder's service names, by name, from `config --services`: compose reads the
+/// whole file for it, so the answer is kept until a compose or `.env` file of the
+/// folder changes (`compose_files`). Errors aren't kept: the next look asks again.
+// ponytail: a file pulled in from elsewhere (`include: ../x.yaml`) is only read again when
+// one in the folder changes.
+fn services_with(docker: &Path, dir: &Path) -> Result<Vec<String>> {
+    type Kept =
+        std::collections::HashMap<PathBuf, (Vec<(String, Option<SystemTime>)>, Vec<String>)>;
+    static KEPT: Mutex<Option<Kept>> = Mutex::new(None);
+    let now = compose_files(dir);
+    if let Some((at, names)) = crate::lock(&KEPT).as_ref().and_then(|k| k.get(dir))
+        && *at == now
+    {
+        return Ok(names.clone());
+    }
+    let out = compose(docker, dir, &["config", "--services"], READ)?;
     // By name: `config --services` gives dependency order, which changes as services do.
-    let mut services: Vec<&str> = services
+    let mut names: Vec<String> = out
         .lines()
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .map(str::to_string)
         .collect();
-    services.sort_unstable();
-    services.dedup();
+    names.sort_unstable();
+    names.dedup();
+    crate::lock(&KEPT)
+        .get_or_insert_default()
+        .insert(dir.to_path_buf(), (now, names.clone()));
+    Ok(names)
+}
+
+/// The modified times of the folder's compose and `.env` files, what `config` reads.
+fn compose_files(dir: &Path) -> Vec<(String, Option<SystemTime>)> {
+    let mut v: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            (name.contains("compose") || name.starts_with(".env"))
+                .then(|| (name, e.metadata().and_then(|m| m.modified()).ok()))
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+fn containers_with(docker: &Path, dir: &Path) -> Result<Vec<Container>> {
+    let services = services_with(docker, dir)?;
+    // The project's containers, from the `docker ps` every poll shares; not `compose run`'s.
+    let real = crate::platform::canonicalize(dir).ok();
+    let ps: Vec<Container> = listed_with(docker, TICK)?
+        .into_iter()
+        .filter(|(d, c)| {
+            !c.oneoff
+                && (d == dir || (real.is_some() && crate::platform::canonicalize(d).ok() == real))
+        })
+        .map(|(_, c)| c)
+        .collect();
     Ok(services
         .into_iter()
-        .map(|name| match ps.iter().find(|r| r.0 == name) {
-            Some((_, state, health, ports, exit_code)) => Container {
-                service: name.into(),
-                state: state.clone(),
-                health: health.clone(),
-                ports: ports.clone(),
-                exit_code: *exit_code,
-            },
+        .map(|name| match ps.iter().find(|c| c.service == name) {
+            Some(c) => c.clone(),
             None => Container {
-                service: name.into(),
+                service: name,
                 state: "stopped".into(),
                 health: None,
                 ports: vec![],
                 exit_code: None,
+                oneoff: false,
             },
         })
         .collect())
 }
 
+/// The services of the folder's compose file, each with its container's state.
 pub fn containers(dir: &Path) -> Result<Vec<Container>> {
     containers_with(&docker_bin(), dir)
 }
 
 /// Each line of `docker ps` as one JSON object, with the compose labels.
-const PS_FORMAT: &str = r#"{"dir":{{json (.Label "com.docker.compose.project.working_dir")}},"service":{{json (.Label "com.docker.compose.service")}},"state":{{json .State}},"status":{{json .Status}},"ports":{{json .Ports}}}"#;
+const PS_FORMAT: &str = r#"{"dir":{{json (.Label "com.docker.compose.project.working_dir")}},"service":{{json (.Label "com.docker.compose.service")}},"oneoff":{{json (.Label "com.docker.compose.oneoff")}},"state":{{json .State}},"status":{{json .Status}},"ports":{{json .Ports}}}"#;
 
 /// Read `docker ps --format PS_FORMAT`: the project folder and the container of each line.
 pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
@@ -248,6 +254,8 @@ pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
     struct Line {
         dir: String,
         service: String,
+        #[serde(default)]
+        oneoff: String,
         state: String,
         status: String,
         ports: String,
@@ -270,12 +278,19 @@ pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
                 .into_iter()
                 .find(|h| l.status.ends_with(&format!("{h})")))
                 .map(str::to_string);
+            // "Exited (137) 2 minutes ago".
+            let exit_code = l
+                .status
+                .strip_prefix("Exited (")
+                .and_then(|r| r.split_once(')')?.0.parse().ok())
+                .filter(|_| l.state == "exited");
             let c = Container {
                 service: l.service,
                 state: l.state,
                 health,
                 ports,
-                exit_code: None,
+                exit_code,
+                oneoff: l.oneoff.eq_ignore_ascii_case("true"),
             };
             (PathBuf::from(l.dir), c)
         })
@@ -285,21 +300,56 @@ pub(crate) fn parse_running(lines: &str) -> Vec<(PathBuf, Container)> {
     rows
 }
 
-fn running_with(docker: &Path) -> Result<Vec<(PathBuf, Container)>> {
+/// A poll's answer is the next one's for this long: the Overview, the app list and the
+/// Processes window all ask every 2 s, and share one `docker ps`.
+pub const TICK: Duration = Duration::from_millis(1900);
+
+/// The last `docker ps --all` (which docker, when, what it said); an action clears it.
+type Listed = (PathBuf, Instant, Result<Vec<(PathBuf, Container)>, String>);
+static LISTED: Mutex<Option<Listed>> = Mutex::new(None);
+
+/// Every compose container, stopped ones too, by the folder its project was started
+/// from: one `docker ps` for all projects, asked again once the last answer is older than
+/// `max_age`. Held while docker answers, so callers at the same time share one.
+fn listed_with(docker: &Path, max_age: Duration) -> Result<Vec<(PathBuf, Container)>> {
+    let mut last = crate::lock(&LISTED);
+    if let Some((d, at, answer)) = last.as_ref()
+        && d == docker
+        && at.elapsed() < max_age
+    {
+        return answer.clone().map_err(anyhow::Error::msg);
+    }
     let args = [
         "ps",
+        "--all",
         "--filter",
         "label=com.docker.compose.service",
         "--format",
         PS_FORMAT,
     ];
-    Ok(parse_running(&run(docker, Path::new("/"), &args, READ)?))
+    let answer = run(docker, Path::new("/"), &args, READ)
+        .map(|out| parse_running(&out))
+        .map_err(|e| format!("{e:#}"));
+    *last = Some((docker.to_path_buf(), Instant::now(), answer.clone()));
+    answer.map_err(anyhow::Error::msg)
 }
 
-/// Every running compose container, by the folder its project was started from:
-/// one `docker ps` for all projects.
-pub fn running() -> Result<Vec<(PathBuf, Container)>> {
-    running_with(&docker_bin())
+fn running_with(docker: &Path, max_age: Duration) -> Result<Vec<(PathBuf, Container)>> {
+    let mut all = listed_with(docker, max_age)?;
+    // What `docker ps` without `--all` lists.
+    all.retain(|(_, c)| matches!(c.state.as_str(), "running" | "paused" | "restarting"));
+    Ok(all)
+}
+
+/// Every running compose container, by the folder its project was started from, from
+/// an answer at most `max_age` old.
+pub fn running(max_age: Duration) -> Result<Vec<(PathBuf, Container)>> {
+    running_with(&docker_bin(), max_age)
+}
+
+/// After an action the next look asks docker again.
+fn forget() {
+    *crate::lock(&LISTED) = None;
 }
 
 fn action_with(docker: &Path, dir: &Path, service: &str, action: &str) -> Result<()> {
@@ -310,7 +360,9 @@ fn action_with(docker: &Path, dir: &Path, service: &str, action: &str) -> Result
         _ => bail!("Unknown action: {action}"),
     };
     // Starting may pull an image or wait for a slow shutdown (a game server saving its world).
-    compose(docker, dir, args, Duration::from_secs(600)).map(drop)
+    let done = compose(docker, dir, args, Duration::from_secs(600)).map(drop);
+    forget();
+    done
 }
 
 pub fn action(dir: &Path, service: &str, action: &str) -> Result<()> {
@@ -325,7 +377,9 @@ fn project_action_with(docker: &Path, dir: &Path, action: &str) -> Result<()> {
         "stop" => &["stop"],
         _ => bail!("Unknown action: {action}"),
     };
-    compose(docker, dir, args, Duration::from_secs(600)).map(drop)
+    let done = compose(docker, dir, args, Duration::from_secs(600)).map(drop);
+    forget();
+    done
 }
 
 pub fn project_action(dir: &Path, action: &str) -> Result<()> {
@@ -539,28 +593,31 @@ mod tests {
         p
     }
 
+    /// Held by the tests that use the shared `docker ps` answer (`LISTED`).
+    static LISTED_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
-    fn parses_ps_lines_and_arrays() {
+    fn reads_exit_codes_and_one_off_containers() {
         let lines = concat!(
-            r#"{"Service":"sphere","State":"running","Health":"healthy","Publishers":[{"PublishedPort":2593},{"PublishedPort":2593}]}"#,
+            r#"{"dir":"/s","service":"db","oneoff":"False","state":"exited","status":"Exited (137) 2 minutes ago","ports":""}"#,
             "\n",
-            r#"{"Service":"db","State":"exited","Health":"","Publishers":[],"ExitCode":137}"#,
-            "\n"
+            r#"{"dir":"/s","service":"web","oneoff":"True","state":"running","status":"Up 1 second","ports":""}"#,
+            "\n",
+            r#"{"dir":"/s","service":"new","state":"created","status":"Created","ports":""}"#,
         );
-        let want = vec![
-            (
-                "sphere".into(),
-                "running".into(),
-                Some("healthy".into()),
-                vec![2593],
-                None,
-            ),
-            ("db".into(), "exited".into(), None, vec![], Some(137)),
-        ];
-        assert_eq!(parse_ps(lines), want);
-        let array = format!("[{}]", lines.trim().replace('\n', ","));
-        assert_eq!(parse_ps(&array), want);
-        assert!(parse_ps("").is_empty());
+        let got: Vec<_> = parse_running(lines)
+            .into_iter()
+            .map(|(_, c)| (c.service, c.state, c.exit_code, c.oneoff))
+            .collect();
+        let s = |v: &str| v.to_string();
+        assert_eq!(
+            got,
+            vec![
+                (s("db"), s("exited"), Some(137), false),
+                (s("new"), s("created"), None, false),
+                (s("web"), s("running"), None, true),
+            ]
+        );
     }
 
     #[test]
@@ -611,27 +668,37 @@ mod tests {
     }
 
     #[test]
-    fn asks_docker_ps_once_with_the_compose_labels() {
+    fn asks_docker_ps_once_per_tick_with_the_compose_labels() {
+        let _l = crate::lock(&LISTED_LOCK);
         let bin = tmp("running-bin");
         let log = bin.join("args");
         let docker = fake_docker(
             &bin,
             &format!(
-                "echo \"$@\" >> {}\necho '{{\"dir\":\"/s\",\"service\":\"web\",\"state\":\"running\",\"status\":\"Up\",\"ports\":\"\"}}'",
+                "echo \"$@\" >> {}\necho '{{\"dir\":\"/s\",\"service\":\"web\",\"state\":\"running\",\"status\":\"Up\",\"ports\":\"\"}}'\necho '{{\"dir\":\"/s\",\"service\":\"db\",\"state\":\"exited\",\"status\":\"Exited (0) 1 second ago\",\"ports\":\"\"}}'",
                 log.display()
             ),
         );
-        let got = running_with(&docker).unwrap();
+        let got = running_with(&docker, TICK).unwrap();
+        // Only the running one, as `docker ps` without `--all` gives.
+        assert_eq!(got.len(), 1);
         assert_eq!(
             (got[0].0.as_path(), got[0].1.service.as_str()),
             (Path::new("/s"), "web")
         );
-        let args = fs::read_to_string(log).unwrap();
+        // The same tick's second look is answered from the first.
+        running_with(&docker, TICK).unwrap();
+        let args = fs::read_to_string(&log).unwrap();
         assert!(
-            args.starts_with("ps --filter label=com.docker.compose.service --format "),
+            args.starts_with("ps --all --filter label=com.docker.compose.service --format "),
             "{args}"
         );
         assert_eq!(args.lines().count(), 1);
+        // An older answer than asked for, or an action since, asks again.
+        running_with(&docker, Duration::ZERO).unwrap();
+        forget();
+        running_with(&docker, TICK).unwrap();
+        assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 3);
     }
 
     #[test]
@@ -676,6 +743,7 @@ mod tests {
 
     #[test]
     fn explains_a_stopped_daemon_and_a_missing_docker() {
+        let _l = crate::lock(&LISTED_LOCK);
         let d = tmp("daemon-dir");
         let bin = tmp("daemon-bin");
         let docker = fake_docker(
@@ -690,14 +758,27 @@ mod tests {
 
     #[test]
     fn merges_services_with_containers() {
+        let _l = crate::lock(&LISTED_LOCK);
         let d = tmp("merge-dir");
         let bin = tmp("merge-bin");
+        let log = bin.join("args");
+        fs::write(d.join("compose.yaml"), "services: {}").unwrap();
+        let line = |dir: &Path, service: &str, oneoff: &str, port: u16| {
+            format!(
+                r#"{{"dir":"{}","service":"{service}","oneoff":"{oneoff}","state":"running","status":"Up 1 minute","ports":"0.0.0.0:{port}->80/tcp"}}"#,
+                dir.display()
+            )
+        };
         let docker = fake_docker(
             &bin,
-            r#"case "$2" in
-config) printf 'web\ndb\n';;
-ps) echo '{"Service":"web","State":"running","Health":"","Publishers":[{"PublishedPort":8080}]}';;
-esac"#,
+            &format!(
+                "echo \"$@\" >> {log}\ncase \"$1\" in\ncompose) printf 'web\\ndb\\n';;\nps) cat <<'EOF'\n{}\n{}\n{}\nEOF\n;;\nesac",
+                // Another project's, and a `compose run` of this one's web.
+                line(Path::new("/elsewhere"), "db", "False", 5432),
+                line(&d, "web", "True", 9999),
+                line(&d, "web", "False", 8080),
+                log = log.display(),
+            ),
         );
         let c = containers_with(&docker, &d).unwrap();
         // By name, not in the order compose gives them.
@@ -709,10 +790,25 @@ esac"#,
             (c[1].service.as_str(), c[1].state.as_str(), &c[1].ports[..]),
             ("web", "running", &[8080][..])
         );
+        // Asked again in the same tick: neither the file nor docker's answer is read again.
+        containers_with(&docker, &d).unwrap();
+        let asked = || fs::read_to_string(&log).unwrap();
+        assert_eq!(asked().matches("compose config --services").count(), 1);
+        assert_eq!(asked().matches("ps --all").count(), 1);
+        // A changed compose file is read again.
+        let f = fs::File::options()
+            .write(true)
+            .open(d.join("compose.yaml"))
+            .unwrap();
+        f.set_modified(SystemTime::now() + Duration::from_secs(60))
+            .unwrap();
+        containers_with(&docker, &d).unwrap();
+        assert_eq!(asked().matches("compose config --services").count(), 2);
     }
 
     #[test]
     fn maps_actions_to_compose_commands() {
+        let _l = crate::lock(&LISTED_LOCK); // an action clears the shared answer
         let d = tmp("args-dir");
         let bin = tmp("args-bin");
         let log = d.join("args");
@@ -728,6 +824,7 @@ esac"#,
 
     #[test]
     fn whole_project_actions_leave_the_order_to_compose() {
+        let _l = crate::lock(&LISTED_LOCK); // an action clears the shared answer
         let d = tmp("project-dir");
         let bin = tmp("project-bin");
         let log = d.join("args");
@@ -825,6 +922,7 @@ esac"#,
 
     #[test]
     fn a_silent_failure_still_has_a_message() {
+        let _l = crate::lock(&LISTED_LOCK); // an action clears the shared answer
         let d = tmp("silent-dir");
         let bin = tmp("silent-bin");
         let docker = fake_docker(&bin, "exit 1");
