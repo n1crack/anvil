@@ -245,7 +245,7 @@ pub fn detect(site: &Site) -> Vec<Process> {
 
 /// `detect` with a config already loaded.
 pub fn detect_with(site: &Site, cfg: Option<&crate::Config>) -> Vec<Process> {
-    let php = crate::php_dir(site.php.as_deref().unwrap_or_default()).join("php");
+    let php = crate::php_bin(site.php.as_deref().unwrap_or_default());
     detect_in(site, &php, &home().join("cache"), cfg)
 }
 
@@ -871,7 +871,7 @@ pub fn one_off_scripts(site: &Site) -> Vec<Script> {
     let Some(scripts) = composer["scripts"].as_object() else {
         return out;
     };
-    let php = crate::php_dir(site.php.as_deref().unwrap_or_default()).join("php");
+    let php = crate::php_bin(site.php.as_deref().unwrap_or_default());
     let phar = home().join("bin/composer.phar");
     let ids = unique_ids(scripts.keys());
     for (name, v) in scripts {

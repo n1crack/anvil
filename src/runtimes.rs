@@ -186,6 +186,13 @@ fn ensure_uv(mac: bool, arm: bool) -> Result<()> {
     })
 }
 
+/// Where a Node.js version's programs are: `bin`, or on Windows the folder itself
+/// (node.exe, npm.cmd).
+pub fn node_bin(version: &str) -> PathBuf {
+    let dir = root("node").join(version);
+    if cfg!(windows) { dir } else { dir.join("bin") }
+}
+
 fn cargo_bin() -> PathBuf {
     root("rust").join("cargo").join("bin")
 }
@@ -200,6 +207,13 @@ pub fn install(id: &str, version: &str) -> Result<()> {
     let (_, caddy_plat) = platform()?;
     let mac = caddy_plat.starts_with("mac");
     let arm = caddy_plat.ends_with("arm64");
+    let windows = cfg!(windows);
+    // ponytail: Rust needs Visual Studio's build tools and uv a pinned Windows checksum.
+    if windows && matches!(id, "rust" | "python") {
+        bail!("{} isn't available on Windows yet", name(id));
+    }
+    // Windows downloads are zips, which Windows' tar unpacks too (`fetch_tgz`).
+    let archive = if windows { "zip" } else { "tar.gz" };
     match id {
         "node" => {
             let list: Vec<serde_json::Value> =
@@ -209,19 +223,31 @@ pub fn install(id: &str, version: &str) -> Result<()> {
                 .filter_map(|v| v["version"].as_str())
                 .find(|v| v.trim_start_matches('v').split('.').next() == Some(version))
                 .with_context(|| format!("No Node.js {version} release"))?;
-            let os = if mac { "darwin" } else { "linux" };
+            let os = if windows {
+                "win"
+            } else if mac {
+                "darwin"
+            } else {
+                "linux"
+            };
             let arch = if arm { "arm64" } else { "x64" };
             let base = format!("https://nodejs.org/dist/{full}/");
-            let file = format!("node-{full}-{os}-{arch}.tar.gz");
+            let file = format!("node-{full}-{os}-{arch}.{archive}");
             let sum = published_sum(&format!("{base}SHASUMS256.txt"), &file)?;
             replace_dir(&root("node").join(version), |d| {
                 fetch_tgz(&format!("{base}{file}"), d, true, Some(&sum))
             })
         }
         "go" => {
-            let os = if mac { "darwin" } else { "linux" };
+            let os = if windows {
+                "windows"
+            } else if mac {
+                "darwin"
+            } else {
+                "linux"
+            };
             let arch = if arm { "arm64" } else { "amd64" };
-            let file = format!("go{version}.{os}-{arch}.tar.gz");
+            let file = format!("go{version}.{os}-{arch}.{archive}");
             let list: Vec<serde_json::Value> =
                 serde_json::from_str(&fetch_text("https://go.dev/dl/?mode=json&include=all")?)?;
             let sum = list
@@ -280,12 +306,14 @@ pub fn install(id: &str, version: &str) -> Result<()> {
                 .as_str()
                 .with_context(|| format!("No .NET {version} SDK"))?;
             let rid = match (mac, arm) {
+                _ if windows && arm => "win-arm64",
+                _ if windows => "win-x64",
                 (true, true) => "osx-arm64",
                 (true, false) => "osx-x64",
                 (false, true) => "linux-arm64",
                 (false, false) => "linux-x64",
             };
-            let name = format!("dotnet-sdk-{rid}.tar.gz");
+            let name = format!("dotnet-sdk-{rid}.{archive}");
             let file = sdk_file(&meta, latest, &name)
                 .with_context(|| format!("No {name} for .NET SDK {latest}"))?;
             // Unpack aside, then move in what isn't there yet: an interrupted
@@ -401,7 +429,7 @@ pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
             // Their telemetry keeps consent and ids in the user's home folder.
             e.push(("NEXT_TELEMETRY_DISABLED".into(), "1".into()));
             e.push(("NUXT_TELEMETRY_DISABLED".into(), "1".into()));
-            root("node").join(version).join("bin")
+            node_bin(version)
         }
         "go" => {
             let goroot = root("go").join(version);

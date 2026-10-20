@@ -148,7 +148,7 @@ fn prune(src: &Path) {
 
 /// The exact version (`8.4.23`) of the installed PHP `minor`.
 pub(crate) fn installed_full(minor: &str) -> Result<String> {
-    let out = crate::platform::command(php_dir(minor).join("php"))
+    let out = crate::platform::command(crate::php_bin(minor))
         .args(["-n", "-r", "echo PHP_VERSION;"])
         .output()
         .with_context(|| format!("PHP {minor} is not installed"))?;

@@ -98,7 +98,11 @@ pub fn so_path(minor: &str, full: &str, name: &str) -> PathBuf {
     php_dir(minor)
         .join("ext")
         .join(full)
-        .join(format!("{name}.so"))
+        .join(if cfg!(windows) {
+            format!("php_{name}.dll")
+        } else {
+            format!("{name}.so")
+        })
 }
 
 /// Whether `name` is built for the PHP `minor` installed now.
@@ -110,6 +114,9 @@ pub fn built(minor: &str, name: &str) -> bool {
 pub fn build(minor: &str, name: &str) -> Result<()> {
     let ext = find(name)?;
     let _held = build_lock(minor, name, name)?;
+    if cfg!(windows) {
+        return fetch_dll(minor, ext);
+    }
     let (full, stage) = crate::opcache::stage(minor)?;
     let bin = tools()?;
     println!("Building {name} {} for PHP {full}…", ext.version);
@@ -132,6 +139,43 @@ pub fn build(minor: &str, name: &str) -> Result<()> {
     let _ = fs::remove_dir_all(&dir);
     ok?;
     println!("{name} built for PHP {full}");
+    Ok(())
+}
+
+/// Windows: PHP's own builds of the extension (windows.php.net's PECL folder) for the
+/// installed PHP `minor`, thread-safety off, x64, in place once PHP loads it. Like the
+/// tarballs, these come with no checksums; HTTPS is the check.
+fn fetch_dll(minor: &str, ext: &Ext) -> Result<()> {
+    let full = installed_full(minor)?;
+    // The compiler PHP itself was built with: Visual Studio 2019 up to 8.3, 2022 after.
+    let vs = if ["8.0", "8.1", "8.2", "8.3"].contains(&minor) {
+        "vs16"
+    } else {
+        "vs17"
+    };
+    let (pecl, v) = (ext.pecl, ext.version);
+    let url = format!(
+        "https://downloads.php.net/~windows/pecl/releases/{pecl}/{v}/php_{pecl}-{}-{minor}-nts-{vs}-x64.zip",
+        v.to_ascii_lowercase()
+    );
+    println!("Downloading {} {v} for PHP {full}…", ext.name);
+    let dir = home()
+        .join("build")
+        .join(format!("{pecl}-{v}-php{full}-win"));
+    let _ = fs::remove_dir_all(&dir);
+    let dll = dir.join(format!("php_{pecl}.dll"));
+    let ok = fetch_tgz(&url, &dir, false, None)
+        .with_context(|| {
+            format!(
+                "couldn't get {} for PHP {minor} from windows.php.net",
+                ext.name
+            )
+        })
+        .and_then(|()| check_loads(minor, ext, &dll))
+        .and_then(|()| install_so(&dll, &so_path(minor, &full, ext.name)));
+    let _ = fs::remove_dir_all(&dir);
+    ok?;
+    println!("{} ready for PHP {full}", ext.name);
     Ok(())
 }
 
@@ -345,7 +389,7 @@ fn compile(dir: &Path, stage: &Path, bin: &Path, name: &str) -> Result<PathBuf> 
 /// PHP lists the module with the `.so` loaded: a build it rejects would only print a
 /// warning on every start.
 fn check_loads(minor: &str, ext: &Ext, so: &Path) -> Result<()> {
-    let out = crate::platform::command(php_dir(minor).join("php"))
+    let out = crate::platform::command(crate::php_bin(minor))
         .arg("-n")
         .arg("-d")
         .arg(format!("{}={}", directive(ext), so.display()))

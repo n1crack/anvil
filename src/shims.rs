@@ -300,7 +300,13 @@ fn resolve_for(
                 None => apps::runtime_version("node", cwd),
             }
             .context("No Node installed in Anvil: run `anvil runtime install node 24`")?;
-            let program = runtimes::root("node").join(&v).join("bin").join(tool);
+            // npm and npx are .cmd scripts on Windows.
+            let file = match tool {
+                "node" => crate::platform::exe("node"),
+                _ if cfg!(windows) => format!("{tool}.cmd"),
+                _ => tool.to_string(),
+            };
+            let program = runtimes::node_bin(&v).join(file);
             if !program.exists() {
                 bail!("Node {v} isn't installed in Anvil: run `anvil runtime install node {v}`");
             }
