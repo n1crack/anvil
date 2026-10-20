@@ -3,6 +3,7 @@
 
 pub mod apps;
 pub mod compose;
+pub mod control;
 pub mod create;
 pub mod databases;
 pub mod dns;
@@ -262,6 +263,10 @@ pub(crate) fn state_dirs_in(home: &Path) -> Result<()> {
     fs::create_dir_all(home.join("log"))?;
     Ok(())
 }
+
+/// Held by every test that sets ANVIL_HOME, which is process-wide.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub fn home() -> PathBuf {
     std::env::var_os("ANVIL_HOME")
@@ -2690,7 +2695,8 @@ mod tests {
         let mut cfg = Config::default();
         let dir = std::env::temp_dir().join(format!("anvil-test-{}", std::process::id()));
         fs::create_dir_all(dir.join("shop")).unwrap();
-        // SAFETY: tests in this module don't read ANVIL_HOME concurrently with other env changes.
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
         unsafe { std::env::set_var("ANVIL_HOME", &dir) };
         cfg.paths.push(dir.clone());
         assert_eq!(
