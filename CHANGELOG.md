@@ -31,7 +31,7 @@ contain breaking changes.
 
 ### Changed
 
-- New apps use pnpm by default (`anvil create --pm` picks another).
+- New apps use pnpm by default (`anvil new --pm` picks another).
 - Settings: the sidebar is grouped (app, Languages, Plugins), and a plugin that is on gets its own page.
 - Settings › PHP: each version's extensions, OPcache included, slide open from "Extensions n/6"; OPcache can be built or removed, after a confirm.
 - Settings: Make default and Uninstall are quiet text actions; Uninstall asks in the row.
@@ -45,6 +45,8 @@ contain breaking changes.
 
 ### Fixed
 
+- A dev server left behind by an Anvil that was killed stops before its app starts again, instead of failing with "address already in use".
+- A service port picked for you is never Anvil's own web or DNS port.
 - Share no longer says the web server isn't running when it is.
 - Tunnel: a shared app whose HTTPS is turned on keeps working at its public address.
 - An address no app has answers "No app at …" (404) instead of an empty page.
