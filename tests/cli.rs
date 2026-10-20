@@ -236,6 +236,22 @@ fn write(path: &Path, content: &str) {
 const REDIS: &str = "services/redis/8.10.2/bin/redis-server";
 
 #[test]
+fn https_refuses_an_app_anvil_doesnt_serve() {
+    let env = Env::new("https-compose");
+    let dir = env.root.join("stack");
+    write(&dir.join("docker-compose.yml"), "services: {}\n");
+    env.run_in(&dir, &["link"]);
+    let err = env.fails(&["https", "stack"]);
+    assert!(err.contains("doesn't serve"), "{err}");
+    assert!(
+        env.config()
+            .sites
+            .get("stack")
+            .is_none_or(|s| s.https.is_none())
+    );
+}
+
+#[test]
 fn config_round_trip() {
     let env = Env::new("config");
     let parked = env.root.join("sites");

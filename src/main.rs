@@ -1503,6 +1503,13 @@ fn run() -> Result<()> {
                 .into_iter()
                 .find(|s| s.name == site_name(&site))
                 .with_context(|| format!("No site named {site}"))?;
+            if !apps::serves(&s.kind) {
+                bail!(
+                    "{} is a {} app, which Anvil doesn't serve, so it has no HTTPS",
+                    s.name,
+                    apps::label(&s.kind)
+                );
+            }
             edit(&mut cfg, |c| set_secure(c, &s.name, !off))?;
             let s = sites(&cfg).into_iter().find(|x| x.name == s.name).unwrap();
             println!(
