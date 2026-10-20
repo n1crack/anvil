@@ -4054,6 +4054,14 @@ fn main() {
         ])
         .setup(|app| {
             let _ = HANDLE.set(app.handle().clone());
+            // Windows keeps a window started by another program (the installer's Finish)
+            // behind the one in front; on top for a moment brings it forward.
+            #[cfg(windows)]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_always_on_top(true);
+                let _ = w.set_focus();
+                let _ = w.set_always_on_top(false);
+            }
             // SIGTERM (a logout, `kill`), SIGINT and SIGHUP quit as Quit does, stopping
             // everything: by default they end Anvil at once and its dev processes run on
             // with no Anvil that knows them.
