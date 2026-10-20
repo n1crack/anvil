@@ -1,5 +1,7 @@
 // Hide the extra console window on Windows release builds.
 
+mod control;
+
 use anvil::validate::{process_id, site_name};
 use anvil::{Config, Server, Site};
 use serde::Serialize;
@@ -17,7 +19,7 @@ use tauri::{
 /// take the next; `let x = m.lock()…;` drops the guard at the `;`, but an `if let` /
 /// `match` scrutinee keeps it through the whole block. If two ever must nest, take
 /// them in field order (restarting, server, error, services, apps, app_errors,
-/// service_errors, container_logs).
+/// service_errors, container_logs, agent_log).
 #[derive(Default)]
 struct App {
     server: Mutex<Option<Server>>,
@@ -37,6 +39,8 @@ struct App {
     container_logs: Mutex<anvil::compose::Logs>,
     /// Set when Caddy or PHP-FPM ended on its own, until the watcher has notified.
     server_crashed: AtomicBool,
+    /// The last actions taken through the control socket, oldest first.
+    agent_log: Mutex<std::collections::VecDeque<control::AgentAction>>,
 }
 
 #[derive(Serialize)]
@@ -430,13 +434,22 @@ fn state(app: State<App>) -> Res<Snapshot> {
 /// Rescan parked folders; re-serve only if the set of sites changed.
 #[tauri::command(async)]
 fn refresh(handle: AppHandle, app: State<App>) -> Res<Snapshot> {
-    let cfg = anvil::load().map_err(err)?;
-    stop_vanished(&app, &cfg);
-    if running(&app) && anvil::needs_restart(&cfg) {
-        start(&app, &cfg);
+    if reload(&app)? {
         changed(&handle);
     }
     snapshot(&app)
+}
+
+/// Catch up with config.toml: stop what's gone, re-serve only if the set of sites
+/// changed. True when it re-served.
+fn reload(app: &App) -> Res<bool> {
+    let cfg = anvil::load().map_err(err)?;
+    stop_vanished(app, &cfg);
+    let restart = running(app) && anvil::needs_restart(&cfg);
+    if restart {
+        start(app, &cfg);
+    }
+    Ok(restart)
 }
 
 #[tauri::command(async)]
@@ -1440,11 +1453,18 @@ fn stop_service(app: &App, id: &str) {
 static STOPPED: AtomicBool = AtomicBool::new(false);
 /// Set when Quit starts stopping, so a second Quit meanwhile doesn't stop again.
 static QUITTING: AtomicBool = AtomicBool::new(false);
+/// Set while this Anvil owns the control socket's file.
+static SERVING: AtomicBool = AtomicBool::new(false);
 
 /// Stop everything Anvil runs (dev processes, the web server, services, container log
 /// streams) at once: SIGTERM to all, one shared deadline (a service's, the longest
 /// grace), then SIGKILL what's left. Takes up to 10 s; call it off the main thread.
 fn stop_everything(app: &App) {
+    // First, so the CLI reads "not running" during the stop. Once: a relaunched Anvil
+    // may own the path by the final Exit.
+    if SERVING.swap(false, Ordering::SeqCst) {
+        let _ = std::fs::remove_file(anvil::control::socket_path());
+    }
     anvil::lock(&app.container_logs).stop();
     let mut all = anvil::lock(&app.apps).take_all();
     // Held through the stop, like `stop`, so a web server start can't interleave.
@@ -3834,6 +3854,20 @@ fn main() {
                         }
                     });
                     start(&state, &cfg);
+                    // The CLI and agents reach Anvil here; without it the app still works.
+                    match anvil::control::bind() {
+                        Ok(l) => {
+                            SERVING.store(true, Ordering::SeqCst);
+                            let h = handle.clone();
+                            std::thread::spawn(move || {
+                                anvil::control::serve(
+                                    l,
+                                    std::sync::Arc::new(move |r| control::dispatch(&h, r)),
+                                )
+                            });
+                        }
+                        Err(e) => eprintln!("Anvil: no control socket: {e:#}"),
+                    }
                     // A crashed Caddy or PHP-FPM shows in the menu bar and window within 2 s.
                     // So does a crashed dev process, as a notification while Anvil isn't in front.
                     let watch = handle.clone();

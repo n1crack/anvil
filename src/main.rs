@@ -745,10 +745,12 @@ fn shim(tool: &std::ffi::OsStr, args: impl Iterator<Item = std::ffi::OsString>) 
 }
 
 /// A config change through `anvil::update` (under the config lock, on top of what's
-/// on disk now); `cfg` becomes the saved config.
+/// on disk now); `cfg` becomes the saved config. A running app is told, so it shows
+/// the change at once.
 fn edit<T>(cfg: &mut Config, f: impl FnOnce(&mut Config) -> Result<T>) -> Result<T> {
     let (saved, out) = update(f)?;
     *cfg = saved;
+    control::notify_changed();
     Ok(out)
 }
 
@@ -1478,7 +1480,16 @@ fn run() -> Result<()> {
             trust()?;
             println!("Anvil's certificate authority is now trusted.");
         }
-        Cmd::Start => start(&cfg)?,
+        Cmd::Start => {
+            // One owner: the app already runs Caddy, PHP-FPM and the services.
+            if matches!(
+                control::request("ping", serde_json::json!({}), "Terminal"),
+                Ok(Some(_))
+            ) {
+                bail!("Anvil is running and already serves your apps");
+            }
+            start(&cfg)?
+        }
         Cmd::Uninstall { yes } => anvil::uninstall::uninstall(&cfg, config_ok, yes)?,
     }
     Ok(())

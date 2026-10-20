@@ -20,7 +20,16 @@ struct Env {
 
 impl Env {
     fn new(name: &str) -> Env {
-        let root = std::env::temp_dir().join(format!("anvil-cli-{}-{name}", std::process::id()));
+        Env::at(&std::env::temp_dir(), name)
+    }
+
+    /// Under /tmp: macOS's temp dir is too long a base for the control socket's path.
+    fn short(name: &str) -> Env {
+        Env::at(Path::new("/tmp"), name)
+    }
+
+    fn at(base: &Path, name: &str) -> Env {
+        let root = base.join(format!("anvil-cli-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("home")).unwrap();
         // Canonical, so it matches the paths `anvil park` stores (/var is /private/var on macOS).
@@ -315,6 +324,75 @@ fn config_round_trip() {
     env.ok(&["forget", parked.to_str().unwrap()]);
     assert!(env.config().paths.is_empty());
     assert_eq!(env.ok(&["sites"]), "");
+}
+
+/// A stand-in for the running app on `env`'s control socket: answers every method
+/// and records `(method, client)`.
+fn fake_app(env: &Env) -> std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> {
+    use std::sync::{Arc, Mutex};
+    // `bind` reads ANVIL_HOME from this process; tests run in parallel.
+    static ENV: Mutex<()> = Mutex::new(());
+    let _one = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    // SAFETY: the only in-process reader of ANVIL_HOME here, under ENV.
+    unsafe { std::env::set_var("ANVIL_HOME", &env.home) };
+    let l = anvil::control::bind().unwrap();
+    let seen = Arc::new(Mutex::new(vec![]));
+    let log = seen.clone();
+    std::thread::spawn(move || {
+        anvil::control::serve(
+            l,
+            Arc::new(move |r| {
+                let mut log = log.lock().unwrap();
+                log.push((r.method.clone(), r.client.clone()));
+                Ok(serde_json::json!({"version": "test"}))
+            }),
+        )
+    });
+    seen
+}
+
+#[test]
+fn edit_without_app_prints_nothing_extra() {
+    let env = Env::short("ctl-none");
+    let dir = env.root.join("extra");
+    fs::create_dir_all(&dir).unwrap();
+    let t = Instant::now();
+    let out = env.run_in(&dir, &["link"]);
+    assert!(t.elapsed() < Duration::from_secs(1));
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("Linked extra.test -> {}\n", dir.display())
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+}
+
+#[test]
+fn edit_tells_a_running_app() {
+    let env = Env::short("ctl-edit");
+    let seen = fake_app(&env);
+    let dir = env.root.join("extra");
+    fs::create_dir_all(&dir).unwrap();
+    let out = env.run_in(&dir, &["link"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(
+        seen.lock()
+            .unwrap()
+            .contains(&("config_changed".into(), "Terminal".into())),
+        "{:?}",
+        seen.lock().unwrap()
+    );
+}
+
+#[test]
+fn start_refuses_while_the_app_runs() {
+    let env = Env::short("ctl-start");
+    let _seen = fake_app(&env);
+    let out = env.fails(&["start"]);
+    assert!(
+        out.contains("Anvil is running and already serves your apps"),
+        "{out}"
+    );
 }
 
 #[test]
