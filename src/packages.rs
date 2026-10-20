@@ -14,6 +14,9 @@ use std::time::SystemTime;
 pub struct Packages {
     /// Frameworks and notable tools with their locked versions, e.g. ("Laravel", "12.1.0").
     pub highlights: Vec<(String, String)>,
+    /// The Packages tab's default badges as (key, label): the frameworks above by package
+    /// name, then the platform facts by their label, e.g. ("laravel/framework", "Laravel").
+    pub defaults: Vec<(String, String)>,
     pub ecosystems: Vec<Ecosystem>,
 }
 
@@ -93,6 +96,7 @@ pub fn read(dir: &Path) -> Packages {
         .flatten()
         .collect();
     let mut highlights: Vec<(String, String)> = Vec::new();
+    let mut defaults: Vec<(String, String)> = Vec::new();
     for (name, label) in FRAMEWORKS {
         if highlights.iter().any(|(l, _)| l == label) {
             continue;
@@ -104,10 +108,15 @@ pub fn read(dir: &Path) -> Packages {
         if let Some(p) = found {
             let v = p.version.clone().unwrap_or_else(|| p.constraint.clone());
             highlights.push((label.to_string(), v));
+            defaults.push((name.to_string(), label.to_string()));
         }
+    }
+    for (label, _) in ecosystems.iter().flat_map(|e| &e.facts) {
+        defaults.push((label.clone(), label.clone()));
     }
     Packages {
         highlights,
+        defaults,
         ecosystems,
     }
 }
@@ -861,6 +870,10 @@ pub struct Advisory {
     pub url: Option<String>,
     /// Where it is fixed when the tool says, e.g. ">=1.2.6" (a range) or "1.2.8".
     pub fixed: Option<String>,
+    /// The CVE id when the tool gives one, e.g. "CVE-2021-44906".
+    pub cve: Option<String>,
+    /// The affected versions as the tool writes them, e.g. ">=1.0.0 <1.2.6".
+    pub range: Option<String>,
 }
 
 fn advisory(package: &str, version: Option<&str>, a: &Value) -> Advisory {
@@ -873,6 +886,11 @@ fn advisory(package: &str, version: Option<&str>, a: &Value) -> Advisory {
         url: s("url").or_else(|| s("link")).or_else(|| s("URL")),
         // "<0.0.0" is the registry's "no fix".
         fixed: s("patched_versions").filter(|v| v != "<0.0.0"),
+        cve: s("cve").or_else(|| a["cves"][0].as_str().map(String::from)),
+        range: s("affectedVersions")
+            .or_else(|| s("vulnerable_versions"))
+            .or_else(|| s("range"))
+            .or_else(|| s("Vulnerable Versions")),
     }
 }
 
@@ -1489,6 +1507,21 @@ renamed = { package = "real-name", version = "0.3" }
                 ("Vite".into(), "7.0.4".into()),
             ]
         );
+        // The badges: the same frameworks by package, then the platform facts.
+        let keys: Vec<_> = p.defaults.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "laravel/framework",
+                "inertiajs/inertia-laravel",
+                "react",
+                "tailwindcss",
+                "vite",
+                "PHP"
+            ]
+        );
+        assert_eq!(p.defaults[0].1, "Laravel");
+        assert_eq!(p.defaults[5].1, "PHP");
     }
 
     /// Real outputs (trimmed) of each tool on a throwaway project pinning
@@ -1531,6 +1564,8 @@ renamed = { package = "real-name", version = "0.3" }
             list[0].url.as_deref(),
             Some("https://github.com/advisories/GHSA-v5mv-p594-2x33")
         );
+        assert_eq!(list[0].cve.as_deref(), Some("CVE-2026-69246"));
+        assert_eq!(list[0].range.as_deref(), Some(">=8.0.0,<8.0.1|<7.15.2"));
         // Filtered output keeps its numeric keys, so the list becomes an object.
         let v: Value = serde_json::from_str(
             r#"{"advisories":{"a/b":{"1":{"title":"T","link":"L","severity":null}}}}"#,
@@ -1544,7 +1579,9 @@ renamed = { package = "real-name", version = "0.3" }
                 severity: "unknown".into(),
                 title: "T".into(),
                 url: Some("L".into()),
-                fixed: None
+                fixed: None,
+                cve: None,
+                range: None
             }
         );
         assert!(parse_audit("composer", "Composer could not find a composer.json").is_none());
@@ -1563,6 +1600,7 @@ renamed = { package = "real-name", version = "0.3" }
             ]
         );
         assert_eq!(list[0].title, "Command Injection in lodash");
+        assert_eq!(list[0].range.as_deref(), Some("<4.17.21"));
         assert_eq!(
             list[0].url.as_deref(),
             Some("https://github.com/advisories/GHSA-35jh-r3h4-6jhm")
@@ -1604,6 +1642,8 @@ renamed = { package = "real-name", version = "0.3" }
             classic[0].url.as_deref(),
             Some("https://github.com/advisories/GHSA-vh95-rmgr-6w4m")
         );
+        assert_eq!(classic[0].cve.as_deref(), Some("CVE-2020-7598"));
+        assert_eq!(classic[0].range.as_deref(), Some(">=1.0.0 <1.2.3"));
         // Nothing found: only the summary line.
         let clean = r#"{"type":"auditSummary","data":{"vulnerabilities":{"info":0}}}"#;
         assert_eq!(parse_audit("yarn", clean), Some(vec![]));
@@ -1618,6 +1658,7 @@ renamed = { package = "real-name", version = "0.3" }
             ]
         );
         assert_eq!(berry[0].title, "Command Injection in lodash");
+        assert_eq!(berry[0].range.as_deref(), Some("<4.17.21"));
         assert_eq!(
             berry[1].url.as_deref(),
             Some("https://github.com/advisories/GHSA-xvch-5gv4-984h")

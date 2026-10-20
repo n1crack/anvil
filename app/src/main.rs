@@ -1972,6 +1972,19 @@ async fn package_updates(site: String) -> Res<Vec<anvil::packages::Update>> {
     .map_err(|e| e.to_string())?
 }
 
+/// The Packages tab's badges; `None` back to the defaults.
+#[tauri::command(async)]
+fn set_packages_pinned(
+    handle: AppHandle,
+    app: State<App>,
+    site: String,
+    pins: Option<Vec<String>>,
+) -> Res<Snapshot> {
+    edit(|c| anvil::set_packages_pinned(c, &site, pins))?;
+    changed(&handle);
+    snapshot(&app)
+}
+
 /// Known vulnerabilities in one ecosystem of the app, from its package manager's audit.
 #[tauri::command]
 async fn package_audit(site: String, ecosystem: String) -> Res<Vec<anvil::packages::Advisory>> {
@@ -4457,6 +4470,7 @@ fn main() {
             packages,
             package_updates,
             package_audit,
+            set_packages_pinned,
             clean,
             log_sources,
             log_read,
@@ -4778,6 +4792,7 @@ mod tests {
             runtime_version: None,
             runtime_pinned: false,
             browser: false,
+            packages_pinned: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],

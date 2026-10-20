@@ -31,6 +31,8 @@ export interface Site {
   runtime_pinned: boolean;
   /** The Settings tab's "Browser errors" switch. */
   browser: boolean;
+  /** The Packages tab's badges; null is the detected ones. */
+  packages_pinned: string[] | null;
   /** For a git worktree of another app: that app's name. */
   worktree_of: string | null;
   /** A worktree's branch; null when detached. */

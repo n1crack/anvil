@@ -193,6 +193,10 @@ pub struct SiteConfig {
     /// (`browser`). Off unless turned on; a worktree's unset follows its app.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<bool>,
+    /// The Packages tab's badges, by package name (or PHP, Node…); unset is the detected
+    /// ones (`packages::Packages::defaults`), a worktree's unset its app's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packages_pinned: Option<Vec<String>>,
 }
 
 /// What the user changed about one process of an app (see `processes::set_process`).
@@ -311,6 +315,8 @@ pub struct Site {
     pub runtime_pinned: bool,
     /// Its Settings tab's "Browser errors" switch (`browser`); a worktree's unset is its app's.
     pub browser: bool,
+    /// Its Packages tab's badges (`SiteConfig::packages_pinned`); `None` is the defaults.
+    pub packages_pinned: Option<Vec<String>>,
     /// For a git worktree of another app: that app's name (its processes and runtimes are shared).
     pub worktree_of: Option<String>,
     /// A worktree's branch, `None` when detached.
@@ -673,6 +679,9 @@ fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
         browser: o
             .and_then(|s| s.browser)
             .or_else(|| m.and_then(|s| s.browser)),
+        packages_pinned: o
+            .and_then(|s| s.packages_pinned.clone())
+            .or_else(|| m.and_then(|s| s.packages_pinned.clone())),
     }
 }
 
@@ -751,6 +760,7 @@ fn site_at(
         autostart: own.is_some_and(|s| s.autostart),
         runtime_pinned,
         browser: own.and_then(|s| s.browser).unwrap_or(false),
+        packages_pinned: own.and_then(|s| s.packages_pinned.clone()),
         worktree_of: None,
         branch: None,
         aliases: vec![],
@@ -1627,6 +1637,16 @@ pub fn set_https_default(cfg: &mut Config, on: bool) {
             .get_or_insert(site.secure);
     }
     cfg.https_default = Some(on);
+}
+
+/// The Packages tab's badges for a site, `None` back to the defaults (a worktree's: its app's).
+pub fn set_packages_pinned(cfg: &mut Config, site: &str, pins: Option<Vec<String>>) -> Result<()> {
+    known_site(cfg, site)?;
+    cfg.sites
+        .entry(site_name(site))
+        .or_default()
+        .packages_pinned = pins;
+    Ok(())
 }
 
 pub fn set_secure(cfg: &mut Config, site: &str, on: bool) -> Result<()> {
@@ -3257,6 +3277,7 @@ mod tests {
             runtime_version: None,
             runtime_pinned: false,
             browser: false,
+            packages_pinned: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],
@@ -3359,6 +3380,32 @@ mod tests {
         let wt = all.iter().find(|s| s.name == "shop--x").unwrap();
         assert_eq!(wt.root, root.join("sites/shop--x/web"));
         assert_eq!(wt.root_custom.as_deref(), Some("web"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_worktree_pins_its_apps_packages_until_it_has_its_own() {
+        let (root, mut cfg) = parked_worktree("pins");
+        let pins = |cfg: &Config, n: &str| {
+            sites(cfg)
+                .into_iter()
+                .find(|s| s.name == n)
+                .unwrap()
+                .packages_pinned
+        };
+        assert_eq!(pins(&cfg, "shop"), None, "unset: the defaults");
+        set_packages_pinned(&mut cfg, "shop", Some(vec!["laravel/framework".into()])).unwrap();
+        assert_eq!(
+            pins(&cfg, "shop--x"),
+            Some(vec!["laravel/framework".into()])
+        );
+        set_packages_pinned(&mut cfg, "shop--x", Some(vec![])).unwrap();
+        assert_eq!(pins(&cfg, "shop--x"), Some(vec![]));
+        set_packages_pinned(&mut cfg, "shop", None).unwrap();
+        assert_eq!(cfg.sites["shop"].packages_pinned, None);
+        assert_eq!(pins(&cfg, "shop--x"), Some(vec![]));
+        assert!(set_packages_pinned(&mut cfg, "nope", None).is_err());
+        assert!(!cfg.sites.contains_key("nope"));
         fs::remove_dir_all(root).unwrap();
     }
 

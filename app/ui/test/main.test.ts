@@ -1392,67 +1392,110 @@ describe("polls and races", () => {
 });
 
 describe("packages", () => {
-  test("All until a check exists, no check on opening; then Outdated with a tab per manager", async () => {
+  const pins = () => $$(".pkg-pin").map((c) => `${c.firstChild!.textContent} ${c.querySelector("b")?.textContent ?? ""}`);
+
+  test("the key packages as badges: the defaults, one off with ×, Reset back", async () => {
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
+    expect(pins()).toEqual(["Laravel 11.36.1", "Livewire 3.5.18", "Tailwind 3.4.17", "Vite 6.0.6", "PHP ^8.2", "Node >=20"]);
+    // No list, no search, no Outdated · All: the badges and the two checks.
+    expect($$(".pkg-list, .pkg-search, .pkg-tools")).toHaveLength(0);
+    expect($$(".pkg-pin-reset")).toHaveLength(0);
+    ($('.pkg-pin [aria-label="Unpin Livewire"]') as HTMLElement).click();
+    await wait(80);
+    expect(calls("set_packages_pinned").at(-1)![1]).toEqual({
+      site: "shop",
+      pins: ["laravel/framework", "tailwindcss", "vite", "PHP", "Node"],
+    });
+    expect(pins()).toHaveLength(5);
+    $(".pkg-pin-reset").click();
+    await wait(80);
+    expect(calls("set_packages_pinned").at(-1)![1]).toEqual({ site: "shop", pins: null });
+    expect(pins()).toHaveLength(6);
+    expect($$(".pkg-pin-reset")).toHaveLength(0);
+  });
+
+  test("+ searches every installed package, the lock file's too, and pins the pick", async () => {
+    $(".pkg-pin-add").click();
+    const q = $(".pkg-pin-pop input") as HTMLInputElement;
+    expect(document.activeElement).toBe(q);
+    expect(q.getAttribute("role")).toBe("combobox");
+    q.value = "symf";
+    q.dispatchEvent(new Event("input"));
+    expect($$(".pkg-pin-pop [role=option] .pkg-opt-name").map((o) => o.textContent)).toEqual(["symfony/console"]);
+    // Pinned ones aren't offered again.
+    q.value = "laravel/fr";
+    q.dispatchEvent(new Event("input"));
+    expect($$(".pkg-pin-pop [role=option]")).toHaveLength(0);
+    q.value = "guzzle";
+    q.dispatchEvent(new Event("input"));
+    q.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    await wait(80);
+    expect(calls("set_packages_pinned").at(-1)![1].pins.at(-1)).toBe("guzzlehttp/guzzle");
+    expect($$(".pkg-pin-pop")).toHaveLength(0);
+    expect(pins().at(-1)).toBe("guzzlehttp/guzzle 7.9.2");
+    expect($$(".pkg-pin-reset")).toHaveLength(1);
+    $(".pkg-pin-reset").click();
+    await wait(80);
+  });
+
+  test("nothing below the checks until one runs; Check outdated: the notice, then a tab per manager", async () => {
     expect(calls("package_updates")).toHaveLength(0);
-    expect($('.pkg-tools .seg [aria-pressed="true"]').dataset.id).toBe("all");
-    expect($$(".pkg-ecos button").map((b) => b.textContent)).toEqual(["Composer 16", "pnpm 8"]);
-    expect($(".pkg-status").textContent).toBe("");
-    $('.pkg-tools .seg [data-id="outdated"]').click();
-    expect($(".pkg-none").textContent).toBe("Not checked yet");
-    expect($$(".pkg-check")).toHaveLength(1);
-    expect($$(".pkg-ecos button").map((b) => b.textContent)).toEqual(["Composer 16", "pnpm 8"]);
-    ($(".pkg-none .pkg-check") as HTMLElement).click();
+    expect($$(".pkg-checks button").map((b) => b.textContent)).toEqual(["Check outdated", "Check security"]);
+    expect($$(".pkg-notice, .pkg-results, .pkg-checked")).toHaveLength(0);
+    $(".pkg-check-outdated").click();
+    expect($(".pkg-check-outdated").textContent).toBe("Checking…");
     await wait(80);
     expect(calls("package_updates")).toHaveLength(1);
-    expect($(".pkg-status").textContent).toBe("checked just now");
+    expect($(".pkg-notice.warn").textContent).toBe("7 updates available");
+    expect($$(".pkg-notice.bad")).toHaveLength(0);
+    expect($(".pkg-checked").textContent).toBe("Updates checked just now");
     expect(JSON.parse(localStorage.getItem("pkgUpdates:shop")!).list).toHaveLength(7);
-    expect($$(".pkg-ecos button").map((b) => b.textContent)).toEqual(["Composer 4", "pnpm 3"]);
-    expect($('.pkg-tools .seg [data-id="outdated"]').textContent).toBe("Outdated 4");
-    const rows = $$(".pkg-list .row");
+    expect($$(".pkg-ecos button").map((b) => b.textContent)).toEqual(["Composer4", "pnpm3"]);
+    expect($$(".pkg-ecos .pkg-count.bad")).toHaveLength(0);
+    const rows = $$(".pkg-results .row");
     expect(rows).toHaveLength(4);
     const fw = rows.find((r) => r.querySelector("a")?.textContent === "laravel/framework")!;
-    expect(fw.querySelector(".pkg-ver")?.textContent).toBe("11.36.1→12.4.0");
-    expect(fw.querySelector(".pkg-new")?.classList.contains("major")).toBe(true);
+    expect(fw.querySelector(".pkg-ver")?.textContent).toBe("11.36.1→12.4.0major");
     ($('.pkg-ecos [data-id="npm"]') as HTMLElement).click();
-    expect($$(".pkg-list .row")).toHaveLength(3);
+    expect($$(".pkg-results .row")).toHaveLength(3);
     $('.tabs [data-tab="logs"]').click();
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
     expect(calls("package_updates")).toHaveLength(1);
   });
 
-  test("a saved check makes Outdated the default after a restart", async () => {
-    const { pkgUpdates, pkgView, drawPackages } = await import("../src/packages");
+  test("a saved check comes back after a restart", async () => {
+    const { pkgUpdates, drawPackages } = await import("../src/packages");
     pkgUpdates.clear();
-    pkgView.clear();
     drawPackages("shop");
-    expect($('.pkg-tools .seg [aria-pressed="true"]').dataset.id).toBe("outdated");
-    expect($(".pkg-status").textContent).toBe("checked just now");
+    expect($(".pkg-notice.warn").textContent).toBe("7 updates available");
     expect(calls("package_updates")).toHaveLength(1);
   });
 
-  test("Check security runs the tab's audit on request and shows it inline", async () => {
-    $('.tabs [data-tab="packages"]').click();
+  test("Check security audits each manager: advisories in red with severity, CVE and range; a failure inline", async () => {
+    $(".pkg-check-security").click();
+    expect($(".pkg-check-security").textContent).toBe("Checking…");
     await wait(80);
-    ($('.pkg-ecos [data-id="composer"]') as HTMLElement).click();
-    expect(calls("package_audit")).toHaveLength(0);
-    expect($(".pkg-audit-check").textContent).toBe("Check security");
-    $(".pkg-audit-check").click();
-    await wait(80);
-    expect(calls("package_audit")).toHaveLength(1);
-    expect($(".pkg-audit-head .pkg-status").textContent).toBe("1 known vulnerability · checked just now");
-    const row = $(".pkg-audit-list .row");
-    expect(row.querySelector("dt")?.textContent).toBe("Noncanonical host can bypass host-based checksguzzlehttp/guzzle 7.9.2");
-    expect(row.querySelector("dd")?.textContent).toBe("high");
-    // Another tab has its own check; a failure is said inline.
-    ($('.pkg-ecos [data-id="npm"]') as HTMLElement).click();
-    expect($(".pkg-audit-head .pkg-status").textContent).toBe("");
-    $(".pkg-audit-check").click();
-    await wait(80);
-    expect($(".pkg-audit-head .pkg-status.error").textContent).toBe("pnpm audit failed: request to registry timed out");
-    expect($$(".pkg-audit-list")).toHaveLength(0);
+    expect(calls("package_audit").map(([, a]) => a.ecosystem)).toEqual(["composer", "npm"]);
+    expect($(".pkg-notice.bad").textContent).toBe("1 security advisory");
+    expect($(".pkg-notice.warn").textContent).toBe("7 updates available");
+    expect($(".pkg-errors").textContent).toBe("pnpm audit failed: request to registry timed out");
+    // guzzle has an advisory and no update: Composer counts 5, in red.
+    const composer = $('.pkg-ecos [data-id="composer"]');
+    expect(composer.textContent).toBe("Composer5");
+    expect(composer.querySelector(".pkg-count")!.classList.contains("bad")).toBe(true);
+    composer.click();
+    const adv = $(".pkg-advisory");
+    expect(adv.querySelector(".pkg-sev")!.textContent).toBe("high");
+    expect(adv.querySelector("a")!.textContent).toBe("Noncanonical host can bypass host-based checks");
+    expect(adv.textContent).toContain("guzzlehttp/guzzle 7.9.2");
+    expect(adv.textContent).toContain("CVE-2026-69246");
+    expect(adv.textContent).toContain(">=7.0.0,<7.9.3");
+    expect(adv.textContent).toContain("fixed in 7.9.3");
+    (adv.querySelector("a") as HTMLElement).click();
+    await wait(30);
+    expect(calls("open_url").at(-1)![1].url).toBe("https://github.com/advisories/GHSA-v5mv-p594-2x33");
   });
 });
 

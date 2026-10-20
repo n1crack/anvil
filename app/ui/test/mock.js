@@ -26,6 +26,7 @@ const mockSite = (name, kind, extra = {}) => ({
   runtime_version: kind === "laravel" ? null : "22.1.0",
   runtime_pinned: false,
   browser: false,
+  packages_pinned: null,
   worktree_of: null,
   branch: null,
   aliases: [],
@@ -522,7 +523,7 @@ window.mockServices = [
       ["test", "@php artisan test"],
     ],
   };
-  composer.locked = composer.packages.map((p) => [p.name, p.version]);
+  composer.locked = [...composer.packages.map((p) => [p.name, p.version]), ["symfony/console", "7.2.1"], ["nesbot/carbon", "3.8.4"]];
   const N = (name, constraint, version, dev) => P(name, constraint, version, dev);
   const npm = {
     id: "npm",
@@ -553,6 +554,14 @@ window.mockServices = [
       ["Livewire", "3.5.18"],
       ["Tailwind", "3.4.17"],
       ["Vite", "6.0.6"],
+    ],
+    defaults: [
+      ["laravel/framework", "Laravel"],
+      ["livewire/livewire", "Livewire"],
+      ["tailwindcss", "Tailwind"],
+      ["vite", "Vite"],
+      ["PHP", "PHP"],
+      ["Node", "Node"],
     ],
     ecosystems: [composer, npm],
   };
@@ -847,7 +856,9 @@ const mockHandle = (cmd, a) => {
           severity: "high",
           title: "Noncanonical host can bypass host-based checks",
           url: "https://github.com/advisories/GHSA-v5mv-p594-2x33",
-          fixed: null,
+          fixed: "7.9.3",
+          cve: "CVE-2026-69246",
+          range: ">=7.0.0,<7.9.3",
         },
       ];
     case "activity":
@@ -966,6 +977,9 @@ const mockHandle = (cmd, a) => {
       c.caught = a.on ? [...c.caught, a.site] : c.caught.filter((n) => n !== a.site);
       return mockSnap;
     }
+    case "set_packages_pinned":
+      mockSnap.sites.find((x) => x.name === a.site).packages_pinned = a.pins;
+      return mockSnap;
     case "set_browser": {
       mockSnap.sites.find((x) => x.name === a.site).browser = a.on;
       return mockSnap;

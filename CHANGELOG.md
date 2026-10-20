@@ -208,6 +208,17 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Changed
 
+- Packages tab: no full package list, search or Outdated/All any more. The key
+  packages are badges with their installed versions, the detected ones by
+  default (Laravel, Livewire, Tailwind, Vite, PHP, Node…); × unpins one, + pins
+  any installed package (Composer and npm/pnpm/yarn/bun lock files included)
+  from a search, Reset brings back the defaults. Kept per app in the config
+  (`packages_pinned`); a worktree follows its app until it changes its own.
+  Check outdated and Check security run on request; what they find shows as a
+  notice (updates in orange, security advisories in red) and a tab per package
+  manager counting the packages concerned, with only those inside: installed →
+  latest (major called out), or an advisory's severity, title (opens it), CVE
+  and affected versions.
 - Sidebar: an app's worktrees sit on a band a tone darker, each with a branch
   mark carrying the same run badge as an app. The header's address list opens
   under its "+N", a tone darker, one row per address without its scheme (a

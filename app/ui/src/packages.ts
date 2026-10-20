@@ -1,18 +1,19 @@
-import { $, ago, el, invoke, renderMain, seg, selected, showError, snap } from "./app";
+import { $, ago, call, el, invoke, popAt, renderMain, seg, selected, showError, snap } from "./app";
 
-/* Packages tab: an app's dependencies from its manifests and lock files, a tab per
- * package manager, with newer versions and known vulnerabilities inline. Scripts live
- * in the Overview's Commands. */
+/* Packages tab: the app's key packages as badges (pinned per app, the detected ones by
+ * default), then Check outdated and Check security. What a check finds shows as a notice
+ * and a tab per package manager with only the packages it concerns. Scripts live in the
+ * Overview's Commands. */
 
 const pkgCache = new Map<string, any>(); // site name -> packages or { error }
-// site name -> { list, at } once checked, "checking" on its way, or { error, at }
+// site name -> { list, at, error? } once checked
 export const pkgUpdates = new Map<string, any>();
-// site name -> ecosystem id -> { list, at }, "checking", or { list?, at?, error }
+// site name -> ecosystem id -> { list, at, error? }
 export const pkgAudits = new Map<string, Record<string, any>>();
+// Checks on their way: `name` for updates, `name:eco` for an audit.
+const busy = new Set<string>();
 // Ecosystems whose package manager has an audit Anvil runs.
 const AUDITED = new Set(["composer", "npm"]);
-let pkgQuery = ""; // one search over every list
-export const pkgView = new Map<string, string>(); // site name -> "all" or "outdated"
 const pkgEco = new Map<string, string>(); // site name -> ecosystem shown
 const REGISTRY = {
   composer: "https://packagist.org/packages/",
@@ -21,7 +22,6 @@ const REGISTRY = {
   go: "https://pkg.go.dev/",
   nuget: "https://www.nuget.org/packages/",
 };
-const REFRESH = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 window.renderPackages = async (s) => {
   drawPackages(s.name);
@@ -36,7 +36,7 @@ window.renderPackages = async (s) => {
   }
 };
 
-/** The last check, kept across restarts; the registries are only asked from the refresh button. */
+/** The last check, kept across restarts; the registries are only asked from the button. */
 function updatesOf(name) {
   if (!pkgUpdates.has(name)) {
     try {
@@ -48,8 +48,7 @@ function updatesOf(name) {
 }
 
 async function checkUpdates(name) {
-  const prev = updatesOf(name);
-  pkgUpdates.set(name, "checking");
+  busy.add(name);
   drawPackages(name);
   try {
     const up = { list: await invoke("package_updates", { site: name }), at: Date.now() };
@@ -57,8 +56,10 @@ async function checkUpdates(name) {
     localStorage.setItem(`pkgUpdates:${name}`, JSON.stringify(up));
   } catch (e) {
     // A failed check keeps what the last one found.
+    const prev = updatesOf(name);
     pkgUpdates.set(name, { list: prev?.list, at: prev?.at, error: String(e) });
   }
+  busy.delete(name);
   if (selected === name) drawPackages(name);
 }
 
@@ -76,184 +77,252 @@ function auditsOf(name) {
 
 async function checkAudit(name, eco) {
   const all = auditsOf(name);
-  const prev = all[eco];
-  all[eco] = "checking";
+  busy.add(`${name}:${eco}`);
   drawPackages(name);
   try {
     all[eco] = { list: await invoke("package_audit", { site: name, ecosystem: eco }), at: Date.now() };
   } catch (e) {
     // A failed check keeps what the last one found.
-    all[eco] = { list: prev?.list, at: prev?.at, error: String(e) };
+    all[eco] = { list: all[eco]?.list, at: all[eco]?.at, error: String(e) };
   }
-  const done = Object.fromEntries(Object.entries(all).filter(([, v]) => v !== "checking"));
-  localStorage.setItem(`pkgAudits:${name}`, JSON.stringify(done));
+  busy.delete(`${name}:${eco}`);
+  localStorage.setItem(`pkgAudits:${name}`, JSON.stringify(all));
   if (selected === name) drawPackages(name);
 }
 
 /** The manager's name for a section: Composer, or pnpm/npm/yarn/bun for npm packages. */
 const managerLabel = (e) => (e.id === "npm" && e.manager ? e.manager.split(" ")[0] : e.label);
 
+/** A badge's version: a platform requirement, a direct dependency or anything locked. */
+function versionOf(p, key) {
+  for (const e of p.ecosystems) {
+    const fact = e.facts.find(([l]) => l === key);
+    if (fact) return fact[1];
+    const dep = e.packages.find((x) => x.name === key);
+    if (dep) return dep.version ?? dep.constraint;
+    const locked = e.locked.find(([n]) => n === key);
+    if (locked) return locked[1];
+  }
+  return null;
+}
+
 export function drawPackages(name) {
   const body = $("#site .pkg-body");
   if (!body) return;
   const p = pkgCache.get(name);
-  const focused = document.activeElement?.classList.contains("pkg-search");
   body.replaceChildren();
   if (!p) return body.append(el("p", "muted", "Reading…"));
   if (p.error) return body.append(el("p", "error", p.error));
   if (!p.ecosystems.length) {
     return body.append(el("p", "muted", "No composer.json, package.json, Cargo.toml, go.mod or .csproj in this folder."));
   }
+  body.append(pinsLine(name, p));
 
-  // What the app is built on, as one quiet line: Laravel 13.12 · Vite 8.0 · PHP ^8.3.
-  const facts = [...p.highlights, ...p.ecosystems.flatMap((e) => e.facts)];
-  if (facts.length) {
-    const line = el("p", "pkg-summary");
-    facts.forEach(([label, v], i) => {
-      if (i) line.append(el("span", "pkg-dot", "·"));
-      const f = el("span", "pkg-fact", label);
-      if (v) f.append(el("b", null, v));
-      line.append(f);
-    });
-    body.append(line);
+  // The two checks; what they last found under them, nothing before the first.
+  const up = updatesOf(name);
+  const audits = auditsOf(name);
+  const audited = p.ecosystems.filter((e) => AUDITED.has(e.id));
+  const bar = el("div", "pkg-checks");
+  const outdated = el("button", "inline-action pkg-check-outdated", busy.has(name) ? "Checking…" : "Check outdated");
+  outdated.disabled = busy.has(name);
+  outdated.onclick = () => checkUpdates(name);
+  bar.append(outdated);
+  if (audited.length) {
+    const auditing = audited.some((e) => busy.has(`${name}:${e.id}`));
+    const security = el("button", "inline-action pkg-check-security", auditing ? "Checking…" : "Check security");
+    security.disabled = auditing;
+    security.onclick = () => audited.forEach((e) => checkAudit(name, e.id));
+    bar.append(security);
+  }
+  body.append(bar);
+
+  const errors = [up?.error, ...audited.map((e) => audits[e.id]?.error)].filter(Boolean);
+  if (errors.length) {
+    const box = el("div", "pkg-errors");
+    for (const m of errors) box.append(el("p", "pkg-error", m));
+    body.append(box);
   }
 
-  const up = updatesOf(name);
-  const checked = !!up?.list;
   const updates = up?.list ?? [];
-  // Outdated once a check exists; until then All.
-  const view = pkgView.get(name) ?? (up?.list ? "outdated" : "all");
-  const newer = new Map(updates.map((u) => [`${u.ecosystem}/${u.name}`, u]));
-  const needle = pkgQuery.trim().toLowerCase();
-  const rowsOf = (e, v = view) =>
-    e.packages
-      .filter((x) => (!needle || x.name.toLowerCase().includes(needle)) && (v !== "outdated" || newer.has(`${e.id}/${x.name}`)))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  const eco = p.ecosystems.find((e) => e.id === pkgEco.get(name)) ?? p.ecosystems[0];
+  const advisories = audited.flatMap((e) => (audits[e.id]?.list ?? []).map((v) => ({ ...v, eco: e.id })));
+  const auditAt = Math.max(0, ...audited.map((e) => audits[e.id]?.at ?? 0));
+  const checked: string[] = [];
+  if (up?.at) checked.push(`${updates.length ? "Updates" : "No updates,"} checked ${ago(new Date(up.at))}`);
+  if (auditAt) checked.push(`${advisories.length ? "security" : "no known advisories,"} checked ${ago(new Date(auditAt))}`);
+  if (checked.length) {
+    const line = checked.join(" · ");
+    body.append(el("p", "muted pkg-checked", line[0].toUpperCase() + line.slice(1)));
+  }
 
-  // Search, Outdated · All, the update check and when it ran; then a tab per ecosystem.
-  const tools = el("div", "pkg-tools");
-  const q = el("input", "pkg-search");
-  q.type = "search";
-  q.placeholder = "Search packages";
-  q.spellcheck = false;
-  q.value = pkgQuery;
-  q.setAttribute("aria-label", "Search packages");
-  q.oninput = () => {
-    pkgQuery = q.value;
-    drawPackages(name);
+  const n = advisories.length;
+  if (n) body.append(el("p", "pkg-notice bad", `${n} security ${n === 1 ? "advisory" : "advisories"}`));
+  const u = updates.length;
+  if (u) body.append(el("p", "pkg-notice warn", `${u} ${u === 1 ? "update" : "updates"} available`));
+
+  // A tab per manager with something found, counting the packages concerned.
+  const found = (e) => ({
+    updates: updates.filter((x) => x.ecosystem === e.id),
+    advisories: advisories.filter((v) => v.eco === e.id),
+  });
+  const affected = (e) => {
+    const f = found(e);
+    return new Set([...f.updates.map((x) => x.name), ...f.advisories.map((v) => v.package)]).size;
   };
-  const outdated = rowsOf(eco, "outdated").length;
-  const filter = seg(
-    "Show",
-    [
-      ["outdated", checked && outdated ? `Outdated ${outdated}` : "Outdated"],
-      ["all", "All"],
-    ],
-    view,
+  const ecos = p.ecosystems.filter((e) => affected(e));
+  if (!ecos.length) return;
+  const eco = ecos.find((e) => e.id === pkgEco.get(name)) ?? ecos[0];
+  const tabs = seg(
+    "Package manager",
+    ecos.map((e) => [e.id, managerLabel(e)]),
+    eco.id,
     (id) => {
-      pkgView.set(name, id);
+      pkgEco.set(name, id);
       drawPackages(name);
     },
   );
-  const check = el("button", `icon-btn pkg-check${up === "checking" ? " spinning" : ""}`);
-  check.innerHTML = REFRESH;
-  check.title = "Check for updates";
-  check.setAttribute("aria-label", "Check for updates");
-  check.disabled = up === "checking";
-  check.onclick = () => checkUpdates(name);
-  // Never checked, Outdated says so with this button in its place.
-  const unchecked = view === "outdated" && !needle && !up?.list;
-  if (unchecked) tools.append(q, filter, updatesStatus(up));
-  else tools.append(q, filter, check, updatesStatus(up));
-  body.append(tools);
+  tabs.classList.add("pkg-ecos");
+  for (const b of tabs.children) {
+    const e = ecos.find((x) => x.id === b.dataset.id);
+    b.title = e.manager ?? "";
+    b.append(el("span", found(e).advisories.length ? "pkg-count bad" : "pkg-count", affected(e)));
+  }
+  body.append(tabs);
 
-  if (p.ecosystems.length > 1) {
-    const tabs = seg(
-      "Package manager",
-      p.ecosystems.map((e) => [e.id, `${managerLabel(e)} ${rowsOf(e, checked ? view : "all").length}`]),
-      eco.id,
-      (id) => {
-        pkgEco.set(name, id);
-        drawPackages(name);
-      },
+  const results = el("div", "pkg-results");
+  const f = found(eco);
+  if (f.advisories.length) {
+    const dl = el("dl", "group pkg-adv-list");
+    for (const v of f.advisories) dl.append(auditRow(v));
+    results.append(dl);
+  }
+  if (f.updates.length) {
+    const newer = new Map(f.updates.map((x) => [x.name, x]));
+    const dl = el("dl", "group pkg-list updates");
+    for (const x of eco.packages.filter((x) => newer.has(x.name)).sort((a, b) => a.name.localeCompare(b.name)))
+      dl.append(pkgRow(eco.id, x, newer.get(x.name)));
+    results.append(dl);
+  }
+  body.append(results);
+}
+
+/** The key packages as badges: × unpins one, + pins another, Reset brings back the detected ones. */
+function pinsLine(name, p) {
+  const s = snap.sites.find((x) => x.name === name);
+  const defaults = p.defaults.map(([k]) => k);
+  const pins: string[] = s?.packages_pinned ?? defaults;
+  const labels = new Map<string, string>(p.defaults);
+  const save = (next) => call("set_packages_pinned", { site: name, pins: next });
+  const line = el("div", "chips pkg-pins");
+  for (const k of pins) {
+    const label = labels.get(k) ?? k;
+    const c = el("span", "chip pkg-pin", label);
+    if (label !== k) c.title = k;
+    const v = versionOf(p, k);
+    if (v) c.append(el("b", null, v));
+    const x = el("button", null, "×");
+    x.setAttribute("aria-label", `Unpin ${label}`);
+    x.onclick = () => save(pins.filter((o) => o !== k));
+    c.append(x);
+    line.append(c);
+  }
+  const add = el("button", "pkg-pin-add", "+");
+  add.title = "Pin a package";
+  add.setAttribute("aria-label", "Pin a package");
+  add.onclick = () => pinPop(add, p, pins, save);
+  line.append(add);
+  if (pins.join("\n") !== defaults.join("\n")) {
+    const reset = el("button", "pkg-pin-reset", "Reset");
+    reset.title = "Back to the detected packages";
+    // A worktree's unset is its app's, so its reset is the defaults themselves.
+    reset.onclick = () => save(s?.worktree_of ? defaults : null);
+    line.append(reset);
+  }
+  return line;
+}
+
+/** The + popover: a search over everything installed, direct dependencies first; ↑↓ and Enter pick. */
+function pinPop(anchor, p, pins, save) {
+  const all: { key: string; version: string | null; from: string }[] = [];
+  const seen = new Set(pins);
+  const offer = (key, version, from) => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    all.push({ key, version, from });
+  };
+  const byName = (a, b) => a.localeCompare(b);
+  for (const e of p.ecosystems) for (const [l, v] of e.facts) offer(l, v, managerLabel(e));
+  for (const e of p.ecosystems)
+    for (const x of [...e.packages].sort((a, b) => byName(a.name, b.name))) offer(x.name, x.version ?? x.constraint, managerLabel(e));
+  for (const e of p.ecosystems) for (const [n, v] of [...e.locked].sort((a, b) => byName(a[0], b[0]))) offer(n, v, managerLabel(e));
+
+  const pop = el("div", "pkg-pin-pop");
+  const q = el("input");
+  q.placeholder = "Search installed packages";
+  q.spellcheck = false;
+  q.setAttribute("role", "combobox");
+  q.setAttribute("aria-label", "Pin a package");
+  q.setAttribute("aria-expanded", "true");
+  q.setAttribute("aria-autocomplete", "list");
+  q.setAttribute("aria-controls", "pkg-pin-list");
+  const list = el("div", "pkg-pin-list");
+  list.id = "pkg-pin-list";
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Installed packages");
+  let shown: typeof all = [];
+  let active = 0;
+  const pick = (key) => {
+    close();
+    save([...pins, key]);
+  };
+  const mark = () => {
+    list.querySelectorAll("[role=option]").forEach((o, i) => o.setAttribute("aria-selected", String(i === active)));
+    q.setAttribute("aria-activedescendant", shown.length ? `pkg-opt-${active}` : "");
+    list.children[active]?.scrollIntoView?.({ block: "nearest" });
+  };
+  const draw = () => {
+    const needle = q.value.trim().toLowerCase();
+    // Names that start with the search first; ponytail: 50 shown, the search narrows the rest.
+    shown = all
+      .filter((o) => o.key.toLowerCase().includes(needle))
+      .sort((a, b) => Number(!a.key.toLowerCase().startsWith(needle)) - Number(!b.key.toLowerCase().startsWith(needle)))
+      .slice(0, 50);
+    active = 0;
+    list.replaceChildren(
+      ...shown.map((o, i) => {
+        const it = el("div", "pkg-opt");
+        it.id = `pkg-opt-${i}`;
+        it.setAttribute("role", "option");
+        it.append(el("span", "pkg-opt-name", o.key), el("span", "pkg-opt-ver", o.version ?? ""), el("span", "pkg-opt-from", o.from));
+        it.onmousedown = (e) => e.preventDefault(); // the search keeps the focus
+        it.onclick = () => pick(o.key);
+        return it;
+      }),
     );
-    tabs.classList.add("pkg-ecos");
-    for (const b of tabs.children) b.title = p.ecosystems.find((e) => e.id === b.dataset.id).manager ?? "";
-    body.append(tabs);
-  }
-
-  if (AUDITED.has(eco.id)) body.append(auditSection(name, eco, needle));
-
-  const rows = rowsOf(eco);
-  if (rows.length) {
-    const list = el("dl", newer.size ? "group pkg-list updates" : "group pkg-list");
-    for (const x of rows) list.append(pkgRow(eco.id, x, newer.get(`${eco.id}/${x.name}`)));
-    body.append(list);
-  } else if (unchecked) {
-    const none = el("p", "muted pkg-none", "Not checked yet");
-    none.append(check);
-    body.append(none);
-  } else {
-    body.append(
-      el(
-        "p",
-        "muted pkg-none",
-        needle ? `Nothing matches “${pkgQuery.trim()}”.` : view === "outdated" ? "Everything is up to date." : "None.",
-      ),
-    );
-  }
-  if (focused) {
-    const again = $(".pkg-search", body);
-    again.focus();
-    again.setSelectionRange(again.value.length, again.value.length);
-  }
+    if (!shown.length) list.append(el("p", "pkg-opt-none", needle ? "Nothing installed matches" : "Everything is pinned"));
+    mark();
+  };
+  q.oninput = draw;
+  q.onkeydown = (e) => {
+    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+    if (step) {
+      e.preventDefault();
+      active = Math.min(Math.max(active + step, 0), shown.length - 1);
+      mark();
+    } else if (e.key === "Enter" && shown[active]) {
+      e.preventDefault();
+      pick(shown[active].key);
+    }
+  };
+  pop.append(q, list);
+  draw();
+  const close = popAt(anchor, pop, q, "left");
 }
 
-/** "checked 5 min ago" next to the refresh button; what it found is in the counts. */
-function updatesStatus(up) {
-  const s = el("span", "pkg-status muted");
-  if (!up) return s;
-  if (up === "checking") s.textContent = "Checking…";
-  else if (up.error) {
-    s.classList.add("error");
-    s.textContent = up.error;
-  } else s.textContent = `checked ${ago(new Date(up.at))}`;
-  return s;
-}
-
-/** "Check security", what the last check found and when; its advisories, most severe first. */
-function auditSection(name, eco, needle) {
-  const a = auditsOf(name)[eco.id];
-  const box = el("div", "pkg-audit");
-  const head = el("p", "pkg-audit-head");
-  const check = el("button", "inline-action pkg-audit-check", a === "checking" ? "Checking…" : "Check security");
-  check.disabled = a === "checking";
-  check.onclick = () => checkAudit(name, eco.id);
-  const status = el("span", "pkg-status muted");
-  if (a?.error) {
-    status.classList.add("error");
-    status.textContent = a.error;
-  } else if (a?.list) {
-    const n = a.list.length;
-    const found = n ? `${n} known ${n === 1 ? "vulnerability" : "vulnerabilities"}` : "No known vulnerabilities";
-    status.textContent = `${found} · checked ${ago(new Date(a.at))}`;
-  }
-  head.append(check, status);
-  box.append(head);
-  const list = (a?.list ?? []).filter((v) => !needle || v.package.toLowerCase().includes(needle));
-  if (list.length) {
-    const dl = el("dl", "group pkg-list pkg-audit-list");
-    for (const v of list) dl.append(auditRow(v));
-    box.append(dl);
-  }
-  return box;
-}
-
+/** An advisory: its severity and title (to the advisory), then the package, CVE and versions. */
 function auditRow(v) {
-  const row = el("div", "row");
+  const row = el("div", "row pkg-advisory");
   const dt = el("dt");
-  const title = el(v.url ? "a" : "span", null, v.title || "Untitled advisory");
+  const title = el(v.url ? "a" : "span", "pkg-adv-title", v.title || "Untitled advisory");
   if (v.url) {
     title.href = v.url;
     title.onclick = (ev) => {
@@ -261,8 +330,14 @@ function auditRow(v) {
       invoke("open_url", { url: v.url }).catch((err) => showError(String(err)));
     };
   }
-  dt.append(title, el("span", "pkg-dev", v.version ? `${v.package} ${v.version}` : v.package));
-  row.append(dt, el("dd", "pkg-ver", v.fixed ? `${v.severity} · fixed in ${v.fixed}` : v.severity));
+  dt.append(el("span", `pkg-sev ${v.severity}`, v.severity), title);
+  const facts = [
+    v.version ? `${v.package} ${v.version}` : v.package,
+    v.cve,
+    v.range && `affects ${v.range}`,
+    v.fixed && `fixed in ${v.fixed}`,
+  ];
+  row.append(dt, el("dd", "pkg-adv-meta", facts.filter(Boolean).join(" · ")));
   return row;
 }
 
@@ -281,12 +356,9 @@ function pkgRow(eco, x, update) {
   const dd = el("dd", "pkg-ver");
   const v = el("span", null, x.version ?? "–");
   v.title = x.released ? `Released ${x.released}` : x.version ? "" : "Not in the lock file";
-  dd.append(v);
-  if (update) {
-    const to = el("span", `pkg-new ${update.level}`, update.latest);
-    to.title = `${update.level[0].toUpperCase()}${update.level.slice(1)} update`;
-    dd.append(el("span", "pkg-arrow", "→"), to);
-  }
+  const to = el("span", `pkg-new ${update.level}`, update.latest);
+  to.title = `${update.level[0].toUpperCase()}${update.level.slice(1)} update`;
+  dd.append(v, el("span", "pkg-arrow", "→"), to, el("span", "pkg-major", update.level === "major" ? "major" : ""));
   row.append(dt, dd);
   return row;
 }

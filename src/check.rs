@@ -313,6 +313,7 @@ mod tests {
             runtime_version: None,
             runtime_pinned: false,
             browser: false,
+            packages_pinned: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],
