@@ -283,17 +283,12 @@ pub(crate) fn frankenphp_env(
 ) -> Result<()> {
     lacking(cfg, site)?;
     env.retain(|(k, _)| k != "PHP_INI_SCAN_DIR");
-    let mut args: Vec<String> = crate::phpext::php_args_with(cfg, FP_PHP, &site.ext)
+    let args: Vec<String> = crate::phpext::cli_args(cfg, FP_PHP, Some(site))
         .chunks(2)
         .filter(|d| !d[1].starts_with("extension=") && !d[1].starts_with("zend_extension="))
         .flatten()
         .cloned()
         .collect();
-    let mut ini = cfg.ini.clone();
-    ini.extend(site.ini.clone());
-    for (k, v) in ini {
-        args.extend(["-d".into(), format!("{k}={v}")]);
-    }
     let dir = home()
         .join("run")
         .join(format!("frankenphp-{}.d", crate::pool(site)));

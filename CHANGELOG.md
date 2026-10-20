@@ -96,6 +96,10 @@ Until 1.0.0, minor versions may contain breaking changes.
   processes included, also when it was started from somewhere else (Finder,
   a terminal), and only then forgets them. Killing Anvil (SIGTERM) now stops
   everything as Quit does.
+- php.ini values set in Anvil, for every app or for one, now reach an app's
+  processes (queue workers, Octane's RoadRunner workers, artisan) and `php`
+  and `composer` in a terminal, not only PHP-FPM: `memory_limit` is
+  the same on the web and in the CLI. The CLI keeps PHP's own no time limit.
 
 ## [0.1.0] - 2026-10-19
 

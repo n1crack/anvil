@@ -258,25 +258,44 @@ pub fn php_args_with(cfg: &Config, minor: &str, own: &[String]) -> Vec<String> {
     args
 }
 
+/// `php_args_with` and then the php.ini values PHP-FPM's pool gives `site` (or, without
+/// one, the shared pool): the global ones, the app's own over them. What a PHP Anvil
+/// starts outside PHP-FPM reads. The CLI keeps its own `max_execution_time=0` and
+/// `max_input_time=-1`: PHP sets them over any ini file.
+pub fn cli_args(cfg: &Config, minor: &str, site: Option<&crate::Site>) -> Vec<String> {
+    let mut args = php_args_with(cfg, minor, site.map_or(&[], |s| &s.ext));
+    let mut ini = cfg.ini.clone();
+    ini.extend(site.map(|s| s.ini.clone()).unwrap_or_default());
+    for (k, v) in ini {
+        let line = format!("{k}={v}");
+        // An opcache.* or xdebug.* value php_args already has.
+        if !args.contains(&line) {
+            args.extend(["-d".into(), line]);
+        }
+    }
+    args
+}
+
 /// `PHP_INI_SCAN_DIR` for a PHP Anvil starts on `minor` other than PHP-FPM (the shims,
-/// an app's processes): `php_args` as an ini file in `php_dir(minor)/conf.d`, so a PHP
+/// an app's processes): `cli_args` as an ini file in `php_dir(minor)/conf.d`, so a PHP
 /// those start in turn (PHP_BINARY: queue:listen's workers; `npm run dev` → `php
 /// artisan`; composer scripts) loads the same. Never with the `-d`s too: loaded twice
 /// warns. `None` when there is nothing to load.
-/// An app with extensions of its own (`site`) gets a folder of its own in `run`.
+/// An app with extensions or php.ini values of its own (`site`) gets a folder of its
+/// own in `run`.
 pub fn scan_env(
     cfg: &Config,
     minor: &str,
     site: Option<&crate::Site>,
 ) -> Result<Option<(String, String)>> {
-    match site.filter(|s| !s.ext.is_empty()) {
+    match site.filter(|s| !s.ext.is_empty() || !s.ini.is_empty()) {
         Some(s) => {
             let dir = home()
                 .join("run")
                 .join(format!("php-{minor}-{}.d", crate::pool(s)));
-            scan_env_in(&dir, &php_args_with(cfg, minor, &s.ext))
+            scan_env_in(&dir, &cli_args(cfg, minor, Some(s)))
         }
-        None => scan_env_in(&php_dir(minor).join("conf.d"), &php_args(cfg, minor)),
+        None => scan_env_in(&php_dir(minor).join("conf.d"), &cli_args(cfg, minor, None)),
     }
 }
 
