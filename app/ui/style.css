@@ -1030,7 +1030,9 @@ button.proc-name:hover { text-decoration: underline; }
 /* ⌨ Keys' card: above the line, at the pane's right, in the console's colors. */
 .dev-keys-card { position: absolute; right: 10px; bottom: calc(100% + 6px); z-index: 5; display: grid; grid-template-columns: auto auto; gap: 4px 12px; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: #1b1f24; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); text-align: left; }
 .dev-keys-card[hidden] { display: none; }
-.dev-keys-card kbd { color: #e6edf3; font: 600 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+/* Key caps in the console's colors: the app's kbd is drawn for the light pages. */
+.dev-keys-card kbd { min-width: 22px; padding: 0 6px; border: 1px solid rgba(255, 255, 255, 0.18); border-bottom-width: 2px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); color: #e6edf3; font: 600 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-align: center; }
+.dev-keys-card span { align-self: center; }
 .dev-head .console-title { flex: none; }
 .dev-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .dev-pane.is-empty .dev-head-start { display: none; }
