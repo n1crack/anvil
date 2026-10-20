@@ -26,6 +26,7 @@ contain breaking changes.
 
 ### Changed
 
+- Switches show a muted green when on.
 - Sidebar: worktrees fold under their app; a lock shows HTTP or HTTPS.
 - Packages tab: key packages as badges, with Check outdated and Check security.
 - New worktree: a branch that doesn't exist is created.

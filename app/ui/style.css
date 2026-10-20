@@ -41,7 +41,8 @@
   --card: var(--steel-hover); /* the sidebar's grouped rows */
   --kids-bg: color-mix(in srgb, var(--card) 80%, #000); /* an app's worktrees under it */
   --pop-deep: color-mix(in srgb, var(--steel-raised) 78%, #000); /* a list in a bubble */
-  --switch-on: color-mix(in srgb, var(--text) 52%, transparent); /* light enough for the white knob */
+  /* On: a muted green, the one "on" means everywhere, light enough under the white knob. */
+  --switch-on: #4c9a62;
 
   /* A process's name color in Watch (blue, purple, pink, orange, green, cyan), as
    * Laravel's concurrently gives them; darker in light so they hold on white. */
@@ -87,7 +88,7 @@
     --card: rgba(255, 255, 255, 0.78);
     --kids-bg: rgba(0, 0, 0, 0.035);
     --pop-deep: #ebebee;
-    --switch-on: var(--text);
+    --switch-on: #3f8f56;
 
     --pc0: #1d4ed8; --pc1: #6d28d9; --pc2: #be123c; --pc3: #c2410c; --pc4: #15803d; --pc5: #0e7490;
   }
