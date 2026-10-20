@@ -652,7 +652,7 @@ const opcacheErrors = new Map<string, string>();
  * after a failed build, the reason under the row, with the tools when they are missing. */
 function opcacheParts(v: Settings["php"][number]) {
   const slot = Object.assign(document.createElement("span"), { className: "ver-opcache" });
-  if (installing.has(`opcache@${v.version}`)) {
+  if (installing.has(`opcache@${v.version}`) || v.opcache_building) {
     slot.innerHTML = `<span class="spin-dot"></span><span class="muted">Adding OPcache…</span>`;
   } else if (v.installed && v.opcache === "missing") {
     slot.append(button("Add OPcache", () => addOpcache(v.version)));

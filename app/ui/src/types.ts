@@ -256,7 +256,7 @@ export interface Settings {
   dns_port: number;
   editor: string | null;
   editors: string[];
-  php: { version: string; installed: boolean; default: boolean; pinned_by: string[]; opcache: "builtin" | "ready" | "missing" }[];
+  php: { version: string; installed: boolean; default: boolean; pinned_by: string[]; opcache: "builtin" | "ready" | "missing"; opcache_building: boolean }[];
   ini: Record<string, string>;
   terminal: string | null;
   terminals: string[];

@@ -142,6 +142,19 @@ describe("versions", () => {
       expect(phpRow("8.2").querySelector(".ver-opcache")?.textContent).toBe("");
     }));
 
+  test("a window opened during a build says Adding OPcache… too", () =>
+    withOpcache83(async () => {
+      w.mockOpcacheBuilding = ["8.3"];
+      try {
+        w.refresh();
+        await open("php");
+        expect(phpRow("8.3").querySelector(".ver-opcache")?.textContent).toBe("Adding OPcache…");
+        expect(buttons(phpRow("8.3"))).not.toContain("Add OPcache");
+      } finally {
+        delete w.mockOpcacheBuilding;
+      }
+    }));
+
   test("add_opcache_is_inline: Adding OPcache… on the row until it resolves, then OPcache", () =>
     withOpcache83(async () => {
       w.mockDelay.php_opcache = 100;

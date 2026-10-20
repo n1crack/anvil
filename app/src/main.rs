@@ -2868,6 +2868,8 @@ struct PhpVersion {
     /// Apps pinned to it: it can't be uninstalled until they are unpinned.
     pinned_by: Vec<String>,
     opcache: anvil::opcache::State,
+    /// An OPcache build for it is running, so a window opened meanwhile says so too.
+    opcache_building: bool,
 }
 
 #[derive(Serialize)]
@@ -3030,6 +3032,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                 default: cfg.php.as_deref() == Some(*v),
                 pinned_by: anvil::pinned_to(&cfg, "php", v),
                 opcache: anvil::opcache::state(v),
+                opcache_building: anvil::lock(&OPCACHE_BUILDS).iter().any(|b| b == v),
             })
             .collect(),
         editors: installed_apps(&EDITORS),

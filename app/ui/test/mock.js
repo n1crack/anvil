@@ -891,6 +891,7 @@ const mockHandle = (cmd, a) => {
           default: version === "8.4",
           pinned_by: window.mockPhpPins?.[version] ?? [],
           opcache: version === "8.5" ? "builtin" : (window.mockOpcache?.[version] ?? (version === "8.4" ? "ready" : "missing")),
+          opcache_building: window.mockOpcacheBuilding?.includes(version) ?? false,
         })),
         ini: { memory_limit: "512M", upload_max_filesize: "64M" },
         terminal: "Terminal",
