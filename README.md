@@ -69,7 +69,7 @@ git clone https://github.com/n1crack/anvil && cd anvil
 cargo install --path .
 ```
 
-That installs the CLI. To build the desktop app as well, see [Build from source](https://anvil.tr/docs/getting-started#build-from-source).
+That installs the CLI. To build the desktop app as well, see [Build from source](https://anvil.tr/docs/installation#build-from-source).
 
 ## Contributing
 
