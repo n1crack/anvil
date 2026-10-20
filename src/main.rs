@@ -760,6 +760,12 @@ fn print_setup_windows(cfg: &Config, status: &anvil::Setup) -> Result<()> {
             )
         );
     }
+    if !status.git {
+        println!(
+            "{}",
+            commands("Git isn't installed: `winget install Git.Git`, or Install Git in the app.")
+        );
+    }
     Ok(())
 }
 

@@ -2682,6 +2682,7 @@ fn setup_fix(handle: AppHandle, app: State<App>, step: String) -> Res<anvil::Set
         }
         "trust" => anvil::trust().map_err(err)?,
         "php" => anvil::php_install(&mut cfg, "8.4").map_err(err)?,
+        "git" => anvil::install_git().map_err(err)?,
         other => return Err(format!("Unknown setup step {other}")),
     }
     changed(&handle);

@@ -45,6 +45,22 @@ describe("setup", () => {
     expect(calls("setup_fix").map(([, a]) => a.step)).toEqual(["all", "trust"]);
     expect($("#setup").hidden).toBe(true);
   });
+
+  test("Install Git where Anvil can install it (git false), and nowhere else", async () => {
+    w.mockSetup.git = false;
+    (w as any).refresh();
+    await wait(80);
+    expect($$("#setup button").map((b) => b.textContent)).toEqual(["Install Git"]);
+    w.mockDelay = { setup_fix: 60 };
+    ($$("#setup button")[0] as HTMLElement).click();
+    await wait(10);
+    expect($("#setup button").textContent).toBe("Installing Git…");
+    w.mockSetup.git = true;
+    await wait(120);
+    w.mockDelay = {};
+    expect(calls("setup_fix").at(-1)![1]).toEqual({ step: "git" });
+    expect($("#setup").hidden).toBe(true);
+  });
 });
 
 describe("sidebar menu", () => {

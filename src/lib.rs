@@ -2040,6 +2040,57 @@ pub struct Setup {
     pub ports: bool,
     /// The terminal shims are written and on PATH in the user's shell rc file.
     pub shims: bool,
+    /// `git` runs. macOS brings it with the Xcode tools; Windows doesn't (`install_git`).
+    pub git: bool,
+}
+
+/// Whether `git` runs here.
+pub fn git_installed() -> bool {
+    platform::command("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// Windows: Git for Windows, through winget (Windows asks once when its installer goes
+/// into Program Files), then found on the PATH it added without a restart.
+pub fn install_git() -> Result<()> {
+    if !cfg!(windows) {
+        bail!("Install Git with the Xcode command line tools: xcode-select --install");
+    }
+    let out = platform::command("winget")
+        .args([
+            "install",
+            "--id",
+            "Git.Git",
+            "--exact",
+            "--silent",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--disable-interactivity",
+        ])
+        .output();
+    match out {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            bail!("winget isn't on this Windows: get Git from https://git-scm.com/download/win")
+        }
+        Err(e) => bail!("couldn't run winget: {e}"),
+        Ok(o) if !o.status.success() => {
+            let text = String::from_utf8_lossy(&o.stdout);
+            let why = text
+                .lines()
+                .map(str::trim)
+                .rfind(|l| !l.is_empty() && !l.chars().all(|c| "-\\|/ ".contains(c)))
+                .unwrap_or("winget failed");
+            bail!("Installing Git failed: {why}")
+        }
+        Ok(_) => {}
+    }
+    platform::refresh_path();
+    if !git_installed() {
+        bail!("Git is installed; open Anvil again to use it");
+    }
+    Ok(())
 }
 
 /// `.localhost` names already reach this Mac (macOS and browsers resolve them
@@ -2188,6 +2239,7 @@ pub fn setup_status(cfg: &Config) -> Setup {
         php: !installed_php().is_empty(),
         ports: ports_forwarded(cfg),
         shims: shims::ready(),
+        git: git_installed(),
     }
 }
 

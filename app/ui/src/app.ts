@@ -110,7 +110,8 @@ async function loadSetup(busy?: string) {
   }
   const bar = $("#setup");
   const machine = SETUP_FIELDS.some((f) => !st[f]);
-  bar.hidden = !machine && st.php;
+  // `git` is false only where Anvil can install it (Windows).
+  bar.hidden = !machine && st.php && st.git !== false;
   bar.replaceChildren();
   if (machine) {
     const b = el("button", "setup-go", busy === "all" ? "Setting up…" : "Set up Anvil");
@@ -140,6 +141,22 @@ async function loadSetup(busy?: string) {
       loadSetup("php");
       try {
         await invoke("setup_fix", { step: "php" });
+      } catch (e) {
+        showError(String(e));
+      }
+      loadSetup();
+    };
+    bar.append(b);
+  }
+  if (st.git === false) {
+    const b = el("button", null, busy === "git" ? "Installing Git…" : "Install Git");
+    if (busy === "git") b.prepend(el("span", "spin-dot"));
+    b.title = "Git for Windows, through winget: new apps get a repository, and worktrees work. Windows may ask once.";
+    b.disabled = !!busy;
+    b.onclick = async () => {
+      loadSetup("git");
+      try {
+        await invoke("setup_fix", { step: "git" });
       } catch (e) {
         showError(String(e));
       }
