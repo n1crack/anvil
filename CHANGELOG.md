@@ -10,6 +10,19 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Tunnel (Settings › Plugins, off by default): an app's Overview gets a Public
+  address line. Share, after a confirm, opens a Cloudflare quick tunnel (no
+  account) to the app through Caddy with the app's own host, HTTPS apps over
+  https; the `https://…trycloudflare.com` address shows once it answers, with
+  Copy and Stop, and why it failed when it didn't. One tunnel per app; it ends
+  with the app's server, the web server, the switch or Anvil. The address is
+  temporary and changes every time. cloudflared 2026.10.2 is downloaded on the
+  first Share (macOS arm64/x86_64, Windows x86_64), checked against its pinned
+  SHA-256, into `~/.anvil/tunnel/<version>` (older versions removed; cleanable
+  in Disk). Caddy now trusts X-Forwarded-* from this computer, so the app sees
+  the public host; a Laravel app that doesn't trust proxies is told its links
+  still point to `<app>.test`. `anvil app share <app>` does the same in a
+  terminal until Ctrl-C.
 - Mail: an app whose `.env` sends mail to an Anvil Mailpit (`MAIL_MAILER=smtp`
   to this computer on that Mailpit's SMTP port) gets a Mail line on its
   Overview: Open inbox while Mailpit runs, Start while it doesn't. Other apps

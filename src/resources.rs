@@ -1128,6 +1128,13 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
         "Downloaded again when an app's Octane starts",
     ));
     entries.push((
+        "Tunnel (cloudflared)".into(),
+        h.join("tunnel"),
+        "Cache",
+        Safety::Safe,
+        "Downloaded again when you share an app",
+    ));
+    entries.push((
         "Logs".into(),
         h.join("log"),
         "Logs",
@@ -1182,6 +1189,7 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
     let is_cache = [
         h.join("build"),
         h.join("octane"),
+        h.join("tunnel"),
         crate::phpext::tools_dir(),
     ]
     .contains(&p)
@@ -1509,8 +1517,15 @@ mod tests {
         let rr = dir.path().join("octane/roadrunner/2025.1.15");
         std::fs::create_dir_all(&rr).unwrap();
         std::fs::write(rr.join("rr"), vec![1u8; 5_000]).unwrap();
+        let cf = dir.path().join("tunnel/2026.10.2");
+        std::fs::create_dir_all(&cf).unwrap();
+        std::fs::write(cf.join("cloudflared"), vec![1u8; 5_000]).unwrap();
         let (_, items) = anvil_disk();
-        for (label, gone) in [("Build tools", &tools), ("Octane servers", &rr)] {
+        for (label, gone) in [
+            ("Build tools", &tools),
+            ("Octane servers", &rr),
+            ("Tunnel (cloudflared)", &cf),
+        ] {
             let item = items.iter().find(|i| i.label == label).unwrap();
             assert!(item.safety == Safety::Safe);
             assert!(clean_anvil(&item.path).unwrap() > 0);

@@ -600,6 +600,7 @@ export function render() {
   $("#worktree-db").checked = s.worktree_db === "copy";
   $("#mcp").checked = s.mcp;
   $("#mcp-line").hidden = !s.mcp;
+  $("#tunnel").checked = s.tunnel;
   renderPresets();
   // .localhost works without setup; another suffix needs the resolver step once.
   const tld = $("#tld");
@@ -817,6 +818,7 @@ $("#notifications").onchange = (e) => call("set_notifications", { on: e.target.c
 $("#https-default").onchange = (e) => call("set_https_default", { on: e.target.checked });
 $("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.checked ? "copy" : "empty" });
 $("#mcp").onchange = (e) => call("set_mcp", { on: e.target.checked });
+$("#tunnel").onchange = (e) => call("set_tunnel", { on: e.target.checked });
 // "Copied" in the button for a moment, no toast.
 $("#mcp-copy").onclick = async (e) => {
   const b = e.currentTarget;

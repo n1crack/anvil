@@ -777,6 +777,16 @@ button, select, input { font: inherit; color: inherit; }
   min-width: 0;
 }
 
+/* Overview › Public address: the tunnel's address, Copy and Stop; its note under them. */
+.share-row .securing { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.share-url { color: var(--heat-text); text-decoration: none; user-select: text; -webkit-user-select: text; }
+.share-url:hover { text-decoration: underline; }
+.share-row .inline-action:first-of-type { margin-left: 8px; }
+.share-note,
+.share-error { display: block; margin-top: 4px; font-size: 12px; }
+.share-row dd > .inline-action:first-child { margin-left: 0; }
+.share-error { color: var(--danger); user-select: text; -webkit-user-select: text; }
+
 /* A path with a button that shows it in Finder. */
 .path-cell {
   display: flex;

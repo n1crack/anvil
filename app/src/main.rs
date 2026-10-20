@@ -21,7 +21,7 @@ use tauri::{
 /// take the next; `let x = m.lock()…;` drops the guard at the `;`, but an `if let` /
 /// `match` scrutinee keeps it through the whole block. If two ever must nest, take
 /// them in field order (restarting, server, error, services, apps, app_errors,
-/// service_errors, container_logs, agent_log).
+/// service_errors, container_logs, agent_log, shares).
 #[derive(Default)]
 struct App {
     server: Mutex<Option<Server>>,
@@ -43,6 +43,8 @@ struct App {
     server_crashed: AtomicBool,
     /// The last actions taken through the control socket, oldest first.
     agent_log: Mutex<std::collections::VecDeque<control::AgentAction>>,
+    /// Apps shared through a tunnel (Settings › Plugins › Tunnel).
+    shares: Mutex<anvil::tunnel::Shares>,
 }
 
 #[derive(Serialize)]
@@ -89,6 +91,19 @@ struct Snapshot {
     /// The catalog extensions built for each version that has some turned on: one on
     /// without a build loads nothing and shows as not built.
     php_ext_built: std::collections::BTreeMap<String, Vec<&'static str>>,
+    /// Settings › Plugins › Tunnel: Overview offers Share.
+    tunnel: bool,
+    /// Shared apps' tunnels, by app.
+    shares: std::collections::BTreeMap<String, ShareView>,
+}
+
+/// An app's tunnel on its Overview.
+#[derive(Serialize)]
+struct ShareView {
+    #[serde(flatten)]
+    state: anvil::tunnel::State,
+    /// What links the app builds point to, when not the public address (`tunnel::note`).
+    note: Option<String>,
 }
 
 /// What a worktree's Overview says about it.
@@ -397,6 +412,20 @@ fn snapshot(app: &App) -> Res<Snapshot> {
                 (v, built)
             })
             .collect(),
+        tunnel: cfg.tunnel,
+        shares: {
+            let states = anvil::lock(&app.shares).states();
+            states
+                .into_iter()
+                .map(|(name, state)| {
+                    let note = sites
+                        .iter()
+                        .find(|s| s.name == name)
+                        .and_then(anvil::tunnel::note);
+                    (name, ShareView { state, note })
+                })
+                .collect()
+        },
         sites,
         hidden: anvil::hidden_sites(&cfg),
         php_default: cfg.php.clone(),
@@ -440,6 +469,8 @@ fn stop(app: &App) {
     let _one = anvil::lock(&app.restarting);
     let old = anvil::lock(&app.server).take();
     drop(old);
+    // Nothing answers them now.
+    stop_shares(app);
 }
 
 /// Something changed: rebuild the tray menu and re-render an open window.
@@ -1498,9 +1529,55 @@ fn restore_processes(app: &App, cfg: &Config, keys: &[String]) {
 /// Stop an app or process without keeping `apps` locked while it shuts down (up to 5 s).
 fn stop_app(app: &App, key: &str) {
     let stopping = anvil::lock(&app.apps).take(key);
+    let Some(s) = stopping else {
+        return;
+    };
+    s.wait(anvil::apps::GRACE);
+    // The app's own server, or its Octane, stopped: so does its tunnel. (A PHP app's
+    // own key runs nothing; Caddy serves it.)
+    let site = key
+        .strip_suffix(&format!("@{}", anvil::octane::ID))
+        .unwrap_or(key);
+    if !site.contains(['@', '#']) {
+        stop_share(app, site);
+    }
+}
+
+/// End an app's tunnel, without keeping `shares` locked while it shuts down.
+fn stop_share(app: &App, site: &str) {
+    let stopping = anvil::lock(&app.shares).take(site);
     if let Some(s) = stopping {
         s.wait(anvil::apps::GRACE);
     }
+}
+
+fn stop_shares(app: &App) {
+    let all = anvil::lock(&app.shares).take_all();
+    anvil::stop_all(all, anvil::apps::GRACE);
+}
+
+/// Share: a quick tunnel to the app (`anvil::tunnel`), refreshed once it answers or fails.
+#[tauri::command(async)]
+fn share_start(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    let (cfg, s) = find_site_cfg(&site)?;
+    if !cfg.tunnel {
+        return Err(anvil::tunnel::TURNED_OFF.into());
+    }
+    // The download (once) before `shares` is locked: the window keeps refreshing.
+    anvil::tunnel::ensure().map_err(err)?;
+    let h = handle.clone();
+    anvil::lock(&app.shares)
+        .start(&cfg, &s, move || changed(&h))
+        .map_err(err)?;
+    changed(&handle);
+    snapshot(&app)
+}
+
+#[tauri::command(async)]
+fn share_stop(handle: AppHandle, app: State<App>, site: String) -> Res<Snapshot> {
+    stop_share(&app, &site);
+    changed(&handle);
+    snapshot(&app)
 }
 
 /// Stop what runs for a site that is gone (a worktree removed outside Anvil), all at once
@@ -1543,6 +1620,7 @@ fn stop_everything(app: &App) {
     let server = anvil::lock(&app.server).take();
     all.extend(server.into_iter().flat_map(|mut s| s.take_all()));
     all.extend(anvil::lock(&app.services).take_all());
+    all.extend(anvil::lock(&app.shares).take_all());
     anvil::stop_all(all, anvil::services::GRACE);
 }
 
@@ -3005,6 +3083,8 @@ struct Settings {
     worktree_db: anvil::worktrees::DbChoice,
     /// Settings › Plugins › Agents (MCP).
     mcp: bool,
+    /// Settings › Plugins › Tunnel.
+    tunnel: bool,
     /// Settings › Worktrees: each preset as it applies.
     worktree_presets: Vec<PresetView>,
     login: bool,
@@ -3168,6 +3248,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         https_default: cfg.https_default == Some(true),
         worktree_db: cfg.worktree_db,
         mcp: cfg.mcp,
+        tunnel: cfg.tunnel,
         worktree_presets,
         hidden: cfg.hidden.clone(),
         paths: cfg.paths,
@@ -3359,6 +3440,22 @@ fn set_mcp(handle: AppHandle, on: bool) -> Res<Settings> {
         &handle,
         |cfg| {
             cfg.mcp = on;
+            Ok(())
+        },
+        false,
+    )
+}
+
+/// Settings › Plugins › Tunnel: Share on apps' Overview. Off ends every tunnel.
+#[tauri::command(async)]
+fn set_tunnel(handle: AppHandle, app: State<App>, on: bool) -> Res<Settings> {
+    if !on {
+        stop_shares(&app);
+    }
+    apply(
+        &handle,
+        |cfg| {
+            cfg.tunnel = on;
             Ok(())
         },
         false,
@@ -4108,6 +4205,9 @@ fn main() {
             set_notifications,
             set_worktree_db,
             set_mcp,
+            set_tunnel,
+            share_start,
+            share_stop,
             set_worktree_preset,
             set_login,
             open_config_dir,

@@ -75,7 +75,15 @@ export interface Snapshot {
   php_ext: Record<string, string[]>;
   /** The extensions built for each version that has some on; one on without a build loads nothing. */
   php_ext_built: Record<string, string[]>;
+  /** Settings › Plugins › Tunnel: Overview offers Share. */
+  tunnel: boolean;
+  /** Shared apps' tunnels, by app; `note` says what links the app builds point to. */
+  shares: Record<string, Share>;
 }
+
+export type Share = ({ state: "starting" } | { state: "ready"; url: string } | { state: "failed"; error: string }) & {
+  note: string | null;
+};
 
 export type DbChoice = "copy" | "empty";
 
@@ -297,6 +305,8 @@ export interface Settings {
   worktree_db: DbChoice;
   /** Settings › Plugins › Agents (MCP). */
   mcp: boolean;
+  /** Settings › Plugins › Tunnel. */
+  tunnel: boolean;
   /** Settings › Worktrees: each preset as it applies. */
   worktree_presets: { id: string; name: string; kinds: string[]; hooks: Hooks; edited: boolean }[];
   login: boolean;
