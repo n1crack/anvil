@@ -54,7 +54,14 @@ pub fn fpm_args(cfg: &Config, minor: &str) -> Vec<String> {
             format!("zend_extension={}", so_path(minor).display()),
         ],
     };
-    for (k, v) in DEV.iter().filter(|(k, _)| !cfg.ini.contains_key(*k)) {
+    // OPcache reads most of its settings once, when FPM starts: a pool's php_value
+    // comes too late, so the user's opcache.* values go here too, over the dev ones.
+    let mine = cfg.ini.iter().filter(|(k, _)| k.starts_with("opcache."));
+    let dev = DEV.iter().filter(|(k, _)| !cfg.ini.contains_key(*k));
+    for (k, v) in dev
+        .map(|(k, v)| (*k, *v))
+        .chain(mine.map(|(k, v)| (k.as_str(), v.as_str())))
+    {
         args.extend(["-d".into(), format!("{k}={v}")]);
     }
     args
@@ -245,7 +252,14 @@ mod tests {
         cfg.ini.insert("opcache.enable".into(), "0".into());
         let args = fpm_args(&cfg, "8.5");
         assert!(!args.contains(&"opcache.enable=1".into()));
+        assert!(args.contains(&"opcache.enable=0".into()));
         assert!(args.contains(&"opcache.validate_timestamps=1".into()));
+        // Read once at FPM start: a pool's php_value would be ignored.
+        cfg.ini
+            .insert("opcache.memory_consumption".into(), "512".into());
+        let args = fpm_args(&cfg, "8.5");
+        assert!(args.contains(&"opcache.memory_consumption=512".into()));
+        assert!(!args.contains(&"opcache.memory_consumption=256".into()));
     }
 
     #[test]
