@@ -647,7 +647,7 @@ impl Apps {
         self.spawn(
             &key,
             &site.path,
-            &script.run,
+            &crate::processes::with_php_args(cfg, site, &script.run),
             crate::processes::env(cfg, site, crate::processes::is_test_script(&script.name))?,
         )?;
         self.processes.insert(key.clone());
@@ -703,7 +703,8 @@ impl Apps {
         if self.running(&key) {
             return Ok(());
         }
-        self.spawn(&key, &site.path, &p.command, process_env(site, p, cfg)?)?;
+        let command = crate::processes::with_php_args(cfg, site, &p.command);
+        self.spawn(&key, &site.path, &command, process_env(site, p, cfg)?)?;
         self.processes.insert(key);
         Ok(())
     }

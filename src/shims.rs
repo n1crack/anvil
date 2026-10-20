@@ -230,8 +230,12 @@ fn resolve_for(
             let v = php_version(pinned, cfg, &installed)?;
             let php_dir = crate::php_dir(&v);
             let php = php_dir.join("php");
+            // What PHP-FPM loads (OPcache, the version's extensions), so CLI and web agree.
+            // ponytail: a PHP it starts itself (PHP_BINARY, e.g. queue:listen's workers)
+            // goes without; an ini file in PHP_INI_SCAN_DIR would reach those too.
+            let mut args = crate::phpext::php_args(cfg, &v);
             if tool == "php" {
-                return Ok((php, vec![], vec![]));
+                return Ok((php, args, vec![]));
             }
             let mut env = vec![path_with(&php_dir)];
             let phar = if fetch {
@@ -240,7 +244,8 @@ fn resolve_for(
                 h.join("bin/composer.phar")
             };
             if tool == "composer" {
-                return Ok((php, vec![phar.display().to_string()], env));
+                args.push(phar.display().to_string());
+                return Ok((php, args, env));
             }
             let composer_home = h.join("composer");
             env.push(("COMPOSER_HOME".into(), composer_home.display().to_string()));

@@ -2,8 +2,8 @@
 //! with phpize against the source tree OPcache configured for the same exact version.
 
 use crate::opcache::{install_so, installed_full, source_tree, tools_error};
-use crate::{fetch_tgz, home, php_dir, run};
-use anyhow::{Context, Result};
+use crate::{Config, fetch_tgz, home, php_dir, run};
+use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -82,10 +82,6 @@ const XDEBUG: [(&str, &str); 2] = [
     ("xdebug.start_with_request", "trigger"),
 ];
 
-/// One build at a time in this process: they share the tools and the staged headers.
-/// ponytail: in-process only; the CLI and the app building at once can still race.
-static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 /// Rebuildable: m4 and autoconf, built again when an extension needs them.
 pub fn tools_dir() -> PathBuf {
     home().join("tools")
@@ -114,7 +110,7 @@ pub fn built(minor: &str, name: &str) -> bool {
 /// Build `name` for the installed PHP `minor` and put it in place once PHP loads it.
 pub fn build(minor: &str, name: &str) -> Result<()> {
     let ext = find(name)?;
-    let _one = crate::lock(&BUILDING);
+    let _held = build_lock(minor, name, name)?;
     let (full, src) = source_tree(minor)?;
     let bin = tools()?;
     let stage = src.join("stage");
@@ -147,6 +143,79 @@ pub fn build(minor: &str, name: &str) -> Result<()> {
     ok?;
     println!("{name} built for PHP {full}");
     Ok(())
+}
+
+/// Held while `name` builds for PHP `minor`, in this process or another (the CLI and the
+/// app): a second build of the same is refused at once. Different builds then take
+/// turns, as they share the tools, the source tree and its staged headers.
+pub(crate) fn build_lock(minor: &str, name: &str, what: &str) -> Result<[fs::File; 2]> {
+    let dir = home().join("run");
+    fs::create_dir_all(&dir)?;
+    let open = |f: String| fs::File::create(dir.join(f));
+    let mine = open(format!("build-{minor}-{name}.lock"))?;
+    match mine.try_lock() {
+        Ok(()) => {}
+        Err(fs::TryLockError::WouldBlock) => {
+            bail!("{what} for PHP {minor} is already being built")
+        }
+        Err(fs::TryLockError::Error(e)) => return Err(e.into()),
+    }
+    let all = open("build.lock".into())?;
+    all.lock()?;
+    Ok([mine, all])
+}
+
+/// Turn `name` on for every app on the installed PHP `minor`, building it first unless
+/// this patch release has it already; the saved config. FPM loads it at its next start.
+pub fn add(minor: &str, name: &str) -> Result<Config> {
+    find(name)?;
+    if !crate::installed_php().iter().any(|v| v == minor) {
+        bail!("PHP {minor} is not installed — run `anvil php install {minor}`");
+    }
+    if !built(minor, name) {
+        build(minor, name)?;
+    }
+    let (cfg, ()) = crate::update(|c| {
+        let names = c.php_ext.entry(minor.into()).or_default();
+        if !names.iter().any(|n| n == name) {
+            names.push(name.into());
+        }
+        Ok(())
+    })?;
+    Ok(cfg)
+}
+
+/// Turn `name` off for PHP `minor`. Its `.so` stays: turning it on again is instant.
+pub fn remove(minor: &str, name: &str) -> Result<Config> {
+    find(name)?;
+    let (cfg, ()) = crate::update(|c| {
+        if let Some(names) = c.php_ext.get_mut(minor) {
+            names.retain(|n| n != name);
+            if names.is_empty() {
+                c.php_ext.remove(minor);
+            }
+        }
+        Ok(())
+    })?;
+    Ok(cfg)
+}
+
+/// Whether `name` is on for PHP `minor`.
+pub fn on(cfg: &Config, minor: &str, name: &str) -> bool {
+    cfg.php_ext
+        .get(minor)
+        .is_some_and(|n| n.iter().any(|x| x == name))
+}
+
+/// The `-d` arguments every PHP Anvil starts on `minor` gets (FPM, the terminal shims,
+/// app processes): OPcache first, as it must load before Xdebug, then the extensions
+/// turned on for the version.
+pub fn php_args(cfg: &Config, minor: &str) -> Vec<String> {
+    let mut args = crate::opcache::fpm_args(cfg, minor);
+    if let Some(names) = cfg.php_ext.get(minor).filter(|n| !n.is_empty()) {
+        args.extend(ini_args(&cfg.ini, minor, names));
+    }
+    args
 }
 
 /// phpize, configure and make in `dir` against the staged PHP; the built `.so`.
@@ -374,6 +443,65 @@ mod tests {
         // Without xdebug, its settings stay out.
         let args = ini_args(&ini, "8.4", &["apcu".into()]);
         assert_eq!(args, d(&format!("extension={apcu}")));
+    }
+
+    #[test]
+    fn removed_ext_leaves_no_arg() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        fake_php("8.4", "8.4.23");
+        fs::write(php_dir("8.4").join("php-fpm"), "").unwrap();
+        let apcu = fake_so("8.4", "8.4.23", "apcu");
+        let xdebug = fake_so("8.4", "8.4.23", "xdebug");
+        crate::save(&Config::default()).unwrap();
+        add("8.4", "xdebug").unwrap();
+        let cfg = add("8.4", "apcu").unwrap();
+        assert_eq!(cfg.php_ext["8.4"], ["xdebug", "apcu"]);
+        let args = php_args(&cfg, "8.4");
+        assert!(args.contains(&format!("extension={apcu}")), "{args:?}");
+        assert!(
+            args.contains(&format!("zend_extension={xdebug}")),
+            "{args:?}"
+        );
+        assert!(php_args(&cfg, "8.3").is_empty(), "on for 8.4 only");
+
+        let cfg = remove("8.4", "apcu").unwrap();
+        assert!(!php_args(&cfg, "8.4").iter().any(|a| a.contains("apcu")));
+        assert!(fs::metadata(&apcu).is_ok(), "the build stays for next time");
+        let cfg = remove("8.4", "xdebug").unwrap();
+        assert!(cfg.php_ext.is_empty(), "nothing left for 8.4: not written");
+        assert!(!php_args(&cfg, "8.4").iter().any(|a| a.contains("xdebug")));
+
+        // A `.so` deleted behind Anvil's back: no argument points at it.
+        let cfg = add("8.4", "apcu").unwrap();
+        fs::remove_file(&apcu).unwrap();
+        assert!(!php_args(&cfg, "8.4").iter().any(|a| a.contains("apcu")));
+        assert!(add("8.4", "swoole").is_err());
+        let e = add("8.3", "apcu").err().unwrap();
+        assert!(e.to_string().contains("not installed"), "{e}");
+    }
+
+    #[test]
+    fn second_build_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let first = build_lock("8.4", "xdebug", "xdebug").unwrap();
+        let e = build("8.4", "xdebug").unwrap_err();
+        assert_eq!(e.to_string(), "xdebug for PHP 8.4 is already being built");
+        drop(first);
+        let op = build_lock("8.4", "opcache", "OPcache").unwrap();
+        let e = crate::opcache::build("8.4").unwrap_err();
+        assert_eq!(e.to_string(), "OPcache for PHP 8.4 is already being built");
+        drop(op);
+        // Free again: the next one gets past the lock (to the PHP that isn't there).
+        let e = build("8.4", "xdebug").unwrap_err();
+        assert!(!e.to_string().contains("already"), "{e}");
+        let e = crate::opcache::build("8.4").unwrap_err();
+        assert!(!e.to_string().contains("already"), "{e}");
     }
 
     #[test]

@@ -435,6 +435,33 @@ enum PhpCmd {
     Ini { key: String, value: Option<String> },
     /// Build OPcache for an installed PHP 8.1–8.4
     Opcache { version: String },
+    /// Extensions for every app on a PHP version, built on this Mac (xdebug, pcov, apcu, igbinary, msgpack)
+    Ext {
+        #[command(subcommand)]
+        cmd: ExtCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExtCmd {
+    /// Turn an extension on, building it first if needed
+    Add {
+        name: String,
+        /// The PHP version, e.g. 8.4; the default version if left out
+        #[arg(long)]
+        php: Option<String>,
+    },
+    /// Turn an extension off (its build is kept)
+    Remove {
+        name: String,
+        #[arg(long)]
+        php: Option<String>,
+    },
+    /// The extensions Anvil can add, and which are on
+    List {
+        #[arg(long)]
+        php: Option<String>,
+    },
 }
 
 fn dir_or_cwd(p: Option<PathBuf>) -> Result<PathBuf> {
@@ -1047,6 +1074,41 @@ fn run() -> Result<()> {
                     "Restart Anvil to use it: `anvil start`, or the app reloads on its next refresh."
                 )
             );
+        }
+        Cmd::Php {
+            cmd: PhpCmd::Ext { cmd },
+        } => {
+            let (ExtCmd::Add { php, .. } | ExtCmd::Remove { php, .. } | ExtCmd::List { php }) =
+                &cmd;
+            let v = php
+                .clone()
+                .or_else(|| cfg.php.clone())
+                .context("No PHP version yet — run `anvil php install 8.4`")?;
+            match &cmd {
+                ExtCmd::Add { name, .. } => drop(phpext::add(&v, name)?),
+                ExtCmd::Remove { name, .. } => drop(phpext::remove(&v, name)?),
+                ExtCmd::List { .. } => {}
+            }
+            if let ExtCmd::List { .. } = cmd {
+                for e in phpext::CATALOG {
+                    let state = match (phpext::on(&cfg, &v, e.name), phpext::built(&v, e.name)) {
+                        (true, true) => green("on"),
+                        (true, false) => {
+                            yellow(format!("on, not built (anvil php ext add {})", e.name))
+                        }
+                        (false, _) => dim("off"),
+                    };
+                    println!("{:<9} {:<10} {state}", e.name, e.version);
+                }
+            } else {
+                control::notify_changed();
+                println!(
+                    "{}",
+                    commands(
+                        "Restart Anvil to use it: `anvil start`, or Stop and Start in the app."
+                    )
+                );
+            }
         }
         Cmd::Clean {
             site: None,

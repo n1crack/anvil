@@ -21,6 +21,14 @@ Until 1.0.0, minor versions may contain breaking changes.
   development, so a saved file shows on the next request. Add OPcache in
   Settings › PHP, or `anvil php opcache <version>`, adds it to a PHP installed
   before.
+- PHP extensions for every app on a version: Xdebug, PCOV, APCu, igbinary and
+  msgpack, each a switch under the version in Settings › PHP, or `anvil php ext
+  add|remove|list [--php <version>]`. Anvil builds each on your Mac from PECL
+  against the PHP you run (checked against checksums pinned in Anvil; needs
+  the Xcode command line tools), and the web, the terminal's `php` and an
+  app's PHP processes load the same ones. Xdebug starts only when a request
+  asks for it (`xdebug.start_with_request=trigger`). Off keeps the build, so
+  on again is instant; a new patch release of PHP builds them again.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service
   start|stop <id>` ask the running app to do it, so the change shows there at
   once, and print each process's state (`api: running`). Without the app open

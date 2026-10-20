@@ -903,6 +903,11 @@ const mockHandle = (cmd, a) => {
           pinned_by: window.mockPhpPins?.[version] ?? [],
           opcache: version === "8.5" ? "builtin" : (window.mockOpcache?.[version] ?? (version === "8.4" ? "ready" : "missing")),
           opcache_building: window.mockOpcacheBuilding?.includes(version) ?? false,
+          extensions: ["xdebug", "pcov", "apcu", "igbinary", "msgpack"].map((name) => ({
+            name,
+            on: window.mockExt?.[version]?.includes(name) ?? false,
+            building: window.mockExtBuilding?.includes(`${version} ${name}`) ?? false,
+          })),
         })),
         ini: { memory_limit: "512M", upload_max_filesize: "64M" },
         terminal: "Terminal",
@@ -984,6 +989,12 @@ const mockHandle = (cmd, a) => {
       if (window.mockOpcacheError) throw window.mockOpcacheError;
       (window.mockOpcache ??= {})[a.version] = "ready";
       return mockHandle("settings");
+    case "php_ext": {
+      if (window.mockExtError) throw window.mockExtError;
+      const on = ((window.mockExt ??= {})[a.version] ??= []).filter((n) => n !== a.name);
+      window.mockExt[a.version] = a.on ? [...on, a.name] : on;
+      return mockHandle("settings");
+    }
     case "package_manager_install":
     case "package_manager_uninstall":
       if (window.mockPmError) throw window.mockPmError;

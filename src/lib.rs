@@ -120,6 +120,10 @@ pub struct Config {
     /// Settings › Plugins › Agents (MCP): `anvil mcp` serves AI agents. Stored only when on.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub mcp: bool,
+    /// Settings › PHP › Extensions: catalog extensions (`phpext::CATALOG`) loaded for
+    /// every app on a version, by minor version. Stored only when there are some.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub php_ext: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -215,6 +219,7 @@ impl Default for Config {
             worktree_presets: BTreeMap::new(),
             worktrees: BTreeMap::new(),
             mcp: false,
+            php_ext: BTreeMap::new(),
         }
     }
 }
@@ -1084,6 +1089,14 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
         && let Err(e) = opcache::build(minor)
     {
         println!("PHP {full} works without OPcache for now: {e}");
+    }
+    // A new patch release: the extensions turned on for it are built again for it.
+    for name in cfg.php_ext.get(minor).cloned().unwrap_or_default() {
+        if !phpext::built(minor, &name)
+            && let Err(e) = phpext::build(minor, &name)
+        {
+            println!("PHP {full} works without {name} for now: {e}");
+        }
     }
     Ok(())
 }
@@ -2103,7 +2116,7 @@ impl Server {
                     .arg(&conf)
                     .arg("-c")
                     .arg(php_dir(v).join("php.ini"))
-                    .args(opcache::fpm_args(cfg, v))
+                    .args(phpext::php_args(cfg, v))
                     .spawn()
                     .with_context(|| format!("failed to start PHP {v}"))?,
             );

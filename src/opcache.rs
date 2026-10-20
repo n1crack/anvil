@@ -73,6 +73,7 @@ pub fn build(minor: &str) -> Result<()> {
     if !BUILDS.contains(&minor) {
         bail!("PHP {minor} has OPcache built in");
     }
+    let _held = crate::phpext::build_lock(minor, "opcache", "OPcache")?;
     let php = php_dir(minor).join("php");
     let (full, src) = source_tree(minor)?;
     println!("Building OPcache for PHP {full}…");

@@ -911,3 +911,46 @@ fn worktree_remove_without_a_terminal_names_the_data_and_refuses() {
     env.ok(&["worktree", "remove", "shop--feat", "--yes"]);
     assert!(!wt.exists());
 }
+
+#[test]
+fn cli_php_ext_add_lists_it() {
+    let env = Env::new("php-ext");
+    env.write_config(&config_with_free_ports());
+    env.fake("php/8.4/php-fpm");
+    // Says it is 8.4.23 when asked; otherwise prints the arguments it got.
+    let php = env.home.join("php/8.4/php");
+    write(
+        &php,
+        "#!/bin/sh\nif [ \"$1\" = -n ]; then printf 8.4.23; else printf '%s\\n' \"$@\"; fi\n",
+    );
+    fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
+    // Built before: turning it on needs no build.
+    let so = env.home.join("php/8.4/ext/8.4.23/apcu.so");
+    write(&so, "");
+    env.ok(&["use", "8.4"]);
+
+    env.ok(&["php", "ext", "add", "apcu"]);
+    assert_eq!(env.config().php_ext["8.4"], ["apcu"]);
+    let list = env.ok(&["php", "ext", "list"]);
+    let line = |name: &str| list.lines().find(|l| l.starts_with(name)).unwrap();
+    assert!(line("apcu").contains("on"), "{list}");
+    assert!(line("xdebug").contains("off"), "{list}");
+    // The terminal's php loads it, as PHP-FPM does.
+    let out = env.ok(&["shim", "php", "-v"]);
+    assert!(
+        out.contains(&format!("extension={}", so.display())),
+        "{out}"
+    );
+
+    let e = env.fails(&["php", "ext", "add", "apcu", "--php", "8.3"]);
+    assert!(e.contains("not installed"), "{e}");
+    let e = env.fails(&["php", "ext", "add", "swoole"]);
+    assert!(e.contains("not in Anvil's catalog"), "{e}");
+
+    env.ok(&["php", "ext", "remove", "apcu"]);
+    assert!(env.config().php_ext.is_empty());
+    let list = env.ok(&["php", "ext", "list"]);
+    assert!(list.lines().all(|l| l.contains("off")), "{list}");
+    assert!(so.exists(), "the build stays");
+    assert!(!env.ok(&["shim", "php", "-v"]).contains("apcu"));
+}

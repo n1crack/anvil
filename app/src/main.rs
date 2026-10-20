@@ -2893,6 +2893,16 @@ struct PhpVersion {
     opcache: anvil::opcache::State,
     /// An OPcache build for it is running, so a window opened meanwhile says so too.
     opcache_building: bool,
+    /// The catalog (`phpext::CATALOG`), each on or off for every app on this version.
+    extensions: Vec<PhpExt>,
+}
+
+#[derive(Serialize)]
+struct PhpExt {
+    name: &'static str,
+    on: bool,
+    /// Being built by this app, so a window opened meanwhile says so too.
+    building: bool,
 }
 
 #[derive(Serialize)]
@@ -3056,6 +3066,14 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                 pinned_by: anvil::pinned_to(&cfg, "php", v),
                 opcache: anvil::opcache::state(v),
                 opcache_building: anvil::lock(&OPCACHE_BUILDS).iter().any(|b| b == v),
+                extensions: anvil::phpext::CATALOG
+                    .iter()
+                    .map(|e| PhpExt {
+                        name: e.name,
+                        on: anvil::phpext::on(&cfg, v, e.name),
+                        building: anvil::lock(&EXT_BUILDS).contains(&(v.to_string(), e.name)),
+                    })
+                    .collect(),
             })
             .collect(),
         editors: installed_apps(&EDITORS),
@@ -3381,6 +3399,51 @@ async fn php_opcache(handle: AppHandle, version: String) -> Res<Settings> {
         anvil::lock(&OPCACHE_BUILDS).retain(|v| *v != version);
         built.map_err(err)?;
         let cfg = anvil::load().map_err(err)?;
+        let app = h.state::<App>();
+        if running(&app) {
+            start(&app, &cfg);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    changed(&handle);
+    settings(handle)
+}
+
+/// (version, extension) pairs being built here; another process's build is refused by
+/// `phpext::build`'s lock file.
+static EXT_BUILDS: Mutex<Vec<(String, &'static str)>> = Mutex::new(Vec::new());
+
+/// Turns a catalog extension on (building it first unless built for this patch release)
+/// or off (its build is kept) for every app on `version`, then restarts PHP-FPM.
+#[tauri::command]
+async fn php_ext(handle: AppHandle, version: String, name: String, on: bool) -> Res<Settings> {
+    let h = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Res<()> {
+        let ext = anvil::phpext::CATALOG
+            .iter()
+            .find(|e| e.name == name)
+            .ok_or_else(|| format!("{name} is not in Anvil's catalog"))?;
+        let key = (version.clone(), ext.name);
+        let cfg = if on {
+            let building = !anvil::phpext::built(&version, ext.name);
+            if building {
+                let mut list = anvil::lock(&EXT_BUILDS);
+                if list.contains(&key) {
+                    return Err(format!("{name} for PHP {version} is already being built"));
+                }
+                list.push(key.clone());
+            }
+            let added = anvil::phpext::add(&version, ext.name);
+            if building {
+                anvil::lock(&EXT_BUILDS).retain(|k| *k != key);
+            }
+            added
+        } else {
+            anvil::phpext::remove(&version, ext.name)
+        }
+        .map_err(err)?;
         let app = h.state::<App>();
         if running(&app) {
             start(&app, &cfg);
@@ -3858,6 +3921,7 @@ fn main() {
             set_ini,
             php_install,
             php_opcache,
+            php_ext,
             xcode_tools_install,
             php_uninstall,
             set_terminal,

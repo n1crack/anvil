@@ -85,7 +85,7 @@ function versionRow(
   busy: boolean,
   blocked: boolean,
   act: { install: () => void; uninstall: () => void; makeDefault?: () => void },
-  extra?: { slot: HTMLElement; error?: HTMLElement },
+  extra?: { slot: HTMLElement; error?: HTMLElement; below?: HTMLElement },
 ) {
   const row = document.createElement("div");
   row.className = `row ver${v.installed ? "" : " missing"}${v.default ? " is-default" : ""}`;
@@ -122,6 +122,7 @@ function versionRow(
     }
   }
   row.append(name, actions);
+  if (extra?.below) row.append(extra.below);
   if (extra?.error) {
     row.classList.add("has-error");
     row.append(extra.error);
@@ -637,7 +638,7 @@ export function render() {
           );
           if (ok) call("php_uninstall", { version: v.version });
         },
-      }, opcacheParts(v)),
+      }, phpParts(v)),
     ),
   );
 
@@ -647,10 +648,12 @@ export function render() {
 }
 
 const opcacheErrors = new Map<string, string>();
+const extErrors = new Map<string, string>(); // version -> why its last extension change failed
 
-/** OPcache's fixed slot after "PHP 8.x" (so Default and Pinned by stay aligned) and,
- * after a failed build, the reason under the row, with the tools when they are missing. */
-function opcacheParts(v: Settings["php"][number]) {
+/** OPcache's fixed slot after "PHP 8.x" (so Default and Pinned by stay aligned), the
+ * Extensions line of an installed version and, after a failed build, the reason under
+ * the row, with the tools when they are missing. */
+function phpParts(v: Settings["php"][number]) {
   const slot = Object.assign(document.createElement("span"), { className: "ver-opcache" });
   if (installing.has(`opcache@${v.version}`) || v.opcache_building) {
     slot.innerHTML = `<span class="spin-dot"></span><span class="muted">Adding OPcache…</span>`;
@@ -659,13 +662,49 @@ function opcacheParts(v: Settings["php"][number]) {
   } else if (v.installed) {
     slot.textContent = "OPcache";
   }
-  const reason = opcacheErrors.get(v.version);
-  if (!reason) return { slot };
+  const below = v.installed ? extensionsLine(v) : undefined;
+  const reason = opcacheErrors.get(v.version) ?? extErrors.get(v.version);
+  if (!reason) return { slot, below };
   const error = Object.assign(document.createElement("div"), { className: "ver-error" });
   error.append(Object.assign(document.createElement("span"), { textContent: reason }));
   if (reason.includes("xcode-select --install"))
     error.append(button("Install command line tools", () => invoke("xcode_tools_install")));
-  return { slot, error };
+  return { slot, error, below };
+}
+
+/** "Extensions" and a switch per catalog extension, on for every app on the version.
+ * One being built says so on its label and holds its switch. */
+function extensionsLine(v: Settings["php"][number]) {
+  const line = Object.assign(document.createElement("div"), { className: "ver-exts" });
+  line.append(Object.assign(document.createElement("span"), { className: "ver-exts-label", textContent: "Extensions" }));
+  for (const e of v.extensions) {
+    const building = e.building || installing.has(`ext@${v.version}@${e.name}`);
+    const label = Object.assign(document.createElement("label"), { className: "ver-ext" });
+    const input = Object.assign(document.createElement("input"), { type: "checkbox", checked: e.on, disabled: building });
+    input.setAttribute("role", "switch");
+    input.onchange = () => setExtension(v.version, e.name, input.checked);
+    label.append(input, Object.assign(document.createElement("span"), { className: "ver-ext-name", textContent: e.name }));
+    if (building) label.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Building…" }));
+    line.append(label);
+  }
+  return line;
+}
+
+/** On builds the extension first unless it is built for this PHP (seconds to a minute),
+ * then PHP-FPM restarts; off keeps the build. */
+async function setExtension(version: string, name: string, on: boolean) {
+  const key = `ext@${version}@${name}`;
+  if (installing.has(key)) return;
+  if (on) installing.add(key);
+  extErrors.delete(version);
+  render();
+  try {
+    s = (await invoke("php_ext", { version, name, on })) ?? s;
+  } catch (e) {
+    extErrors.set(version, String(e));
+  }
+  installing.delete(key);
+  render();
 }
 
 /** The build takes minutes; the row says so meanwhile and holds a second click. */

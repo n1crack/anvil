@@ -1012,6 +1012,30 @@ pub fn with_ansi(command: &str) -> String {
     }
 }
 
+/// `command` run by the app's PHP with what PHP-FPM loads (`phpext::php_args`: OPcache,
+/// the version's extensions), when it starts with PHP: `php …`, or Anvil's PHP by its
+/// path (a composer.json script). `--ansi` is added first (`with_ansi`).
+/// ponytail: a PHP started further down (`npm run dev` → `php artisan …`, or PHP_BINARY,
+/// e.g. queue:listen's workers) goes without; an ini in PHP_INI_SCAN_DIR would reach those.
+pub fn with_php_args(cfg: &crate::Config, site: &Site, command: &str) -> String {
+    let command = with_ansi(command);
+    let Some(v) = site.php.as_deref() else {
+        return command;
+    };
+    let args = crate::phpext::php_args(cfg, v);
+    let php = crate::shims::sh_quote(&crate::php_dir(v).join("php").display().to_string());
+    let rest = command
+        .strip_prefix("php ")
+        .or_else(|| command.strip_prefix(&format!("{php} ")));
+    match rest {
+        Some(rest) if !args.is_empty() => {
+            let args: Vec<_> = args.iter().map(|a| crate::shims::sh_quote(a)).collect();
+            format!("{php} {} {rest}", args.join(" "))
+        }
+        _ => command,
+    }
+}
+
 /// Key for the process manager, pid and log files: `<site>@<process>`. Site
 /// names never contain `@`, so a key can't be another app's name.
 pub fn key(site: &str, process: &str) -> String {
@@ -1850,6 +1874,41 @@ echo '{DEV_JSON}'
             !saved.contains("pinned") && !saved.contains("top"),
             "{saved}"
         );
+    }
+
+    #[test]
+    fn php_processes_load_the_versions_extensions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&crate::ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let php = crate::php_dir("8.4").join("php");
+        fs::create_dir_all(php.parent().unwrap()).unwrap();
+        fs::write(&php, "#!/bin/sh\nprintf 8.4.23\n").unwrap();
+        fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
+        let so = crate::phpext::so_path("8.4", "8.4.23", "apcu");
+        fs::create_dir_all(so.parent().unwrap()).unwrap();
+        fs::write(&so, "").unwrap();
+        let s = site(dir.path(), "laravel");
+        let mut cfg = crate::Config::default();
+        let run = |cfg: &crate::Config, c: &str| with_php_args(cfg, &s, c);
+        // Nothing to load (no OPcache built, no extensions): as before.
+        assert_eq!(run(&cfg, "php artisan pail"), "php artisan pail --ansi");
+
+        cfg.php_ext.insert("8.4".into(), vec!["apcu".into()]);
+        let php = crate::shims::sh_quote(&php.display().to_string());
+        let ext = format!("'-d' 'extension={}'", so.display());
+        assert_eq!(
+            run(&cfg, "php artisan queue:listen"),
+            format!("{php} {ext} artisan queue:listen --ansi")
+        );
+        assert_eq!(
+            run(&cfg, &format!("{php} '/x/composer.phar' run-script lint")),
+            format!("{php} {ext} '/x/composer.phar' run-script lint")
+        );
+        assert_eq!(run(&cfg, "npm run dev"), "npm run dev");
+        assert_eq!(run(&cfg, "phpunit"), "phpunit");
     }
 
     #[test]

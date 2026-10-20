@@ -184,6 +184,81 @@ describe("versions", () => {
       expect(w.mockCalls.at(-1)).toEqual(["xcode_tools_install", undefined]);
     }));
 
+  const exts = (v: string) =>
+    [...(phpRow(v).querySelectorAll(".ver-ext") as NodeListOf<HTMLElement>)].map((l) => ({
+      name: l.querySelector(".ver-ext-name")?.textContent,
+      on: (l.querySelector("input[role=switch]") as HTMLInputElement).checked,
+      text: l.textContent,
+    }));
+  const extSwitch = (v: string, name: string) =>
+    [...phpRow(v).querySelectorAll(".ver-ext")]
+      .find((l) => l.querySelector(".ver-ext-name")?.textContent === name)!
+      .querySelector("input") as HTMLInputElement;
+
+  test("extensions_switches_per_version: the catalog as switches under each installed version only", () =>
+    withOpcache83(async () => {
+      w.mockExt = { "8.4": ["xdebug"] };
+      w.refresh();
+      await open("php");
+      try {
+        expect(phpRow("8.4").querySelector(".ver-exts-label")?.textContent).toBe("Extensions");
+        expect(exts("8.4")).toEqual(
+          ["xdebug", "pcov", "apcu", "igbinary", "msgpack"].map((name) => ({ name, on: name === "xdebug", text: name })),
+        );
+        expect(exts("8.3").every((e) => !e.on)).toBe(true);
+        // Not installed: no Extensions line.
+        expect(phpRow("8.2").querySelector(".ver-exts")).toBeNull();
+        // Off: one call, for that version and extension.
+        extSwitch("8.4", "xdebug").click();
+        await wait(30);
+        expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "xdebug", on: false }]);
+        expect(exts("8.4").every((e) => !e.on)).toBe(true);
+      } finally {
+        delete w.mockExt;
+      }
+    }));
+
+  test("building_is_inline: Building… on the switch's label until it resolves; an error under the row", () =>
+    withOpcache83(async () => {
+      w.mockDelay.php_ext = 100;
+      try {
+        extSwitch("8.4", "apcu").click();
+        await wait(10);
+        expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "apcu", on: true }]);
+        const apcu = () => exts("8.4").find((e) => e.name === "apcu")!;
+        expect(apcu().text).toBe("apcuBuilding…");
+        expect(extSwitch("8.4", "apcu").disabled).toBe(true);
+        await wait(150);
+        expect(apcu()).toEqual({ name: "apcu", on: true, text: "apcu" });
+        expect($$('[role="alert"]:not([hidden]), .toast').length).toBe(0);
+
+        // A window opened while another build runs says so too.
+        w.mockExtBuilding = ["8.4 pcov"];
+        w.refresh();
+        await open("php");
+        expect(exts("8.4").find((e) => e.name === "pcov")!.text).toBe("pcovBuilding…");
+        expect(extSwitch("8.4", "pcov").disabled).toBe(true);
+        delete w.mockExtBuilding;
+        w.refresh();
+        await open("php");
+
+        w.mockExtError = "Building pcov failed — it needs the Xcode Command Line Tools: xcode-select --install";
+        delete w.mockDelay.php_ext;
+        extSwitch("8.4", "pcov").click();
+        await wait(30);
+        const r = phpRow("8.4");
+        expect(r.querySelector(".ver-error")?.textContent).toContain("xcode-select --install");
+        expect(buttons(r)).toContain("Install command line tools");
+        expect(extSwitch("8.4", "pcov").checked).toBe(false);
+        expect($$('[role="alert"]:not([hidden])').length).toBe(0);
+      } finally {
+        delete w.mockExt;
+        delete w.mockExtError;
+        delete w.mockExtBuilding;
+        delete w.mockDelay.php_ext;
+      }
+    }));
+
   test("Node.js: every version the backend offers, installed ones without a made-up default", async () => {
     await open("node");
     const rows = $$("#node .ver");

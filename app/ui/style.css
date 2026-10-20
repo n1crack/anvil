@@ -1283,7 +1283,33 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .ver-opcache + .ver-default,
 .ver-opcache + .ver-pinned { margin-left: 0; }
 
-.page .row.ver.has-error { flex-wrap: wrap; }
+.page .row.ver.has-error,
+.page .row.ver:has(.ver-exts) { flex-wrap: wrap; }
+
+/* PHP: the version's extensions, a small switch each, lined up under the version. */
+.ver-exts {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 2px 0 4px 24px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ver-exts-label { width: 72px; }
+
+.ver-ext {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+
+.ver-ext input[type="checkbox"][role="switch"] { transform: scale(0.8); transform-origin: left center; margin-right: -6px; }
+
+.ver-ext input:disabled { opacity: 0.45; }
 
 .ver-error {
   display: flex;
