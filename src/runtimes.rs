@@ -247,7 +247,7 @@ pub fn install(id: &str, version: &str) -> Result<()> {
                 bail!("Python versions look like 3.13");
             }
             ensure_uv(mac, arm)?;
-            run(Command::new(uv())
+            run(crate::platform::command(uv())
                 .args(["python", "install", version])
                 .envs(env("python", version)))
         }
@@ -261,8 +261,8 @@ pub fn install(id: &str, version: &str) -> Result<()> {
             let url = format!("https://static.rust-lang.org/rustup/dist/{target}/rustup-init");
             let sum = published_sum(&format!("{url}.sha256"), "rustup-init")?;
             let init = download(&url, Some(&sum))?;
-            run(Command::new("chmod").arg("+x").arg(&init))?;
-            run(Command::new(&init)
+            run(crate::platform::command("chmod").arg("+x").arg(&init))?;
+            run(crate::platform::command(&init)
                 .args(["-y", "--no-modify-path", "--profile", "minimal"])
                 .args(["--default-toolchain", version])
                 .envs(env("rust", version)))?;
@@ -354,7 +354,7 @@ pub fn uninstall(id: &str, version: &str) -> Result<()> {
     match id {
         "rust" => fs::remove_dir_all(root("rust")),
         "python" => {
-            return run(Command::new(uv())
+            return run(crate::platform::command(uv())
                 .args(["python", "uninstall", version])
                 .envs(env("python", version)));
         }
@@ -508,7 +508,7 @@ pub struct PackageManager {
 fn find(name: &str, path: &str, envs: &[(String, String)]) -> Option<(Found, PathBuf)> {
     let bin = which(name, path)?;
     let version = crate::output_within(
-        Command::new(&bin)
+        crate::platform::command(&bin)
             .arg("--version")
             .envs(envs.iter().cloned())
             .env("PATH", path)
@@ -523,7 +523,7 @@ fn find(name: &str, path: &str, envs: &[(String, String)]) -> Option<(Found, Pat
             .map(|l| l.trim().trim_start_matches('v').to_string())
     })
     .filter(|v| !v.is_empty());
-    let real = fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
+    let real = crate::platform::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
     let user = crate::user_home();
     let source = source_of(&real, &home(), &user);
     Some((
@@ -556,7 +556,8 @@ pub fn package_managers() -> Vec<PackageManager> {
         .map(|name| {
             let apps = find(name, &apps_path, &apps_env);
             let apps_real = apps.as_ref().map(|(_, r)| r.clone());
-            let term_real = which(name, &login).map(|b| fs::canonicalize(&b).unwrap_or(b));
+            let term_real =
+                which(name, &login).map(|b| crate::platform::canonicalize(&b).unwrap_or(b));
             let same = term_real.is_some() && term_real == apps_real;
             PackageManager {
                 name,
@@ -575,11 +576,10 @@ pub fn package_managers() -> Vec<PackageManager> {
 
 /// The first executable `name` in a PATH string.
 fn which(name: &str, path: &str) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    path.split(':')
+    path.split(crate::platform::PATH_SEP)
         .filter(|d| !d.is_empty())
-        .map(|d| Path::new(d).join(name))
-        .find(|p| fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+        .map(|d| Path::new(d).join(crate::platform::exe(name)))
+        .find(|p| fs::metadata(p).is_ok_and(|m| crate::platform::is_executable(p, &m)))
 }
 
 /// Where a program (its resolved path) comes from.
@@ -653,7 +653,7 @@ fn install_pm_in(name: &str, anvil: &Path, runner: Runner) -> Result<()> {
                 .next()
                 .with_context(|| format!("{name} is installed with npm: install Node.js first"))?;
             runner(
-                Command::new(node.join(&v).join("bin").join("npm"))
+                crate::platform::command(node.join(&v).join("bin").join("npm"))
                     .args(["install", "-g", "--prefix"])
                     .arg(runtimes.join("pm"))
                     .arg(name)
@@ -674,7 +674,11 @@ fn install_pm_in(name: &str, anvil: &Path, runner: Runner) -> Result<()> {
                     .and_then(|_| runner(&mut unzip_bun(&zip, asset, &bin)));
                 let _ = fs::remove_file(&zip);
                 ok?;
-                Ok(std::os::unix::fs::symlink("bun", bin.join("bunx"))?)
+                let bun = crate::platform::exe("bun");
+                Ok(crate::platform::link_program(
+                    &bun,
+                    &bin.join(crate::platform::exe("bunx")),
+                )?)
             })
         }
         _ => bail!("Anvil installs pnpm, yarn and bun, not {name}"),
@@ -693,7 +697,7 @@ fn bun_asset(mac: bool, arm: bool) -> &'static str {
 
 /// Only the `bun` binary out of the release zip, straight into `bin`.
 fn unzip_bun(zip: &Path, asset: &str, bin: &Path) -> Command {
-    let mut c = Command::new("unzip");
+    let mut c = crate::platform::command("unzip");
     c.args(["-q", "-j"])
         .arg(zip)
         .arg(format!("{asset}/bun"))

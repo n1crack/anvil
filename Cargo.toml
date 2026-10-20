@@ -10,11 +10,17 @@ description = "A local development environment: local domains, HTTPS, runtimes a
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 ctrlc = { version = "3.5.2", features = ["termination"] }
-nix = { version = "0.31.3", features = ["signal", "user"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 tempfile = "3.27.0"
 toml = "1.1.8"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31.3", features = ["signal", "user"] }
+
+[target.'cfg(windows)'.dependencies]
+uds_windows = "1.2.1"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time"] }
 
 [dev-dependencies]
 proptest = { version = "1", default-features = false, features = ["std"] }

@@ -1,18 +1,20 @@
 // Hide the extra console window on Windows release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod control;
 
 use anvil::validate::{process_id, site_name};
 use anvil::{Config, Server, Site};
 use serde::Serialize;
-use std::process::Command;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use tauri::TitleBarStyle;
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{
-    AppHandle, Emitter, Manager, RunEvent, State, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
-    WindowEvent, Wry,
+    AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    Wry,
 };
 
 /// Lock order: never hold two of these at once. Copy what one guards, drop it, then
@@ -166,7 +168,7 @@ fn app_states(
 ) -> std::collections::BTreeMap<String, &'static str> {
     let canon: Vec<_> = containers
         .iter()
-        .filter_map(|d| d.canonicalize().ok())
+        .filter_map(|d| anvil::platform::canonicalize(d).ok())
         .collect();
     let mine = |s: &Site, keys: &[String]| {
         keys.iter().any(|k| {
@@ -184,7 +186,8 @@ fn app_states(
             } else if mine(s, live)
                 || (!containers.is_empty()
                     && (containers.contains(&s.path)
-                        || s.path.canonicalize().is_ok_and(|p| canon.contains(&p))))
+                        || anvil::platform::canonicalize(&s.path)
+                            .is_ok_and(|p| canon.contains(&p))))
             {
                 "running"
             } else if mine(s, crashed) {
@@ -691,12 +694,13 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
             Ok(c) => (Some(c), None),
             // A file that can't be read (unset variables) may still have containers up.
             Err(e) => {
-                let real = site.path.canonicalize().ok();
+                let real = anvil::platform::canonicalize(&site.path).ok();
                 let up: Vec<_> = anvil::compose::running()
                     .unwrap_or_default()
                     .into_iter()
                     .filter(|(dir, _)| {
-                        *dir == site.path || (real.is_some() && dir.canonicalize().ok() == real)
+                        *dir == site.path
+                            || (real.is_some() && anvil::platform::canonicalize(dir).ok() == real)
                     })
                     .map(|(_, c)| c)
                     .collect();
@@ -883,11 +887,10 @@ fn activity(app: State<App>) -> Res<Activity> {
     let web = web_pids
         .into_iter()
         .map(|(label, pid)| {
-            let key = match label
-                .strip_prefix("PHP ")
-                .and_then(|l| l.strip_suffix(" FPM"))
-            {
-                Some(v) => format!("web:php-{v}"),
+            // `PHP 8.4 FPM`, `PHP 8.4 FPM (shop)`, on Windows `PHP 8.4 (pool, port 20001)`:
+            // one row each, so the key carries the pid; their log is the version's.
+            let key = match label.strip_prefix("PHP ").and_then(|l| l.split(' ').next()) {
+                Some(v) => format!("web:php-{v}:{pid}"),
                 None => "web:caddy".into(),
             };
             measured(row(key, label, "running", false), &table, pid, false)
@@ -958,9 +961,9 @@ fn activity(app: State<App>) -> Res<Activity> {
             }
         }
         // The project folder may be named through a symlink on either side.
-        let real = site.path.canonicalize().ok();
+        let real = anvil::platform::canonicalize(&site.path).ok();
         let here = |dir: &std::path::Path| {
-            dir == site.path || (real.is_some() && dir.canonicalize().ok() == real)
+            dir == site.path || (real.is_some() && anvil::platform::canonicalize(dir).ok() == real)
         };
         if anvil::compose::file(&site.path).is_some() {
             for (_, c) in containers
@@ -1012,6 +1015,13 @@ fn parse_log_key<'a>(key: &'a str, services: &[String]) -> Res<LogKey<'a>> {
     let parsed = if key == "web:caddy" {
         Some(LogKey::Caddy)
     } else if let Some(v) = key.strip_prefix("web:php-") {
+        let v = v.split_once(':').map_or(v, |(v, pid)| {
+            if pid.chars().all(|c| c.is_ascii_digit()) {
+                v
+            } else {
+                ""
+            }
+        });
         (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.') && !v.contains(".."))
             .then_some(LogKey::Php(v))
     } else if let Some(id) = key.strip_prefix("service:") {
@@ -1898,11 +1908,12 @@ async fn log_clear(site: String, source: String) -> Res<()> {
 #[tauri::command]
 async fn log_open(site: String, source: String) -> Res<()> {
     with_site(site, move |s| {
-        anvil::run(
-            Command::new("open")
-                .args(["-a", "Console"])
-                .arg(log_path(&s, &source)?),
-        )
+        let log = log_path(&s, &source)?;
+        anvil::run(&mut if cfg!(windows) {
+            anvil::platform::open(log)
+        } else {
+            anvil::platform::open_with("Console", log)
+        })
     })
     .await
 }
@@ -1918,11 +1929,11 @@ async fn open_in_editor(site: String, path: String, line: u32) -> Res<()> {
         let file = anvil::validate::file_in(std::path::Path::new(&s.path), &path)?;
         let (bin, args) = anvil::logs::editor_command(&editor, &file, line);
         // Not waited on here: a launcher script may stay until the editor quits.
-        if let Ok(mut child) = Command::new(&bin).args(&args).spawn() {
+        if let Ok(mut child) = anvil::platform::command(&bin).args(&args).spawn() {
             std::thread::spawn(move || child.wait());
             return Ok(());
         }
-        anvil::run(Command::new("open").args(["-a", &editor]).arg(&file))
+        anvil::run(&mut anvil::platform::open_with(&editor, &file))
     })
     .await
 }
@@ -2091,10 +2102,9 @@ async fn create(
 
     let app = handle.state::<App>();
     let (cfg, site) = edit(|cfg| {
-        let parked = cfg
-            .paths
-            .iter()
-            .any(|p| p.canonicalize().ok() == parent.canonicalize().ok());
+        let parked = cfg.paths.iter().any(|p| {
+            anvil::platform::canonicalize(p).ok() == anvil::platform::canonicalize(&parent).ok()
+        });
         let site = if parked {
             anvil::site_name(name)
         } else {
@@ -2144,18 +2154,16 @@ fn create_log(name: String, from: u64) -> Res<anvil::logs::Text> {
 #[tauri::command(async)]
 fn create_reveal(name: String) -> Res<()> {
     anvil::validate::new_app_name(&name).map_err(err)?;
-    anvil::run(
-        Command::new("open")
-            .arg("-R")
-            .arg(anvil::create::log_file(&name)),
-    )
+    anvil::run(&mut anvil::platform::reveal(&anvil::create::log_file(
+        &name,
+    )))
     .map_err(err)
 }
 
 /// Serve one project folder; its name comes from the folder.
 #[tauri::command(async)]
 fn link_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<String> {
-    let path = path.canonicalize().map_err(|e| e.to_string())?;
+    let path = anvil::platform::canonicalize(&path).map_err(|e| e.to_string())?;
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -2168,7 +2176,7 @@ fn link_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
 /// Serve every project inside a folder.
 #[tauri::command(async)]
 fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<()> {
-    let path = path.canonicalize().map_err(|e| e.to_string())?;
+    let path = anvil::platform::canonicalize(&path).map_err(|e| e.to_string())?;
     let (cfg, ()) = edit(|c| {
         if !c.paths.contains(&path) {
             c.paths.push(path);
@@ -2511,15 +2519,12 @@ fn setup_fix(handle: AppHandle, app: State<App>, step: String) -> Res<anvil::Set
             if !ok(&cfg.tld) {
                 return Err(format!("{} isn't a valid domain suffix", cfg.tld));
             }
-            let (file, _) = anvil::resolver_file(&cfg);
-            let script = format!(
-                "mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport {}\\n' > {}",
-                cfg.dns_port,
-                anvil::shims::sh_quote(&file.to_string_lossy()),
-            );
+            let script = anvil::setup_script(&cfg, true, None, None).map_err(err)?;
             let prompt = format!("Anvil sets up .{} addresses on this Mac.", cfg.tld);
             anvil::run_as_admin(&script, &prompt).map_err(err)?;
         }
+        // Windows: Caddy listens on 80 and 443 itself.
+        "ports" if cfg!(windows) => {}
         "ports" => {
             let (file, _) = anvil::ports_daemon(&cfg);
             let tmp = anvil::stage_ports_daemon(&cfg).map_err(err)?;
@@ -2762,7 +2767,7 @@ fn open_service(id: String, what: String) -> Res<()> {
     if !path.exists() {
         return Err(format!("Nothing there yet — start {id} first"));
     }
-    anvil::run(Command::new("open").arg("-a").arg("Finder").arg(path)).map_err(err)
+    anvil::run(&mut anvil::platform::open(path)).map_err(err)
 }
 
 /// Databases, keys or messages in a running service.
@@ -2805,7 +2810,7 @@ fn open_in_client(id: String, client: String, database: Option<String>) -> Res<(
         return Err(format!("{client} isn't installed"));
     }
     let url = anvil::databases::url(&cfg, &id, database.as_deref()).map_err(err)?;
-    anvil::run(Command::new("open").arg("-a").arg(&client).arg(url)).map_err(err)
+    anvil::run(&mut anvil::platform::open_with(&client, url)).map_err(err)
 }
 
 #[tauri::command(async)]
@@ -2884,7 +2889,7 @@ fn remove_service(
 fn open_url(url: String) -> Res<()> {
     let tld = anvil::load().map(|c| c.tld).unwrap_or_default();
     anvil::validate::link(&url, &tld).map_err(err)?;
-    anvil::run(Command::new("open").arg(url)).map_err(err)
+    anvil::run(&mut anvil::platform::open(url)).map_err(err)
 }
 
 /* ---------- Settings ---------- */
@@ -3031,6 +3036,8 @@ fn apply_theme(handle: &AppHandle, theme: Option<&str>) {
 
 /// With the Dock icon off, Anvil only shows in the Dock while a window is open.
 fn update_dock(handle: &AppHandle) {
+    #[cfg(not(target_os = "macos"))]
+    let _ = handle;
     #[cfg(target_os = "macos")]
     {
         let keep = anvil::load().map(|c| c.dock_icon).unwrap_or(false);
@@ -3129,7 +3136,7 @@ fn add_path(handle: AppHandle, path: std::path::PathBuf) -> Res<Settings> {
     apply(
         &handle,
         |cfg| {
-            let path = path.canonicalize()?;
+            let path = anvil::platform::canonicalize(&path)?;
             if !cfg.paths.contains(&path) {
                 cfg.paths.push(path);
             }
@@ -3343,7 +3350,7 @@ fn set_login(handle: AppHandle, on: bool) -> Res<Settings> {
 
 #[tauri::command(async)]
 fn open_config_dir() -> Res<()> {
-    anvil::run(Command::new("open").arg(anvil::home())).map_err(err)
+    anvil::run(&mut anvil::platform::open(anvil::home())).map_err(err)
 }
 
 #[tauri::command(async)]
@@ -3500,12 +3507,22 @@ async fn app_ext(handle: AppHandle, site: String, name: String, on: bool) -> Res
 /// Opens Apple's installer for the Xcode Command Line Tools, which OPcache builds with.
 #[tauri::command(async)]
 fn xcode_tools_install() -> Res<()> {
-    anvil::run(Command::new("xcode-select").arg("--install")).map_err(err)
+    anvil::run(anvil::platform::command("xcode-select").arg("--install")).map_err(err)
 }
 
 #[tauri::command(async)]
 fn php_uninstall(handle: AppHandle, version: String) -> Res<Settings> {
     apply(&handle, |cfg| anvil::php_uninstall(cfg, &version), false)
+}
+
+/// The Mac's title bar drawn over the page, as the main window has it; elsewhere the
+/// system's own.
+fn titlebar<'a, R: tauri::Runtime, M: Manager<R>>(
+    b: WebviewWindowBuilder<'a, R, M>,
+) -> WebviewWindowBuilder<'a, R, M> {
+    #[cfg(target_os = "macos")]
+    let b = b.title_bar_style(TitleBarStyle::Overlay).hidden_title(true);
+    b
 }
 
 fn open_settings(handle: &AppHandle) {
@@ -3514,14 +3531,13 @@ fn open_settings(handle: &AppHandle) {
         let _ = w.set_focus();
         return;
     }
-    let built =
+    let built = titlebar(
         WebviewWindowBuilder::new(handle, "settings", WebviewUrl::App("settings.html".into()))
             .title("Anvil Settings")
             .inner_size(780.0, 640.0)
-            .min_inner_size(640.0, 480.0)
-            .title_bar_style(TitleBarStyle::Overlay)
-            .hidden_title(true)
-            .build();
+            .min_inner_size(640.0, 480.0),
+    )
+    .build();
     if built.is_ok() {
         apply_theme(handle, anvil::load().ok().and_then(|c| c.theme).as_deref());
         update_dock(handle);
@@ -3551,17 +3567,17 @@ fn open_processes(handle: &AppHandle, select: Option<&str>) {
                 .all(|c| c.is_ascii_alphanumeric() || "-_.:/@#".contains(c))
         })
         .map_or("null".into(), |k| format!("\"{k}\""));
-    let built = WebviewWindowBuilder::new(
-        handle,
-        "processes",
-        WebviewUrl::App("processes.html".into()),
+    let built = titlebar(
+        WebviewWindowBuilder::new(
+            handle,
+            "processes",
+            WebviewUrl::App("processes.html".into()),
+        )
+        .initialization_script(format!("window.activitySelect = {pick};"))
+        .title("Processes")
+        .inner_size(820.0, 560.0)
+        .min_inner_size(640.0, 420.0),
     )
-    .initialization_script(format!("window.activitySelect = {pick};"))
-    .title("Processes")
-    .inner_size(820.0, 560.0)
-    .min_inner_size(640.0, 420.0)
-    .title_bar_style(TitleBarStyle::Overlay)
-    .hidden_title(true)
     .build();
     if built.is_ok() {
         apply_theme(handle, anvil::load().ok().and_then(|c| c.theme).as_deref());
@@ -3577,21 +3593,18 @@ fn show_processes(handle: AppHandle, select: Option<String>) {
 #[tauri::command(async)]
 fn open(site: String, target: String) -> Res<()> {
     let (cfg, s) = find_site_cfg(&site)?;
-    let mut cmd = Command::new("open");
-    match target.as_str() {
-        "browser" => cmd.arg(anvil::site_url(&cfg, &s)),
-        "finder" => cmd.arg(&s.path),
-        "root" => cmd.arg(&s.root),
-        "terminal" => cmd
-            .args(["-a", cfg.terminal.as_deref().unwrap_or("Terminal")])
-            .arg(&s.path),
+    let mut cmd = match target.as_str() {
+        "browser" => anvil::platform::open(anvil::site_url(&cfg, &s)),
+        "finder" => anvil::platform::open(&s.path),
+        "root" => anvil::platform::open(&s.root),
+        "terminal" => anvil::platform::terminal(cfg.terminal.as_deref(), &s.path),
         "editor" => {
             let editor = cfg.editor.ok_or("No editor set in ~/.anvil/config.toml")?;
-            cmd.args(["-a", &editor]).arg(&s.path)
+            anvil::platform::open_with(&editor, &s.path)
         }
         "git" => {
             let client = git_client(&cfg).ok_or("No git app installed")?;
-            cmd.args(["-a", &client]).arg(&s.path)
+            anvil::platform::open_with(&client, &s.path)
         }
         other => return Err(format!("Unknown target {other}")),
     };
@@ -3865,7 +3878,7 @@ fn on_menu(handle: &AppHandle, id: &str) {
         }
         "logs" => {
             let _ = std::fs::create_dir_all(home.join("log"));
-            let _ = Command::new("open").arg(home.join("log")).status();
+            let _ = anvil::platform::open(home.join("log")).status();
         }
         "settings" => open_settings(handle),
         "quit" => handle.exit(0),
@@ -4155,7 +4168,14 @@ fn main() {
                 .build(app)?;
             Ok(())
         })
-        .menu(app_menu)
+        // macOS's menu bar; on Windows it would be a menu row inside the window.
+        .menu(move |h| {
+            if cfg!(target_os = "macos") {
+                app_menu(h)
+            } else {
+                Menu::new(h)
+            }
+        })
         .on_menu_event(|handle, e| on_app_menu(handle, e.id.as_ref()))
         .on_window_event(|w, e| {
             // Closing the main window keeps Anvil running in the menu bar.
@@ -4261,6 +4281,8 @@ mod tests {
         let parse = |k| parse_log_key(k, &["redis".to_string()]);
         assert_eq!(parse("web:caddy"), Ok(LogKey::Caddy));
         assert_eq!(parse("web:php-8.4"), Ok(LogKey::Php("8.4")));
+        assert_eq!(parse("web:php-8.4:4242"), Ok(LogKey::Php("8.4")));
+        assert!(parse("web:php-8.4:../x").is_err());
         assert_eq!(parse("my.app"), Ok(LogKey::App("my.app")));
         assert_eq!(parse("a@dev"), Ok(LogKey::Process("a", "dev")));
         assert_eq!(parse("a#build"), Ok(LogKey::Once("a", "build")));

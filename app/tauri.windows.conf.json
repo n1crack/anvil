@@ -1,0 +1,16 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Anvil",
+        "width": 1140,
+        "height": 700,
+        "minWidth": 760,
+        "minHeight": 480,
+        "transparent": true,
+        "windowEffects": { "effects": ["mica"] }
+      }
+    ]
+  }
+}

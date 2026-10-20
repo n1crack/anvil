@@ -312,7 +312,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
     $(".name", text).append(lock);
   }
   // In a folder's section the path only repeats the heading; linked apps and groups keep it.
-  if (path && !child) $(".sub", text).textContent = tilde(s.path) + "/";
+  if (path && !child) $(".sub", text).textContent = tilde(s.path) + (s.path.includes("\\") ? "\\" : "/");
   else $(".sub", text).remove();
   if (!path && !child) b.classList.add("compact");
 

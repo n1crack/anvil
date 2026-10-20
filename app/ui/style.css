@@ -3081,3 +3081,12 @@ body.activity {
 .svc-license-text a { color: inherit; }
 /* A note with nothing to say takes no room. */
 .field small:empty { display: none; }
+
+/* ---------- Windows ---------- */
+
+/* The system's title bar sits above the page: no room for traffic lights, and the
+ * sidebar shows Mica rather than vibrancy. */
+html.windows { --titlebar: 12px; }
+html.windows .detail .titlebar,
+html.windows header.titlebar { height: 52px; }
+html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }

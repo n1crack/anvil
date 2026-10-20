@@ -474,9 +474,7 @@ fn build(
             return Ok(());
         };
         sh(
-            Command::new("/bin/sh")
-                .args(["-c", &apps::js_install(manager)])
-                .envs(node.clone()),
+            crate::platform::shell(&apps::js_install(manager), None).envs(node.clone()),
             dir,
         )
     };
@@ -484,12 +482,12 @@ fn build(
     match kind {
         "laravel" | "statamic" | "symfony" => {
             let v = opts.get("php").context("Install a PHP version first")?;
-            let php_bin = crate::php_dir(v).join("php");
+            let php_bin = crate::php_bin(v);
             let path = crate::prepend_path(php_bin.parent().unwrap(), &crate::env_path());
             let phar = composer()?;
             let composer = |args: &[&str], cwd: &Path| {
                 sh(
-                    Command::new(&php_bin)
+                    crate::platform::command(&php_bin)
                         .args(["-d", "memory_limit=-1"])
                         .arg(&phar)
                         .args(args)
@@ -537,14 +535,17 @@ fn build(
         }
         "next" | "nuxt" | "vite" => {
             step("Download")?;
-            sh(Command::new("npx").args(npx_args(kind, name, opts)), parent)?;
+            sh(
+                crate::platform::command("npx").args(npx_args(kind, name, opts)),
+                parent,
+            )?;
             js_deps(js(opts))?;
             step("Set up")?;
         }
         "rust" => {
             step("Set up")?;
             sh(
-                Command::new("cargo").args(["new", "--vcs", "none", name]),
+                crate::platform::command("cargo").args(["new", "--vcs", "none", name]),
                 parent,
             )?;
             fs::write(dir.join("src/main.rs"), RUST_MAIN)?;
@@ -553,12 +554,15 @@ fn build(
             step("Set up")?;
             fs::create_dir_all(dir)?;
             fs::write(dir.join("main.go"), GO_MAIN)?;
-            sh(Command::new("go").args(["mod", "init", name]), dir)?;
+            sh(
+                crate::platform::command("go").args(["mod", "init", name]),
+                dir,
+            )?;
         }
         "dotnet" => {
             step("Set up")?;
             sh(
-                Command::new("dotnet").args(["new", "web", "-o", name]),
+                crate::platform::command("dotnet").args(["new", "web", "-o", name]),
                 parent,
             )?;
         }
@@ -569,7 +573,7 @@ fn build(
             step("Set up")?;
             fs::create_dir_all(dir)?;
             sh(
-                Command::new("uv").args([
+                crate::platform::command("uv").args([
                     "run",
                     "--no-project",
                     "--with",
@@ -635,10 +639,10 @@ fn build(
     if on(opts, "git") {
         // A repository with everything in a first commit; a missing git name or
         // email only skips the commit.
-        sh(Command::new("git").args(["init", "-q"]), dir)?;
-        sh(Command::new("git").args(["add", "-A"]), dir)?;
+        sh(crate::platform::command("git").args(["init", "-q"]), dir)?;
+        sh(crate::platform::command("git").args(["add", "-A"]), dir)?;
         if sh(
-            Command::new("git").args(["commit", "-q", "-m", "Initial commit"]),
+            crate::platform::command("git").args(["commit", "-q", "-m", "Initial commit"]),
             dir,
         )
         .is_err()
@@ -832,7 +836,7 @@ mod tests {
         assert!(env.contains(&("COLUMNS".into(), "20".into())));
         assert!(env.contains(&("LINES".into(), "5".into())));
         // A step's process sees them.
-        let out = Command::new("/bin/sh")
+        let out = crate::platform::command("/bin/sh")
             .args(["-c", "echo $COLUMNS $LINES"])
             .env_clear()
             .envs(step_env(LOG_SIZE))

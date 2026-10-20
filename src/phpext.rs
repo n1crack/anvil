@@ -7,7 +7,6 @@ use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub struct Ext {
     pub name: &'static str,
@@ -116,7 +115,7 @@ pub fn build(minor: &str, name: &str) -> Result<()> {
     let stage = src.join("stage");
     let staged = stage.join(".anvil-staged");
     if !staged.exists() {
-        run(Command::new("make")
+        run(crate::platform::command("make")
             .args(["-s", "install-headers", "install-build", "install-programs"])
             .current_dir(&src))
         .map_err(|e| tools_error("PHP's headers", e))?;
@@ -313,12 +312,15 @@ pub(crate) fn scan_env_in(dir: &Path, args: &[String]) -> Result<Option<(String,
     } else {
         dirs.extend(
             theirs
-                .split(':')
+                .split(crate::platform::PATH_SEP)
                 .filter(|p| !Path::new(p).starts_with(&home))
                 .map(String::from),
         );
     }
-    Ok(Some(("PHP_INI_SCAN_DIR".into(), dirs.join(":"))))
+    Ok(Some((
+        "PHP_INI_SCAN_DIR".into(),
+        dirs.join(&crate::platform::PATH_SEP.to_string()),
+    )))
 }
 
 /// phpize, configure and make in `dir` against the staged PHP; the built `.so`.
@@ -339,7 +341,7 @@ fn compile(dir: &Path, stage: &Path, bin: &Path, name: &str) -> Result<PathBuf> 
         (Path::new("make"), vec!["-s".into(), format!("-j{jobs}")]),
     ];
     for (prog, args) in steps {
-        run(Command::new(prog)
+        run(crate::platform::command(prog)
             .args(args)
             .env("PHP_AUTOCONF", bin.join("autoconf"))
             .env("PHP_AUTOHEADER", bin.join("autoheader"))
@@ -352,7 +354,7 @@ fn compile(dir: &Path, stage: &Path, bin: &Path, name: &str) -> Result<PathBuf> 
 /// PHP lists the module with the `.so` loaded: a build it rejects would only print a
 /// warning on every start.
 fn check_loads(minor: &str, ext: &Ext, so: &Path) -> Result<()> {
-    let out = Command::new(php_dir(minor).join("php"))
+    let out = crate::platform::command(php_dir(minor).join("php"))
         .arg("-n")
         .arg("-d")
         .arg(format!("{}={}", directive(ext), so.display()))
@@ -403,7 +405,7 @@ fn tools() -> Result<PathBuf> {
             ("make", vec!["-s".into(), "install".into()]),
         ];
         for (prog, args) in steps {
-            let mut cmd = Command::new(prog);
+            let mut cmd = crate::platform::command(prog);
             if name == "autoconf" {
                 // autoconf remembers this m4, so the old one in /usr/bin is never used.
                 cmd.env("M4", dir.join("bin/m4"));

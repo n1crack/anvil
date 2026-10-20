@@ -125,7 +125,10 @@ pub fn sources(site: &Site) -> Vec<LogSource> {
 }
 
 fn inside(path: &Path, root: &Path) -> bool {
-    match (path.canonicalize(), root.canonicalize()) {
+    match (
+        crate::platform::canonicalize(path),
+        crate::platform::canonicalize(root),
+    ) {
         (Ok(p), Ok(r)) => p.starts_with(r),
         _ => false,
     }

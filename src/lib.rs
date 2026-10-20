@@ -14,6 +14,7 @@ pub mod mcp;
 pub mod opcache;
 pub mod packages;
 pub mod phpext;
+pub mod platform;
 pub mod processes;
 pub mod project;
 pub mod resources;
@@ -26,8 +27,6 @@ pub mod validate;
 pub mod worktrees;
 
 use anyhow::{Context, Result, bail};
-use nix::sys::signal::Signal;
-use nix::unistd::Pid;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -39,7 +38,7 @@ use std::sync::Once;
 const CADDY_VERSION: &str = "2.11.7";
 /// SHA-512 of each Caddy download, from caddy_<version>_checksums.txt, pinned
 /// here so a changed file on the release page is refused. Update with the version.
-const CADDY_SHA512: [(&str, &str); 4] = [
+const CADDY_SHA512: [(&str, &str); 5] = [
     (
         "mac_arm64",
         "68f592df8f0ec058fbdb9b137b64e9a0aa792d28c06e1e3b9ec12d0e7fb371683a54e73ef6d8e6d0dd70dc6b941a5b5d5b73faedd3f89de119ad2eb78bdc668e",
@@ -55,6 +54,10 @@ const CADDY_SHA512: [(&str, &str); 4] = [
     (
         "linux_amd64",
         "a7a433a1b133efc3c8d10eb0b99d52a24b5ef5c322dc77f5282182b1c0402139ab83f3a99f0c52409df77d20123fb0b523edad8a66d8f5e49136197bf61ef0e7",
+    ),
+    (
+        "windows_amd64",
+        "c308154504e53755958ffc62d8a2657ab17eefd6dd25c45dbb2c3d93d29519971f77ca652f7d0f2bcb7f980b9ba3822478865e29969d0272d7613550a43152b1",
     ),
 ];
 const PHP_INDEX: &str = "https://dl.static-php.dev/static-php-cli/common/";
@@ -194,12 +197,14 @@ pub struct ProcessConfig {
 impl Default for Config {
     fn default() -> Self {
         // Caddy's own ports: macOS only lets root listen below 1024 on loopback, so
-        // 80 and 443 reach these through pf (see `ports_daemon`).
+        // 80 and 443 reach these through pf (see `ports_daemon`). Windows lets anyone
+        // listen there; its DNS rules (NRPT) only send to port 53.
+        let windows = cfg!(windows);
         Config {
             tld: "test".into(),
-            http_port: 8080,
-            https_port: 8443,
-            dns_port: 5354,
+            http_port: if windows { 80 } else { 8080 },
+            https_port: if windows { 443 } else { 8443 },
+            dns_port: if windows { 53 } else { 5354 },
             php: None,
             paths: vec![],
             links: BTreeMap::new(),
@@ -284,10 +289,9 @@ pub fn state_dirs() -> Result<()> {
 }
 
 pub(crate) fn state_dirs_in(home: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     let run = home.join("run");
     fs::create_dir_all(&run)?;
-    fs::set_permissions(&run, fs::Permissions::from_mode(0o700))?;
+    platform::set_mode(&run, 0o700)?;
     fs::create_dir_all(home.join("log"))?;
     Ok(())
 }
@@ -308,12 +312,7 @@ pub fn user_home() -> PathBuf {
     std::env::var_os("HOME")
         .filter(|h| !h.is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            nix::unistd::User::from_uid(nix::unistd::getuid())
-                .ok()
-                .flatten()
-                .map(|u| u.dir)
-        })
+        .or_else(platform::account_home)
         .expect("no home folder: HOME is not set and the account has none")
 }
 
@@ -466,7 +465,7 @@ pub fn site_name_clashes(cfg: &Config) -> Vec<String> {
 
 /// Every app's folder (canonical), hidden ones too.
 pub(crate) fn app_folders(cfg: &Config) -> BTreeSet<PathBuf> {
-    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| crate::platform::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     parked(cfg)
         .0
         .into_values()
@@ -488,7 +487,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     // The git worktrees of each app, read from the repository's files (git may be broken
     // or missing); an alias (a link to a parked app's folder) is the same app. A worktree
     // deleted by hand counts as removed.
-    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| crate::platform::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let mut seen = BTreeSet::new();
     let mut mains = vec![];
     let parked_first = found.iter().filter(|(_, (_, d))| d.is_some());
@@ -591,7 +590,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
 /// site on the same folder: two masters' pools never run the same files (one OPcache per
 /// master), and a zend extension such as Xdebug can be one app's only.
 fn mark_own_masters(sites: &mut [Site]) {
-    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| crate::platform::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let paths: BTreeSet<PathBuf> = sites
         .iter()
         .filter(|s| !s.ext.is_empty())
@@ -791,6 +790,7 @@ pub(crate) fn platform() -> Result<(&'static str, &'static str)> {
         ("macos", "x86_64") => ("macos-x86_64", "mac_amd64"),
         ("linux", "aarch64") => ("linux-aarch64", "linux_arm64"),
         ("linux", "x86_64") => ("linux-x86_64", "linux_amd64"),
+        ("windows", "x86_64") => ("windows-x86_64", "windows_amd64"),
         (os, arch) => bail!("{os}/{arch} is not supported yet"),
     })
 }
@@ -808,12 +808,74 @@ pub fn run(cmd: &mut Command) -> Result<()> {
 /// Runs a shell `script` as root, after macOS asks for the password with `prompt`. The
 /// script goes to a private (0600) file and the file's path and the prompt reach
 /// AppleScript as arguments, so nothing in them is ever parsed as AppleScript.
+#[cfg(not(windows))]
 pub fn run_as_admin(script: &str, prompt: &str) -> Result<()> {
     run_sh_file(script, prompt, ADMIN_SH)
 }
 
+/// Runs a PowerShell `script` as administrator, after Windows asks (UAC). `prompt` has
+/// no place in that dialog; the script stops at its first error.
+#[cfg(windows)]
+pub fn run_as_admin(script: &str, prompt: &str) -> Result<()> {
+    let _ = prompt;
+    let mut file = tempfile::Builder::new()
+        .prefix("anvil-admin-")
+        .suffix(".ps1")
+        .tempfile()?;
+    std::io::Write::write_all(
+        &mut file,
+        format!("$ErrorActionPreference = 'Stop'\r\n{script}\r\n").as_bytes(),
+    )?;
+    // Closed, so PowerShell can open it (Windows locks an open file); removed on drop.
+    let file = file.into_temp_path();
+    // Already an administrator (an elevated terminal): no need to ask.
+    if platform::elevated() {
+        let out = platform::command("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&file)
+            .output()
+            .context("couldn't run PowerShell")?;
+        if !out.status.success() {
+            bail!(
+                "the administrator step failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        return Ok(());
+    }
+    let path = file.display().to_string().replace('\'', "''");
+    let outer = format!(
+        "$p = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden \
+         -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{path}\"'; exit $p.ExitCode"
+    );
+    let out = platform::command("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &outer])
+        .output()
+        .context("couldn't run PowerShell")?;
+    if !out.status.success() {
+        let why = String::from_utf8_lossy(&out.stderr);
+        if why.contains("canceled") || why.contains("cancelled") {
+            bail!("Windows didn't get permission (the request was declined)");
+        }
+        bail!(
+            "the administrator step failed ({}): {}",
+            out.status,
+            why.trim()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
 const ADMIN_SH: &str = "do shell script \"/bin/sh \" & quoted form of (item 1 of argv) with prompt (item 2 of argv) with administrator privileges";
 
+#[cfg(not(windows))]
 fn run_sh_file(script: &str, prompt: &str, applescript: &str) -> Result<()> {
     // tempfile creates the file 0600; it is removed when `file` drops.
     let mut file = tempfile::Builder::new()
@@ -821,7 +883,7 @@ fn run_sh_file(script: &str, prompt: &str, applescript: &str) -> Result<()> {
         .suffix(".sh")
         .tempfile()?;
     std::io::Write::write_all(&mut file, script.as_bytes())?;
-    run(Command::new("osascript")
+    run(crate::platform::command("osascript")
         .args(["-e", "on run argv", "-e", applescript, "-e", "end run"])
         .arg(file.path())
         .arg(prompt))
@@ -830,7 +892,7 @@ fn run_sh_file(script: &str, prompt: &str, applescript: &str) -> Result<()> {
 /// `curl <args> <url>`'s body; an error, with curl's reason, when it fails (`-f` makes an
 /// HTTP error a failure).
 pub(crate) fn curl(args: &[&str], url: &str) -> Result<Vec<u8>> {
-    let out = Command::new("curl")
+    let out = crate::platform::command("curl")
         .args(args)
         .arg(url)
         .output()
@@ -890,15 +952,33 @@ pub(crate) fn verify(file: &Path, sum: &str, what: &str) -> Result<()> {
         128 => "sha512",
         _ => bail!("The published checksum of {what} is malformed"),
     };
-    let out = Command::new("openssl")
-        .args(["dgst", &format!("-{algo}"), "-r"])
-        .arg(file)
-        .output()
-        .context("failed to run openssl")?;
-    if !out.status.success() {
-        bail!("openssl couldn't hash the download of {what}");
-    }
-    let got = String::from_utf8_lossy(&out.stdout);
+    let got = if cfg!(windows) {
+        // certutil: a title line, the digest (older Windows spaces its bytes), a status line.
+        let out = crate::platform::command("certutil")
+            .arg("-hashfile")
+            .arg(file)
+            .arg(algo.to_ascii_uppercase())
+            .output()
+            .context("failed to run certutil")?;
+        if !out.status.success() {
+            bail!("certutil couldn't hash the download of {what}");
+        }
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .nth(1)
+            .unwrap_or_default()
+            .replace(' ', "")
+    } else {
+        let out = crate::platform::command("openssl")
+            .args(["dgst", &format!("-{algo}"), "-r"])
+            .arg(file)
+            .output()
+            .context("failed to run openssl")?;
+        if !out.status.success() {
+            bail!("openssl couldn't hash the download of {what}");
+        }
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
     if !got
         .split_whitespace()
         .next()
@@ -918,8 +998,11 @@ pub(crate) fn download(url: &str, sum: Option<&str>) -> Result<PathBuf> {
     fs::create_dir_all(&build)?;
     // Keep the published name: rustup-init decides what it is from it.
     let tmp = build.join(name);
-    let ok = run(Command::new("curl").args(["-fL#", "-o"]).arg(&tmp).arg(url))
-        .and_then(|_| sum.map_or(Ok(()), |s| verify(&tmp, s, name)));
+    let ok = run(crate::platform::command("curl")
+        .args(["-fL#", "-o"])
+        .arg(&tmp)
+        .arg(url))
+    .and_then(|_| sum.map_or(Ok(()), |s| verify(&tmp, s, name)));
     if let Err(e) = ok {
         let _ = fs::remove_file(&tmp);
         return Err(e);
@@ -928,11 +1011,21 @@ pub(crate) fn download(url: &str, sum: Option<&str>) -> Result<PathBuf> {
 }
 
 /// Download a .tar.gz, verify it against `sum` if given, and unpack it into `dir`.
-/// With `strip`, the archive's single top-level folder is dropped.
+/// With `strip`, the archive's single top-level folder is dropped. On Windows a .zip
+/// too: its own tar (bsdtar) reads both.
 pub(crate) fn fetch_tgz(url: &str, dir: &Path, strip: bool, sum: Option<&str>) -> Result<()> {
     let tmp = download(url, sum)?;
-    let mut tar = Command::new("tar");
-    tar.arg("-xzf").arg(&tmp).arg("-C").arg(dir);
+    let mut tar = if cfg!(windows) {
+        // Not a tar earlier on PATH (Git's, which can't read zip).
+        let system = std::env::var_os("SystemRoot").map_or("C:\\Windows".into(), PathBuf::from);
+        crate::platform::command(system.join("System32").join("tar.exe"))
+    } else {
+        crate::platform::command("tar")
+    };
+    tar.arg(if cfg!(windows) { "-xf" } else { "-xzf" })
+        .arg(&tmp)
+        .arg("-C")
+        .arg(dir);
     if strip {
         tar.arg("--strip-components=1");
     }
@@ -974,6 +1067,19 @@ pub(crate) fn replace_dir(dir: &Path, fill: impl FnOnce(&Path) -> Result<()>) ->
     }
     let _ = fs::remove_dir_all(&old);
     Ok(())
+}
+
+/// The program that serves a PHP version's requests: PHP-FPM, or on Windows (which has
+/// none) a pool of php-cgi processes (`cgi_ports`).
+pub const PHP_SERVER: &str = if cfg!(windows) {
+    "php-cgi.exe"
+} else {
+    "php-fpm"
+};
+
+/// `php` of an installed version.
+pub fn php_bin(v: &str) -> PathBuf {
+    php_dir(v).join(platform::exe("php"))
 }
 
 pub fn php_dir(v: &str) -> PathBuf {
@@ -1062,7 +1168,7 @@ pub fn installed_php() -> Vec<String> {
         .flatten()
         .flatten()
         .filter(|e| {
-            e.path().join("php-fpm").exists()
+            e.path().join(PHP_SERVER).exists()
                 && PHP_VERSIONS.contains(&e.file_name().to_string_lossy().as_ref())
         })
         .map(|e| e.file_name().to_string_lossy().into_owned())
@@ -1073,6 +1179,9 @@ pub fn installed_php() -> Vec<String> {
 
 pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     php_offered(minor).map_err(anyhow::Error::msg)?;
+    if cfg!(windows) {
+        return php_install_windows(cfg, minor);
+    }
     let (plat, _) = platform()?;
     let list: Vec<serde_json::Value> = fetch_json(&format!("{PHP_INDEX}?format=json"))?;
     let prefix = format!("php-{minor}.");
@@ -1135,6 +1244,76 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     Ok(())
 }
 
+const PHP_WINDOWS: &str = "https://windows.php.net/downloads/releases/";
+
+/// The extensions a Windows PHP loads: what static-php-cli builds into the Mac's, as far
+/// as windows.php.net ships them.
+const PHP_WINDOWS_EXT: [&str; 15] = [
+    "bz2",
+    "curl",
+    "fileinfo",
+    "gd",
+    "gmp",
+    "intl",
+    "mbstring",
+    "mysqli",
+    "openssl",
+    "pdo_mysql",
+    "pdo_pgsql",
+    "pdo_sqlite",
+    "sodium",
+    "sqlite3",
+    "zip",
+];
+
+/// PHP from windows.php.net: the thread-safe-less x64 build (php-cgi), checked against
+/// its published SHA-256, with a php.ini that loads the usual extensions and OPcache.
+fn php_install_windows(cfg: &mut Config, minor: &str) -> Result<()> {
+    let list: serde_json::Value = fetch_json(&format!("{PHP_WINDOWS}releases.json"))?;
+    let rel = &list[minor];
+    let build = ["nts-vs17-x64", "nts-vs16-x64"]
+        .iter()
+        .find_map(|b| rel[b]["zip"].as_object())
+        .with_context(|| format!("windows.php.net has no PHP {minor} build"))?;
+    let (file, sum) = (
+        build["path"].as_str().context("no file in releases.json")?,
+        build["sha256"]
+            .as_str()
+            .context("no checksum in releases.json")?,
+    );
+    let full = rel["version"].as_str().unwrap_or(minor).to_string();
+    let dir = php_dir(minor);
+    println!("Installing PHP {full}…");
+    replace_dir(&dir, |new| {
+        fetch_tgz(&format!("{PHP_WINDOWS}{file}"), new, false, Some(sum))?;
+        let ini = dir.join("php.ini");
+        if ini.exists() {
+            fs::copy(ini, new.join("php.ini"))?;
+        } else {
+            let ext: String = PHP_WINDOWS_EXT
+                .iter()
+                .map(|e| format!("extension={e}\n"))
+                .collect();
+            fs::write(
+                new.join("php.ini"),
+                format!(
+                    "memory_limit = 512M\nupload_max_filesize = 100M\npost_max_size = 100M\nmax_execution_time = 120\n\
+                     extension_dir = \"{}\"\n{ext}zend_extension=opcache\nopcache.enable = 1\n",
+                    dir.join("ext").display()
+                ),
+            )?;
+        }
+        Ok(())
+    })?;
+    *cfg = update(|c| {
+        c.php.get_or_insert_with(|| minor.into());
+        Ok(())
+    })?
+    .0;
+    println!("PHP {full} installed in {}", dir.display());
+    Ok(())
+}
+
 /// Set the PHP version used by every site that isn't pinned.
 pub fn set_default_php(cfg: &mut Config, version: &str) -> Result<()> {
     php_offered(version).map_err(anyhow::Error::msg)?;
@@ -1160,7 +1339,7 @@ pub fn set_site_php(cfg: &mut Config, site: &str, version: Option<String>) -> Re
 }
 
 fn caddy() -> PathBuf {
-    home().join("bin").join("caddy")
+    home().join("bin").join(platform::exe("caddy"))
 }
 
 pub fn ensure_caddy() -> Result<()> {
@@ -1170,7 +1349,8 @@ pub fn ensure_caddy() -> Result<()> {
     let (_, plat) = platform()?;
     println!("Downloading Caddy {CADDY_VERSION}…");
     let base = format!("https://github.com/caddyserver/caddy/releases/download/v{CADDY_VERSION}/");
-    let file = format!("caddy_{CADDY_VERSION}_{plat}.tar.gz");
+    let ext = if cfg!(windows) { "zip" } else { "tar.gz" };
+    let file = format!("caddy_{CADDY_VERSION}_{plat}.{ext}");
     let sum = CADDY_SHA512
         .iter()
         .find(|(p, _)| *p == plat)
@@ -1186,10 +1366,59 @@ pub fn ensure_caddy() -> Result<()> {
 
 /// Caddy keeps its CA and certs inside ANVIL_HOME, not in the user's global dirs.
 fn caddy_cmd() -> Command {
-    let mut c = Command::new(caddy());
+    let mut c = crate::platform::command(caddy());
     c.env("XDG_DATA_HOME", home().join("data"))
         .env("XDG_CONFIG_HOME", home().join("data"));
     c
+}
+
+/// A path as the Caddyfile holds it: Windows' backslashes as slashes, which Caddy takes
+/// and which can't escape the quotes around it.
+fn caddy_path(p: &Path) -> String {
+    let s = p.display().to_string();
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s
+    }
+}
+
+/// Where Caddy sends a site's PHP requests: its pool's socket, or on Windows its
+/// php-cgi processes.
+fn php_upstream(site: &Site) -> Option<String> {
+    if cfg!(windows) {
+        let ports = cgi_ports(&php_pool(site)?);
+        Some(
+            ports
+                .map(|p| format!("127.0.0.1:{p}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    } else {
+        Some(format!("unix/{}", fpm_socket(site)?.display()))
+    }
+}
+
+/// The pool serving a site: its own (`own_pool`), or its PHP version's.
+fn php_pool(site: &Site) -> Option<String> {
+    let v = site.php.as_ref()?;
+    Some(if own_pool(site) {
+        pool(site)
+    } else {
+        format!("php-{v}")
+    })
+}
+
+/// php-cgi processes per pool. php-cgi answers one request at a time.
+const CGI_WORKERS: u16 = 4;
+
+/// A pool's php-cgi ports: a block of `CGI_WORKERS` picked by its name, so the Caddyfile
+/// and the processes agree without keeping a table.
+// ponytail: two pools whose names hash to one block share it; collisions are rare
+// with a few pools and a restart with one of them renamed is the way out.
+pub(crate) fn cgi_ports(pool: &str) -> std::ops::Range<u16> {
+    let base = 20_000 + (stable_hash(pool) % 2_500) as u16 * CGI_WORKERS;
+    base..base + CGI_WORKERS
 }
 
 /// Pool name for a site with its own settings (FPM pool names can't contain dots).
@@ -1533,11 +1762,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         }
         // A quote, backslash or line break in the folder would end the quoted root and
         // break (or rewrite) the whole Caddyfile; such a folder isn't served.
-        if site
-            .root
-            .to_string_lossy()
-            .contains(['"', '\\', '\n', '\r'])
-        {
+        if caddy_path(&site.root).contains(['"', '\\', '\n', '\r']) {
             continue;
         }
         // A web root set by the user: one edited by hand to leave the project isn't served;
@@ -1583,10 +1808,10 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         s += &format!(
             "\n{} {{\n\troot * \"{}\"\n\tencode\n",
             addresses(site, &names),
-            site.root.display()
+            caddy_path(&site.root)
         );
-        if let Some(sock) = fpm_socket(site) {
-            s += &format!("\tphp_fastcgi unix/{}\n", sock.display());
+        if let Some(upstream) = php_upstream(site) {
+            s += &format!("\tphp_fastcgi {upstream}\n");
         }
         s += "\tfile_server {\n\t\thide .*\n\t}\n}\n";
         if site.secure {
@@ -1700,9 +1925,15 @@ pub fn trust() -> Result<()> {
     if !root.exists() {
         bail!("No certificate authority yet — start Anvil once, then trust it");
     }
+    if cfg!(windows) {
+        // The user's own Root store: no administrator, Windows asks in a dialog.
+        return run(platform::command("certutil")
+            .args(["-user", "-addstore", "Root"])
+            .arg(root));
+    }
     // ponytail: macOS login keychain only; Linux (update-ca-certificates / NSS) comes with the Linux port.
     let keychain = user_home().join("Library/Keychains/login.keychain-db");
-    run(Command::new("security")
+    run(crate::platform::command("security")
         .args(["add-trusted-cert", "-r", "trustRoot", "-k"])
         .arg(keychain)
         .arg(root))
@@ -1812,6 +2043,10 @@ pub const PF_ANCHOR: &str = "com.apple/anvil";
 // ponytail: checks the daemon file, not the live pf rules (reading those needs root);
 // rules flushed by other software stay unnoticed until the next boot.
 pub fn ports_forwarded(cfg: &Config) -> bool {
+    // Windows: Caddy listens on 80 and 443 itself when they are its ports.
+    if cfg!(windows) {
+        return cfg.http_port == 80 && cfg.https_port == 443;
+    }
     let (file, want) = ports_daemon(cfg);
     fs::read_to_string(file).is_ok_and(|s| s == want)
 }
@@ -1854,19 +2089,69 @@ pub fn setup_status(cfg: &Config) -> Setup {
     let root = root_cert();
     Setup {
         resolver: !needs_resolver(cfg)
-            || fs::read_to_string(file)
-                .is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace())),
-        trusted: !root.exists()
-            || Command::new("security")
-                .arg("verify-cert")
-                .arg("-c")
-                .arg(&root)
-                .output()
-                .is_ok_and(|o| o.status.success()),
+            || if cfg!(windows) {
+                nrpt_ready(cfg)
+            } else {
+                fs::read_to_string(file)
+                    .is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace()))
+            },
+        trusted: !root.exists() || cert_trusted(&root),
         php: !installed_php().is_empty(),
         ports: ports_forwarded(cfg),
         shims: shims::ready(),
     }
+}
+
+/// Whether the system trusts `root`: the Mac's `security verify-cert`; on Windows, the
+/// certificate is in the user's or the machine's Root store.
+fn cert_trusted(root: &Path) -> bool {
+    if cfg!(windows) {
+        let script = "$c = New-Object Security.Cryptography.X509Certificates.X509Certificate2 $env:ANVIL_CERT; \
+             if ((Test-Path \"Cert:\\CurrentUser\\Root\\$($c.Thumbprint)\") -or (Test-Path \"Cert:\\LocalMachine\\Root\\$($c.Thumbprint)\")) { exit 0 } else { exit 1 }";
+        return platform::command("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .env("ANVIL_CERT", root)
+            .output()
+            .is_ok_and(|o| o.status.success());
+    }
+    platform::command("security")
+        .arg("verify-cert")
+        .arg("-c")
+        .arg(root)
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// Windows: a Name Resolution Policy rule sends `.<tld>` to Anvil's DNS server. NRPT
+/// can't name a port, so that server listens on 53. The rules live in the registry,
+/// one key per rule, `Name` the suffix (with its dot) and `GenericDNSServers` the server.
+fn nrpt_ready(cfg: &Config) -> bool {
+    let out = platform::command("reg")
+        .args([
+            "query",
+            r"HKLM\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig",
+            "/s",
+        ])
+        .output();
+    let Ok(out) = out else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let name = format!(".{}", cfg.tld);
+    // A rule is a block of values under its key; ours names the suffix and 127.0.0.1.
+    text.split("\r\n\r\n").any(|rule| {
+        let value = |v: &str| {
+            rule.lines()
+                .filter_map(|l| l.trim().strip_prefix(v))
+                .filter_map(|l| l.split_once("REG_"))
+                .filter_map(|(_, r)| r.split_once(char::is_whitespace))
+                .map(|(_, val)| val.trim().to_string())
+                .next()
+        };
+        value("Name").is_some_and(|n| n.split("\\0").any(|n| n.eq_ignore_ascii_case(&name)))
+            && value("GenericDNSServers").is_some_and(|s| s.split(';').any(|s| s == "127.0.0.1"))
+            && cfg.dns_port == 53
+    })
 }
 
 pub const SYSTEM_KEYCHAIN: &str = "/Library/Keychains/System.keychain";
@@ -1884,6 +2169,9 @@ pub fn setup_script(
     ports_plist: Option<&Path>,
     cert: Option<&Path>,
 ) -> Result<String> {
+    if cfg!(windows) {
+        return setup_script_windows(cfg, resolver, cert);
+    }
     let q = |p: &Path| shims::sh_quote(&p.to_string_lossy());
     let mut steps = Vec::new();
     if resolver && needs_resolver(cfg) {
@@ -1920,6 +2208,29 @@ pub fn setup_script(
     Ok(steps.join(" && "))
 }
 
+/// `setup_script` for Windows, in PowerShell for `run_as_admin`: the NRPT rule for the
+/// suffix (an old one for it replaced) and the authority trusted machine-wide. Windows
+/// needs no ports step.
+fn setup_script_windows(cfg: &Config, resolver: bool, cert: Option<&Path>) -> Result<String> {
+    let q = |s: &str| format!("'{}'", s.replace('\'', "''"));
+    let mut steps = Vec::new();
+    if resolver && needs_resolver(cfg) {
+        clean_tld(&cfg.tld)?;
+        let ns = q(&format!(".{}", cfg.tld));
+        steps.push(format!(
+            "Get-DnsClientNrptRule | Where-Object {{ $_.Namespace -contains {ns} }} | Remove-DnsClientNrptRule -Force; \
+             Add-DnsClientNrptRule -Namespace {ns} -NameServers '127.0.0.1' | Out-Null; Clear-DnsClientCache"
+        ));
+    }
+    if let Some(cert) = cert {
+        steps.push(format!(
+            "Import-Certificate -FilePath {} -CertStoreLocation Cert:\\LocalMachine\\Root | Out-Null",
+            q(&cert.to_string_lossy())
+        ));
+    }
+    Ok(steps.join("\r\n"))
+}
+
 /// Lock a mutex even if a thread panicked while holding it: the data is still there,
 /// and one panic must not turn every later lock into another (the app would die and
 /// Quit would break).
@@ -1948,28 +2259,18 @@ fn pid_file() -> PathBuf {
 }
 
 pub(crate) fn alive(pid: &str) -> bool {
-    pid.parse()
-        .is_ok_and(|p| nix::sys::signal::kill(Pid::from_raw(p), None).is_ok())
+    pid.parse().is_ok_and(platform::alive)
 }
 
 /// SIGTERM to one process, if it is still there.
 pub fn sigterm(pid: u32) {
-    let _ = nix::sys::signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
+    platform::term(pid, false);
 }
 
-/// When a process started, as `ps` prints it (`Sat Oct 18 10:02:03 2026`). With the pid
-/// it names one process: a reused pid has another start time. In one locale and time
-/// zone: `ps` follows LANG and TZ, and an Anvil started from a terminal has others
-/// than one started from Finder.
+/// When a process started (`platform::started`). With the pid it names one process: a
+/// reused pid has another start time.
 pub(crate) fn started(pid: u32) -> Option<String> {
-    let o = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "lstart="])
-        .env("LC_ALL", "C")
-        .env("TZ", "UTC")
-        .output()
-        .ok()?;
-    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-    (!s.is_empty()).then_some(s)
+    platform::started(pid)
 }
 
 /// Clean up after an Anvil that died without stopping its children (crash, SIGKILL).
@@ -1982,7 +2283,6 @@ pub(crate) fn started(pid: u32) -> Option<String> {
 /// (no other process can take a pid while its group lives). SIGTERM, SIGKILL after
 /// `apps::GRACE`, and only then is the pid file removed.
 pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
-    use nix::sys::signal::{kill, killpg};
     let Ok(file) = fs::read_to_string(pid_file) else {
         return;
     };
@@ -1995,17 +2295,16 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
         .parent()
         .and_then(Path::parent)
         .map(|h| h.display().to_string());
-    let named = |pid: &str| {
-        Command::new("ps")
-            .args(["-p", pid, "-o", "command="])
-            .output()
-            .is_ok_and(|o| {
-                ours.as_ref()
-                    .is_some_and(|h| String::from_utf8_lossy(&o.stdout).contains(h))
-            })
+    let named = |pid: u32| {
+        platform::command_line(pid).is_some_and(|c| ours.as_ref().is_some_and(|h| c.contains(h)))
     };
-    let signal =
-        |p: Pid, s: Option<Signal>| (if group { killpg(p, s) } else { kill(p, s) }).is_ok();
+    let running = |p: u32| {
+        if group {
+            platform::group_alive(p)
+        } else {
+            platform::alive(p)
+        }
+    };
     let mut stopping = vec![];
     for line in pids {
         let (pid, at) = line
@@ -2014,29 +2313,31 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
         let Ok(n) = pid.parse::<u32>() else {
             continue;
         };
-        let p = Pid::from_raw(n as i32);
         let same = if alive(pid) {
-            at.is_some_and(|at| started(n).as_deref() == Some(at)) || named(pid)
+            at.is_some_and(|at| started(n).as_deref() == Some(at)) || named(n)
         } else {
-            group && signal(p, None)
+            group && running(n)
         };
-        if same && signal(p, Some(Signal::SIGTERM)) {
-            stopping.push(p);
+        if same && platform::term(n, group) {
+            stopping.push(n);
         }
     }
     let deadline = std::time::Instant::now() + apps::GRACE;
-    while stopping.iter().any(|p| signal(*p, None)) && std::time::Instant::now() < deadline {
+    while stopping.iter().any(|p| running(*p)) && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     for p in stopping {
-        signal(p, Some(Signal::SIGKILL));
+        platform::kill(p, group);
     }
     let _ = fs::remove_file(pid_file);
 }
 
 /// Whether something listens on this Mac's `port`.
 pub fn port_answers(port: u16) -> bool {
-    TcpStream::connect(("127.0.0.1", port)).is_ok()
+    // Bounded: on Windows a refused connection to loopback takes ~2 s (it retries the
+    // SYN); one that is listening answers in well under this.
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(250)).is_ok()
 }
 
 /// The first of `ports` that neither a program here nor `taken` uses.
@@ -2068,14 +2369,12 @@ pub(crate) fn terminate(child: &mut Child, grace: std::time::Duration) {
 /// `terminate` for many at once: SIGTERM to all, one shared `grace` for them to exit,
 /// then SIGKILL what is left. Stopping N takes one grace, not N.
 pub(crate) fn terminate_all(children: &mut [Child], grace: std::time::Duration) {
-    use nix::sys::signal::{kill, killpg};
-    let pid = |c: &Child| Pid::from_raw(c.id() as i32);
     let groups: Vec<bool> = children
         .iter()
         .map(|c| {
-            let group = killpg(pid(c), Signal::SIGTERM).is_ok();
+            let group = platform::term(c.id(), true);
             if !group {
-                let _ = kill(pid(c), Signal::SIGTERM);
+                platform::term(c.id(), false);
             }
             group
         })
@@ -2093,7 +2392,7 @@ pub(crate) fn terminate_all(children: &mut [Child], grace: std::time::Duration) 
     for ((c, group), exited) in children.iter_mut().zip(groups).zip(exited) {
         // Anything in the group still alive gets killed, even after its leader ended.
         if group {
-            let _ = killpg(pid(c), Signal::SIGKILL);
+            platform::kill(c.id(), true);
         }
         if !exited {
             let _ = c.kill();
@@ -2149,7 +2448,7 @@ impl Server {
         let sites = sites(cfg);
         let versions: BTreeSet<_> = sites.iter().filter_map(|s| s.php.clone()).collect();
         for v in &versions {
-            if !php_dir(v).join("php-fpm").exists() {
+            if !php_dir(v).join(PHP_SERVER).exists() {
                 bail!("PHP {v} is used but not installed — run `anvil php install {v}`");
             }
         }
@@ -2159,7 +2458,10 @@ impl Server {
             children: vec![],
             labels: vec![],
         };
-        for v in &versions {
+        for v in versions.iter().filter(|_| cfg!(windows)) {
+            server.start_cgi(cfg, v, &sites)?;
+        }
+        for v in versions.iter().filter(|_| !cfg!(windows)) {
             for site in &sites {
                 if let Some(sock) = fpm_socket(site) {
                     let _ = fs::remove_file(sock);
@@ -2170,7 +2472,7 @@ impl Server {
             fs::write(&conf, fpm_conf(cfg, v, &sites))?;
             // Started here, not by a PHP: `-d`s, no scan dir (`phpext::scan_env`).
             let fpm = |conf: &Path, ext: &[String]| {
-                Command::new(php_dir(v).join("php-fpm"))
+                crate::platform::command(php_dir(v).join("php-fpm"))
                     .arg("-y")
                     .arg(conf)
                     .arg("-c")
@@ -2235,6 +2537,55 @@ impl Server {
             });
         });
         Ok(server)
+    }
+
+    /// Windows: the php-cgi processes of version `v`'s pools, `CGI_WORKERS` per pool on
+    /// its `cgi_ports`: the shared one with the global php.ini values, then one per site
+    /// with values, extensions or a worktree's environment of its own.
+    fn start_cgi(&mut self, cfg: &Config, v: &str, sites: &[Site]) -> Result<()> {
+        let mut pools = vec![(format!("php-{v}"), cfg.ini.clone(), vec![], vec![])];
+        for site in sites
+            .iter()
+            .filter(|s| s.php.as_deref() == Some(v) && own_pool(s))
+        {
+            // As with FPM: a worktree Anvil can't separate from main gets no pool.
+            let Ok(env) = worktrees::web_env(cfg, site) else {
+                continue;
+            };
+            let mut ini = cfg.ini.clone();
+            ini.extend(site.ini.clone());
+            pools.push((pool(site), ini, env, site.ext.clone()));
+        }
+        let log = php_fpm_log(v);
+        for (name, ini, env, ext) in pools {
+            for port in cgi_ports(&name) {
+                let err = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log)?;
+                let mut cmd = platform::command(php_dir(v).join(PHP_SERVER));
+                cmd.arg("-b")
+                    .arg(format!("127.0.0.1:{port}"))
+                    .arg("-c")
+                    .arg(php_dir(v).join("php.ini"))
+                    .args(phpext::php_args_with(cfg, v, &ext));
+                for (k, val) in &ini {
+                    cmd.arg("-d").arg(format!("{k}={val}"));
+                }
+                // 0: no request limit, so a worker never leaves its port unanswered.
+                cmd.env("PHP_FCGI_MAX_REQUESTS", "0")
+                    .envs(env.iter().map(|(k, v)| (k, v)))
+                    .stdout(std::process::Stdio::null())
+                    .stderr(err);
+                self.labels.push(format!("PHP {v} ({name}, port {port})"));
+                self.children.push(
+                    platform::no_window(&mut cmd)
+                        .spawn()
+                        .with_context(|| format!("failed to start PHP {v}"))?,
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Each child's label (`Caddy`, `PHP 8.4 FPM`) and pid; Caddy is last.
@@ -2310,7 +2661,7 @@ mod tests {
         use std::os::unix::process::CommandExt;
         let dir = tempfile::tempdir().unwrap();
         let pid_file = dir.path().join("grandchild");
-        let mut leader = Command::new("sh")
+        let mut leader = crate::platform::command("sh")
             .arg("-c")
             .arg(format!(
                 "sleep 30 & echo $! > '{}'; wait",
@@ -2339,7 +2690,7 @@ mod tests {
         assert!(gone, "the group's other process survived");
 
         let start = std::time::Instant::now();
-        let mut stubborn = Command::new("sh")
+        let mut stubborn = crate::platform::command("sh")
             .args(["-c", "trap '' TERM; sleep 30"])
             .spawn()
             .unwrap();
@@ -2355,7 +2706,7 @@ mod tests {
     fn stop_all_shares_one_deadline() {
         use std::os::unix::process::CommandExt;
         let spawn = |script: &str| {
-            Command::new("sh")
+            crate::platform::command("sh")
                 .args(["-c", script])
                 .process_group(0)
                 .spawn()
@@ -2382,7 +2733,7 @@ mod tests {
             // The whole group is gone, its sleep too (launchd reaps it; give it a moment).
             let gone = (0..50).any(|_| {
                 std::thread::sleep(std::time::Duration::from_millis(20));
-                nix::sys::signal::killpg(Pid::from_raw(pid), None).is_err()
+                !platform::group_alive(pid as u32)
             });
             assert!(gone, "group {pid} survived");
         }
@@ -2430,7 +2781,12 @@ mod tests {
 
     #[test]
     fn a_child_that_ends_is_noticed_and_dropped() {
-        let spawn = |cmd: &str| Command::new("/bin/sh").args(["-c", cmd]).spawn().unwrap();
+        let spawn = |cmd: &str| {
+            crate::platform::command("/bin/sh")
+                .args(["-c", cmd])
+                .spawn()
+                .unwrap()
+        };
         let mut server = Server {
             children: vec![spawn("sleep 30"), spawn("exit 3")],
             labels: vec!["PHP 8.4 FPM".into(), "Caddy".into()],
@@ -2699,7 +3055,7 @@ mod tests {
     fn without_git_a_parked_worktree_folder_is_still_its_apps() {
         let (root, _) = parked_worktree("no-git");
         // The check runs in a test process whose PATH has no git at all.
-        let out = std::process::Command::new(std::env::current_exe().unwrap())
+        let out = crate::platform::command(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "tests::no_git_child",
@@ -2719,7 +3075,7 @@ mod tests {
     #[ignore = "run by without_git_a_parked_worktree_folder_is_still_its_apps"]
     fn no_git_child() {
         assert!(
-            std::process::Command::new("git").output().is_err(),
+            crate::platform::command("git").output().is_err(),
             "git is gone"
         );
         let root = PathBuf::from(std::env::var_os("ANVIL_NO_GIT_ROOT").unwrap());
@@ -3434,7 +3790,7 @@ mod tests {
         }
         let tmp = std::env::temp_dir().join(format!("anvil-ports-{}.plist", std::process::id()));
         fs::write(&tmp, &plist).unwrap();
-        let lint = Command::new("plutil")
+        let lint = crate::platform::command("plutil")
             .arg("-lint")
             .arg(&tmp)
             .output()
@@ -3626,7 +3982,7 @@ mod tests {
                     let dir = crate::worktrees::tests::tmp("caddy-adapt");
                     let file = dir.join("Caddyfile");
                     fs::write(&file, &caddy).unwrap();
-                    let out = std::process::Command::new(&bin)
+                    let out = crate::platform::command(&bin)
                         .args(["adapt", "--adapter", "caddyfile", "--config"])
                         .arg(&file)
                         .env("XDG_DATA_HOME", &dir)
@@ -3680,10 +4036,14 @@ mod tests {
 /// PATH (/usr/bin:/bin:…), so pnpm, Homebrew, nvm and the like aren't found by
 /// the processes Anvil starts. This asks the user's login shell once.
 pub fn login_path() -> Option<String> {
+    // Windows programs get the user's PATH from the system, whatever started them.
+    if cfg!(windows) {
+        return None;
+    }
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     // A shell that waits on something (a prompt, a slow plugin) must not hold Anvil up.
     let out = output_within(
-        Command::new(shell).args(["-lic", "printf '\\n__ANVIL_PATH__%s\\n' \"$PATH\""]),
+        crate::platform::command(shell).args(["-lic", "printf '\\n__ANVIL_PATH__%s\\n' \"$PATH\""]),
         std::time::Duration::from_secs(3),
     )?;
     parse_login_path(&out)
@@ -3750,17 +4110,17 @@ pub fn env_path() -> String {
 
 /// `dir` first on `path`.
 pub fn prepend_path(dir: &Path, path: &str) -> String {
-    format!("{}:{path}", dir.display())
+    format!("{}{}{path}", dir.display(), platform::PATH_SEP)
 }
 
 pub fn merge_path(current: &str, login: &str) -> String {
     let mut seen = std::collections::HashSet::new();
     current
-        .split(':')
-        .chain(login.split(':'))
+        .split(platform::PATH_SEP)
+        .chain(login.split(platform::PATH_SEP))
         .filter(|d| !d.is_empty() && seen.insert(*d))
         .collect::<Vec<_>>()
-        .join(":")
+        .join(&platform::PATH_SEP.to_string())
 }
 
 #[cfg(test)]

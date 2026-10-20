@@ -404,13 +404,13 @@ const DEV_COMMANDS: &str = "vendor/laravel/framework/src/Illuminate/Foundation/D
 /// What `composer run dev` / `php artisan dev` would start, asked of Laravel 13 itself
 /// (minus `server`, which Anvil already runs). `None` when it can't be asked.
 pub fn laravel_dev_commands(dir: &Path, php: &Path) -> Option<Vec<(String, String)>> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
     if !dir.join(DEV_COMMANDS).is_file() {
         return None;
     }
     let script = r#"require 'vendor/autoload.php'; $app = require 'bootstrap/app.php'; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); echo json_encode(array_map(fn($c) => ['name' => $c['name'], 'command' => $c['command']], \Illuminate\Foundation\DevCommands::commands()));"#;
-    let mut child = Command::new(php)
+    let mut child = crate::platform::command(php)
         // Warnings go to stderr, so they can't spoil the JSON on stdout.
         .args(["-d", "display_errors=stderr", "-r", script])
         .current_dir(dir)

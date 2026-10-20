@@ -2,7 +2,6 @@
 //! they reach a file name, a command or `open`.
 
 use anyhow::{Context, Result, bail};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The name of an application Anvil creates: also its folder and its address.
@@ -57,8 +56,9 @@ pub fn process_id(s: &str) -> bool {
 /// unless it stays inside `root`. Returns the resolved path.
 pub fn path_in(root: &Path, path: impl AsRef<Path>) -> Result<PathBuf> {
     let path = path.as_ref();
-    let root = fs::canonicalize(root).with_context(|| format!("{} not found", root.display()))?;
-    let full = fs::canonicalize(root.join(path))
+    let root = crate::platform::canonicalize(root)
+        .with_context(|| format!("{} not found", root.display()))?;
+    let full = crate::platform::canonicalize(root.join(path))
         .with_context(|| format!("{} not found", path.display()))?;
     if !full.starts_with(&root) {
         bail!("{} is outside {}", path.display(), root.display());
@@ -112,6 +112,7 @@ pub fn link(url: &str, tld: &str) -> Result<()> {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::fs;
 
     #[test]
     fn names() {
@@ -134,7 +135,7 @@ mod tests {
     #[test]
     fn paths_stay_inside_their_root() {
         let dir = tempfile::tempdir().unwrap();
-        let dir = dir.path().canonicalize().unwrap();
+        let dir = crate::platform::canonicalize(dir.path()).unwrap();
         let root = dir.join("site");
         fs::create_dir_all(root.join("app")).unwrap();
         fs::write(root.join("app/X.php"), "").unwrap();
@@ -200,7 +201,7 @@ mod tests {
             prop_oneof![Just(".."), Just("."), Just("a"), Just("up"), Just("link"), Just("f")], 0..6)
         ) {
             let dir = tempfile::tempdir().unwrap();
-            let dir = dir.path().canonicalize().unwrap();
+            let dir = crate::platform::canonicalize(dir.path()).unwrap();
             let root = dir.join("root");
             fs::create_dir_all(root.join("a")).unwrap();
             fs::write(root.join("f"), "").unwrap();

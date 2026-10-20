@@ -6,7 +6,6 @@ use crate::{Config, Site, apps, create, home, installed_php, run, runtimes, site
 use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub const TOOLS: [&str; 6] = ["php", "composer", "laravel", "node", "npm", "npx"];
 
@@ -21,11 +20,11 @@ pub fn sh_quote(s: &str) -> String {
 /// The anvil CLI the shims run: this program when it is the CLI; from the app, the
 /// CLI bundled next to it, else cargo's, else whatever `anvil` is on PATH.
 pub fn pick_cli(exe: &Path, user_home: &Path, exists: impl Fn(&Path) -> bool) -> PathBuf {
-    if exe.file_name().is_some_and(|n| n == "anvil") {
+    if exe.file_stem().is_some_and(|n| n == "anvil") {
         return exe.to_path_buf();
     }
     [
-        exe.with_file_name("anvil"),
+        exe.with_file_name(crate::platform::exe("anvil")),
         user_home.join(".cargo/bin/anvil"),
     ]
     .into_iter()
@@ -36,6 +35,42 @@ pub fn pick_cli(exe: &Path, user_home: &Path, exists: impl Fn(&Path) -> bool) ->
 use crate::user_home;
 
 /// Write the shims into `<home>/shims`.
+#[cfg(windows)]
+pub fn install(home: &Path) -> Result<()> {
+    // `<tool>.exe` is the CLI itself under the tool's name (a hard link, else a copy):
+    // the CLI sees its name and acts as the shim. A .cmd would ask "Terminate batch
+    // job?" on Ctrl+C and mangle quoted arguments.
+    let exe = std::env::current_exe().unwrap_or_default();
+    let cli = pick_cli(&exe, &user_home(), Path::exists);
+    if !cli.is_absolute() {
+        bail!("couldn't find anvil.exe to make the shims from");
+    }
+    let dir = home.join("shims");
+    fs::create_dir_all(&dir)?;
+    for tool in TOOLS.iter().copied().chain(["anvil"]) {
+        let file = dir.join(format!("{tool}.exe"));
+        if file == cli {
+            continue;
+        }
+        // A running shim can't be replaced; it is the same program, so keep it.
+        if fs::remove_file(&file).is_err() && file.exists() {
+            continue;
+        }
+        if fs::hard_link(&cli, &file).is_err() {
+            fs::copy(&cli, &file)?;
+        }
+    }
+    Ok(())
+}
+
+/// The tool a shim stands for when this program runs under its name (`php.exe`).
+pub fn shim_name(exe: &Path) -> Option<&'static str> {
+    let stem = exe.file_stem()?.to_str()?;
+    TOOLS.iter().copied().find(|t| t.eq_ignore_ascii_case(stem))
+}
+
+/// Write the shims into `<home>/shims`.
+#[cfg(unix)]
 pub fn install(home: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let exe = std::env::current_exe().unwrap_or_default();
@@ -73,7 +108,7 @@ pub fn install(home: &Path) -> Result<()> {
 /// are resolved: macOS reaches /var through /private/var. Of several sites on one folder
 /// (an alias), one with extensions of its own, so the terminal loads what its web does.
 pub fn site_for<'a>(sites: &'a [Site], cwd: &Path) -> Option<&'a Site> {
-    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| crate::platform::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let cwd = real(cwd);
     sites
         .iter()
@@ -174,14 +209,14 @@ fn is_test_run(tool: &str, args: &[String]) -> bool {
 /// Refuses a folder in a git worktree of an Anvil app (a hidden one too) that isn't
 /// that worktree's site: it would run with no worktree env, on main's database.
 fn known_worktree(cfg: &Config, site: Option<&Site>, cwd: &Path) -> Result<()> {
-    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let cwd = crate::platform::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let Some(root) = cwd.ancestors().find(|d| d.join(".git").exists()) else {
         return Ok(());
     };
     let Some(main) = crate::worktrees::main_of(root) else {
         return Ok(()); // not a linked worktree
     };
-    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| crate::platform::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     if site.is_some_and(|s| real(&s.path).starts_with(root)) {
         return Ok(());
     }
@@ -230,7 +265,7 @@ fn resolve_for(
             };
             let v = php_version(pinned, cfg, &installed)?;
             let php_dir = crate::php_dir(&v);
-            let php = php_dir.join("php");
+            let php = crate::php_bin(&v);
             // What PHP-FPM loads (OPcache, the version's extensions), so CLI and web agree,
             // also in a PHP this one starts (`phpext::scan_env`).
             let scan = crate::phpext::scan_env(cfg, &v, site)?;
@@ -251,7 +286,7 @@ fn resolve_for(
             env.push(("COMPOSER_HOME".into(), composer_home.display().to_string()));
             let laravel = composer_home.join("vendor/bin/laravel");
             if fetch && !laravel.exists() {
-                run(Command::new(&php)
+                run(crate::platform::command(&php)
                     .arg(&phar)
                     .args(["global", "require", "laravel/installer"])
                     .envs(env.clone()))?;
@@ -354,7 +389,55 @@ pub fn remove_path_block(file: &Path) -> Result<()> {
         .with_context(|| format!("couldn't write {}", file.display()))
 }
 
+/// The user's own PATH (HKCU\\Environment), as Windows gives it to programs started later.
+#[cfg(windows)]
+fn user_path() -> Option<String> {
+    let out = crate::platform::command("reg")
+        .args(["query", "HKCU\\Environment", "/v", "Path"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    // `    Path    REG_EXPAND_SZ    C:\\a;C:\\b`
+    text.lines()
+        .find_map(|l| l.trim_start().strip_prefix("Path"))
+        .and_then(|l| l.split_once("REG_"))
+        .and_then(|(_, rest)| rest.split_once(char::is_whitespace))
+        .map(|(_, v)| v.trim().to_string())
+}
+
+#[cfg(windows)]
+fn on_user_path(dir: &Path) -> bool {
+    user_path().is_some_and(|p| {
+        p.split(';')
+            .any(|d| Path::new(d.trim_end_matches('\\')).eq(dir))
+    })
+}
+
+/// The shims are written and the user's PATH has them.
+#[cfg(windows)]
+pub fn ready() -> bool {
+    home().join("shims").join("php.exe").exists() && on_user_path(&home().join("shims"))
+}
+
+/// Write the shims and put their folder first on the user's PATH; Windows tells running
+/// programs, and terminals opened from now on have it.
+#[cfg(windows)]
+pub fn setup() -> Result<Vec<PathBuf>> {
+    install(&home())?;
+    let dir = home().join("shims");
+    if !on_user_path(&dir) {
+        // .NET's SetEnvironmentVariable keeps REG_EXPAND_SZ and announces the change.
+        let script = "$d = $env:ANVIL_SHIMS; $p = [Environment]::GetEnvironmentVariable('Path', 'User'); \
+             if ($p) { $p = \"$d;$p\" } else { $p = $d }; [Environment]::SetEnvironmentVariable('Path', $p, 'User')";
+        run(crate::platform::command("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .env("ANVIL_SHIMS", &dir))?;
+    }
+    Ok(vec![])
+}
+
 /// The shims are written and some shell rc file puts them on PATH.
+#[cfg(not(windows))]
 pub fn ready() -> bool {
     home().join("shims/php").exists()
         && shell_rc_files(&user_home())
@@ -363,6 +446,7 @@ pub fn ready() -> bool {
 }
 
 /// Write the shims and put them on PATH in every shell rc file.
+#[cfg(not(windows))]
 pub fn setup() -> Result<Vec<PathBuf>> {
     install(&home())?;
     let user = user_home();

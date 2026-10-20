@@ -9,7 +9,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ui = join(dirname(fileURLToPath(import.meta.url)), "..");
-const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 1 << 28 });
+// Windows: pnpm is a .cmd, which only a shell runs.
+const run = (cmd, args, cwd) =>
+  execFileSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 1 << 28, shell: process.platform === "win32" });
 
 const meta = JSON.parse(
   run(

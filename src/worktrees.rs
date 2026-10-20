@@ -894,7 +894,7 @@ pub fn set_db_at(cfg: &mut Config, folder: &Path, choice: DbChoice) -> anyhow::R
 
 /// The worktree Anvil serves from `folder` (one `add` just made, say).
 pub fn site_at(cfg: &Config, folder: &Path) -> Option<Site> {
-    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| crate::platform::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     crate::sites(cfg)
         .into_iter()
         .find(|s| s.worktree_of.is_some() && real(&s.path) == real(folder))
@@ -1133,9 +1133,9 @@ fn sqlite_file(main: &Path, wt: &Path, file: &str) -> Option<String> {
         return None;
     }
     let real = real_file(file);
-    let main = fs::canonicalize(main).unwrap_or_else(|_| main.to_path_buf());
+    let main = crate::platform::canonicalize(main).unwrap_or_else(|_| main.to_path_buf());
     // Already in the worktree (its own `.env`; a worktree may sit inside main's folder).
-    if real.starts_with(fs::canonicalize(wt).unwrap_or_else(|_| wt.to_path_buf())) {
+    if real.starts_with(crate::platform::canonicalize(wt).unwrap_or_else(|_| wt.to_path_buf())) {
         return None;
     }
     let to = match real.strip_prefix(&main) {
@@ -1147,11 +1147,11 @@ fn sqlite_file(main: &Path, wt: &Path, file: &str) -> Option<String> {
 
 /// `file` canonical, so a symlinked folder still matches; the file itself may not exist yet.
 fn real_file(file: &Path) -> PathBuf {
-    fs::canonicalize(file)
+    crate::platform::canonicalize(file)
         .ok()
         .or_else(|| {
             Some(
-                fs::canonicalize(file.parent()?)
+                crate::platform::canonicalize(file.parent()?)
                     .ok()?
                     .join(file.file_name()?),
             )
@@ -1598,7 +1598,7 @@ pub fn list(main: &Path) -> Vec<Worktree> {
                     .to_string()
             });
             Some(Worktree {
-                path: fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+                path: crate::platform::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
                 detached: branch.is_none(),
                 branch,
                 prunable: !dot_git.exists(),
@@ -1614,7 +1614,7 @@ pub fn list(main: &Path) -> Vec<Worktree> {
 pub fn main_of(dir: &Path) -> Option<PathBuf> {
     let git_dir = crate::git::git_dir(dir)?;
     let common = fs::read_to_string(git_dir.join("commondir")).ok()?;
-    let common = fs::canonicalize(git_dir.join(common.trim())).ok()?;
+    let common = crate::platform::canonicalize(git_dir.join(common.trim())).ok()?;
     common.parent().map(Path::to_path_buf)
 }
 
@@ -1632,7 +1632,7 @@ pub fn add(
     copy_db: Option<bool>,
 ) -> anyhow::Result<(PathBuf, DbChoice)> {
     // A linked app may have worktrees; an alias (a link to another app's folder) is that app.
-    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| crate::platform::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let alias = app.linked
         && crate::sites(cfg)
             .iter()
@@ -2052,7 +2052,7 @@ pub fn after_create(cfg: &Config, site: &Site) -> Vec<String> {
 /// `composer` is Anvil's. Only when the user said so; its database is prepared first by the
 /// caller. `quiet`: the output is kept, its last lines in the error; else it shows.
 pub fn run_after(cfg: &Config, site: &Site, command: &str, quiet: bool) -> anyhow::Result<()> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     let mut env = crate::processes::env(cfg, site, false)?;
     let shims = crate::home().join("shims");
     if shims.is_dir()
@@ -2060,11 +2060,8 @@ pub fn run_after(cfg: &Config, site: &Site, command: &str, quiet: bool) -> anyho
     {
         *path = crate::prepend_path(&shims, path);
     }
-    let mut cmd = Command::new("/bin/sh");
-    cmd.args(["-c", command])
-        .envs(env)
-        .current_dir(&site.path)
-        .stdin(Stdio::null());
+    let mut cmd = crate::platform::shell(command, None);
+    cmd.envs(env).current_dir(&site.path).stdin(Stdio::null());
     if !quiet {
         if !cmd.status()?.success() {
             anyhow::bail!("{command} failed");
@@ -2141,11 +2138,12 @@ pub fn install(cfg: &Config, site: &Site, what: &str) -> anyhow::Result<()> {
         "js" => {
             let install = crate::apps::js_install(crate::apps::js_manager(dir));
             let (_, _, env) = resolve_with("node", dir, cfg, false)?;
-            ("/bin/sh".into(), vec!["-c".into(), install], env)
+            let (sh, args) = crate::platform::shell_args(&install);
+            (sh, args, env)
         }
         _ => anyhow::bail!("Anvil doesn't install {what}"),
     };
-    let out = std::process::Command::new(program)
+    let out = crate::platform::command(program)
         .args(args)
         .envs(env)
         .current_dir(dir)
@@ -2439,17 +2437,16 @@ fn remove_with(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use std::process::Command;
 
     pub(crate) fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("anvil-wt-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        fs::canonicalize(&d).unwrap()
+        crate::platform::canonicalize(&d).unwrap()
     }
 
     pub(crate) fn git(dir: &Path, args: &[&str]) {
-        let ok = Command::new("git")
+        let ok = crate::platform::command("git")
             .args(["-c", "user.name=t", "-c", "user.email=t@t", "-C"])
             .arg(dir)
             .args(args)
@@ -3199,7 +3196,7 @@ pub(crate) mod tests {
         let (main, x) = repo("real");
         let l = list(&main);
         assert_eq!(l.len(), 1);
-        assert_eq!(l[0].path, fs::canonicalize(&x).unwrap());
+        assert_eq!(l[0].path, crate::platform::canonicalize(&x).unwrap());
         assert_eq!(l[0].branch.as_deref(), Some("x"));
         assert_eq!(main_of(&x), Some(main.clone()));
         assert_eq!(main_of(&main), None);
@@ -3833,8 +3830,8 @@ pub(crate) mod tests {
             // checkout (the worktree is next to it, not inside).
             let canon = |p: &str| {
                 let p = Path::new(p);
-                let dir =
-                    fs::canonicalize(p.parent().unwrap()).unwrap_or(p.parent().unwrap().into());
+                let dir = crate::platform::canonicalize(p.parent().unwrap())
+                    .unwrap_or(p.parent().unwrap().into());
                 dir.join(p.file_name().unwrap_or_default())
             };
             let is_mains = |db: &str| {

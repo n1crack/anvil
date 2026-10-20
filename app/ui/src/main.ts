@@ -1,3 +1,4 @@
+import "./platform";
 // The main window, in the order its scripts always ran.
 import "./term";
 import "./app";

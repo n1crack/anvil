@@ -1,3 +1,4 @@
+import "./platform";
 import type { Settings } from "./types";
 import { ownError } from "./live";
 import { FIELDS, control } from "./hooksform";

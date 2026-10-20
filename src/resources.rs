@@ -6,7 +6,6 @@ use anyhow::{Result, bail};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -395,7 +394,6 @@ fn rules_for(site: &Site) -> Vec<Rule> {
 /// path, so every size equals `du -sk <path>` run on its own.
 pub(crate) fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
     use std::collections::HashSet;
-    use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Condvar, Mutex};
 
@@ -417,11 +415,11 @@ pub(crate) fn du(paths: &[PathBuf]) -> BTreeMap<PathBuf, u64> {
     let linked: Vec<Mutex<HashSet<(usize, u64, u64)>>> =
         (0..64).map(|_| Mutex::new(HashSet::new())).collect();
     let add = |targets: &[usize], m: &std::fs::Metadata| {
-        let n = m.blocks() * 512;
-        let shared = !m.is_dir() && m.nlink() > 1;
+        let (n, link) = crate::platform::disk_usage(m);
         for &t in targets {
-            let key = (t, m.dev(), m.ino());
-            if shared && !crate::lock(&linked[(m.ino() as usize ^ t) % 64]).insert(key) {
+            if let Some((dev, ino)) = link
+                && !crate::lock(&linked[(ino as usize ^ t) % 64]).insert((t, dev, ino))
+            {
                 continue;
             }
             counters[t].fetch_add(n, Ordering::Relaxed);
@@ -555,8 +553,39 @@ pub struct Ps {
     command: String,
 }
 
+#[cfg(windows)]
 pub fn ps() -> Vec<Ps> {
-    let out = Command::new("ps")
+    let table = crate::platform::process_table();
+    let parent: std::collections::HashMap<u32, u32> = table.iter().map(|p| (p.0, p.1)).collect();
+    // No process groups: a process's "group" is the ancestor Anvil started (its parent is
+    // this process), else its oldest known ancestor. A pid can be reused by an unrelated
+    // process, so the walk is bounded.
+    let me = std::process::id();
+    let group = |mut pid: u32| {
+        for _ in 0..64 {
+            match parent.get(&pid) {
+                Some(&p) if p != me && p != 0 && p != pid && parent.contains_key(&p) => pid = p,
+                _ => break,
+            }
+        }
+        pid
+    };
+    table
+        .iter()
+        .map(|(pid, ppid, rss, cpu, name)| Ps {
+            pid: *pid,
+            ppid: *ppid,
+            pgid: group(*pid),
+            rss: *rss,
+            cpu: *cpu,
+            command: name.clone(),
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+pub fn ps() -> Vec<Ps> {
+    let out = crate::platform::command("ps")
         .args(["-A", "-o", "pid=,ppid=,pgid=,rss=,%cpu=,command="])
         .output();
     let Ok(out) = out else { return vec![] };
@@ -745,7 +774,7 @@ fn listeners(ports: &[u16]) -> BTreeMap<u16, String> {
         return BTreeMap::new();
     }
     let list: Vec<String> = ports.iter().map(u16::to_string).collect();
-    let out = Command::new("lsof")
+    let out = crate::platform::command("lsof")
         .args(["-nP", "-sTCP:LISTEN", "-Fpcn"])
         .arg(format!("-iTCP:{}", list.join(",")))
         .output();
@@ -755,12 +784,12 @@ fn listeners(ports: &[u16]) -> BTreeMap<u16, String> {
 
 /// Container names by published port; empty if Docker isn't there or doesn't answer in 3s.
 fn containers() -> BTreeMap<u16, String> {
-    use std::os::unix::process::CommandExt;
-    let child = Command::new(crate::compose::docker_bin())
+    use crate::platform::OwnGroup;
+    let child = crate::platform::command(crate::compose::docker_bin())
         .args(["ps", "--format", "{{.Names}}\t{{.Ports}}"])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        .process_group(0) // a timeout ends whatever docker started too
+        .own_group() // a timeout ends whatever docker started too
         .spawn();
     let Ok(mut child) = child else {
         return BTreeMap::new();
@@ -1676,10 +1705,18 @@ mod tests {
             root.join("node_modules/a/b"),
         ];
         let ours = du(&paths);
-        let out = Command::new("du").arg("-sk").args(&paths).output().unwrap();
+        let out = crate::platform::command("du")
+            .arg("-sk")
+            .args(&paths)
+            .output()
+            .unwrap();
         // The system du counts a hard link once per run, so ask it about each path alone.
         for p in &paths {
-            let out = Command::new("du").arg("-sk").arg(p).output().unwrap();
+            let out = crate::platform::command("du")
+                .arg("-sk")
+                .arg(p)
+                .output()
+                .unwrap();
             let kb: u64 = String::from_utf8_lossy(&out.stdout)
                 .split_whitespace()
                 .next()

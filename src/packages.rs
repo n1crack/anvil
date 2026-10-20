@@ -1084,7 +1084,7 @@ pub fn audit(dir: &Path, eco: &str, cfg: &crate::Config) -> anyhow::Result<Vec<A
         ),
     };
     // ponytail: no time limit, the tools time out on the network themselves.
-    let out = std::process::Command::new(&program)
+    let out = crate::platform::command(&program)
         .args(pre)
         .args(args)
         .envs(env)

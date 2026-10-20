@@ -6,7 +6,7 @@ use anyhow::{Result, bail};
 use serde::Serialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 #[derive(Serialize)]
@@ -47,15 +47,15 @@ fn compose(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Resul
 
 /// Run `docker <args>` in `dir`; stdout on success, a readable error otherwise.
 fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
-    use std::os::unix::process::CommandExt;
-    let mut child = match Command::new(docker)
+    use crate::platform::OwnGroup;
+    let mut child = match crate::platform::command(docker)
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // Its own group, so a timeout also ends the compose plugin docker starts.
-        .process_group(0)
+        .own_group()
         .spawn()
     {
         Ok(c) => c,
@@ -406,16 +406,16 @@ struct Follow {
 /// that ends with the stream. Its own process group, so the compose plugin under the
 /// CLI stops with it.
 fn follow(docker: &Path, dir: &Path, service: &str, buf: Shared) -> Result<std::process::Child> {
+    use crate::platform::OwnGroup;
     use std::io::BufRead;
-    use std::os::unix::process::CommandExt;
-    let mut child = Command::new(docker)
+    let mut child = crate::platform::command(docker)
         .args(["compose", "logs", "-f", "--no-color", "--no-log-prefix"])
         .args(["--timestamps", "--tail", &FIRST.to_string(), "--", service])
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .process_group(0)
+        .own_group()
         .spawn()?;
     let mut out = std::io::BufReader::new(child.stdout.take().unwrap());
     std::thread::spawn(move || {
@@ -816,7 +816,10 @@ esac"#,
         logs.stop();
         assert!(logs.follows.is_empty());
         // Killed and reaped: the pid names no process, not even a zombie.
-        let ps = Command::new("ps").args(["-p", &pid]).output().unwrap();
+        let ps = crate::platform::command("ps")
+            .args(["-p", &pid])
+            .output()
+            .unwrap();
         assert!(!ps.status.success(), "{pid} is still there");
     }
 

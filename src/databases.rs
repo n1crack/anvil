@@ -51,7 +51,7 @@ fn client(cfg: &Config, id: &str, query: &str) -> Result<String> {
     let bin = program_dir(cfg, id)?.join("bin");
     let mut c = match kind {
         "mysql" => {
-            let mut c = Command::new(bin.join("mysql"));
+            let mut c = crate::platform::command(bin.join("mysql"));
             c.args([
                 "-h",
                 "127.0.0.1",
@@ -67,7 +67,7 @@ fn client(cfg: &Config, id: &str, query: &str) -> Result<String> {
             c
         }
         "postgres" => {
-            let mut c = Command::new(bin.join("psql"));
+            let mut c = crate::platform::command(bin.join("psql"));
             c.args([
                 "-h",
                 "127.0.0.1",
@@ -83,7 +83,7 @@ fn client(cfg: &Config, id: &str, query: &str) -> Result<String> {
             c
         }
         "redis" => {
-            let mut c = Command::new(bin.join("redis-cli"));
+            let mut c = crate::platform::command(bin.join("redis-cli"));
             c.args(["-h", "127.0.0.1", "-p", &p])
                 .args(query.split_whitespace());
             c
@@ -311,7 +311,7 @@ pub(crate) fn clone_steps(
 }
 
 fn command(c: &Cmd) -> Command {
-    let mut command = Command::new(&c.program);
+    let mut command = crate::platform::command(&c.program);
     command.args(&c.args);
     command
 }

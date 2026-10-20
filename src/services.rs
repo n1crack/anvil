@@ -721,7 +721,7 @@ fn build_redis(prefix: &std::path::Path, version: &str) -> Result<()> {
     )?;
     let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
     // Only the server and CLI: the bundled modules need a newer GNU Make than macOS ships.
-    run(Command::new("make")
+    run(crate::platform::command("make")
         .args(["-C", "src", &format!("-j{jobs}"), "BUILD_TLS=no", "redis-server", "redis-cli"])
         .current_dir(&src))
     .context("Building Redis failed — are the Xcode command line tools installed? (xcode-select --install)")?;
@@ -729,7 +729,7 @@ fn build_redis(prefix: &std::path::Path, version: &str) -> Result<()> {
     for bin in ["redis-server", "redis-cli"] {
         fs::copy(src.join("src").join(bin), prefix.join("bin").join(bin))?;
     }
-    let version = Command::new(prefix.join("bin/redis-server"))
+    let version = crate::platform::command(prefix.join("bin/redis-server"))
         .arg("--version")
         .output()?;
     let v = String::from_utf8_lossy(&version.stdout);
@@ -855,7 +855,7 @@ fn init(cfg: &Config, kind: &str, id: &str, log: &fs::File) -> Result<()> {
     }
     let d = dir(kind, &version(cfg, id));
     let status = match kind {
-        "mysql" => Command::new(d.join("bin/mysqld"))
+        "mysql" => crate::platform::command(d.join("bin/mysqld"))
             .arg("--no-defaults")
             .arg("--initialize-insecure")
             .arg(format!("--basedir={}", d.display()))
@@ -863,7 +863,7 @@ fn init(cfg: &Config, kind: &str, id: &str, log: &fs::File) -> Result<()> {
             .stdout(log.try_clone()?)
             .stderr(log.try_clone()?)
             .status()?,
-        "postgres" => Command::new(d.join("bin/initdb"))
+        "postgres" => crate::platform::command(d.join("bin/initdb"))
             .arg("-D")
             .arg(&data)
             .args(["-U", "postgres", "--auth=trust", "-E", "UTF8", "--locale=C"])
@@ -893,7 +893,7 @@ fn command(cfg: &Config, id: &str) -> Command {
     let v = version(cfg, id);
     let (d, data, run_dir) = (dir(kind, &v), data(id), home().join("run"));
     let port = port(cfg, id).to_string();
-    let mut c = Command::new(binary(kind, &v));
+    let mut c = crate::platform::command(binary(kind, &v));
     match kind {
         "mysql" => {
             c.arg("--no-defaults")
@@ -1527,10 +1527,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("svc-x.pids");
         assert!(!pid_alive(&file));
-        let mut child = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
+        let mut child = crate::platform::command("sleep").arg("30").spawn().unwrap();
         fs::write(&file, format!("1\n{}", child.id())).unwrap();
         assert!(pid_alive(&file));
         child.kill().unwrap();

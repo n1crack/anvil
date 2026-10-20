@@ -3,7 +3,7 @@ use anvil::*;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 /// `--help` colors: khaki headings, commands and flags in a soft green,
 /// placeholders grey. The descriptions get an off-white in `help_text`.
@@ -480,8 +480,7 @@ enum ExtCmd {
 
 fn dir_or_cwd(p: Option<PathBuf>) -> Result<PathBuf> {
     let p = p.map_or_else(std::env::current_dir, Ok)?;
-    p.canonicalize()
-        .with_context(|| format!("{} not found", p.display()))
+    anvil::platform::canonicalize(&p).with_context(|| format!("{} not found", p.display()))
 }
 
 fn start(cfg: &Config) -> Result<()> {
@@ -663,6 +662,9 @@ fn print_hooks(h: &worktrees::Resolved) {
 
 fn print_setup(cfg: &Config) -> Result<()> {
     let status = setup_status(cfg);
+    if cfg!(windows) {
+        return print_setup_windows(cfg, &status);
+    }
     if !status.shims {
         println!(
             "Adding {} to PATH in {} so php, composer, laravel, node, npm and npx follow each site's versions.",
@@ -690,6 +692,41 @@ fn print_setup(cfg: &Config) -> Result<()> {
             commands("Run once so addresses, ports 80 and 443 and HTTPS work on this Mac:"),
             cyan(format!("sudo sh -c {}", shims::sh_quote(&script)))
         );
+    }
+    if !root.exists() {
+        println!(
+            "{}",
+            commands(
+                "Then `anvil start` once and `anvil setup` again to trust Anvil's HTTPS certificates."
+            )
+        );
+    }
+    Ok(())
+}
+
+/// `anvil setup` on Windows: the shims on the user's PATH, then the system steps (the
+/// NRPT rule, the authority trusted) at once, behind Windows' own permission prompt.
+fn print_setup_windows(cfg: &Config, status: &anvil::Setup) -> Result<()> {
+    if !status.shims {
+        println!(
+            "Adding {} to your PATH so php, composer, laravel, node, npm and npx follow each site's versions.",
+            home().join("shims").display()
+        );
+    }
+    shims::setup()?;
+    if !status.shims {
+        println!("{}\n", commands("Open a new terminal window to use them."));
+    }
+    let root = root_cert();
+    let cert = (root.exists() && !status.trusted).then_some(root.as_path());
+    let script = setup_script(cfg, !status.resolver, None, cert)?;
+    if !script.is_empty() {
+        println!(
+            "Windows asks for permission to set up .{} addresses and HTTPS…",
+            cfg.tld
+        );
+        anvil::run_as_admin(&script, "")?;
+        println!("Done.");
     }
     if !root.exists() {
         println!(
@@ -817,13 +854,17 @@ fn main() -> ExitCode {
 /// `anvil shim <tool> [args…]`, what the shims in ~/.anvil/shims run: the
 /// arguments go through untouched, so it is handled before clap sees them.
 fn shim(tool: &std::ffi::OsStr, args: impl Iterator<Item = std::ffi::OsString>) -> Result<()> {
-    use std::os::unix::process::CommandExt;
     let tool = tool.to_string_lossy();
     let args: Vec<std::ffi::OsString> = args.collect();
     let words: Vec<String> = args.iter().map(|a| a.to_string_lossy().into()).collect();
     let cwd = std::env::current_dir()?;
     let (program, pre, env) = shims::resolve_run(&tool, &words, &cwd, &load()?, true)?;
-    let e = Command::new(&program).args(pre).args(args).envs(env).exec();
+    let e = anvil::platform::exec(
+        anvil::platform::command(&program)
+            .args(pre)
+            .args(args)
+            .envs(env),
+    );
     Err(e).with_context(|| format!("couldn't run {}", program.display()))
 }
 
@@ -882,6 +923,15 @@ fn service_in_app(id: String, action: &str) -> Result<()> {
 
 fn run() -> Result<()> {
     let mut args = std::env::args_os().skip(1);
+    // A Windows shim is this program named `php.exe`, `npm.exe`…
+    if cfg!(windows)
+        && let Some(tool) = std::env::current_exe()
+            .ok()
+            .as_deref()
+            .and_then(shims::shim_name)
+    {
+        return shim(std::ffi::OsStr::new(tool), std::env::args_os().skip(1));
+    }
     if args.next().is_some_and(|a| a == "shim") {
         let tool = args.next().context("usage: anvil shim <tool> [args…]")?;
         return shim(&tool, args);

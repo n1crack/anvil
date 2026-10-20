@@ -197,13 +197,7 @@ fn last_lines(path: &std::path::Path) -> Vec<String> {
 
 /// `HH:MM` in local time.
 fn clock(at: u64) -> String {
-    let t = at as nix::libc::time_t;
-    // SAFETY: `localtime_r` only writes into `tm`, which lives on this stack.
-    let mut tm: nix::libc::tm = unsafe { std::mem::zeroed() };
-    if unsafe { nix::libc::localtime_r(&t, &mut tm) }.is_null() {
-        return String::from("--:--");
-    }
-    format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+    crate::platform::local_clock(at)
 }
 
 #[cfg(test)]

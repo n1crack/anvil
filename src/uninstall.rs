@@ -6,7 +6,6 @@ use crate::{Config, PF_ANCHOR, PORTS_LABEL, SYSTEM_KEYCHAIN, home, run, shims};
 use anyhow::{Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub enum Step {
     /// `/etc/resolver/<tld>` pointing at Anvil's DNS server (needs sudo).
@@ -62,7 +61,7 @@ pub fn is_anvil_resolver(text: &str, dns_port: u16) -> bool {
 
 /// SHA-1 of a PEM certificate, as `security` prints it.
 fn fingerprint(cert: &Path) -> Option<String> {
-    let out = Command::new("openssl")
+    let out = crate::platform::command("openssl")
         .args(["x509", "-noout", "-fingerprint", "-sha1", "-in"])
         .arg(cert)
         .output()
@@ -84,7 +83,7 @@ pub fn plan(cfg: &Config) -> Vec<Step> {
     let root = crate::root_cert();
     if let Some(sha1) = fingerprint(&root) {
         let listed = |keychain: &Path| {
-            Command::new("security")
+            crate::platform::command("security")
                 .args(["find-certificate", "-a", "-Z"])
                 .arg(keychain)
                 .output()
@@ -176,10 +175,10 @@ pub fn home_problem(h: &Path, user: &Path, projects: &[PathBuf]) -> Option<Strin
     {
         return Some("it is a link; remove the folder it points to yourself".into());
     }
-    let Ok(h) = h.canonicalize() else {
+    let Ok(h) = crate::platform::canonicalize(h) else {
         return Some("it can't be read".into());
     };
-    if user.canonicalize().is_ok_and(|u| u.starts_with(&h)) {
+    if crate::platform::canonicalize(user).is_ok_and(|u| u.starts_with(&h)) {
         return Some("it is your home folder or holds it".into());
     }
     // Something only Anvil makes must be there, not just nothing foreign.
@@ -201,7 +200,7 @@ pub fn home_problem(h: &Path, user: &Path, projects: &[PathBuf]) -> Option<Strin
     }
     projects
         .iter()
-        .filter_map(|p| p.canonicalize().ok())
+        .filter_map(|p| crate::platform::canonicalize(p).ok())
         .find(|p| p.starts_with(&h))
         .map(|p| format!("your project folder {} is inside it", p.display()))
 }
@@ -217,7 +216,7 @@ fn projects(cfg: &Config) -> Vec<PathBuf> {
 /// The app, `anvil start`, and anything running from Anvil's home (servers,
 /// services, runtimes). Apps Anvil started stop with the app or `anvil start`.
 fn still_running() -> Result<Vec<String>> {
-    let out = Command::new("ps")
+    let out = crate::platform::command("ps")
         .args(["-axo", "pid=,command="])
         .output()?;
     if !out.status.success() {
@@ -319,17 +318,17 @@ fn apply(steps: &[Step]) {
             continue;
         }
         let done = match s {
-            Step::Authority(sha1) => run(Command::new("security")
+            Step::Authority(sha1) => run(crate::platform::command("security")
                 .args(["delete-certificate", "-Z", sha1, "-t"])
                 .arg(login_keychain())),
             Step::SystemAuthority(sha1) => {
                 // The admin-domain trust setting outlives the certificate unless it is
                 // removed first; the root file is still in ~/.anvil at this point.
                 let root = home().join("data/caddy/pki/authorities/local/root.crt");
-                let _ = run(Command::new("sudo")
+                let _ = run(crate::platform::command("sudo")
                     .args(["security", "remove-trusted-cert", "-d"])
                     .arg(&root));
-                run(Command::new("sudo").args([
+                run(crate::platform::command("sudo").args([
                     "security",
                     "delete-certificate",
                     "-Z",
@@ -339,8 +338,8 @@ fn apply(steps: &[Step]) {
                 ]))
             }
             Step::PathBlock(p) => shims::remove_path_block(p),
-            Step::Resolver(p) => run(Command::new("sudo").arg("rm").arg("-f").arg(p)),
-            Step::Ports(p) => run(Command::new("sudo").args([
+            Step::Resolver(p) => run(crate::platform::command("sudo").arg("rm").arg("-f").arg(p)),
+            Step::Ports(p) => run(crate::platform::command("sudo").args([
                 "sh",
                 "-c",
                 &format!(

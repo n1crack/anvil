@@ -538,7 +538,7 @@ mod tests {
         let dir = PathBuf::from(format!("/tmp/anvil-mcp-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let dir = dir.canonicalize().unwrap();
+        let dir = crate::platform::canonicalize(&dir).unwrap();
         // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
         unsafe { std::env::set_var("ANVIL_HOME", &dir) };
         Home(dir, guard)

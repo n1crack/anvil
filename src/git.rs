@@ -56,7 +56,7 @@ pub fn info(dir: &Path) -> Option<GitInfo> {
 /// git in `dir`, hardened: a repo's own config could otherwise run a program
 /// (fsmonitor), and it never waits on a prompt.
 fn command(dir: &Path) -> Command {
-    let mut c = Command::new("git");
+    let mut c = crate::platform::command("git");
     c.args(["-c", "core.fsmonitor=false"])
         .arg("-C")
         .arg(dir)

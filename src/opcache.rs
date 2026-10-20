@@ -6,7 +6,6 @@ use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// The versions whose default build lacks OPcache.
 pub const BUILDS: [&str; 4] = ["8.1", "8.2", "8.3", "8.4"];
@@ -34,7 +33,8 @@ pub fn so_path(minor: &str) -> PathBuf {
 }
 
 pub fn state(minor: &str) -> State {
-    if !BUILDS.contains(&minor) {
+    // Windows' PHP ships OPcache; its php.ini loads it.
+    if cfg!(windows) || !BUILDS.contains(&minor) {
         State::BuiltIn
     } else if so_path(minor).exists() {
         State::Ready
@@ -78,13 +78,13 @@ pub fn build(minor: &str) -> Result<()> {
     let (full, src) = source_tree(minor)?;
     println!("Building OPcache for PHP {full}…");
     let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
-    run(Command::new("make")
+    run(crate::platform::command("make")
         .args(["-s", &format!("-j{jobs}")])
         .current_dir(&src))
     .map_err(|e| tools_error("OPcache", e))?;
     let built = src.join("modules/opcache.so");
     // A `.so` PHP rejects would only print a warning on every start: check it first.
-    let check = Command::new(&php)
+    let check = crate::platform::command(&php)
         .arg("-n")
         .arg("-d")
         .arg(format!("zend_extension={}", built.display()))
@@ -100,7 +100,7 @@ pub fn build(minor: &str) -> Result<()> {
 
 /// The exact version (`8.4.23`) of the installed PHP `minor`.
 pub(crate) fn installed_full(minor: &str) -> Result<String> {
-    let out = Command::new(php_dir(minor).join("php"))
+    let out = crate::platform::command(php_dir(minor).join("php"))
         .args(["-n", "-r", "echo PHP_VERSION;"])
         .output()
         .with_context(|| format!("PHP {minor} is not installed"))?;
@@ -131,7 +131,7 @@ pub fn source_tree(minor: &str) -> Result<(String, PathBuf)> {
         true,
         Some(&sum),
     )?;
-    run(Command::new("./configure")
+    run(crate::platform::command("./configure")
         .arg("--quiet")
         // php-config and phpize carry the prefix: the stage is where they are.
         .arg(format!("--prefix={}", src.join("stage").display()))
@@ -148,7 +148,7 @@ pub fn source_tree(minor: &str) -> Result<(String, PathBuf)> {
         ])
         .current_dir(&src))
     .map_err(|e| tools_error("PHP's source", e))?;
-    let info = Command::new(php_dir(minor).join("php"))
+    let info = crate::platform::command(php_dir(minor).join("php"))
         .args(["-n", "-i"])
         .output()?;
     let config_h = fs::read_to_string(src.join("main/php_config.h"))?;

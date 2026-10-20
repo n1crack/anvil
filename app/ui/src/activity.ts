@@ -1,3 +1,4 @@
+import "./platform";
 import type { Activity, AgentAction } from "./types";
 import { follower } from "./console";
 import { splitter } from "./split";

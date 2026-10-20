@@ -2,13 +2,13 @@
 //! server (Node, Rust, Go, .NET): Anvil starts them on a private port and Caddy
 //! proxies `<name>.<tld>` to it.
 
+use crate::platform::OwnGroup;
 use crate::{Config, Site, Stopping, home, kill_orphans, runtimes};
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
 /// Every kind Anvil knows, in detection order.
@@ -206,10 +206,12 @@ pub fn with_js_install(dir: &Path, command: &str) -> String {
     if !runs_package_script(command) || !dir.join("package.json").exists() {
         return command.to_string();
     }
-    format!(
-        "{{ [ -d node_modules ] || {}; }} && {command}",
-        js_install(js_manager(dir))
-    )
+    let install = js_install(js_manager(dir));
+    if cfg!(windows) {
+        format!("(if not exist node_modules {install}) && {command}")
+    } else {
+        format!("{{ [ -d node_modules ] || {install}; }} && {command}")
+    }
 }
 
 /// The command Anvil runs when the app has no custom one. `$PORT` is set.
@@ -720,11 +722,11 @@ impl Apps {
         // Its old shell, if a crashed Anvil left one, ends first: nothing writes the log meanwhile.
         kill_orphans(&pid_in(&self.home, key), true);
         crate::state_dirs_in(&self.home)?;
+        // Emptied apart: Windows can't shorten a file opened only to append to.
+        fs::File::create(log_in(&self.home, key))?;
         let log = fs::OpenOptions::new()
-            .create(true)
             .append(true)
             .open(log_in(&self.home, key))?;
-        log.set_len(0)?;
         let command = crate::processes::with_ansi(command);
         // The trailing argument is $0: it tags the shell with Anvil's home so a
         // crashed Anvil's leftovers can be recognised and cleaned up.
@@ -733,8 +735,7 @@ impl Apps {
         // `<site>`, `<site>@<process>` or `<site>#<script>`.
         let site = key.split(['@', '#']).next().unwrap_or(key);
         let (columns, lines) = self.sizes.get(site).copied().unwrap_or(TERM_SIZE);
-        let child = Command::new("/bin/sh")
-            .args(["-c", &command, &tag])
+        let child = crate::platform::shell(&command, Some(&tag))
             .current_dir(dir)
             .envs(crate::processes::COLOR_ENV)
             .env("COLUMNS", columns.to_string())
@@ -743,7 +744,7 @@ impl Apps {
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
-            .process_group(0)
+            .own_group()
             .spawn()
             .with_context(|| format!("failed to start {key}"))?;
         let at = crate::started(child.id()).unwrap_or_default();
@@ -1357,12 +1358,12 @@ mod tests {
         let home = dir.join("home");
         fs::create_dir_all(home.join("run")).unwrap();
         // An owner that is gone: a child that already ended.
-        let mut gone = Command::new("true").spawn().unwrap();
+        let mut gone = crate::platform::command("true").spawn().unwrap();
         gone.wait().unwrap();
         let sleep = || {
-            Command::new("sleep")
+            crate::platform::command("sleep")
                 .arg("30")
-                .process_group(0)
+                .own_group()
                 .spawn()
                 .unwrap()
         };
@@ -1400,15 +1401,15 @@ mod tests {
         let dir = project(&[("groups/x", "")]);
         let home = dir.join("home");
         fs::create_dir_all(home.join("run")).unwrap();
-        let mut gone = Command::new("true").spawn().unwrap();
+        let mut gone = crate::platform::command("true").spawn().unwrap();
         gone.wait().unwrap();
         // A dev shell as `spawn` starts it: its own group, Anvil's tag as $0, a child in
         // its group. Reaped once it ends, as launchd reaps an orphan.
         let shell = |key: &str, script: &str| {
             let tag = format!("anvil:{}:{key}", home.display());
-            let mut c = Command::new("/bin/sh")
+            let mut c = crate::platform::command("/bin/sh")
                 .args(["-c", script, &tag])
-                .process_group(0)
+                .own_group()
                 .spawn()
                 .unwrap();
             let pid = c.id();
@@ -1421,7 +1422,7 @@ mod tests {
         // Its start time as `ps` wrote it for an Anvil started from a Turkish terminal; a
         // relaunch from Finder reads "Tue Oct 20 …" for the same process.
         let dev = shell("shop@dev", "sleep 60 & wait");
-        let tr = Command::new("ps")
+        let tr = crate::platform::command("ps")
             .args(["-p", &dev.to_string(), "-o", "lstart="])
             .env("LC_ALL", "tr_TR.UTF-8")
             .output()

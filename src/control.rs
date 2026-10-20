@@ -1,11 +1,11 @@
 //! The control socket: the running app answers the CLI and agents on
 //! `run/anvil.sock`, one JSON object per line each way.
 
+use crate::platform::{UnixListener, UnixStream};
 use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,7 +42,6 @@ fn checked_path() -> Result<PathBuf> {
 
 /// Binds the socket, owner-only, replacing a file a crashed app left behind.
 pub fn bind() -> Result<UnixListener> {
-    use std::os::unix::fs::PermissionsExt;
     let p = checked_path()?;
     crate::state_dirs()?;
     if UnixStream::connect(&p).is_ok() {
@@ -50,7 +49,7 @@ pub fn bind() -> Result<UnixListener> {
     }
     let _ = std::fs::remove_file(&p);
     let l = UnixListener::bind(&p).map_err(|e| anyhow!("couldn't bind {}: {e}", p.display()))?;
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))?;
+    crate::platform::set_mode(&p, 0o600)?;
     Ok(l)
 }
 
