@@ -72,7 +72,6 @@ describe("versions", () => {
       "PHP 8.3",
       "PHP 8.2",
       "PHP 8.1",
-      "PHP 8.0",
     ]);
     const def = rows[1];
     expect(def.classList.contains("is-default")).toBe(true);

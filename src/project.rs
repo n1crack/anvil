@@ -16,7 +16,7 @@
 //! copy = [".env"]
 //! ```
 
-use crate::{Config, PHP_VERSIONS, Site, services};
+use crate::{Config, Site, services};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -42,13 +42,8 @@ pub struct ProjectFile {
 /// The file's text checked: TOML, known keys, kinds and versions.
 pub fn parse(text: &str) -> Result<ProjectFile, String> {
     let f: ProjectFile = toml::from_str(text).map_err(|e| e.message().trim().to_string())?;
-    if let Some(v) = &f.php
-        && !PHP_VERSIONS.contains(&v.as_str())
-    {
-        return Err(format!(
-            "php = \"{v}\": Anvil offers PHP {}",
-            PHP_VERSIONS.join(", ")
-        ));
+    if let Some(v) = &f.php {
+        crate::php_offered(v).map_err(|e| format!("php = \"{v}\": {e}"))?;
     }
     if let Some(v) = &f.node
         && (v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()))
@@ -240,6 +235,10 @@ mod tests {
             ("ruby = \"3\"\n", "unknown field `ruby`"),
             ("[services]\nmongo = \"\"\n", "unknown service mongo"),
             ("php = \"7.4\"\n", "php = \"7.4\""),
+            (
+                "php = \"8.0\"\n",
+                "php = \"8.0\": PHP 8.0 is end of life — Anvil offers PHP 8.5, 8.4, 8.3, 8.2, 8.1",
+            ),
             ("node = \"lts\"\n", "node = \"lts\""),
             ("[services]\nmysql = \"5.7\"\n", "mysql = \"5.7\""),
             ("[services]\nredis = \"8.1\"\n", "redis = \"8.1\""),

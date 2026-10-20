@@ -885,7 +885,7 @@ const mockHandle = (cmd, a) => {
         dns_port: 53,
         editor: "Zed",
         editors: ["Zed", "Visual Studio Code"],
-        php: ["8.5", "8.4", "8.3", "8.2", "8.1", "8.0"].map((version) => ({
+        php: ["8.5", "8.4", "8.3", "8.2", "8.1"].map((version) => ({
           version,
           installed: version === "8.5" || version === "8.4",
           default: version === "8.4",

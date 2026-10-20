@@ -755,7 +755,7 @@ $("#open-config-about").onclick = () => invoke("open_config_dir").catch((e) => s
  * project's own LICENSE file (October 2026); check again when a source or version changes. */
 const SOFTWARE: [string, string, string, string, string][] = [
   ["Caddy", "Web server and HTTPS certificates", "Apache-2.0", "https://caddyserver.com", "Downloaded"],
-  ["PHP", "PHP apps, in static-php-cli’s builds (MIT); PHP 8.0–8.5", "PHP-3.01", "https://www.php.net", "Downloaded"],
+  ["PHP", "PHP apps, in static-php-cli’s builds (MIT); PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded"],
   ["Composer", "PHP packages", "MIT", "https://getcomposer.org", "Downloaded"],
   ["Node.js", "JavaScript apps", "MIT", "https://nodejs.org", "Downloaded"],
   ["pnpm", "JavaScript packages", "MIT", "https://pnpm.io", "Downloaded"],

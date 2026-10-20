@@ -67,7 +67,7 @@ It comes as a desktop app that carries the `anvil` CLI.
 - Automatic detection of Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt,
   Vite, Node.js, Rust, Go, .NET, Django, FastAPI, Flask and Docker Compose
   projects, with a manual override per app.
-- Isolated PHP 8.0 to 8.5 from portable builds, a default version (`anvil use
+- Isolated PHP 8.1 to 8.5 from portable builds, a default version (`anvil use
   8.4`) and a pinned version per application (`anvil app php <site> 8.3`).
 - php.ini settings for all applications (`anvil php ini <key> <value>`) or for
   one (`anvil app ini <site> <key> <value>`); an application with its own

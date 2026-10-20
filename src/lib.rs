@@ -925,7 +925,24 @@ pub fn php_dir(v: &str) -> PathBuf {
 }
 
 /// PHP versions Anvil offers to install, newest first.
-pub const PHP_VERSIONS: [&str; 6] = ["8.5", "8.4", "8.3", "8.2", "8.1", "8.0"];
+pub const PHP_VERSIONS: [&str; 5] = ["8.5", "8.4", "8.3", "8.2", "8.1"];
+
+/// Refuse a PHP version Anvil doesn't offer, saying why for 8.0: it is end of life, and
+/// its static-php-cli macOS build can't load extensions.
+pub fn php_offered(v: &str) -> Result<(), String> {
+    if PHP_VERSIONS.contains(&v) {
+        return Ok(());
+    }
+    let why = if v == "8.0" {
+        "is end of life"
+    } else {
+        "isn't offered"
+    };
+    Err(format!(
+        "PHP {v} {why} — Anvil offers PHP {}",
+        PHP_VERSIONS.join(", ")
+    ))
+}
 
 /// The apps pinned to `version` of `lang` (`php` or a runtime id), by name: removing
 /// it would break them. Only pins in effect count (a .NET one never is).
@@ -989,7 +1006,8 @@ pub fn installed_php() -> Vec<String> {
         .flatten()
         .flatten()
         .filter(|e| {
-            e.path().join("php-fpm").exists() && !e.file_name().to_string_lossy().starts_with('.')
+            e.path().join("php-fpm").exists()
+                && PHP_VERSIONS.contains(&e.file_name().to_string_lossy().as_ref())
         })
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
@@ -998,6 +1016,7 @@ pub fn installed_php() -> Vec<String> {
 }
 
 pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
+    php_offered(minor).map_err(anyhow::Error::msg)?;
     let (plat, _) = platform()?;
     let list: Vec<serde_json::Value> = fetch_json(&format!("{PHP_INDEX}?format=json"))?;
     let prefix = format!("php-{minor}.");
@@ -1049,6 +1068,7 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
 
 /// Set the PHP version used by every site that isn't pinned.
 pub fn set_default_php(cfg: &mut Config, version: &str) -> Result<()> {
+    php_offered(version).map_err(anyhow::Error::msg)?;
     if !installed_php().iter().any(|v| v == version) {
         bail!("PHP {version} is not installed — run `anvil php install {version}`");
     }
@@ -1058,6 +1078,9 @@ pub fn set_default_php(cfg: &mut Config, version: &str) -> Result<()> {
 
 /// Pin a site to a PHP version, or back to the default with `None`.
 pub fn set_site_php(cfg: &mut Config, site: &str, version: Option<String>) -> Result<()> {
+    if let Some(v) = &version {
+        php_offered(v).map_err(anyhow::Error::msg)?;
+    }
     if let Some(v) = &version
         && !installed_php().contains(v)
     {
@@ -2624,6 +2647,33 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "blog, shop use PHP 8.3 — switch them to another version first"
+        );
+    }
+
+    /// PHP 8.0 is end of life: install, default and pin say so, before any download.
+    #[test]
+    fn php_8_0_is_not_offered() {
+        assert_eq!(PHP_VERSIONS, ["8.5", "8.4", "8.3", "8.2", "8.1"]);
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
+        // A folder left from before isn't an installed version, so templates don't offer it.
+        fs::create_dir_all(php_dir("8.0")).unwrap();
+        fs::write(php_dir("8.0").join("php-fpm"), "").unwrap();
+        assert!(installed_php().is_empty());
+        let eol = "PHP 8.0 is end of life — Anvil offers PHP 8.5, 8.4, 8.3, 8.2, 8.1";
+        let mut cfg = Config::default();
+        assert_eq!(php_install(&mut cfg, "8.0").unwrap_err().to_string(), eol);
+        assert_eq!(
+            set_default_php(&mut cfg, "8.0").unwrap_err().to_string(),
+            eol
+        );
+        let pin = set_site_php(&mut cfg, "shop", Some("8.0".into())).unwrap_err();
+        assert_eq!(pin.to_string(), eol);
+        assert_eq!(
+            php_install(&mut cfg, "7.4").unwrap_err().to_string(),
+            "PHP 7.4 isn't offered — Anvil offers PHP 8.5, 8.4, 8.3, 8.2, 8.1"
         );
     }
 
