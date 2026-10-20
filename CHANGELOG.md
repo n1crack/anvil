@@ -34,6 +34,16 @@ Until 1.0.0, minor versions may contain breaking changes.
   or 50 MB; Disk lists them as cleanable. `anvil app mail <app>` lists the
   latest, `--open <id>` prints one with its files and links. A taken port is
   reported and the web server runs on without it.
+- Settings › Plugins › Mail catcher (off by default) turns it on, says where
+  it listens or why it can't, and lists mail from no app. With it on, each app
+  has a Mail tab: its mails newest first (time, from, to, subject, files,
+  size), live while shown; one opens to its HTML in a sandbox (no scripts,
+  nothing loaded from the network until Load remote images), text, headers
+  or source, with Save (to Downloads) for its files, Delete and Clear. A
+  switch in the tab leaves an app to its own mail setup. The Overview's Mail
+  line says Anvil catches the app's mail instead of pointing at Mailpit.
+  The app's CSP allows remote images so that button can work; the mail's own
+  frame blocks them until then.
 - Mail: an app whose `.env` sends mail to an Anvil Mailpit (`MAIL_MAILER=smtp`
   to this computer on that Mailpit's SMTP port) gets a Mail line on its
   Overview: Open inbox while Mailpit runs, Start while it doesn't. Other apps

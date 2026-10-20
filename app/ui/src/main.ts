@@ -6,6 +6,7 @@ import "./newapp";
 import "./git";
 import "./logs";
 import "./requests";
+import "./mail";
 import "./services";
 import "./share";
 import "./packages";

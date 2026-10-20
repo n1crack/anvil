@@ -16,6 +16,7 @@ import {
   selected,
   setMode,
   showError,
+  showTab,
   snap,
 } from "./app";
 import { late } from "./late";
@@ -61,8 +62,17 @@ window.renderSiteServices = (s, root) => {
     };
     box.append(chip);
   }
-  // The Overview's Mail line: only for an app whose .env sends to an Anvil Mailpit.
+  // The Overview's Mail line: the mail catcher's for an app it catches, else only for an
+  // app whose .env sends to an Anvil Mailpit.
   const row = $(".mail-row", root);
+  const c = snap?.catcher;
+  if (c?.caught.includes(s.name)) {
+    row.hidden = false;
+    const b = el("button", "inline-action", "Show mail");
+    b.onclick = () => showTab(root, "mail");
+    $("dd", row).replaceChildren(c.error ? el("span", "error", c.error) : el("span", null, "Caught by Anvil"), " ", b);
+    return;
+  }
   const svc = services.find((x) => x.id === snap?.mail?.[s.name]);
   row.hidden = !svc?.web;
   if (!svc?.web) return;

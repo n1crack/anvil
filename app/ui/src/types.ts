@@ -65,6 +65,9 @@ export interface Snapshot {
   projects: Record<string, Need[]>;
   /** The Anvil Mailpit each app's .env sends mail to, by app name; apps that send there only. */
   mail: Record<string, string>;
+  /** Settings › Plugins › Mail catcher while it's on: its port, why it isn't listening,
+   * the apps whose mail it catches. */
+  catcher: { port: number; error: string | null; caught: string[] } | null;
   /** Each worktree's database and what its Overview warns about, by worktree name. */
   worktrees: Record<string, WorktreeView>;
   /** Database copies of worktrees that are gone; never deleted on their own. */
@@ -307,6 +310,10 @@ export interface Settings {
   mcp: boolean;
   /** Settings › Plugins › Tunnel. */
   tunnel: boolean;
+  /** Settings › Plugins › Mail catcher, its port and why it isn't listening. */
+  mail_catcher: boolean;
+  mail_port: number;
+  mail_error: string | null;
   /** Settings › Worktrees: each preset as it applies. */
   worktree_presets: { id: string; name: string; kinds: string[]; hooks: Hooks; edited: boolean }[];
   login: boolean;

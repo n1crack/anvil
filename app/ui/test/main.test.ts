@@ -1957,6 +1957,107 @@ describe("share", () => {
   });
 });
 
+describe("mail catcher", () => {
+  const rows = () => $$(".mail-list .log");
+  const cell = (r: HTMLElement, c: string) => r.querySelector(c)?.textContent;
+  const frame = () => $(".mail-list .log-detail iframe") as HTMLIFrameElement;
+  const view = (id: string) => ($(`.mail-list .log-detail .seg [data-id="${id}"]`) as HTMLElement).click();
+
+  test("off: no Mail tab; on: the Overview's Mail line says Anvil catches it, Show mail opens the tab", async () => {
+    await select("shop");
+    expect($('.tabs [data-tab="mail"]').hidden).toBe(true);
+    w.mockSnap.catcher = { port: 2525, error: null, caught: ["shop"] };
+    await wait(550);
+    w.refresh();
+    await wait(80);
+    await select("shop");
+    const tabs = $$(".tabs [role=tab]").map((t) => t.dataset.tab);
+    expect(tabs.indexOf("mail")).toBe(tabs.indexOf("requests") + 1);
+    expect($('.tabs [data-tab="mail"]').hidden).toBe(false);
+    const row = $('[data-panel="overview"] .mail-row');
+    expect(row.hidden).toBe(false);
+    // The catcher instead of Mailpit, whose line shop would get otherwise.
+    expect(row.querySelector("dd")!.textContent).toBe("Caught by Anvil Show mail");
+    (row.querySelector("button") as HTMLElement).click();
+    await wait(80);
+    expect($('[data-panel="mail"]').hidden).toBe(false);
+  });
+
+  test("lists the newest first: time, from, to, subject, files and size; says how it catches", async () => {
+    expect(calls("mail_list").at(-1)![1]).toEqual({ inbox: "shop" });
+    const [first, second] = rows();
+    expect(cell(first, ".mail-from")).toBe("Shop <hello@example.com>");
+    expect(cell(first, ".mail-to")).toBe("user@example.com");
+    expect(cell(first, ".log-msg")).toBe("Şifre sıfırlama");
+    expect(cell(first, ".mail-files")).toBe("1");
+    expect(cell(first, ".req-size")).toBe("1.5 KB");
+    expect(cell(second, ".log-msg")).toBe("(no subject)");
+    expect(second.querySelector(".mail-files")!.textContent).toBe("");
+    expect($(".mail-how").textContent).toBe(
+      "Anvil catches shop’s mail: its processes and PHP get MAIL_HOST=127.0.0.1, MAIL_PORT=2525 and MAIL_USERNAME=shop, over its .env. A running process gets them when it restarts.",
+    );
+    expect(($(".mail-catch input") as HTMLInputElement).checked).toBe(true);
+  });
+
+  test("a mail opens to its HTML in a sandbox: no scripts, no remote loads until asked", async () => {
+    (rows()[0].querySelector(".log-head") as HTMLElement).click();
+    await wait(40);
+    expect(calls("mail_read").at(-1)![1]).toEqual({ inbox: "shop", id: "1792505339198-2" });
+    const f = frame();
+    expect(f.getAttribute("sandbox")).toBe("allow-same-origin");
+    expect(f.srcdoc).toContain(`content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"`);
+    expect(f.srcdoc).toContain("https://tracker.example/p.gif");
+    const remote = $(".mail-remote") as HTMLButtonElement;
+    expect(remote.hidden).toBe(false);
+    remote.click();
+    expect(frame().srcdoc).toContain("img-src data: https: http:");
+    expect($(".mail-remote")).toBeNull();
+  });
+
+  test("Text, Headers and Source views; Save puts the file in Downloads and says where", async () => {
+    view("text");
+    expect($(".mail-list .log-detail .mail-text").textContent).toBe("Reset: https://shop.test/reset");
+    view("headers");
+    expect($(".mail-list .log-detail .req-headers").textContent).toContain("SubjectŞifre sıfırlama");
+    view("source");
+    await wait(30);
+    expect(calls("mail_source").at(-1)![1]).toEqual({ inbox: "shop", id: "1792505339198-2" });
+    expect($(".mail-list .log-detail .mail-text").textContent).toBe("From: x\r\n\r\nraw");
+    const files = $$(".mail-list .log-detail .mail-file");
+    expect(files.map((f) => f.querySelector("span")!.textContent)).toEqual(["invoice.pdf 13 B"]);
+    (files[0].querySelector("button") as HTMLElement).click();
+    await wait(30);
+    expect(calls("mail_save").at(-1)![1]).toEqual({ inbox: "shop", id: "1792505339198-2", index: 1 });
+    expect(files[0].textContent).toBe("invoice.pdf 13 B Saved to ~/Downloads/invoice.pdf");
+  });
+
+  test("new mail comes in on top while the tab is shown; Delete takes one out", async () => {
+    const mail = await import("../src/mail");
+    mail.poll(false); // ticks by hand
+    w.mockMails.shop.unshift({ ...w.mockMails.shop[1], id: "1792505400000-9", subject: "Newest" });
+    await mail.tick();
+    expect(cell(rows()[0], ".log-msg")).toBe("Newest");
+    expect(rows().length).toBe(3);
+    // The open one stays open.
+    expect(rows()[1].querySelector(".log-detail")).not.toBeNull();
+    (rows()[1].querySelector(".mail-delete") as HTMLElement).click();
+    await wait(30);
+    expect(calls("mail_delete").at(-1)![1]).toEqual({ inbox: "shop", id: "1792505339198-2" });
+    expect(rows().map((r) => cell(r, ".log-msg"))).toEqual(["Newest", "(no subject)"]);
+  });
+
+  test("the switch leaves the app to its own mail setup; the line says so", async () => {
+    const box = $(".mail-catch input") as HTMLInputElement;
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    await wait(60);
+    expect(calls("set_mail_caught").at(-1)![1]).toEqual({ site: "shop", on: false });
+    expect($(".mail-how").textContent).toBe("shop sends mail with its own settings; Anvil doesn’t catch it.");
+    expect($('[data-panel="overview"] .mail-row dd').textContent).toBe("mailpit is stopped Start");
+    w.mockSnap.catcher = null;
+  });
+});
+
 describe("run settings", () => {
   test("a .NET app has no version picker: dotnet picks the SDK from global.json", async () => {
     w.mockSnap.sites.push(w.mockSite("api", "dotnet", { runtime_version: "10.0" }));

@@ -979,6 +979,7 @@ export function showTab(root, name, fallback = false) {
   $(".res-reload", root).hidden = name !== "resources";
   window.logsTab?.(root, name === "logs");
   window.requestsTab?.(root, name === "requests");
+  window.mailTab?.(root, name === "mail");
   if (name === "dev") late.devTab?.();
   if (name === "containers") late.containersTab?.();
   // Measuring (du, lsof, docker) only happens when someone looks at it.
@@ -1180,6 +1181,8 @@ export function renderSite() {
 
   // Caddy serves neither a compose project nor a plain folder.
   $('.tabs [data-tab="requests"]', root).hidden = s.kind === "compose" || s.kind === "folder";
+  // Only while the mail catcher is on (Settings › Plugins); its switch lives in the tab.
+  $('.tabs [data-tab="mail"]', root).hidden = !snap.catcher || s.kind === "compose" || s.kind === "folder";
   for (const b of root.querySelectorAll(".tabs [role=tab]")) b.onclick = () => showTab(root, b.dataset.tab);
   $(".tabs", root).onkeydown = (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;

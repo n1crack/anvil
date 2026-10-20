@@ -194,6 +194,19 @@
           <span>Tunnel<small>Share an app at a temporary public address through a Cloudflare quick tunnel, no account needed. Each app’s Overview gets Share; nothing is shared until you click it.</small></span>
           <input id="tunnel" type="checkbox" role="switch">
         </label>
+        <label class="row">
+          <span>Mail catcher<small>Each app’s mail lands in an inbox of its own, in its Mail tab: Anvil gives the app’s processes and PHP MAIL_* settings that win over its .env, and keeps the mail. Nothing is sent on.</small></span>
+          <input id="mail-catcher" type="checkbox" role="switch">
+        </label>
+        <div class="row" id="mail-line" hidden>
+          <span>Listens on<small>Change mail_port in config.toml</small></span>
+          <span class="actions-inline"><code></code></span>
+        </div>
+        <p class="error" id="mail-error" hidden></p>
+      </div>
+      <div id="mail-other" hidden>
+        <h2>Mail from no app</h2>
+        <p class="hint">Sent with an SMTP username that is no app’s, or none.</p>
       </div>
     </section>
 

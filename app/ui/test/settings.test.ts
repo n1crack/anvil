@@ -399,6 +399,35 @@ describe("plugins", () => {
     expect(w.mockCalls.at(-1)).toEqual(["set_tunnel", { on: true }]);
     expect(box.checked).toBe(true);
   });
+
+  test("Mail catcher: its address while on, a taken port inline, and mail from no app below", async () => {
+    await open("plugins");
+    const box = $("#mail-catcher") as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect($("#mail-line").hidden).toBe(true);
+    expect($("#mail-other").hidden).toBe(true);
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    await wait(60);
+    expect(w.mockCalls.filter(([c]: [string]) => c === "set_mail_catcher").at(-1)).toEqual(["set_mail_catcher", { on: true }]);
+    expect($("#mail-line").hidden).toBe(false);
+    expect($("#mail-line code").textContent).toBe("127.0.0.1:2525");
+    expect($("#mail-error").hidden).toBe(true);
+    // Mail whose SMTP username is no app's.
+    expect($("#mail-other").hidden).toBe(false);
+    expect($("#mail-other .log-msg").textContent).toBe("From nobody");
+    w.mockMailError = "The mail catcher can't use port 2525: Address already in use (os error 48)";
+    box.dispatchEvent(new Event("change"));
+    await wait(60);
+    expect($("#mail-error").textContent).toBe(w.mockMailError);
+    expect($("#mail-error").hidden).toBe(false);
+    w.mockMailError = null;
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    await wait(60);
+    expect($("#mail-line").hidden).toBe(true);
+    expect($("#mail-other").hidden).toBe(true);
+  });
 });
 
 describe("worktrees", () => {

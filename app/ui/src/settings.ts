@@ -3,6 +3,7 @@ import type { Settings } from "./types";
 import { ownError } from "./live";
 import { FIELDS, control } from "./hooksform";
 import { restart, type Release } from "./update";
+import { inboxView, type Inbox } from "./inbox";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -601,6 +602,7 @@ export function render() {
   $("#mcp").checked = s.mcp;
   $("#mcp-line").hidden = !s.mcp;
   $("#tunnel").checked = s.tunnel;
+  renderMailCatcher();
   renderPresets();
   // .localhost works without setup; another suffix needs the resolver step once.
   const tld = $("#tld");
@@ -819,6 +821,28 @@ $("#https-default").onchange = (e) => call("set_https_default", { on: e.target.c
 $("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.checked ? "copy" : "empty" });
 $("#mcp").onchange = (e) => call("set_mcp", { on: e.target.checked });
 $("#tunnel").onchange = (e) => call("set_tunnel", { on: e.target.checked });
+$("#mail-catcher").onchange = (e) => call("set_mail_catcher", { on: e.target.checked });
+
+/** Settings › Plugins › Mail catcher: where it listens, why it can't, and the inbox of
+ * mail from no app, shown once there is some. */
+let other: Inbox | null = null;
+function renderMailCatcher() {
+  $("#mail-catcher").checked = s.mail_catcher;
+  $("#mail-line").hidden = !s.mail_catcher;
+  $("#mail-line code").textContent = `127.0.0.1:${s.mail_port}`;
+  $("#mail-error").textContent = s.mail_error ?? "";
+  $("#mail-error").hidden = !s.mail_error;
+  const box = $("#mail-other");
+  if (!s.mail_catcher) {
+    box.hidden = true;
+    return;
+  }
+  if (!other) {
+    other = inboxView("_other", invoke, "No mail from outside your apps.");
+    box.append(other.node);
+  }
+  other.load().then(() => (box.hidden = !other!.node.querySelector(".mail-item")));
+}
 // "Copied" in the button for a moment, no toast.
 $("#mcp-copy").onclick = async (e) => {
   const b = e.currentTarget;

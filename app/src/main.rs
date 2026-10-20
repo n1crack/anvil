@@ -47,6 +47,23 @@ struct App {
     shares: Mutex<anvil::tunnel::Shares>,
 }
 
+/// The mail catcher as the main window shows it (its Mail tab, the Overview's Mail line).
+#[derive(Serialize)]
+struct Catcher {
+    port: u16,
+    /// Why it isn't listening (its port taken), while the web server runs.
+    error: Option<String>,
+    /// The apps whose mail it catches: not those switched to their own mail setup.
+    caught: Vec<String>,
+}
+
+/// Why the running server's mail catcher isn't listening.
+fn mail_error(app: &App) -> Option<String> {
+    anvil::lock(&app.server)
+        .as_ref()
+        .and_then(|s| s.mail_error.clone())
+}
+
 #[derive(Serialize)]
 struct Snapshot {
     sites: Vec<Site>,
@@ -80,6 +97,8 @@ struct Snapshot {
     projects: std::collections::BTreeMap<String, Vec<anvil::project::Need>>,
     /// The Anvil Mailpit each app's .env sends mail to, apps that send there only.
     mail: std::collections::BTreeMap<String, String>,
+    /// Settings › Plugins › Mail catcher, while it's on.
+    catcher: Option<Catcher>,
     /// Each worktree's database and what its Overview warns about.
     worktrees: std::collections::BTreeMap<String, WorktreeView>,
     /// Database copies of worktrees that are gone (never dropped on their own).
@@ -391,6 +410,15 @@ fn snapshot(app: &App) -> Res<Snapshot> {
                 ))
             })
             .collect(),
+        catcher: cfg.mail_catcher.then(|| Catcher {
+            port: anvil::mail::port(&cfg),
+            error: mail_error(app),
+            caught: sites
+                .iter()
+                .filter(|s| anvil::mail::caught(&cfg, &s.name))
+                .map(|s| s.name.clone())
+                .collect(),
+        }),
         worktrees: {
             let preparing = anvil::lock(&app.preparing).clone();
             sites
@@ -3085,6 +3113,10 @@ struct Settings {
     mcp: bool,
     /// Settings › Plugins › Tunnel.
     tunnel: bool,
+    /// Settings › Plugins › Mail catcher, its port and why it isn't listening.
+    mail_catcher: bool,
+    mail_port: u16,
+    mail_error: Option<String>,
     /// Settings › Worktrees: each preset as it applies.
     worktree_presets: Vec<PresetView>,
     login: bool,
@@ -3249,6 +3281,12 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         worktree_db: cfg.worktree_db,
         mcp: cfg.mcp,
         tunnel: cfg.tunnel,
+        mail_catcher: cfg.mail_catcher,
+        mail_port: cfg.mail_port.unwrap_or(anvil::mail::DEFAULT_PORT),
+        mail_error: cfg
+            .mail_catcher
+            .then(|| mail_error(&handle.state::<App>()))
+            .flatten(),
         worktree_presets,
         hidden: cfg.hidden.clone(),
         paths: cfg.paths,
@@ -3460,6 +3498,86 @@ fn set_tunnel(handle: AppHandle, app: State<App>, on: bool) -> Res<Settings> {
         },
         false,
     )
+}
+
+/// Settings › Plugins › Mail catcher: the web server restarts, so PHP gets `MAIL_*` (or
+/// loses it) and the listener starts or stops with it.
+#[tauri::command(async)]
+fn set_mail_catcher(handle: AppHandle, on: bool) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.mail_catcher = on;
+            Ok(())
+        },
+        true,
+    )
+}
+
+/// The Mail tab's switch: catch the app's mail, or leave it to its own setup.
+#[tauri::command(async)]
+fn set_mail_caught(handle: AppHandle, app: State<App>, site: String, on: bool) -> Res<Snapshot> {
+    let (cfg, ()) = edit(|c| anvil::mail::set_caught(c, &site, on))?;
+    if running(&app) {
+        start(&app, &cfg);
+    }
+    changed(&handle);
+    snapshot(&app)
+}
+
+/// An inbox's folder: an app's, or `_other` (Settings › Plugins › Mail catcher).
+fn inbox(name: &str) -> Res<std::path::PathBuf> {
+    anvil::mail::inbox(&anvil::mail::root(), name).ok_or_else(|| format!("No inbox {name}"))
+}
+
+async fn in_inbox<T: Send + 'static>(
+    name: String,
+    f: impl FnOnce(std::path::PathBuf) -> anyhow::Result<T> + Send + 'static,
+) -> Res<T> {
+    tauri::async_runtime::spawn_blocking(move || f(inbox(&name)?).map_err(err))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The Mail tab: an inbox's messages, newest first.
+#[tauri::command]
+async fn mail_list(inbox: String) -> Res<Vec<anvil::mail::Summary>> {
+    in_inbox(inbox, |d| Ok(anvil::mail::list(&d))).await
+}
+
+#[tauri::command]
+async fn mail_read(inbox: String, id: String) -> Res<anvil::mail::Message> {
+    in_inbox(inbox, move |d| anvil::mail::read(&d, &id)).await
+}
+
+/// A message as it came in, for its Source view.
+#[tauri::command]
+async fn mail_source(inbox: String, id: String) -> Res<String> {
+    in_inbox(inbox, move |d| {
+        Ok(String::from_utf8_lossy(&anvil::mail::raw(&d, &id)?).into_owned())
+    })
+    .await
+}
+
+/// Save an attachment to Downloads; where it went.
+#[tauri::command]
+async fn mail_save(inbox: String, id: String, index: usize) -> Res<std::path::PathBuf> {
+    in_inbox(inbox, move |d| {
+        let to = anvil::user_home().join("Downloads");
+        std::fs::create_dir_all(&to)?;
+        anvil::mail::save(&d, &id, index, &to)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn mail_delete(inbox: String, id: String) -> Res<()> {
+    in_inbox(inbox, move |d| anvil::mail::delete(&d, &id)).await
+}
+
+#[tauri::command]
+async fn mail_clear(inbox: String) -> Res<()> {
+    in_inbox(inbox, |d| anvil::mail::clear(&d)).await
 }
 
 /// Settings › General › Notifications (`notify`).
@@ -4208,6 +4326,14 @@ fn main() {
             set_tunnel,
             share_start,
             share_stop,
+            set_mail_catcher,
+            set_mail_caught,
+            mail_list,
+            mail_read,
+            mail_source,
+            mail_save,
+            mail_delete,
+            mail_clear,
             set_worktree_preset,
             set_login,
             open_config_dir,

@@ -57,6 +57,32 @@ window.mockRequests = {
   end_offset: 1200,
   truncated: true,
 };
+// The mail catcher's inboxes (src/mail.rs), newest first, and one message read in full.
+window.mockMails = {
+  shop: [
+    { id: "1792505339198-2", ts: 1792505339198, from: "Shop <hello@example.com>", to: ["user@example.com"], subject: "Şifre sıfırlama", size: 1536, attachments: 1 },
+    { id: "1792505319331-0", ts: 1792505319331, from: "hello@example.com", to: ["web@example.com"], subject: "", size: 304, attachments: 0 },
+  ],
+  _other: [{ id: "1792505354071-4", ts: 1792505354071, from: "Node <node@example.com>", to: ["a@example.com"], subject: "From nobody", size: 900, attachments: 0 }],
+};
+window.mockMailMessage = (id) => ({
+  ...Object.values(window.mockMails)
+    .flat()
+    .find((m) => m.id === id),
+  cc: [],
+  date: "Tue, 20 Oct 2026 17:00:00 +0300",
+  text: "Reset: https://shop.test/reset",
+  html: '<p><img src="data:image/png;base64,iVBORw0KGgo="><a href="https://shop.test/reset">Reset</a><img src="https://tracker.example/p.gif"></p>',
+  headers: [
+    ["From", "Shop <hello@example.com>"],
+    ["Subject", "Şifre sıfırlama"],
+  ],
+  attachments: [
+    { index: 0, name: "logo.png", mime: "image/png", size: 8, inline: true },
+    { index: 1, name: "invoice.pdf", mime: "application/pdf", size: 13, inline: false },
+  ],
+  links: ["https://shop.test/reset"],
+});
 window.mockSnap = {
   sites: [
     mockSite("shop", "laravel"),
@@ -78,6 +104,7 @@ window.mockSnap = {
   tunnel: false,
   shares: {},
   mail: { shop: "mailpit" },
+  catcher: null,
   editor: "Zed",
   git_client: null,
   groups: {},
@@ -930,10 +957,35 @@ const mockHandle = (cmd, a) => {
     case "set_tunnel":
       window.mockTunnel = a.on;
       return mockHandle("settings", {});
+    case "set_mail_catcher":
+      window.mockMailCatcher = a.on;
+      return mockHandle("settings", {});
+    case "set_mail_caught": {
+      const c = mockSnap.catcher;
+      c.caught = a.on ? [...c.caught, a.site] : c.caught.filter((n) => n !== a.site);
+      return mockSnap;
+    }
+    case "mail_list":
+      return [...(window.mockMails[a.inbox] ?? [])];
+    case "mail_read":
+      return window.mockMailMessage(a.id);
+    case "mail_source":
+      return "From: x\r\n\r\nraw";
+    case "mail_save":
+      return "/Users/x/Downloads/invoice.pdf";
+    case "mail_delete":
+      window.mockMails[a.inbox] = window.mockMails[a.inbox].filter((m) => m.id !== a.id);
+      return null;
+    case "mail_clear":
+      window.mockMails[a.inbox] = [];
+      return null;
     case "settings":
       return {
         mcp: window.mockMcp ?? false,
         tunnel: window.mockTunnel ?? false,
+        mail_catcher: window.mockMailCatcher ?? false,
+        mail_port: 2525,
+        mail_error: window.mockMailError ?? null,
         paths: ["/Users/x/Sites"],
         hidden: ["old-blog"],
         tld: "test",

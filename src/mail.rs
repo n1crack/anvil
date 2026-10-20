@@ -85,6 +85,16 @@ pub fn env(cfg: &crate::Config, site: &crate::Site) -> Vec<(String, String)> {
     .collect()
 }
 
+/// The Mail tab's switch: catch the app's mail, or leave it to its own setup.
+pub fn set_caught(cfg: &mut crate::Config, site: &str, on: bool) -> Result<()> {
+    crate::known_site(cfg, site)?;
+    cfg.sites
+        .entry(crate::site_name(site))
+        .or_default()
+        .mail_uncaught = !on;
+    Ok(())
+}
+
 /// Where inboxes live.
 pub fn root() -> PathBuf {
     crate::home().join("mail")
@@ -401,6 +411,43 @@ pub fn attachment(dir: &Path, id: &str, index: usize) -> Result<(String, Vec<u8>
         .nth(index)
         .with_context(|| format!("No attachment {index}"))?;
     Ok((name_of(p, index), p.contents().to_vec()))
+}
+
+/// Write an attachment into the folder `to` under its own name (made safe: the mail's
+/// sender chose it), numbered when a file has that name already. Where it went.
+pub fn save(dir: &Path, id: &str, index: usize, to: &Path) -> Result<PathBuf> {
+    let (name, bytes) = attachment(dir, id, index)?;
+    let name: String = name
+        .chars()
+        .filter(|c| !c.is_control())
+        .map(|c| if "/\\:".contains(c) { '-' } else { c })
+        .collect();
+    let name = name.trim_start_matches(['.', '-', ' ']).trim();
+    let name = if name.is_empty() { "attachment" } else { name };
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s, format!(".{e}")),
+        _ => (name, String::new()),
+    };
+    for n in 1.. {
+        let path = match n {
+            1 => to.join(name),
+            n => to.join(format!("{stem} {n}{ext}")),
+        };
+        // create_new: never over a file that's there, even one made meanwhile.
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                std::io::Write::write_all(&mut f, &bytes)?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    unreachable!()
 }
 
 pub fn delete(dir: &Path, id: &str) -> Result<()> {
@@ -846,6 +893,27 @@ JVBERi0xLjQ=\r\n\
         let (name, bytes) = attachment(dir.path(), &s.id, pdf.index).unwrap();
         assert_eq!(name, "invoice.pdf");
         assert_eq!(bytes, b"%PDF-1.4");
+    }
+
+    #[test]
+    fn a_saved_attachment_stays_in_its_folder_and_never_overwrites() {
+        let dir = tempfile::tempdir().unwrap();
+        let evil = MIME.replace("invoice.pdf", "../../evil/x.pdf");
+        let s = store(dir.path(), evil.as_bytes(), "x@y", &[]).unwrap();
+        let to = dir.path().join("Downloads");
+        std::fs::create_dir(&to).unwrap();
+        let index = read(dir.path(), &s.id)
+            .unwrap()
+            .attachments
+            .iter()
+            .find(|a| !a.inline)
+            .unwrap()
+            .index;
+        let first = save(dir.path(), &s.id, index, &to).unwrap();
+        assert_eq!(first, to.join("evil-x.pdf"));
+        assert_eq!(std::fs::read(&first).unwrap(), b"%PDF-1.4");
+        let second = save(dir.path(), &s.id, index, &to).unwrap();
+        assert_eq!(second, to.join("evil-x 2.pdf"));
     }
 
     #[test]

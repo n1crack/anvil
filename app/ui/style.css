@@ -2623,6 +2623,33 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .req-headers dt { flex: none; width: 180px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .req-headers dd { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .req-headers .redacted { color: var(--muted); font-style: italic; }
+/* Mail: the mail catcher's inbox (inbox.ts), rows as the Requests tab's. */
+.mail-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 10px; }
+.mail-how { flex: 1; min-width: 0; margin: 0; font-size: 12px; line-height: 1.5; }
+.mail-catch { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.mail-down { margin: 0 0 10px; font-size: 12px; }
+.mail-bar { justify-content: space-between; min-height: 26px; }
+.mail-count { font-size: 12px; }
+.mail-err { margin: 0 0 8px; font-size: 12px; }
+.mail-item .log-time { width: 64px; }
+.mail-from,
+.mail-to { flex: none; width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.mail-to { width: 140px; }
+.mail-item .log-msg { font-family: inherit; font-size: 13px; }
+.mail-files { flex: none; display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; width: 30px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mail-files svg { width: 12px; height: 12px; }
+.mail-item .log-detail { padding-left: 82px; }
+.mail-views { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.mail-actions { display: flex; gap: 8px; }
+.mail-actions button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: none; color: var(--muted); font-size: 12px; }
+.mail-actions button:hover { color: var(--text); border-color: var(--cold); }
+.mail-files-list { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 8px; font-size: 12px; }
+/* A mail is drawn for white paper, as mail apps show it, in either theme. */
+.mail-html { display: block; width: 100%; min-height: 80px; border: 1px solid var(--line); border-radius: var(--radius-s); background: #fff; }
+.mail-text { margin: 0; max-height: 480px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.55 ui-monospace, "SF Mono", Menlo, monospace; }
+#mail-other { max-width: 640px; }
+#mail-other .mail { margin-top: 8px; }
+
 /* Nothing listed: no rule above the message, it would double the tabs' line. */
 .logs-list:has(> .empty, > .logs-large) { border-top: 0; }
 
