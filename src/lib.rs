@@ -1206,6 +1206,19 @@ pub fn set_global_ini(cfg: &mut Config, key: &str, value: Option<&str>) -> Resul
 
 /// Set (or with `None`, clear) one php.ini override for a site.
 /// Turn HTTPS on or off for one site.
+/// HTTPS for new applications. The ones there now keep what they have, so turning
+/// it on or off never moves an existing app.
+pub fn set_https_default(cfg: &mut Config, on: bool) {
+    for site in sites(cfg) {
+        cfg.sites
+            .entry(site.name)
+            .or_default()
+            .https
+            .get_or_insert(site.secure);
+    }
+    cfg.https_default = Some(on);
+}
+
 pub fn set_secure(cfg: &mut Config, site: &str, on: bool) -> Result<()> {
     cfg.sites.entry(site_name(site)).or_default().https = Some(on);
     save(cfg)
@@ -2615,6 +2628,18 @@ mod tests {
     }
 
     /// dotnet picks its SDK from global.json, so a .NET app has no version to pin.
+    #[test]
+    fn https_for_new_apps_leaves_existing_ones_as_they_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.links.insert("shop".into(), dir.path().to_path_buf());
+        set_https_default(&mut cfg, true);
+        assert_eq!(cfg.https_default, Some(true));
+        assert!(!sites(&cfg).iter().any(|s| s.secure));
+        cfg.links.insert("blog".into(), dir.path().to_path_buf());
+        assert!(sites(&cfg).iter().any(|s| s.name == "blog" && s.secure));
+    }
+
     #[test]
     fn a_dotnet_app_is_never_pinned() {
         let dir = tempfile::tempdir().unwrap();

@@ -2588,7 +2588,7 @@ fn set_https_default(handle: AppHandle, on: bool) -> Res<Settings> {
     apply(
         &handle,
         |cfg| {
-            cfg.https_default = Some(on);
+            anvil::set_https_default(cfg, on);
             Ok(())
         },
         true,
