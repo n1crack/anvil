@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Debug, Clone, PartialEq, Default)]
 pub struct Request {
+    /// Where its line starts in the log: the row's id for `at`.
+    pub id: u64,
     /// Seconds since 1970.
     pub ts: f64,
     pub method: String,
@@ -24,6 +26,34 @@ pub struct Request {
     pub resp_headers: BTreeMap<String, Vec<String>>,
     pub remote: String,
     pub tls: bool,
+}
+
+/// A request as a list row: no headers (`at` has them, by `id`).
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct Row {
+    pub id: u64,
+    /// Seconds since 1970, to the millisecond.
+    pub ts: f64,
+    pub method: String,
+    pub host: String,
+    pub uri: String,
+    pub status: u16,
+    pub ms: f64,
+}
+
+impl From<&Request> for Row {
+    fn from(r: &Request) -> Row {
+        let milli = |x: f64| (x * 1000.0).round() / 1000.0;
+        Row {
+            id: r.id,
+            ts: milli(r.ts),
+            method: r.method.clone(),
+            host: r.host.clone(),
+            uri: r.uri.clone(),
+            status: r.status,
+            ms: milli(r.duration_ms),
+        }
+    }
 }
 
 #[derive(Serialize, Debug, Default)]
@@ -95,6 +125,7 @@ pub fn parse(line: &str) -> Option<Request> {
     let l: Line = serde_json::from_str(line.trim_start_matches('\0').trim()).ok()?;
     let r = l.request;
     Some(Request {
+        id: 0,
         ts: l.ts,
         remote: if r.client_ip.is_empty() {
             r.remote_ip
@@ -135,7 +166,10 @@ impl Filter {
         let set = |o: &Option<String>| o.clone().filter(|s| !s.is_empty() && s != "all");
         let q = self.query.trim().to_lowercase();
         (self.assets || !is_asset(&r.uri))
-            && set(&self.status).is_none_or(|s| s == format!("{}xx", r.status / 100))
+            && set(&self.status).is_none_or(|s| match s.strip_prefix(">=") {
+                Some(n) => n.trim().parse().is_ok_and(|n: u16| r.status >= n),
+                None => s == format!("{}xx", r.status / 100),
+            })
             && set(&self.method).is_none_or(|m| m.eq_ignore_ascii_case(&r.method))
             && (q.is_empty()
                 || r.uri.to_lowercase().contains(&q)
@@ -199,7 +233,11 @@ pub fn read(path: &Path, filter: &Filter, before: Option<u64>, limit: usize) -> 
                 end = at + l.len() as u64;
                 break 'pages;
             }
-            requests.extend(parse(l).filter(|r| filter.matches(r)));
+            requests.extend(
+                parse(l)
+                    .filter(|r| filter.matches(r))
+                    .map(|r| Request { id: at, ..r }),
+            );
         }
         end = start;
     }
@@ -224,11 +262,16 @@ pub fn tail(path: &Path, from: u64, filter: &Filter) -> Result<Page> {
     let mut buf = Vec::new();
     f.take(len - from).read_to_end(&mut buf)?;
     let end = buf.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    let mut requests: Vec<Request> = String::from_utf8_lossy(&buf[..end])
-        .lines()
-        .filter_map(parse)
-        .filter(|r| filter.matches(r))
-        .collect();
+    let mut at = from;
+    let mut requests: Vec<Request> = Vec::new();
+    for l in String::from_utf8_lossy(&buf[..end]).split_inclusive('\n') {
+        requests.extend(
+            parse(l)
+                .filter(|r| filter.matches(r))
+                .map(|r| Request { id: at, ..r }),
+        );
+        at += l.len() as u64;
+    }
     requests.reverse();
     Ok(Page {
         requests,
@@ -236,6 +279,26 @@ pub fn tail(path: &Path, from: u64, filter: &Filter) -> Result<Page> {
         end_offset: from + end as u64,
         truncated: false,
     })
+}
+
+/// The request whose line starts at `id`; `None` when no line starts there (the log rolled).
+pub fn at(path: &Path, id: u64) -> Result<Option<Request>> {
+    let Some(mut f) = open(path)? else {
+        return Ok(None);
+    };
+    if id > 0 {
+        f.seek(SeekFrom::Start(id - 1))?;
+    }
+    let mut buf = Vec::new();
+    // ponytail: a line over 1 MiB isn't found; Caddy's lines are a few KB.
+    f.take(1 << 20).read_to_end(&mut buf)?;
+    let line = match id {
+        0 => &buf[..],
+        _ if buf.first() == Some(&b'\n') => &buf[1..],
+        _ => return Ok(None),
+    };
+    let line = line.split(|&b| b == b'\n').next().unwrap_or_default();
+    Ok(parse(&String::from_utf8_lossy(line)).map(|r| Request { id, ..r }))
 }
 
 #[cfg(test)]
@@ -360,6 +423,32 @@ mod tests {
         )
         .unwrap();
         assert!(errors.requests.is_empty() && !errors.truncated);
+    }
+
+    #[test]
+    fn status_at_least_and_rows_by_id() {
+        let r = |status| parse(&line("/", status, "GET")).unwrap();
+        let f = Filter {
+            status: Some(">=400".into()),
+            ..Filter::default()
+        };
+        assert!(f.matches(&r(404)) && f.matches(&r(500)) && !f.matches(&r(302)));
+        let body = format!("{}\n{}\n", line("/a", 200, "GET"), line("/b", 500, "POST"));
+        let (_d, p) = temp(&body);
+        let page = read(&p, &Filter::default(), None, 10).unwrap();
+        let b = &page.requests[0];
+        assert_eq!(
+            (b.uri.as_str(), b.id),
+            ("/b", body.find("\n").unwrap() as u64 + 1)
+        );
+        assert_eq!(page.requests[1].id, 0);
+        assert_eq!(at(&p, b.id).unwrap().unwrap().uri, "/b");
+        assert_eq!(at(&p, 0).unwrap().unwrap().uri, "/a");
+        // Not a line's start (the log rolled, or a made-up id).
+        assert!(at(&p, 5).unwrap().is_none());
+        assert!(at(&p, 1 << 40).unwrap().is_none());
+        let t = tail(&p, page.requests[1].id, &Filter::default()).unwrap();
+        assert_eq!(t.requests[0].id, b.id);
     }
 
     #[test]

@@ -141,14 +141,26 @@ Until 1.0.0, minor versions may contain breaking changes.
   Agents, newest first. A failed action says why on its line.
 - Agents (MCP), off by default in Settings › Plugins: `anvil mcp` lets AI
   agents list apps and their processes, start, stop and restart them and
-  services, read logs, ask what failed since their last check, add
-  worktrees, and change an app's PHP or Node.js version, HTTPS and
-  autostart. They can't change a start command or php.ini, which would let
-  them choose what Anvil runs. Nothing that can't be undone is offered: no
-  database drop, no service data removal, no clean, no uninstall, and no
-  worktree removal, which deletes its folder. Claude Code connects with
-  `claude mcp add anvil -- anvil mcp`. While it's off, `anvil mcp` says where
-  to turn it on and exits with 1.
+  services, read logs and the requests the web server answered, ask what
+  failed since their last check (exits, new errors and warnings, new 5xx
+  requests), add and remove worktrees, and change an app's PHP or Node.js
+  version, HTTPS, aliases and its processes' autostart. They can't change a
+  start command or php.ini, which would let them choose what Anvil runs
+  outside their shell's permission. A tool's app is optional: it defaults to the app (or worktree)
+  of the folder the agent runs `anvil mcp` in. Results are compact JSON,
+  also as structured content; every tool has a title and read-only,
+  destructive and idempotent hints, so the agent's own permission prompts
+  apply. Logs and requests come in pages of up to 200 rows and about 32 KB
+  (`truncated`), with a `before` cursor; one request's headers by its id.
+  Results with log lines, requests or mail start with a line saying they
+  are untrusted app content. Removing a worktree is refused while it runs,
+  with uncommitted changes or unpushed commits, or when its folder holds
+  files git doesn't keep (a SQLite database, an edited `.env`); the user
+  can still remove it with `anvil worktree remove`. Nothing that can't be
+  undone is offered: no database drop, no service data removal, no clean,
+  no uninstall. Claude Code connects with `claude mcp add anvil -- anvil
+  mcp`. While it's off, `anvil mcp` says where to turn it on and exits
+  with 1.
 
 ### Changed
 

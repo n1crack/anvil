@@ -249,33 +249,58 @@ pub fn search(
     before: Option<u64>,
     limit: usize,
 ) -> Result<Page> {
+    let len = fs::metadata(path)?.len();
+    let (found, more) = entries(path, query, level, before, limit)?;
+    Ok(Page {
+        entries: found.into_iter().map(|(_, e)| e).collect(),
+        start_offset: more.unwrap_or(0),
+        end_offset: len,
+        truncated: more.is_some(),
+    })
+}
+
+/// An entry and the offset it starts at.
+pub type Placed = (u64, Entry);
+
+/// `search`'s matches, each with the offset it starts at, and where to go on from:
+/// the oldest match's start when `limit` cut the scan, `None` at the file's start.
+/// ponytail: invalid UTF-8 before an entry shifts its offset by the replacement's extra bytes.
+pub fn entries(
+    path: &Path,
+    query: &str,
+    level: Option<&str>,
+    before: Option<u64>,
+    limit: usize,
+) -> Result<(Vec<Placed>, Option<u64>)> {
     let mut f = File::open(path)?;
     let len = f.metadata()?.len();
     let q = query.trim().to_lowercase();
     let level = level.filter(|l| !l.is_empty() && *l != "all");
     let mut end = before.unwrap_or(len).min(len);
     let stop = end.saturating_sub(SEARCH_BYTES);
-    let mut entries = Vec::new();
-    while end > 0 && end > stop && entries.len() < limit {
+    let limit = limit.max(1);
+    let mut found = Vec::new();
+    while end > 0 && end > stop {
         let (start, text) = window(&mut f, end, SEARCH_CHUNK, first_header)?;
-        let mut hits: Vec<&str> = split(&text)
+        let base = text.as_ptr() as usize;
+        let hits = split(&text)
             .into_iter()
+            .rev()
             .filter(|raw| level.is_none_or(|l| group(&level_of(raw)) == l))
-            .filter(|raw| q.is_empty() || raw.to_lowercase().contains(&q))
-            .collect();
-        hits.reverse();
-        entries.extend(hits.into_iter().take(limit - entries.len()).map(entry));
+            .filter(|raw| q.is_empty() || raw.to_lowercase().contains(&q));
+        for raw in hits {
+            if found.len() == limit {
+                let at = found.last().map_or(end, |(at, _)| *at);
+                return Ok((found, Some(at)));
+            }
+            found.push((start + (raw.as_ptr() as usize - base) as u64, entry(raw)));
+        }
         if start >= end {
             break;
         }
         end = start;
     }
-    Ok(Page {
-        entries,
-        start_offset: end,
-        end_offset: len,
-        truncated: end > 0,
-    })
+    Ok((found, (end > 0).then_some(end)))
 }
 
 /// Bytes `[start, end)` where `start` is the beginning of an entry (or of the
@@ -1007,6 +1032,37 @@ mod tests {
             .write_all(body.as_bytes())
             .unwrap();
         p
+    }
+
+    #[test]
+    fn search_pages_back_without_skipping_matches() {
+        let body: String = (0..40)
+            .map(|i| format!("[2026-05-30 15:00:00] local.ERROR: entry {i}\n"))
+            .collect();
+        let p = temp("search-pages", &body);
+        let mut seen = Vec::new();
+        let mut before = None;
+        loop {
+            let page = search(&p, "entry", None, before, 7).unwrap();
+            seen.extend(page.entries.into_iter().map(|e| e.message));
+            if !page.truncated {
+                break;
+            }
+            before = Some(page.start_offset);
+        }
+        let want: Vec<String> = (0..40).rev().map(|i| format!("entry {i}")).collect();
+        assert_eq!(seen, want);
+        // Each entry's own start: where a page past it begins.
+        let (got, more) = entries(&p, "", None, None, 2).unwrap();
+        let at = |i: u32| body.find(&format!("ERROR: entry {i}\n")).unwrap() as u64 - 28;
+        assert_eq!(got[0].0, at(39));
+        assert_eq!(got[1].0, at(38));
+        assert_eq!(got[1].1.message, "entry 38");
+        assert_eq!(more, Some(at(38)));
+        let (all, more) = entries(&p, "", None, Some(at(1)), 5).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(more, None);
+        fs::remove_file(p).unwrap();
     }
 
     #[test]

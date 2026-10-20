@@ -2,7 +2,7 @@
 //! cursor the caller holds. Each call reads only the bytes after the cursor's
 //! offsets, so its cost follows what's new, not the size of the logs.
 
-use crate::{Site, apps, logs};
+use crate::{Site, apps, logs, requests};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -12,6 +12,9 @@ pub struct Cursor {
     pub at: u64,
     /// By source id (`logs::LogSource::id`).
     pub offsets: BTreeMap<String, u64>,
+    /// How far the app's request log was read (`requests::file`).
+    #[serde(default)]
+    pub requests: u64,
 }
 
 /// One of the app's processes as the caller (the running app) knows it.
@@ -49,6 +52,8 @@ pub struct Check {
     pub restarted: Vec<String>,
     /// Errors and warnings, at most `MAX_ENTRIES`, newest last.
     pub entries: Vec<CheckEntry>,
+    /// Requests answered with a 5xx, at most `MAX_ENTRIES`, newest last.
+    pub requests: Vec<requests::Row>,
     pub cursor: Cursor,
 }
 
@@ -61,7 +66,27 @@ pub fn check(site: &Site, procs: &[ProcState], since: Option<&Cursor>, now: u64)
     let mut cursor = Cursor {
         at: now,
         offsets: BTreeMap::new(),
+        requests: 0,
     };
+    let (path, errors) = (
+        requests::file(&site.name),
+        requests::Filter {
+            status: Some("5xx".into()),
+            assets: true,
+            ..Default::default()
+        },
+    );
+    let mut failed: Vec<requests::Row> = Vec::new();
+    let page = match since {
+        // Nothing to read on the first call: only where the log ends.
+        None => requests::read(&path, &errors, None, 0),
+        Some(c) => requests::tail(&path, c.requests, &errors),
+    };
+    if let Ok(page) = page {
+        cursor.requests = page.end_offset;
+        failed = page.requests.iter().rev().map(Into::into).collect();
+        failed.drain(..failed.len().saturating_sub(MAX_ENTRIES));
+    }
     let mut restarted = Vec::new();
     let mut entries = Vec::new();
     // (label, errors, warnings) per source with any.
@@ -136,6 +161,9 @@ pub fn check(site: &Site, procs: &[ProcState], since: Option<&Cursor>, now: u64)
             parts.join(", ")
         }
         Some(c) => {
+            if !failed.is_empty() {
+                parts.push(plural(failed.len(), "5xx request"));
+            }
             for (label, errors, warnings) in &counts {
                 let mut n = Vec::new();
                 if *errors > 0 {
@@ -158,6 +186,7 @@ pub fn check(site: &Site, procs: &[ProcState], since: Option<&Cursor>, now: u64)
         exited,
         restarted,
         entries,
+        requests: failed,
         cursor,
     }
 }
@@ -295,6 +324,38 @@ mod tests {
     }
 
     #[test]
+    fn new_5xx_requests_are_reported() {
+        let e = env();
+        let file = crate::requests::file("shop");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let line = |uri: &str, status: u16| {
+            format!(
+                r#"{{"ts":1792502416.2,"request":{{"method":"GET","host":"shop.test","uri":"{uri}","headers":{{"Cookie":["REDACTED"]}}}},"duration":0.5,"size":1,"status":{status}}}"#
+            ) + "\n"
+        };
+        append(&file, &line("/old", 500));
+        let first = check(&e.1, &[], None, 1000);
+        assert!(first.requests.is_empty());
+        append(
+            &file,
+            &(line("/ok", 200) + &line("/boom", 502) + &line("/nf", 404)),
+        );
+        let c = check(&e.1, &[], Some(&first.cursor), 1100);
+        assert_eq!(c.requests.len(), 1);
+        assert_eq!(
+            (c.requests[0].uri.as_str(), c.requests[0].status),
+            ("/boom", 502)
+        );
+        assert!(
+            c.summary.starts_with("1 5xx request since "),
+            "{}",
+            c.summary
+        );
+        let again = check(&e.1, &[], Some(&c.cursor), 1200);
+        assert!(again.requests.is_empty());
+    }
+
+    #[test]
     fn new_error_lines_are_reported() {
         let e = env();
         append(&log(&e), "[2026-10-19 14:00:00] local.ERROR: old\n");
@@ -349,6 +410,7 @@ mod tests {
         let since = Cursor {
             at: 1000,
             offsets: [("laravel.log".to_string(), 500)].into(),
+            requests: 0,
         };
         let c = check(&e.1, &[], Some(&since), 1100);
         assert_eq!(c.restarted, ["laravel.log"]);
@@ -367,6 +429,7 @@ mod tests {
         let since = Cursor {
             at: 1000,
             offsets: Default::default(),
+            requests: 0,
         };
         let procs = [
             proc("api", "crashed", Some((1, 1050))),
