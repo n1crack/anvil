@@ -508,6 +508,8 @@ fn start(app: &App, cfg: &Config) {
         Ok(s) => {
             *anvil::lock(&app.server) = Some(s);
             *anvil::lock(&app.error) = None;
+            // An app whose HTTPS changed needs its tunnel to reach the other port.
+            anvil::lock(&app.shares).refresh(cfg, &anvil::sites(cfg));
         }
         Err(e) => *anvil::lock(&app.error) = Some(err(e)),
     }

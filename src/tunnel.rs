@@ -58,6 +58,10 @@ fn bin() -> PathBuf {
     dir().join(platform::exe("cloudflared"))
 }
 
+fn config_file() -> PathBuf {
+    dir().join("config.yml")
+}
+
 /// Download the pinned cloudflared once, checked against its digest, and drop older ones.
 pub fn ensure() -> Result<PathBuf> {
     if !bin().exists() {
@@ -74,7 +78,7 @@ pub fn ensure() -> Result<PathBuf> {
         })?;
     }
     // Empty: a ~/.cloudflared/config.yml of the user's (a named tunnel's) stays out of it.
-    let config = dir().join("config.yml");
+    let config = config_file();
     if !config.exists() {
         fs::write(&config, "")?;
     }
@@ -198,7 +202,12 @@ struct Share {
     child: Arc<Mutex<Option<Child>>>,
     state: Arc<Mutex<State>>,
     log: PathBuf,
+    /// cloudflared's arguments: they follow the app's HTTPS (`refresh`).
+    args: Vec<String>,
+    changed: Changed,
 }
+
+type Changed = Arc<dyn Fn() + Send + Sync>;
 
 /// The apps shared now, by site name: one tunnel each.
 pub struct Shares {
@@ -226,13 +235,48 @@ impl Shares {
         &mut self,
         cfg: &Config,
         site: &Site,
-        changed: impl Fn() + Send + 'static,
+        changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<()> {
+        self.open(cfg, site, Arc::new(changed))
+    }
+
+    /// Open again, at a new address, each tunnel whose app turned HTTPS on or off since:
+    /// its old origin would only redirect visitors to the app's own .test address.
+    pub fn refresh(&mut self, cfg: &Config, sites: &[Site]) {
+        for site in sites {
+            let Some(s) = self.list.get(&site.name) else {
+                continue;
+            };
+            if s.args != args(cfg, site, &config_file()) {
+                // A Caddy just started takes a moment to listen. Failing (the web server
+                // down), the tunnel is gone, as it would be then anyway.
+                let port = if site.secure {
+                    cfg.https_port
+                } else {
+                    cfg.http_port
+                };
+                let until = Instant::now() + Duration::from_secs(5);
+                while !crate::port_answers(port) && Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                let changed = s.changed.clone();
+                let _ = self.open(cfg, site, changed);
+            }
+        }
+    }
+
+    fn open(&mut self, cfg: &Config, site: &Site, changed: Changed) -> Result<()> {
         if !crate::apps::serves(&site.kind) {
             bail!("{} has no address to share", site.name);
         }
+        let args = args(cfg, site, &config_file());
+        let current = |s: &Share| s.args == args;
         let starting = |s: &Share| *crate::lock(&s.state) == State::Starting;
-        if self.list.get(&site.name).is_some_and(starting) || self.alive(&site.name) {
+        if self
+            .list
+            .get(&site.name)
+            .is_some_and(|s| current(s) && (starting(s) || self.alive(&site.name)))
+        {
             return Ok(());
         }
         if let Some(old) = self.take(&site.name) {
@@ -254,7 +298,7 @@ impl Shares {
             .join(format!("tunnel-{}.log", site.name));
         let out = fs::File::create(&log)?;
         let child = platform::command(&bin)
-            .args(args(cfg, site, &bin.with_file_name("config.yml")))
+            .args(&args)
             .stdin(Stdio::null())
             .stdout(out.try_clone()?)
             .stderr(out)
@@ -270,9 +314,11 @@ impl Shares {
             child: Arc::new(Mutex::new(Some(child))),
             state: Arc::new(Mutex::new(State::Starting)),
             log: log.clone(),
+            args,
+            changed: changed.clone(),
         };
         let (child, state) = (share.child.clone(), share.state.clone());
-        std::thread::spawn(move || watch(&child, &state, &log, changed));
+        std::thread::spawn(move || watch(&child, &state, &log, || changed()));
         self.list.insert(site.name.clone(), share);
         Ok(())
     }
@@ -512,6 +558,37 @@ mod tests {
         assert!(!platform::alive(pid));
         assert!(!pid_file(&shares.home, "hello").exists());
         assert!(shares.states().is_empty());
+    }
+
+    /// HTTPS turned on while shared: http:// would only redirect visitors to hello.test.
+    #[cfg(unix)]
+    #[test]
+    fn a_tunnel_follows_the_apps_https() {
+        let (dir, _env) = fake("exec sleep 30");
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = server.local_addr().unwrap().port();
+        let cfg = Config {
+            http_port: port,
+            https_port: port,
+            ..Config::default()
+        };
+        let mut s = site(dir.path(), "php", false);
+        let mut shares = Shares::default();
+        shares.start(&cfg, &s, || {}).unwrap();
+        let pid = |sh: &Shares| crate::lock(&sh.list["hello"].child).as_ref().unwrap().id();
+        let first = pid(&shares);
+        shares.refresh(&cfg, std::slice::from_ref(&s));
+        assert_eq!(pid(&shares), first, "nothing changed");
+        s.secure = true;
+        shares.refresh(&cfg, std::slice::from_ref(&s));
+        assert!(!platform::alive(first));
+        assert_ne!(pid(&shares), first);
+        assert!(
+            shares.list["hello"]
+                .args
+                .contains(&format!("https://127.0.0.1:{port}"))
+        );
+        shares.take("hello").unwrap().wait(Duration::from_secs(5));
     }
 
     #[cfg(unix)]
