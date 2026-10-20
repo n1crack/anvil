@@ -61,6 +61,18 @@ window.renderSiteServices = (s, root) => {
     };
     box.append(chip);
   }
+  // The Overview's Mail line: only for an app whose .env sends to an Anvil Mailpit.
+  const row = $(".mail-row", root);
+  const svc = services.find((x) => x.id === snap?.mail?.[s.name]);
+  row.hidden = !svc?.web;
+  if (!svc?.web) return;
+  const dd = $("dd", row);
+  const b = el("button", "inline-action", svc.running ? "Open inbox" : "Start");
+  b.onclick = () =>
+    svc.running
+      ? invoke("open_url", { url: svc.web }).catch((e) => showError(String(e)))
+      : serviceCall("service_run", { id: svc.id, action: "start" });
+  dd.replaceChildren(el("span", svc.running ? null : "muted", svc.running ? svc.id : `${svc.id} is stopped`), " ", b);
 };
 
 window.loadServices = () => serviceCall("services");

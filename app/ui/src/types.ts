@@ -63,6 +63,8 @@ export interface Snapshot {
   runtimes: Record<string, string[]>;
   /** What an app's .anvil.toml asks for, by app name; apps with one only. */
   projects: Record<string, Need[]>;
+  /** The Anvil Mailpit each app's .env sends mail to, by app name; apps that send there only. */
+  mail: Record<string, string>;
   /** Each worktree's database and what its Overview warns about, by worktree name. */
   worktrees: Record<string, WorktreeView>;
   /** Database copies of worktrees that are gone; never deleted on their own. */

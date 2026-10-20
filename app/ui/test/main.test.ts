@@ -1750,6 +1750,32 @@ describe("project file", () => {
   });
 });
 
+describe("mail", () => {
+  test("an app sending to an Anvil Mailpit gets a Mail line: Start while stopped, then Open inbox", async () => {
+    const mailpit = w.mockServices.find((s: any) => s.id === "mailpit");
+    const row = () => $('[data-panel="overview"] .mail-row');
+    try {
+      await w.loadServices();
+      $('.modes [data-mode="apps"]').click();
+      await select("vuefinder");
+      expect(row().hidden).toBe(true);
+      await select("shop");
+      expect(row().hidden).toBe(false);
+      expect(row().querySelector("dd")!.textContent).toBe("mailpit is stopped Start");
+      mailpit.running = true; // what service_run hands back
+      (row().querySelector("button") as HTMLButtonElement).click();
+      await wait(40);
+      expect(calls("service_run").at(-1)![1]).toEqual({ id: "mailpit", action: "start" });
+      expect(row().querySelector("dd")!.textContent).toBe("mailpit Open inbox");
+      (row().querySelector("button") as HTMLButtonElement).click();
+      expect(calls("open_url").at(-1)![1]).toEqual({ url: "http://127.0.0.1:8025" });
+    } finally {
+      mailpit.running = false;
+      await w.loadServices();
+    }
+  });
+});
+
 describe("run settings", () => {
   test("a .NET app has no version picker: dotnet picks the SDK from global.json", async () => {
     w.mockSnap.sites.push(w.mockSite("api", "dotnet", { runtime_version: "10.0" }));

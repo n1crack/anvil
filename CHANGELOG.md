@@ -10,6 +10,12 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Mail: an app whose `.env` sends mail to an Anvil Mailpit (`MAIL_MAILER=smtp`
+  to this computer on that Mailpit's SMTP port) gets a Mail line on its
+  Overview: Open inbox while Mailpit runs, Start while it doesn't. Other apps
+  show nothing. `anvil app mail <app>` prints the inbox address. The inbox
+  opens unfiltered: apps share Laravel's default sender, so a sender filter
+  could hide mail.
 - Laravel Octane: an app with `laravel/octane` gets an `octane` process
   (RoadRunner), left out of Dev start, on a private port of its own (no two
   apps share one, and none is among the ports macOS gives outgoing

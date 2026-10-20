@@ -49,6 +49,7 @@ window.mockSnap = {
   php_ext_catalog: ["xdebug", "pcov", "apcu", "igbinary", "msgpack"],
   php_ext: {},
   php_ext_built: {},
+  mail: { shop: "mailpit" },
   editor: "Zed",
   git_client: null,
   groups: {},

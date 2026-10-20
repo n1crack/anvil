@@ -76,6 +76,8 @@ struct Snapshot {
     runtimes: std::collections::BTreeMap<&'static str, Vec<String>>,
     /// What each app's `.anvil.toml` asks for (PHP, Node.js, services), apps with one only.
     projects: std::collections::BTreeMap<String, Vec<anvil::project::Need>>,
+    /// The Anvil Mailpit each app's .env sends mail to, apps that send there only.
+    mail: std::collections::BTreeMap<String, String>,
     /// Each worktree's database and what its Overview warns about.
     worktrees: std::collections::BTreeMap<String, WorktreeView>,
     /// Database copies of worktrees that are gone (never dropped on their own).
@@ -373,6 +375,15 @@ fn snapshot(app: &App) -> Res<Snapshot> {
             .iter()
             .map(|s| (s.name.clone(), anvil::project::needs(&cfg, s)))
             .filter(|(_, n)| !n.is_empty())
+            .collect(),
+        mail: sites
+            .iter()
+            .filter_map(|s| {
+                Some((
+                    s.name.clone(),
+                    anvil::resources::mailpit_for(&cfg, &s.path)?,
+                ))
+            })
             .collect(),
         worktrees: {
             let preparing = anvil::lock(&app.preparing).clone();

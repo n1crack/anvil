@@ -429,6 +429,8 @@ enum AppCmd {
         site: String,
         process: Option<String>,
     },
+    /// The inbox address of the Anvil Mailpit the app's .env sends mail to
+    Mail { site: String },
 }
 
 #[derive(Subcommand)]
@@ -1465,6 +1467,23 @@ fn run() -> Result<()> {
             AppCmd::Start { site, process } => run_in_app(site, process, "start")?,
             AppCmd::Stop { site, process } => run_in_app(site, process, "stop")?,
             AppCmd::Restart { site, process } => run_in_app(site, process, "restart")?,
+            AppCmd::Mail { site } => {
+                let s = sites(&cfg)
+                    .into_iter()
+                    .find(|s| s.name == site_name(&site))
+                    .with_context(|| format!("No site named {site}"))?;
+                let id = resources::mailpit_for(&cfg, &s.path).with_context(|| {
+                    format!(
+                        "{}'s .env doesn't send mail to an Anvil Mailpit (MAIL_MAILER=smtp, MAIL_HOST=127.0.0.1, MAIL_PORT=its SMTP port)",
+                        s.name
+                    )
+                })?;
+                if !services::runs_somewhere(&id) {
+                    bail!("{id} isn't running: anvil service start {id}");
+                }
+                let port = services::web_port(&cfg, &id).unwrap_or(8025);
+                println!("http://127.0.0.1:{port}");
+            }
         },
         Cmd::New {
             kind,

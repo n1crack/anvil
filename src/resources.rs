@@ -672,6 +672,20 @@ pub fn processes(site: &Site, app_pid: Option<u32>) -> Vec<Process> {
     out
 }
 
+/// The Anvil Mailpit an app's .env sends mail to: SMTP to this computer on its port.
+pub fn mailpit_for(cfg: &Config, dir: &Path) -> Option<String> {
+    let env = dotenv(dir);
+    if env.get("MAIL_MAILER").map(String::as_str) != Some("smtp")
+        || !is_local(env.get("MAIL_HOST").map(String::as_str))
+    {
+        return None;
+    }
+    let port: u16 = env.get("MAIL_PORT")?.parse().ok()?;
+    services::instances(cfg).into_iter().find(|id| {
+        services::kind_of(cfg, id).is_ok_and(|k| k == "mailpit") && services::port(cfg, id) == port
+    })
+}
+
 /// Read `KEY=value` pairs from the project's .env.
 pub(crate) fn dotenv(dir: &Path) -> BTreeMap<String, String> {
     dotenv_file(&dir.join(".env"))
@@ -1365,6 +1379,40 @@ pub fn touched(dir: &Path) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mail_goes_to_the_mailpit_on_its_smtp_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        for (id, kind, port) in [("redis", "redis", 1025), ("mail", "mailpit", 1026)] {
+            cfg.services.insert(
+                id.into(),
+                services::ServiceConfig {
+                    kind: Some(kind.into()),
+                    port: Some(port),
+                    ..Default::default()
+                },
+            );
+        }
+        let to = |env: &str| {
+            std::fs::write(dir.path().join(".env"), env).unwrap();
+            mailpit_for(&cfg, dir.path())
+        };
+        let smtp = "MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT=";
+        assert_eq!(to(&format!("{smtp}1026")).as_deref(), Some("mail"));
+        assert_eq!(
+            to("MAIL_MAILER=smtp\nMAIL_PORT=1026").as_deref(),
+            Some("mail")
+        );
+        // Another kind on that port, another host, another mailer, no port: not Mailpit.
+        assert_eq!(to(&format!("{smtp}1025")), None);
+        assert_eq!(
+            to("MAIL_MAILER=smtp\nMAIL_HOST=mailpit\nMAIL_PORT=1026"),
+            None
+        );
+        assert_eq!(to("MAIL_MAILER=log\nMAIL_PORT=1026"), None);
+        assert_eq!(to("MAIL_MAILER=smtp"), None);
+    }
 
     #[test]
     fn build_tools_are_cleanable() {
