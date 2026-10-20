@@ -450,9 +450,20 @@ fn pid_in(home: &Path, name: &str) -> PathBuf {
     home.join("run").join(format!("app-{name}.pids"))
 }
 
-/// Whether any Anvil (the app or `anvil start`) is running this app right now.
+/// Whether any Anvil (the app or `anvil start`) is running this app right now: its
+/// own server or any of its processes (`<name>@<process>`, a queue or Vite).
 pub fn running_anywhere(name: &str) -> bool {
-    running_in(&home(), name)
+    let home = home();
+    let own = format!("app-{name}@");
+    running_in(&home, name)
+        || fs::read_dir(home.join("run")).is_ok_and(|dir| {
+            dir.flatten().any(|f| {
+                let file = f.file_name().to_string_lossy().into_owned();
+                file.strip_prefix(&own)
+                    .and_then(|k| k.strip_suffix(".pids"))
+                    .is_some_and(|k| running_in(&home, &format!("{name}@{k}")))
+            })
+        })
 }
 
 fn running_in(home: &Path, name: &str) -> bool {
@@ -859,6 +870,22 @@ pub fn check_command(command: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn running_anywhere_counts_the_apps_processes() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        fs::create_dir_all(dir.path().join("run")).unwrap();
+        let me = std::process::id();
+        let pids = |key: &str| dir.path().join("run").join(format!("app-{key}.pids"));
+        fs::write(pids("shop--x@vite"), format!("{me}\n{me} vite\n")).unwrap();
+        assert!(running_anywhere("shop--x"));
+        assert!(!running_anywhere("shop"));
+        fs::write(pids("shop--x@vite"), "4194302\n4194302 vite\n").unwrap();
+        assert!(!running_anywhere("shop--x"));
+    }
+
     use super::*;
 
     /// Every Start, process and script of an app, in the CLI and the app, makes a
