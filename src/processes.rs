@@ -2030,6 +2030,78 @@ echo '{DEV_JSON}'
     }
 
     #[test]
+    fn app_processes_get_php_ini_values() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&crate::ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let php = crate::php_dir("8.4").join("php");
+        fs::create_dir_all(php.parent().unwrap()).unwrap();
+        fs::write(&php, "#!/bin/sh\nprintf 8.4.23\n").unwrap();
+        fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(php.with_file_name("php-fpm"), "").unwrap();
+        let app = dir.path().join("shop");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("artisan"), "").unwrap();
+        let mut cfg = crate::Config::default();
+        cfg.links.insert("shop".into(), app.clone());
+        cfg.php = Some("8.4".into());
+        cfg.ini.insert("memory_limit".into(), "1G".into());
+        cfg.ini.insert("opcache.enable".into(), "0".into());
+        let shop = |cfg: &crate::Config| {
+            crate::sites(cfg)
+                .into_iter()
+                .find(|s| s.name == "shop")
+                .unwrap()
+        };
+        let scan = |env: Vec<(String, String)>| {
+            env.into_iter()
+                .find(|(k, _)| k == "PHP_INI_SCAN_DIR")
+                .map(|(_, v)| v)
+        };
+        let ini_of = |scan: &str| {
+            fs::read_to_string(Path::new(scan.split(':').next().unwrap()).join("anvil.ini"))
+                .unwrap()
+        };
+        // The global values, as PHP-FPM's shared pool has them: the version's folder.
+        let conf_d = crate::php_dir("8.4").join("conf.d");
+        let want = format!("{}:", conf_d.display());
+        assert_eq!(
+            scan(env(&cfg, &shop(&cfg), false).unwrap()),
+            Some(want.clone())
+        );
+        assert_eq!(ini_of(&want), "memory_limit=1G\nopcache.enable=0\n");
+        let (_, _, e) = crate::shims::resolve_with("php", dir.path(), &cfg, false).unwrap();
+        assert_eq!(scan(e), Some(want));
+
+        // The app's own win, as in its pool: a folder of its own, for its processes and
+        // the shims in its folder.
+        let own_ini = &mut cfg.sites.entry("shop".into()).or_default().ini;
+        own_ini.insert("memory_limit".into(), "2G".into());
+        own_ini.insert("upload_max_filesize".into(), "64M".into());
+        let own = dir.path().join("run/php-8.4-site-shop.d");
+        let want = format!("{}:", own.display());
+        assert_eq!(
+            scan(env(&cfg, &shop(&cfg), false).unwrap()),
+            Some(want.clone())
+        );
+        let ini = ini_of(&want);
+        assert!(ini.contains("memory_limit=2G\n"), "{ini}");
+        assert!(!ini.contains("memory_limit=1G"), "{ini}");
+        assert!(ini.contains("upload_max_filesize=64M\n"), "{ini}");
+        assert_eq!(ini.matches("opcache.enable=0").count(), 1, "{ini}");
+        let (_, _, e) = crate::shims::resolve_with("php", &app, &cfg, false).unwrap();
+        assert_eq!(scan(e), Some(want));
+        // Elsewhere, still the global ones only.
+        let (_, _, e) = crate::shims::resolve_with("php", dir.path(), &cfg, false).unwrap();
+        assert_eq!(
+            ini_of(&scan(e).unwrap()),
+            "memory_limit=1G\nopcache.enable=0\n"
+        );
+    }
+
+    #[test]
     fn artisan_commands_get_ansi() {
         let ansi = |c: &str| with_ansi(c);
         assert_eq!(

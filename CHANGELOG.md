@@ -23,7 +23,9 @@ Until 1.0.0, minor versions may contain breaking changes.
   has PHP 8.5 inside, so an app on another version is told so on its row and
   PHP-FPM keeps serving it. It listens on 127.0.0.1 only, gets the app's
   php.ini values, and keeps its own extensions: the ones Anvil builds can't
-  load into it. Octane itself copies `public/frankenphp-worker.php` into the
+  load into it. It has APCu and igbinary but not Xdebug, PCOV or msgpack: an
+  app with one of those on is told so on its row instead of starting without
+  it. Octane itself copies `public/frankenphp-worker.php` into the
   project, as `octane:install` does.
 - A web root of your own for an app Anvil serves (PHP, static): a folder inside
   the project (`web`, `dist`, `.`) in the app's Settings, or `anvil app root
@@ -94,6 +96,13 @@ Until 1.0.0, minor versions may contain breaking changes.
   processes included, also when it was started from somewhere else (Finder,
   a terminal), and only then forgets them. Killing Anvil (SIGTERM) now stops
   everything as Quit does.
+- php.ini values set in Anvil, for every app or for one, now reach an app's
+  processes (queue workers, Octane's RoadRunner workers, artisan) and `php`
+  and `composer` in a terminal, not only PHP-FPM: `memory_limit` is
+  the same on the web and in the CLI. The CLI keeps PHP's own no time limit.
+- `anvil app start` and `anvil service start` wait for a start that downloads
+  first (FrankenPHP, 177 MB) and print how it went, instead of "Anvil didn't
+  answer" after 5 seconds.
 
 ## [0.1.0] - 2026-10-19
 

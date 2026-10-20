@@ -197,28 +197,97 @@ fn write_caddyfile(site: &Site) -> Result<()> {
     )?)
 }
 
-/// FrankenPHP's environment over an app process's: Anvil's extensions are built for
+/// The extensions FrankenPHP's PHP has built in, lowercased: read from the binary once
+/// (`php-cli -m` refuses below PHP 8.6, `-r` works) and kept beside it as `extensions`.
+fn builtin() -> Result<Vec<String>> {
+    let d = dir(Server::FrankenPhp);
+    let file = d.join("extensions");
+    let text = match std::fs::read_to_string(&file) {
+        Ok(t) => t,
+        Err(_) => {
+            let data = home().join("octane/frankenphp/data");
+            let out = std::process::Command::new(d.join("frankenphp"))
+                .args(["php-cli", "-n", "-r"])
+                .arg(r#"echo implode(",", array_merge(get_loaded_extensions(), get_loaded_extensions(true)));"#)
+                .env("XDG_CONFIG_HOME", &data)
+                .env("XDG_DATA_HOME", &data)
+                .output()?;
+            anyhow::ensure!(
+                out.status.success(),
+                "FrankenPHP didn't list its extensions: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+            let t = String::from_utf8_lossy(&out.stdout)
+                .to_lowercase()
+                .replace(',', "\n");
+            std::fs::write(&file, &t)?;
+            t
+        }
+    };
+    Ok(text.lines().map(|l| l.trim().to_string()).collect())
+}
+
+/// Err unless FrankenPHP has every extension Anvil loads for the app (its PHP version's
+/// and its own, `phpext::php_args_with`): Anvil's builds can't load into it, so starting
+/// without them would drop them silently.
+fn lacking(cfg: &crate::Config, site: &Site) -> Result<()> {
+    let version = cfg.php_ext.get(FP_PHP).cloned().unwrap_or_default();
+    let mut names: Vec<&String> = vec![];
+    for n in version.iter().chain(&site.ext) {
+        if !names.contains(&n) && crate::phpext::built(FP_PHP, n) {
+            names.push(n);
+        }
+    }
+    if names.is_empty() {
+        return Ok(());
+    }
+    let have = builtin()?;
+    let missing: Vec<&String> = names.into_iter().filter(|n| !have.contains(n)).collect();
+    let Some((last, rest)) = missing.split_last() else {
+        return Ok(());
+    };
+    let list = match rest {
+        [] => last.to_string(),
+        _ => format!(
+            "{} or {last}",
+            rest.iter()
+                .map(|n| n.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    let (app, ver) = (
+        missing.iter().any(|n| site.ext.contains(n)),
+        missing.iter().any(|n| version.contains(n)),
+    );
+    let place = match (app, ver) {
+        (true, false) => "for this app".to_string(),
+        (false, _) => format!("for PHP {FP_PHP}"),
+        (true, true) => format!("for this app and PHP {FP_PHP}"),
+    };
+    let it = if rest.is_empty() { "it" } else { "them" };
+    bail!("FrankenPHP has no {list}; turn {it} off {place} or use RoadRunner")
+}
+
+/// FrankenPHP's environment over an app process's:Anvil's extensions are built for
 /// Anvil's PHP (not thread-safe) and can't load into FrankenPHP's own (thread-safe, with
 /// its own extensions), so its `PHP_INI_SCAN_DIR` has the app's php.ini values (PHP-FPM's,
-/// and OPcache's and Xdebug's settings) but no extension lines. Its Caddy keeps its state
+/// and OPcache's and Xdebug's settings) but no extension lines, and an app that has one
+/// FrankenPHP lacks doesn't start (`lacking`). Its Caddy keeps its state
 /// under Anvil's folder, not the user's own Caddy's.
 pub(crate) fn frankenphp_env(
     cfg: &crate::Config,
     site: &Site,
     env: &mut Vec<(String, String)>,
 ) -> Result<()> {
+    lacking(cfg, site)?;
     env.retain(|(k, _)| k != "PHP_INI_SCAN_DIR");
-    let mut args: Vec<String> = crate::phpext::php_args_with(cfg, FP_PHP, &site.ext)
+    let args: Vec<String> = crate::phpext::cli_args(cfg, FP_PHP, Some(site))
         .chunks(2)
         .filter(|d| !d[1].starts_with("extension=") && !d[1].starts_with("zend_extension="))
         .flatten()
         .cloned()
         .collect();
-    let mut ini = cfg.ini.clone();
-    ini.extend(site.ini.clone());
-    for (k, v) in ini {
-        args.extend(["-d".into(), format!("{k}={v}")]);
-    }
     let dir = home()
         .join("run")
         .join(format!("frankenphp-{}.d", crate::pool(site)));
@@ -420,6 +489,7 @@ mod tests {
         crate::phpext::tests::fake_php("8.5", "8.5.1");
         crate::phpext::tests::fake_so("8.5", "8.5.1", "apcu");
         cfg.php_ext.insert("8.5".into(), vec!["apcu".into()]);
+        fake_frankenphp("Core,apcu");
         cfg.ini.insert("memory_limit".into(), "1G".into());
         s.ini.insert("upload_max_filesize".into(), "64M".into());
         let env = crate::apps::process_env(&s, &row, &cfg).unwrap();
@@ -447,6 +517,67 @@ mod tests {
         assert_eq!(get("XDG_DATA_HOME"), Some(data));
         let path = get("PATH").unwrap();
         assert!(path.starts_with(&format!("{}:", dir(Server::FrankenPhp).display())));
+        unsafe { std::env::remove_var("ANVIL_HOME") };
+    }
+
+    /// A `frankenphp` in `dir(FrankenPhp)` whose PHP lists `exts`.
+    fn fake_frankenphp(exts: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let d = dir(Server::FrankenPhp);
+        fs::create_dir_all(&d).unwrap();
+        let bin = d.join("frankenphp");
+        fs::write(&bin, format!("#!/bin/sh\nprintf '{exts}'\n")).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn frankenphp_refuses_extensions_it_lacks() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        let app = tempfile::tempdir().unwrap();
+        let mut s = frankenphp_app(app.path(), "8.5");
+        let mut cfg = crate::Config::default();
+        let row = crate::processes::octane_row(&cfg, &s).unwrap();
+        crate::phpext::tests::fake_php("8.5", "8.5.1");
+        for e in ["xdebug", "pcov", "apcu"] {
+            crate::phpext::tests::fake_so("8.5", "8.5.1", e);
+        }
+        fake_frankenphp("Core,APCu,Zend OPcache");
+        // Read once from the binary, then from the list kept beside it.
+        assert_eq!(builtin().unwrap(), ["core", "apcu", "zend opcache"]);
+        fs::remove_file(dir(Server::FrankenPhp).join("frankenphp")).unwrap();
+        assert_eq!(builtin().unwrap(), ["core", "apcu", "zend opcache"]);
+
+        cfg.php_ext.insert("8.5".into(), vec!["apcu".into()]);
+        assert!(
+            crate::apps::process_env(&s, &row, &cfg).is_ok(),
+            "it has apcu"
+        );
+        s.ext = vec!["xdebug".into()];
+        let err = |cfg: &crate::Config, s: &Site| {
+            crate::apps::process_env(s, &row, cfg)
+                .unwrap_err()
+                .to_string()
+        };
+        assert_eq!(
+            err(&cfg, &s),
+            "FrankenPHP has no xdebug; turn it off for this app or use RoadRunner"
+        );
+        cfg.php_ext.insert("8.5".into(), vec!["pcov".into()]);
+        assert_eq!(
+            err(&cfg, &s),
+            "FrankenPHP has no pcov or xdebug; turn them off for this app and PHP 8.5 or use RoadRunner"
+        );
+        s.ext.clear();
+        assert_eq!(
+            err(&cfg, &s),
+            "FrankenPHP has no pcov; turn it off for PHP 8.5 or use RoadRunner"
+        );
+        // On but not built for this PHP: Anvil wouldn't load it, nothing to refuse.
+        cfg.php_ext.insert("8.5".into(), vec!["msgpack".into()]);
+        assert!(crate::apps::process_env(&s, &row, &cfg).is_ok());
         unsafe { std::env::remove_var("ANVIL_HOME") };
     }
 
