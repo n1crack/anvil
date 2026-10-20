@@ -50,7 +50,7 @@ jobs:
             url "$base/Anvil_#{version}_universal.dmg",
                 verified: "github.com/${{ github.repository }}/"
             name "Anvil"
-            desc "Native development environment"
+            desc "Local development environment for web projects"
             homepage "https://anvil.tr/"
 
             auto_updates true
@@ -62,7 +62,7 @@ jobs:
           EOF
           cat > Formula/anvil.rb <<EOF
           class Anvil < Formula
-            desc "Native development environment"
+            desc "Local development environment for web projects"
             homepage "https://anvil.tr/"
             url "$base/anvil-#{version}-universal-apple-darwin.tar.gz"
             version "$VERSION"

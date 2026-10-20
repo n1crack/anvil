@@ -21,12 +21,25 @@ It comes as a desktop app and a CLI.
 
 ### macOS (Apple Silicon)
 
+With [Homebrew](https://brew.sh), add Anvil's tap once:
+
 ```sh
-brew install --cask n1crack/anvil/anvil   # the app, which carries the anvil CLI
-brew install n1crack/anvil/anvil          # or only the CLI
+brew tap n1crack/anvil
 ```
 
-Pick one: both put `anvil` on PATH. The app is also on the [releases page](https://github.com/n1crack/anvil/releases), and updates itself.
+Then install the app, which carries the `anvil` CLI:
+
+```sh
+brew install --cask anvil
+```
+
+Or only the CLI:
+
+```sh
+brew install anvil
+```
+
+Pick one: both put `anvil` on PATH. Without the tap step, use the full names: `brew install --cask n1crack/anvil/anvil` or `brew install n1crack/anvil/anvil`. The app updates itself; `brew upgrade` updates the CLI. The app is also on the [releases page](https://github.com/n1crack/anvil/releases).
 
 ### Linux and Windows
 
