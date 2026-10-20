@@ -107,6 +107,7 @@
         <div class="row php-only"><dt>Web root</dt><dd class="path-cell"><span class="path" data-field="root"></span><button class="icon-btn path-open" data-open="root" title="Show in Finder" aria-label="Show the web root in Finder"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></dd></div>
         <div class="row db-row" hidden><dt>Database</dt><dd></dd></div>
         <div class="row mail-row" hidden><dt>Mail</dt><dd></dd></div>
+        <div class="row browser-line" hidden><dt>Browser</dt><dd></dd></div>
         <div class="row share-row" hidden><dt>Public address</dt><dd></dd></div>
       </dl>
       <div class="agents" hidden>
@@ -136,6 +137,14 @@
             <input id="app-https" type="checkbox" role="switch">
             <span class="securing" hidden><span class="spin-dot"></span><span class="securing-text"></span></span>
             <small>Serve at https:// with a trusted local certificate; http:// redirects there</small>
+          </dd>
+        </div>
+        <div class="row row-top php-only serves-only browser-row">
+          <dt><label for="app-browser">Browser errors</label></dt>
+          <dd class="https-cell">
+            <input id="app-browser" type="checkbox" role="switch">
+            <small>Your browser sends this app's JavaScript errors, failed requests and console errors to Anvil, for AI agents (MCP); one script is added to its pages</small>
+            <small class="error browser-blocked" hidden>This app's Content-Security-Policy keeps the script out of its pages, so nothing arrives</small>
           </dd>
         </div>
         <div class="row php-only serves-only">

@@ -25,6 +25,7 @@ const mockSite = (name, kind, extra = {}) => ({
   autostart: false,
   runtime_version: kind === "laravel" ? null : "22.1.0",
   runtime_pinned: false,
+  browser: false,
   worktree_of: null,
   branch: null,
   aliases: [],
@@ -965,6 +966,12 @@ const mockHandle = (cmd, a) => {
       c.caught = a.on ? [...c.caught, a.site] : c.caught.filter((n) => n !== a.site);
       return mockSnap;
     }
+    case "set_browser": {
+      mockSnap.sites.find((x) => x.name === a.site).browser = a.on;
+      return mockSnap;
+    }
+    case "browser_status":
+      return window.mockBrowser ?? { on: true, errors: 0, since: null, blocked: false };
     case "mail_list":
       return [...(window.mockMails[a.inbox] ?? [])];
     case "mail_read":

@@ -21,6 +21,30 @@ Until 1.0.0, minor versions may contain breaking changes.
   log in. No version check or other request to adminer.org. An app called `db`
   keeps `db.<tld>`, and Settings says the viewer isn't served then.
   `anvil db open <service|app> [database]` prints the address.
+- Browser errors, a switch per PHP app in its Settings tab (off by default;
+  `anvil app browser <app> --on`): the app's pages, in any browser you open them
+  in, send their JavaScript errors with stack frames, unhandled rejections,
+  console.error and warn (with where they were called), failed fetch/XHR and
+  responses of 400 or more, resources that didn't load, CSP violations,
+  deprecations and each page load's timings to Anvil, for agents. While any
+  app has it on, PHP-FPM's pools (php-cgi's `-d` on Windows) prepend a small
+  file from `~/.anvil/inject` that, only for that app (`ANVIL_INJECT`, set by
+  its site block) and only for a page load (Sec-Fetch-Dest, else Accept), puts
+  one `<script src="/__anvil/a.js?v=…">` before `</head>` of an HTML page;
+  JSON, fragments, redirects, downloads and SSE are left alone, and a page
+  whose Content-Security-Policy wouldn't let it run gets none (the Settings
+  tab and the Overview say so). An `auto_prepend_file` of your own is still
+  run. The script batches events (at most 200 a page, repeats counted, no
+  cookies, storage, form values or bodies, console text cut at 1.5 KB) and
+  sends them with `sendBeacon` to `/__anvil/e` on the page's own origin; Caddy
+  answers 204 and writes them without headers or addresses to
+  `~/.anvil/log/browser/<app>.log` (1 MiB, one older copy, 24 h; "Browser
+  errors" in Disk). The Overview has a Browser line ("3 errors since 17:40").
+  `anvil app browser <app>` lists them grouped, `--follow` as they come; the
+  MCP `browser` tool returns them grouped by kind, message and place (count,
+  first and last seen, page, top frames) with the latest page loads and a
+  cursor, marked as untrusted, and `check` adds the new browser errors since
+  its cursor.
 - Tunnel (Settings › Plugins, off by default): an app's Overview gets a Public
   address line. Share, after a confirm, opens a Cloudflare quick tunnel (no
   account) to the app through Caddy with the app's own host, HTTPS apps over

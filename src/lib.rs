@@ -2,6 +2,7 @@
 //! Shared by the `anvil` CLI and the desktop app.
 
 pub mod apps;
+pub mod browser;
 pub mod check;
 pub mod compose;
 pub mod control;
@@ -188,6 +189,10 @@ pub struct SiteConfig {
     /// The Mail tab's "Don't catch": the app keeps its own mail setup while the catcher is on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub mail_uncaught: bool,
+    /// The Settings tab's "Browser errors": the app's pages send their errors to Anvil
+    /// (`browser`). Off unless turned on; a worktree's unset follows its app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<bool>,
 }
 
 /// What the user changed about one process of an app (see `processes::set_process`).
@@ -304,6 +309,8 @@ pub struct Site {
     /// Language version the app runs with: chosen, from the project, or the newest.
     pub runtime_version: Option<String>,
     pub runtime_pinned: bool,
+    /// Its Settings tab's "Browser errors" switch (`browser`); a worktree's unset is its app's.
+    pub browser: bool,
     /// For a git worktree of another app: that app's name (its processes and runtimes are shared).
     pub worktree_of: Option<String>,
     /// A worktree's branch, `None` when detached.
@@ -663,6 +670,9 @@ fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
         worktree: worktrees::Hooks::default(),
         // A worktree has an inbox of its own, so its own switch.
         mail_uncaught: o.is_some_and(|s| s.mail_uncaught),
+        browser: o
+            .and_then(|s| s.browser)
+            .or_else(|| m.and_then(|s| s.browser)),
     }
 }
 
@@ -740,6 +750,7 @@ fn site_at(
         port: own.and_then(|s| s.port),
         autostart: own.is_some_and(|s| s.autostart),
         runtime_pinned,
+        browser: own.and_then(|s| s.browser).unwrap_or(false),
         worktree_of: None,
         branch: None,
         aliases: vec![],
@@ -1504,19 +1515,19 @@ fn fpm_socket(site: &Site) -> Option<PathBuf> {
 fn fpm_conf(cfg: &Config, v: &str, sites: &[Site]) -> String {
     let mut s = fpm_global(v);
     s += &fpm_pool("www", &home().join("run").join(format!("php-{v}.sock")), 16);
-    s += &php_values(&cfg.ini);
+    s += &php_values(sites, cfg.ini.clone());
     for site in sites
         .iter()
         .filter(|s| s.php.as_deref() == Some(v) && own_pool(s) && !s.own_master)
     {
-        s += &site_pool(cfg, site);
+        s += &site_pool(cfg, site, sites);
     }
     s
 }
 
 /// PHP-FPM config of a site's own master: its pool only; `None` when it gets no pool.
-fn fpm_site_conf(cfg: &Config, v: &str, site: &Site) -> Option<String> {
-    Some(fpm_global(v) + &Some(site_pool(cfg, site)).filter(|p| !p.is_empty())?)
+fn fpm_site_conf(cfg: &Config, v: &str, site: &Site, sites: &[Site]) -> Option<String> {
+    Some(fpm_global(v) + &Some(site_pool(cfg, site, sites)).filter(|p| !p.is_empty())?)
 }
 
 /// Where a site's own master's config goes.
@@ -1540,22 +1551,31 @@ fn fpm_pool(name: &str, sock: &Path, max: u8) -> String {
     )
 }
 
-fn php_values(ini: &BTreeMap<String, String>) -> String {
-    ini.iter()
+/// A pool's php.ini lines. With the browser bridge on for any app, every pool prepends
+/// Anvil's file (pool-wide: a per-request PHP_VALUE stays on the worker for the next
+/// app's requests), which includes the user's own `auto_prepend_file` through `env`.
+fn php_values(sites: &[Site], ini: BTreeMap<String, String>) -> String {
+    let (ini, theirs) = browser::pool_ini(sites, ini);
+    let mut s: String = ini
+        .iter()
         .map(|(k, val)| format!("php_value[{k}] = {val}\n"))
-        .collect()
+        .collect();
+    if let Some(p) = theirs.filter(|p| !p.contains('"')) {
+        s += &format!("env[ANVIL_PREPEND] = \"{p}\"\n");
+    }
+    s
 }
 
 /// A site's own pool, with the version's and its own php.ini values and a worktree's
 /// `env[]` lines; nothing for a worktree Anvil can't separate from main (Caddy shows why).
-fn site_pool(cfg: &Config, site: &Site) -> String {
+fn site_pool(cfg: &Config, site: &Site, sites: &[Site]) -> String {
     let Ok(env) = worktrees::web_env(cfg, site) else {
         return String::new();
     };
     let mut s = fpm_pool(&pool(site), &fpm_socket(site).unwrap(), 8);
     let mut ini = cfg.ini.clone();
     ini.extend(site.ini.clone());
-    s += &php_values(&ini);
+    s += &php_values(sites, ini);
     // Quoted: URLs hold `?`, `=`, `&`. One bad line would stop every pool; `env`
     // already refuses a database value that isn't safe, so only a shared one is left out.
     for (k, val) in env.iter().filter(|(k, v)| worktrees::fpm_safe(k, v)) {
@@ -1701,8 +1721,15 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
     let mut s = format!(
         // trusted_proxies: what comes from this computer keeps its X-Forwarded-*, so an app
         // shared through a tunnel (`tunnel`) learns the public host it is reached at.
-        "{{\n\tdefault_bind 127.0.0.1 [::1]\n\thttp_port {}\n\thttps_port {}\n\tadmin off\n\tlocal_certs\n\tskip_install_trust\n\tauto_https disable_redirects\n\tservers {{\n\t\ttrusted_proxies static 127.0.0.1/32 ::1/128\n\t}}\n}}\n",
-        cfg.http_port, cfg.https_port
+        "{{\n\tdefault_bind 127.0.0.1 [::1]\n\thttp_port {}\n\thttps_port {}\n\tadmin off\n\tlocal_certs\n\tskip_install_trust\n\tauto_https disable_redirects\n\tservers {{\n\t\ttrusted_proxies static 127.0.0.1/32 ::1/128\n\t}}\n{}}}\n",
+        cfg.http_port,
+        cfg.https_port,
+        // The browser bridge's logs, one per app with it on (`browser::site_lines`).
+        sites
+            .iter()
+            .filter(|s| browser::on(s))
+            .filter_map(|s| browser::logger(&s.name))
+            .collect::<String>()
     );
     // A secure site's HTTP addresses redirect; 302, so turning HTTPS off isn't
     // undone by a redirect the browser remembers.
@@ -1865,12 +1892,18 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         );
         // The mail catcher's env as FastCGI params: no pool of its own needed, and
         // PHP-FPM and Windows' php-cgi read them alike (Laravel: `$_SERVER` over `.env`).
-        let mail = mail::env(cfg, site);
-        let fpm = php_upstream(site).map(|upstream| match mail.is_empty() {
+        // So is the browser bridge's switch, which the pool-wide prepend reads.
+        let mut params = mail::env(cfg, site);
+        if browser::on(site) {
+            s += &browser::site_lines(&site.name);
+            params.push(("ANVIL_INJECT".into(), "1".into()));
+        }
+        let fpm = php_upstream(site).map(|upstream| match params.is_empty() {
             true => format!("php_fastcgi {upstream}\n"),
             false => format!(
                 "php_fastcgi {upstream} {{\n{}\t}}\n",
-                mail.iter()
+                params
+                    .iter()
                     .map(|(k, v)| format!("\t\tenv {k} \"{v}\"\n"))
                     .collect::<String>()
             ),
@@ -2738,6 +2771,10 @@ impl Server {
         }
         state_dirs()?;
         prune_run(&sites);
+        // PHP and Caddy read them from the start; only while an app's bridge is on.
+        if browser::any(&sites) {
+            browser::write_files()?;
+        }
 
         let mut server = Server {
             children: vec![],
@@ -2774,7 +2811,7 @@ impl Server {
                 .iter()
                 .filter(|s| s.own_master && s.php.as_deref() == Some(v))
             {
-                let Some(text) = fpm_site_conf(cfg, v, site) else {
+                let Some(text) = fpm_site_conf(cfg, v, site, &sites) else {
                     continue;
                 };
                 let conf = fpm_site_conf_file(v, site);
@@ -2870,7 +2907,10 @@ impl Server {
             pools.push((pool(site), ini, env, Some(site)));
         }
         let log = php_fpm_log(v);
-        for (name, ini, env, site) in pools {
+        for (name, ini, mut env, site) in pools {
+            // As FPM's `php_values`: Anvil's prepend for every pool while any app's bridge is on.
+            let (ini, theirs) = browser::pool_ini(sites, ini);
+            env.extend(theirs.map(|p| ("ANVIL_PREPEND".to_string(), p)));
             for port in cgi_ports(&name) {
                 let err = fs::OpenOptions::new()
                     .create(true)
@@ -3191,6 +3231,7 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            browser: false,
             worktree_of: None,
             branch: None,
             aliases: vec![],
@@ -4126,7 +4167,7 @@ mod tests {
         shop.ini.insert("display_errors".into(), "On".into());
         let mut sites = [shop, site("blog", "/s/blog", Some("8.4"))];
         mark_own_masters(&mut sites);
-        let conf = fpm_site_conf(&cfg, "8.4", &sites[0]).unwrap();
+        let conf = fpm_site_conf(&cfg, "8.4", &sites[0], &sites).unwrap();
         assert_eq!(conf.matches("\n[").count(), 1, "one pool: {conf}");
         assert!(conf.starts_with("[global]\n"));
         assert!(conf.contains("\n[site-shop]\n"));
@@ -4398,6 +4439,85 @@ mod tests {
         // A changed port re-serves.
         cfg.mail_port = Some(2600);
         assert!(caddyfile(&cfg, &sites).contains("env MAIL_PORT \"2600\""));
+    }
+
+    #[test]
+    fn the_browser_bridge_is_in_only_its_apps_block_and_every_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
+        let mut shop = site("shop", "/s/shop/public", Some("8.4"));
+        shop.kind = "laravel".into();
+        let mut blog = site("blog", "/s/blog", Some("8.4"));
+        blog.ini
+            .insert("auto_prepend_file".into(), "/s/blog/pre.php".into());
+        let mut cfg = Config::default();
+        // Off for all: no trace of it.
+        let off = caddyfile(&cfg, &[shop.clone(), blog.clone()]);
+        assert!(
+            !off.contains("__anvil") && !off.contains("ANVIL_INJECT"),
+            "{off}"
+        );
+        assert!(!fpm_conf(&cfg, "8.4", &[shop.clone(), blog.clone()]).contains("inject"));
+        shop.browser = true;
+        let sites = [shop, blog];
+        let out = caddyfile(&cfg, &sites);
+        let (head, rest) = out.split_at(out.find("\nshop.test").unwrap());
+        let block = &rest[..rest.find("\nblog.test").unwrap()];
+        assert!(head.contains("\tlog anvil_browser_shop {\n"), "{head}");
+        assert!(head.contains("browser/shop.log"), "{head}");
+        assert!(
+            block.contains(
+                "\thandle /__anvil/e {\n\t\tlog_name anvil_browser_shop\n\t\trespond 204\n\t}\n"
+            ),
+            "{block}"
+        );
+        assert!(block.contains("\t\tenv ANVIL_INJECT \"1\"\n"), "{block}");
+        // The collector goes before PHP gets the request.
+        assert!(block.find("/__anvil/e").unwrap() < block.find("php_fastcgi").unwrap());
+        let blog_block = &rest[rest.find("\nblog.test").unwrap()..];
+        assert!(!blog_block.contains("__anvil") && !blog_block.contains("ANVIL_INJECT"));
+        // Pool-wide: every pool prepends Anvil's file; the app's own is included by it.
+        let prepend = browser::prepend_file().display().to_string();
+        let conf = fpm_conf(&cfg, "8.4", &sites);
+        let www = &conf[conf.find("[www]").unwrap()..conf.find("[site-blog]").unwrap()];
+        assert!(
+            www.contains(&format!("php_value[auto_prepend_file] = {prepend}\n")),
+            "{www}"
+        );
+        assert!(!www.contains("ANVIL_PREPEND"));
+        let own = &conf[conf.find("[site-blog]").unwrap()..];
+        assert!(
+            own.contains(&format!("php_value[auto_prepend_file] = {prepend}\n")),
+            "{own}"
+        );
+        assert!(
+            own.contains("env[ANVIL_PREPEND] = \"/s/blog/pre.php\"\n"),
+            "{own}"
+        );
+        // A global one too.
+        cfg.ini
+            .insert("auto_prepend_file".into(), "/g/pre.php".into());
+        let conf = fpm_conf(&cfg, "8.4", &sites);
+        assert!(
+            conf.contains("env[ANVIL_PREPEND] = \"/g/pre.php\"\n"),
+            "{conf}"
+        );
+        // Caddy takes it, when this machine has Anvil's Caddy (CI has none).
+        let bin = PathBuf::from(std::env::var("HOME").unwrap()).join(".anvil/bin/caddy");
+        if bin.exists() {
+            fs::write(dir.path().join("Caddyfile"), &out).unwrap();
+            let adapt = crate::platform::command(&bin)
+                .args(["adapt", "--adapter", "caddyfile", "--config"])
+                .arg(dir.path().join("Caddyfile"))
+                .env("XDG_DATA_HOME", dir.path())
+                .env("XDG_CONFIG_HOME", dir.path())
+                .output()
+                .unwrap();
+            let err = String::from_utf8_lossy(&adapt.stderr);
+            assert!(adapt.status.success(), "{err}");
+        }
     }
 
     #[test]

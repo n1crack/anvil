@@ -1110,6 +1110,51 @@ function drawHttps(s) {
   };
 }
 
+// An app's browser errors as last read (`browser_status`), by app: read again after 5 s.
+const bridgeSeen = new Map<string, { at: number; st: { errors: number; since: number | null; blocked: boolean } }>();
+const HM = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+/** The Settings tab's "Browser errors" switch (PHP apps), the note when the app's CSP
+ * keeps the script out, and the Overview's Browser line while it's on. */
+function browserBridge(s, root) {
+  const row = $(".browser-row", root);
+  const line = $('[data-panel="overview"] .browser-line', root);
+  if (!row) return;
+  if (!PHP_KINDS.has(s.kind) || !s.php) {
+    row.remove();
+    return;
+  }
+  const box = $("#app-browser", row);
+  box.checked = !!s.browser;
+  box.onchange = () => {
+    bridgeSeen.delete(s.name);
+    call("set_browser", { site: s.name, on: box.checked });
+  };
+  if (!s.browser) return;
+  const draw = (st) => {
+    $(".browser-blocked", row).hidden = !st.blocked;
+    if (!line) return;
+    line.hidden = false;
+    const n = st.errors;
+    $("dd", line).replaceChildren(
+      st.blocked
+        ? el("span", "error", "Blocked by the app’s Content-Security-Policy")
+        : n
+          ? el("span", null, `${n} error${n === 1 ? "" : "s"} since ${HM.format(new Date(st.since * 1000))}`)
+          : el("span", "muted", "No errors"),
+    );
+  };
+  const seen = bridgeSeen.get(s.name);
+  if (seen) draw(seen.st);
+  if (seen && Date.now() - seen.at < 5000) return;
+  invoke("browser_status", { site: s.name })
+    .then((st) => {
+      bridgeSeen.set(s.name, { at: Date.now(), st });
+      if (selected === s.name && row.isConnected) draw(st);
+    })
+    .catch(() => {});
+}
+
 /** Every address of an app, each with its own Open. */
 function aliasPop(anchor, sites) {
   const pop = el("div", "alias-pop");
@@ -1272,6 +1317,7 @@ export function renderSite() {
   php.onchange = () => call("set_php", { site: s.name, version: php.value || null });
 
   if (!process && serves(s)) webRoot(s, root);
+  browserBridge(s, root);
   if (!process && s.php) appExtensions(s, root);
   else root.querySelector(".app-exts-row")?.remove();
 

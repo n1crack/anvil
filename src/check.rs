@@ -2,7 +2,7 @@
 //! cursor the caller holds. Each call reads only the bytes after the cursor's
 //! offsets, so its cost follows what's new, not the size of the logs.
 
-use crate::{Site, apps, logs, requests};
+use crate::{Site, apps, browser, logs, requests};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -15,6 +15,9 @@ pub struct Cursor {
     /// How far the app's request log was read (`requests::file`).
     #[serde(default)]
     pub requests: u64,
+    /// How far the app's browser log was read (`browser::file`).
+    #[serde(default)]
+    pub browser: u64,
 }
 
 /// One of the app's processes as the caller (the running app) knows it.
@@ -54,6 +57,9 @@ pub struct Check {
     pub entries: Vec<CheckEntry>,
     /// Requests answered with a 5xx, at most `MAX_ENTRIES`, newest last.
     pub requests: Vec<requests::Row>,
+    /// Errors on the app's pages while its browser bridge is on, at most `MAX_ENTRIES`,
+    /// most recently seen last.
+    pub browser: Vec<browser::Group>,
     pub cursor: Cursor,
 }
 
@@ -67,6 +73,7 @@ pub fn check(site: &Site, procs: &[ProcState], since: Option<&Cursor>, now: u64)
         at: now,
         offsets: BTreeMap::new(),
         requests: 0,
+        browser: 0,
     };
     let (path, errors) = (
         requests::file(&site.name),
@@ -86,6 +93,23 @@ pub fn check(site: &Site, procs: &[ProcState], since: Option<&Cursor>, now: u64)
         cursor.requests = page.end_offset;
         failed = page.requests.iter().rev().map(Into::into).collect();
         failed.drain(..failed.len().saturating_sub(MAX_ENTRIES));
+    }
+    let mut page_errors: Vec<browser::Group> = Vec::new();
+    if browser::on(site) {
+        let file = browser::file(&site.name);
+        match since {
+            None => {
+                let end = requests::read(&file, &errors, None, 0);
+                cursor.browser = end.map_or(0, |p| p.end_offset);
+            }
+            Some(c) => {
+                if let Ok(r) = browser::read(&file, c.browser) {
+                    cursor.browser = r.end;
+                    page_errors = r.errors().cloned().collect();
+                    page_errors.drain(..page_errors.len().saturating_sub(MAX_ENTRIES));
+                }
+            }
+        }
     }
     let mut restarted = Vec::new();
     let mut entries = Vec::new();
@@ -164,6 +188,10 @@ pub fn check(site: &Site, procs: &[ProcState], since: Option<&Cursor>, now: u64)
             if !failed.is_empty() {
                 parts.push(plural(failed.len(), "5xx request"));
             }
+            let n: u64 = page_errors.iter().map(|g| g.count).sum();
+            if n > 0 {
+                parts.push(plural(n as usize, "browser error"));
+            }
             for (label, errors, warnings) in &counts {
                 let mut n = Vec::new();
                 if *errors > 0 {
@@ -187,6 +215,7 @@ pub fn check(site: &Site, procs: &[ProcState], since: Option<&Cursor>, now: u64)
         restarted,
         entries,
         requests: failed,
+        browser: page_errors,
         cursor,
     }
 }
@@ -283,6 +312,7 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            browser: false,
             worktree_of: None,
             branch: None,
             aliases: vec![],
@@ -356,6 +386,44 @@ mod tests {
     }
 
     #[test]
+    fn new_browser_errors_are_reported_while_the_bridge_is_on() {
+        let mut e = env();
+        e.1.browser = true;
+        e.1.php = Some("8.4".into());
+        let file = crate::browser::file("shop");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let beacon = |events: &str| {
+            let d: String = events.bytes().map(|b| format!("%{b:02X}")).collect();
+            format!(
+                r#"{{"ts":1792502416.2,"request":{{"method":"POST","host":"shop.test","uri":"/__anvil/e?p=x&d={d}"}},"status":204}}"#
+            ) + "\n"
+        };
+        append(&file, &beacon(r#"[{"k":"error","msg":"old","at":"/"}]"#));
+        let first = check(&e.1, &[], None, 1000);
+        assert!(first.browser.is_empty());
+        append(
+            &file,
+            &beacon(
+                r#"[{"k":"error","msg":"boom","at":"/"},{"k":"console","level":"warn","msg":"meh","at":"/"},{"k":"load","at":"/"}]"#,
+            ),
+        );
+        let c = check(&e.1, &[], Some(&first.cursor), 1100);
+        let msgs: Vec<&str> = c.browser.iter().map(|g| g.message.as_str()).collect();
+        // Errors only: warnings and page loads are in `browser`.
+        assert_eq!(msgs, ["boom"]);
+        assert!(
+            c.summary.starts_with("1 browser error since "),
+            "{}",
+            c.summary
+        );
+        assert!(check(&e.1, &[], Some(&c.cursor), 1200).browser.is_empty());
+        // Off: not read.
+        e.1.browser = false;
+        append(&file, &beacon(r#"[{"k":"error","msg":"later","at":"/"}]"#));
+        assert!(check(&e.1, &[], Some(&c.cursor), 1300).browser.is_empty());
+    }
+
+    #[test]
     fn new_error_lines_are_reported() {
         let e = env();
         append(&log(&e), "[2026-10-19 14:00:00] local.ERROR: old\n");
@@ -411,6 +479,7 @@ mod tests {
             at: 1000,
             offsets: [("laravel.log".to_string(), 500)].into(),
             requests: 0,
+            browser: 0,
         };
         let c = check(&e.1, &[], Some(&since), 1100);
         assert_eq!(c.restarted, ["laravel.log"]);
@@ -430,6 +499,7 @@ mod tests {
             at: 1000,
             offsets: Default::default(),
             requests: 0,
+            browser: 0,
         };
         let procs = [
             proc("api", "crashed", Some((1, 1050))),

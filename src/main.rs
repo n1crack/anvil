@@ -478,6 +478,22 @@ enum AppCmd {
         #[arg(long, short)]
         follow: bool,
     },
+    /// Errors on the app's pages from your browser (JS errors, rejections, console errors,
+    /// failed requests, CSP), grouped, oldest first, while its Browser errors switch is on;
+    /// --on and --off turn it on (PHP apps) and off
+    Browser {
+        site: String,
+        /// How many groups
+        #[arg(short, default_value_t = 20)]
+        n: usize,
+        /// Keep printing new events as they come
+        #[arg(long, short)]
+        follow: bool,
+        #[arg(long, conflicts_with = "off")]
+        on: bool,
+        #[arg(long)]
+        off: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1013,6 +1029,32 @@ fn print_mail(m: &anvil::mail::Message) {
         (Some(t), _) => println!("{}", t.trim_end()),
         (None, Some(h)) => println!("{}", h.trim_end()),
         _ => println!("{}", dim("(no text)")),
+    }
+}
+
+/// One group of `anvil app browser`: when last, how many, kind, message, where, frames.
+fn print_group(g: &browser::Group) {
+    let at = g.last as u64;
+    let kind = match g.level.as_str() {
+        "error" => red(format!("{:<10}", g.kind)),
+        _ => yellow(format!("{:<10}", g.kind)),
+    };
+    let times = if g.count > 1 {
+        dim(format!(" ×{}", g.count))
+    } else {
+        String::new()
+    };
+    println!(
+        "{} {kind} {}{times}  {}",
+        dim(format!("{}:{:02}", platform::local_clock(at), at % 60)),
+        g.message.lines().next().unwrap_or_default(),
+        dim(&g.page)
+    );
+    if let Some(s) = &g.source {
+        println!("    {}", dim(s));
+    }
+    for f in &g.frames {
+        println!("    {}", dim(f));
     }
 }
 
@@ -1725,6 +1767,69 @@ fn run() -> Result<()> {
                             print_request(r, &s.host);
                         }
                         from = t.end_offset;
+                    }
+                }
+            }
+            AppCmd::Browser {
+                site,
+                n,
+                follow,
+                on,
+                off,
+            } => {
+                if on || off {
+                    edit(&mut cfg, |c| browser::set(c, &site, on))?;
+                }
+                let s = sites(&cfg)
+                    .into_iter()
+                    .find(|s| s.name == site_name(&site))
+                    .with_context(|| format!("No app named {site}"))?;
+                if on || off {
+                    println!(
+                        "Browser errors {} for {}{}",
+                        if on { "on" } else { "off" },
+                        s.name,
+                        if on {
+                            " (the running Anvil restarts its web server)"
+                        } else {
+                            ""
+                        }
+                    );
+                    return Ok(());
+                }
+                if !browser::on(&s) {
+                    bail!(
+                        "{}'s Browser errors switch is off: anvil app browser {} --on",
+                        s.name,
+                        s.name
+                    );
+                }
+                if browser::blocked(&s.name) {
+                    println!(
+                        "{}",
+                        yellow(format!(
+                            "{}'s Content-Security-Policy keeps Anvil's script out of its pages",
+                            s.name
+                        ))
+                    );
+                }
+                let path = browser::file(&s.name);
+                let r = browser::read(&path, 0)?;
+                if r.groups.is_empty() {
+                    println!("{}", dim(format!("No errors from {}'s pages yet", s.name)));
+                }
+                for g in r.groups.iter().rev().take(n).rev() {
+                    print_group(g);
+                }
+                let mut from = r.end;
+                if follow {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        let t = browser::read(&path, from)?;
+                        for g in &t.groups {
+                            print_group(g);
+                        }
+                        from = t.end;
                     }
                 }
             }

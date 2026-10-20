@@ -29,6 +29,8 @@ export interface Site {
   autostart: boolean;
   runtime_version: string | null;
   runtime_pinned: boolean;
+  /** The Settings tab's "Browser errors" switch. */
+  browser: boolean;
   /** For a git worktree of another app: that app's name. */
   worktree_of: string | null;
   /** A worktree's branch; null when detached. */

@@ -3581,6 +3581,34 @@ fn set_mail_caught(handle: AppHandle, app: State<App>, site: String, on: bool) -
     snapshot(&app)
 }
 
+/// The Settings tab's "Browser errors": the web server restarts, so PHP and Caddy get the
+/// bridge (or lose it).
+#[tauri::command(async)]
+fn set_browser(handle: AppHandle, app: State<App>, site: String, on: bool) -> Res<Snapshot> {
+    let (cfg, ()) = edit(|c| anvil::browser::set(c, &site, on))?;
+    if running(&app) {
+        start(&app, &cfg);
+    }
+    changed(&handle);
+    snapshot(&app)
+}
+
+/// An app's browser errors for its Overview and Settings: how many, since when, and
+/// whether its CSP keeps the script out.
+#[tauri::command]
+async fn browser_status(site: String) -> Res<anvil::browser::Status> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = anvil::load().map_err(err)?;
+        let s = anvil::sites(&cfg)
+            .into_iter()
+            .find(|s| s.name == site)
+            .ok_or_else(|| format!("No app named {site}"))?;
+        Ok(anvil::browser::status(&s))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// An inbox's folder: an app's, or `_other` (Settings › Plugins › Mail catcher).
 fn inbox(name: &str) -> Res<std::path::PathBuf> {
     anvil::mail::inbox(&anvil::mail::root(), name).ok_or_else(|| format!("No inbox {name}"))
@@ -4390,6 +4418,8 @@ fn main() {
             set_mail_catcher,
             set_db_viewer,
             set_mail_caught,
+            set_browser,
+            browser_status,
             mail_list,
             mail_read,
             mail_source,
@@ -4742,6 +4772,7 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            browser: false,
             worktree_of: None,
             branch: None,
             aliases: vec![],

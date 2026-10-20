@@ -1149,6 +1149,13 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
         "Only history; new lines keep coming",
     ));
     entries.push((
+        "Browser errors".into(),
+        h.join("log").join("browser"),
+        "Logs",
+        Safety::Safe,
+        "What apps' pages sent while Browser errors is on; each keeps about 2 MB for a day",
+    ));
+    entries.push((
         "Caught mail".into(),
         crate::mail::root(),
         "Logs",
@@ -1180,7 +1187,17 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
         .filter(|i| i.bytes > 0)
         .collect();
     items.sort_by_key(|i| std::cmp::Reverse(i.bytes));
-    (items.iter().map(|i| i.bytes).sum(), items)
+    // An item inside another (Browser errors in Logs) counts once.
+    let total = items
+        .iter()
+        .filter(|i| {
+            !items
+                .iter()
+                .any(|o| o.path != i.path && Path::new(&i.path).starts_with(&o.path))
+        })
+        .map(|i| i.bytes)
+        .sum();
+    (total, items)
 }
 
 /// Delete one of Anvil's own cleanable items: a cache folder, leftovers, or logs.
@@ -1210,7 +1227,8 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
     ]
     .contains(&p)
         || cache_dirs(&h).contains(&p);
-    if p != h.join("log") && !is_cache {
+    let browser = h.join("log").join("browser");
+    if p != h.join("log") && p != browser && !is_cache {
         bail!("Anvil doesn't clean {path}");
     }
     // One of those folders replaced by a symlink is not followed out of Anvil's home.
@@ -1218,20 +1236,21 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
         bail!("{path} leads outside Anvil's folder; Anvil won't clean it");
     }
     let freed: u64 = du(std::slice::from_ref(&p)).values().sum();
-    if p == h.join("log") {
-        for e in std::fs::read_dir(&p)?.flatten() {
+    let logs = p == h.join("log");
+    if logs || p == browser {
+        for e in std::fs::read_dir(&p)?.flatten().filter(|_| logs) {
             // file_type doesn't follow links: a link here is not emptied through.
             if e.file_type().is_ok_and(|t| t.is_file()) {
                 std::fs::write(e.path(), "")?;
             }
         }
-        // Apps' request logs: Caddy writes on in the current one (emptied); the copies
-        // it rolled are only history.
-        for e in std::fs::read_dir(p.join("requests"))
-            .into_iter()
-            .flatten()
-            .flatten()
-        {
+        // Apps' request and browser logs: Caddy writes on in the current one (emptied);
+        // the copies it rolled are only history.
+        let dirs = match logs {
+            true => vec![p.join("requests"), browser],
+            false => vec![browser],
+        };
+        for e in dirs.iter().flat_map(std::fs::read_dir).flatten().flatten() {
             if !e.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
@@ -1578,6 +1597,31 @@ mod tests {
     }
 
     #[test]
+    fn browser_logs_are_their_own_item_counted_once_and_cleaned_like_request_logs() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&crate::ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let current = crate::browser::file("shop");
+        let rolled = current.with_file_name("shop-2026-10-20T13-20-36.452.log.gz");
+        std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+        std::fs::write(&current, vec![b'x'; 50_000]).unwrap();
+        std::fs::write(&rolled, vec![1u8; 50_000]).unwrap();
+        let (total, items) = anvil_disk();
+        let item = items.iter().find(|i| i.label == "Browser errors").unwrap();
+        let logs = items.iter().find(|i| i.label == "Logs").unwrap();
+        assert!(item.bytes >= 100_000 && logs.bytes >= item.bytes);
+        assert!(total < logs.bytes + item.bytes, "inside Logs: counted once");
+        assert!(clean_anvil(&item.path).unwrap() >= 100_000);
+        assert_eq!(std::fs::metadata(&current).unwrap().len(), 0);
+        assert!(!rolled.exists());
+        // Cleaning Logs empties them too.
+        std::fs::write(&current, "x").unwrap();
+        clean_anvil(&logs.path).unwrap();
+        assert_eq!(std::fs::metadata(&current).unwrap().len(), 0);
+    }
+
+    #[test]
     fn touched_skips_dependencies_and_hidden_folders() {
         let dir = std::env::temp_dir().join(format!("anvil-touched-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1666,6 +1710,7 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            browser: false,
             worktree_of: None,
             branch: None,
             aliases: vec![],
@@ -1726,6 +1771,7 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            browser: false,
             worktree_of: None,
             branch: None,
             aliases: vec![],
@@ -1797,6 +1843,7 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            browser: false,
             worktree_of: None,
             branch: None,
             aliases: vec![],

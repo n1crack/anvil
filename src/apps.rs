@@ -1291,6 +1291,7 @@ mod tests {
             autostart: false,
             runtime_version: None,
             runtime_pinned: false,
+            browser: false,
             worktree_of: None,
             branch: None,
             aliases: vec![],

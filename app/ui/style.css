@@ -621,6 +621,7 @@ button, select, input { font: inherit; color: inherit; }
 .https-cell .securing { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .https-cell .securing[hidden] { display: none; }
 .https-cell small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.https-cell small.error { color: var(--danger); }
 .root-cell { display: grid; grid-template-columns: minmax(0, 320px) auto; justify-content: start; align-items: center; gap: 4px 2px; }
 .root-cell [hidden] { display: none; }
 .root-cell small { grid-column: 1 / -1; color: var(--danger); font-size: 12px; }

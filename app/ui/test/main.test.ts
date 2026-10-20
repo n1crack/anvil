@@ -2701,3 +2701,42 @@ describe("agent activity", () => {
     w.mockAgents = [];
   });
 });
+
+describe("browser errors", () => {
+  const box = () => $("#app-browser") as HTMLInputElement;
+  const line = () => $('[data-panel="overview"] .browser-line');
+
+  test("a PHP app's Settings has the switch, off; a dev server's has none", async () => {
+    await select("vuefinder");
+    expect($("#app-browser")).toBeNull();
+    await select("shop");
+    expect(box().checked).toBe(false);
+    expect(line().hidden).toBe(true);
+    expect($(".browser-blocked").hidden).toBe(true);
+  });
+
+  test("on: the Overview's Browser line counts the errors since the first", async () => {
+    w.mockBrowser = { on: true, errors: 3, since: 1792504953, blocked: false };
+    box().checked = true;
+    box().dispatchEvent(new Event("change"));
+    await wait(80);
+    expect(calls("set_browser").at(-1)![1]).toEqual({ site: "shop", on: true });
+    expect(box().checked).toBe(true);
+    const hm = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date(1792504953000));
+    expect(line().hidden).toBe(false);
+    expect($('[data-panel="overview"] .browser-line dd').textContent).toBe(`3 errors since ${hm}`);
+  });
+
+  test("an app whose CSP keeps the script out says so in Settings and on the Overview", async () => {
+    w.mockBrowser = { on: true, errors: 0, since: null, blocked: true };
+    for (const on of [false, true]) {
+      box().checked = on;
+      box().dispatchEvent(new Event("change"));
+      await wait(80);
+    }
+    expect(line().hidden).toBe(false);
+    expect($(".browser-blocked").hidden).toBe(false);
+    expect($('[data-panel="overview"] .browser-line dd').textContent).toBe("Blocked by the app’s Content-Security-Policy");
+    w.mockBrowser = undefined;
+  });
+});
