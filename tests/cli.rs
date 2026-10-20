@@ -848,3 +848,50 @@ fn worktree_add_without_a_terminal_lists_after_create_and_runs_nothing() {
     assert!(env.root.join("sites/shop--feat").is_dir());
     assert!(!env.root.join("sites/shop--feat/ran").exists());
 }
+
+#[test]
+fn worktree_remove_without_a_terminal_names_the_data_and_refuses() {
+    let env = Env::new("remove-losses");
+    let shop = env.root.join("sites/shop");
+    write(&shop.join("artisan"), "");
+    write(
+        &shop.join(".gitignore"),
+        ".env\n/vendor\ndatabase/*.sqlite\n",
+    );
+    write(&shop.join(".env"), "DB_CONNECTION=sqlite\nMAIL_HOST=main\n");
+    let git = |args: &[&str]| {
+        let ok = Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(&shop)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "artisan", ".gitignore"]);
+    git(&["commit", "-q", "-m", "i"]);
+    let parked = env.root.join("sites");
+    write(
+        &env.home.join("config.toml"),
+        &format!("paths = [{parked:?}]\n"),
+    );
+    env.ok(&["worktree", "add", "feat", "--new", "--app", "shop"]);
+    let wt = env.root.join("sites/shop--feat");
+    write(&wt.join("database/database.sqlite"), "data");
+    write(&wt.join("vendor/autoload.php"), "");
+    let dotenv = fs::read_to_string(wt.join(".env")).unwrap();
+    write(&wt.join(".env"), &dotenv.replace("=main", "=edited"));
+    // `output()` gives the CLI no terminal: it names what goes and refuses.
+    let out = env.fails(&["worktree", "remove", "shop--feat"]);
+    assert!(
+        out.contains(
+            "These will be deleted with the folder: database/database.sqlite, .env: add --yes"
+        ),
+        "{out}"
+    );
+    assert!(wt.join("database/database.sqlite").exists());
+    env.ok(&["worktree", "remove", "shop--feat", "--yes"]);
+    assert!(!wt.exists());
+}

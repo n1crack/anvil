@@ -2035,6 +2035,25 @@ describe("worktrees", () => {
     expect(calls("worktree_remove").at(-1)![1]).toEqual({ site: wt, dropDb: true, force: true });
   });
 
+  test("Remove Worktree… names the ignored data that goes with the folder", async () => {
+    w.mockGitClean = true;
+    w.mockLosses = ["database/database.sqlite", ".env"];
+    try {
+      await show({ copies: [] });
+      $(`#list [data-name="${wt}"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await wait(80);
+      (w.mockMenu as any[]).find((i) => i.text === "Remove Worktree…").action();
+      await wait(60);
+      expect(calls("worktree_losses").at(-1)![1]).toEqual({ site: wt });
+      const said = [...document.querySelectorAll(".pop-confirm p")].map((p) => p.textContent);
+      expect(said[1]).toBe("These will be deleted with the folder: database/database.sqlite, .env.");
+      expect($(".pop-confirm .primary").textContent).toBe("Remove");
+    } finally {
+      delete w.mockGitClean;
+      delete w.mockLosses;
+    }
+  });
+
   test("Remove Worktree… on a clean worktree without a copy: just Remove", async () => {
     w.mockGitClean = true;
     try {

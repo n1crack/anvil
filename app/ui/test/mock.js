@@ -661,6 +661,8 @@ const mockHandle = (cmd, a) => {
         },
         own: { keys: { APP_URL: "{url}", DB_DATABASE: "{db}" } },
       };
+    case "worktree_losses":
+      return window.mockLosses ?? [];
     case "worktree_remove":
       if (window.mockRemoveFail && !a.force) throw window.mockRemoveFail;
       return mockSnap;

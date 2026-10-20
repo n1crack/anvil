@@ -291,6 +291,9 @@ enum WorktreeCmd {
         /// Remove even with uncommitted changes or unpushed commits
         #[arg(long)]
         force: bool,
+        /// Don't ask before deleting what git doesn't keep (its SQLite files, an edited .env)
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -981,6 +984,7 @@ fn run() -> Result<()> {
                     name,
                     drop_db,
                     force,
+                    yes,
                 } => {
                     let s = all
                         .iter()
@@ -988,6 +992,19 @@ fn run() -> Result<()> {
                         .with_context(|| format!("No worktree named {name}"))?;
                     if apps::running_anywhere(&s.name) {
                         bail!("Stop {} in Anvil first", s.name);
+                    }
+                    // Uncommitted work refuses first: no question for a remove that won't go.
+                    worktrees::stop_if_clean(s, force, || ())?;
+                    let losses = worktrees::removal_losses(&cfg, s);
+                    if !yes && !losses.is_empty() {
+                        let question = format!(
+                            "These will be deleted with the folder: {}.\nRemove {}?",
+                            losses.join(", "),
+                            s.name
+                        );
+                        if !confirm(&question, "add --yes to remove them too")? {
+                            bail!("Nothing changed");
+                        }
                     }
                     // Saved after Ok and Err alike: a failed drop has removed the records of
                     // the databases that did go.

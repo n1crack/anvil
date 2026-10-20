@@ -2304,6 +2304,16 @@ fn set_app_hooks(
     worktree_hooks(site)
 }
 
+/// What removing the worktree deletes that git doesn't keep (`worktrees::removal_losses`).
+#[tauri::command(async)]
+fn worktree_losses(site: String) -> Res<Vec<String>> {
+    let cfg = anvil::load().map_err(err)?;
+    Ok(anvil::worktrees::removal_losses(
+        &cfg,
+        &site_in(&cfg, &site)?,
+    ))
+}
+
 /// `remove`'s safety check first (unless `force`; refused, nothing is stopped), then stop
 /// everything of the worktree (one shared deadline), then `worktrees::remove`. The config is
 /// saved after a failure too: a failed drop has forgotten the databases that went.
@@ -3801,6 +3811,7 @@ fn main() {
             worktree_add,
             worktree_new_db,
             worktree_remove,
+            worktree_losses,
             worktree_after_create,
             worktree_after_create_list,
             worktree_rewrite,

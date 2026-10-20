@@ -2290,6 +2290,83 @@ fn check_clean(site: &Site) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What removing the worktree deletes that git can't bring back: files it ignores or
+/// doesn't track that hold data, relative to the worktree. Its SQLite files (the one its
+/// `.env` uses, any `*.sqlite`, `*.sqlite3`, `*.db` under `database/`) and its `.env` files
+/// that main has no copy of or that set other values than main's, the hooks' keys aside
+/// (Anvil writes those). What a build makes again (`vendor`, `node_modules`) isn't listed.
+pub fn removal_losses(cfg: &Config, site: &Site) -> Vec<String> {
+    let wt = &site.path;
+    let args = [
+        "status",
+        "--porcelain",
+        "-z",
+        "--ignored=matching",
+        "--untracked-files=all",
+    ];
+    let Ok(out) = crate::git::run(wt, &args) else {
+        return Vec::new();
+    };
+    // `?? path` and `!! path` (a folder ends in `/` and stands for all in it).
+    let loose: Vec<&str> = out
+        .split('\0')
+        .filter_map(|e| e.strip_prefix("?? ").or(e.strip_prefix("!! ")))
+        .collect();
+    let untracked = |rel: &str| {
+        loose
+            .iter()
+            .any(|l| *l == rel || (l.ends_with('/') && rel.starts_with(l)))
+    };
+    let mut files: Vec<String> = Vec::new();
+    if let MainDb::Sqlite { to, .. } = main_db(cfg, site)
+        && let Ok(rel) = to.strip_prefix(wt)
+    {
+        files.push(rel.display().to_string());
+    }
+    let mut dirs = vec![wt.join("database")];
+    while let Some(dir) = dirs.pop() {
+        for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if matches!(
+                p.extension().and_then(|x| x.to_str()),
+                Some("sqlite" | "sqlite3" | "db")
+            ) && let Ok(rel) = p.strip_prefix(wt)
+            {
+                files.push(rel.display().to_string());
+            }
+        }
+    }
+    let main = main_of(wt);
+    let keys = hooks(cfg, site).keys;
+    let values = |f: &Path| {
+        let mut v = crate::resources::dotenv_file(f);
+        v.retain(|k, _| !keys.contains_key(k));
+        v
+    };
+    let mut envs: Vec<String> = fs::read_dir(wt)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n == ".env" || n.starts_with(".env."))
+        .filter(|n| {
+            let theirs = main.as_ref().map(|m| m.join(n)).filter(|f| f.is_file());
+            theirs.is_none_or(|t| values(&wt.join(n)) != values(&t))
+        })
+        .collect();
+    envs.sort();
+    files.extend(envs);
+    let mut out: Vec<String> = Vec::new();
+    for f in files {
+        if wt.join(&f).is_file() && untracked(&f) && !out.contains(&f) {
+            out.push(f);
+        }
+    }
+    out
+}
+
 /// `stop` (the worktree's processes) once `remove`'s safety check passes, unless `force`:
 /// a refused remove leaves everything running.
 pub fn stop_if_clean<T>(site: &Site, force: bool, stop: impl FnOnce() -> T) -> anyhow::Result<T> {
@@ -3253,6 +3330,33 @@ pub(crate) mod tests {
         assert!(!site.path.exists());
         assert_eq!(*dropped.borrow(), ["postgres-x shop_feature_x"]);
         assert!(cfg.worktrees.is_empty());
+    }
+
+    #[test]
+    fn removal_losses_names_ignored_data_not_what_a_build_makes() {
+        let main_env = "APP_URL=http://shop.test\nDB_CONNECTION=sqlite\nMAIL_HOST=main\n";
+        let (cfg, site) = worktree_site("losses", main_env);
+        let x = &site.path;
+        fs::write(x.join(".gitignore"), ".env\n/vendor\n/node_modules\n").unwrap();
+        fs::create_dir_all(x.join("database")).unwrap();
+        fs::write(x.join("database/.gitignore"), "*.sqlite*\n").unwrap();
+        fs::write(x.join(".env.example"), "edited=1\n").unwrap();
+        git(x, &["add", "."]);
+        git(x, &["commit", "-q", "-m", "ignores"]);
+        fs::write(x.join("database/database.sqlite"), "data").unwrap();
+        for f in ["vendor/autoload.php", "node_modules/x/index.js"] {
+            fs::create_dir_all(x.join(f).parent().unwrap()).unwrap();
+            fs::write(x.join(f), "").unwrap();
+        }
+        // Only the keys Anvil writes differ: nothing of the user's is in it.
+        let anvils = "APP_URL=http://shop--feature-x.test\nDB_CONNECTION=sqlite\nMAIL_HOST=main\nDB_DATABASE=x\n";
+        fs::write(x.join(".env"), anvils).unwrap();
+        assert_eq!(removal_losses(&cfg, &site), ["database/database.sqlite"]);
+        fs::write(x.join(".env"), anvils.replace("=main", "=edited")).unwrap();
+        assert_eq!(
+            removal_losses(&cfg, &site),
+            ["database/database.sqlite", ".env"]
+        );
     }
 
     #[test]

@@ -39,6 +39,9 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 - `anvil start` refuses while the Anvil app runs, which already serves your
   apps.
+- Removing a worktree names the files git doesn't keep that go with its
+  folder (its SQLite database, an edited `.env`) before you confirm. `anvil
+  worktree remove` asks on a terminal and elsewhere refuses until `--yes`.
 
 ### Fixed
 

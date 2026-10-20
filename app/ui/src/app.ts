@@ -859,7 +859,10 @@ const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 /** Confirm under the worktree's row: what would be lost, and whether its database copy goes too.
  * Uncommitted changes or unpushed commits (or no way to tell) make it "Remove anyway". */
 async function removeWorktree(s) {
-  const info = await invoke("git_info", { site: s.name }).catch(() => null);
+  const [info, losses] = await Promise.all([
+    invoke("git_info", { site: s.name }).catch(() => null),
+    invoke<string[]>("worktree_losses", { site: s.name }).catch(() => []),
+  ]);
   const copies = snap.worktrees?.[s.name]?.copies ?? [];
   const said = [`Remove ${s.name}? Its folder goes${s.branch ? ", its branch stays" : ""}.`];
   if (!info) said.push("Anvil couldn't check it for uncommitted changes.");
@@ -868,6 +871,8 @@ async function removeWorktree(s) {
   const force = !info || info.changed > 0 || info.ahead > 0;
   const pop = el("div", "pop-confirm wide");
   pop.append(el("p", null, said.join(" ")));
+  // Git ignores these, so nothing above counts them: the SQLite files, an edited .env.
+  if (losses.length) pop.append(el("p", null, `These will be deleted with the folder: ${losses.join(", ")}.`));
   let drop: HTMLInputElement | null = null;
   if (copies.length) {
     const label = el("label");
