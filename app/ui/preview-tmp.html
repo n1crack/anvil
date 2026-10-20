@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anvil</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="titlebar" data-tauri-drag-region></div>
+    <div class="modes" role="tablist" aria-label="Show">
+      <button role="tab" data-mode="apps">Applications</button>
+      <button role="tab" data-mode="services">Services<span id="svc-running" class="count"></span></button>
+    </div>
+    <div class="toolbar">
+      <label class="search">
+        <span class="visually-hidden">Search applications</span>
+        <input id="search" type="search" placeholder="Search applications" autocomplete="off" spellcheck="false">
+      </label>
+      <button id="reload" class="icon-btn" title="Reload applications (⌘R)" aria-label="Reload applications">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="filter" class="icon-btn" title="Filter by type" aria-label="Filter by type">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11l-4.25 5v4l-2.5 1.25V8.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="add" class="icon-btn" title="Add applications" aria-label="Add applications">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <nav id="list" class="list" aria-label="Applications"></nav>
+  </aside>
+
+  <main class="detail">
+    <header class="titlebar" data-tauri-drag-region>
+      <div id="setup" class="setup" hidden></div>
+      <button id="open-settings" class="icon-btn" title="Settings (⌘,)" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+      <button id="open-processes" class="icon-btn" title="Processes" aria-label="Processes">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-8 6 16 3-8h4"/></svg>
+      </button>
+      <button id="power" class="power" data-on="false" title="Web server and local domains for all your applications">
+        <span class="ingot" aria-hidden="true"></span>
+        <span id="power-label">Stopped</span>
+      </button>
+      <div id="update" class="update" hidden></div>
+    </header>
+    <div id="error" class="error" role="alert" hidden>
+      <span id="error-text"></span>
+      <button id="error-close" class="icon-btn" aria-label="Dismiss">×</button>
+    </div>
+    <section id="site" class="site"></section>
+  </main>
+
+  <template id="site-tpl">
+    <div class="site-top">
+    <header class="site-head">
+      <div class="site-title">
+        <span class="mark big" aria-hidden="true"></span>
+        <div>
+          <h1 class="site-name"></h1>
+          <div class="site-meta"><span class="meta"></span><span class="site-services"></span></div>
+        </div>
+      </div>
+      <div class="head-side">
+        <div class="run-box" hidden>
+          <button class="state state-link" type="button" title="Show Dev"><span class="dot" aria-hidden="true"></span><span class="state-text" aria-live="polite"></span></button>
+        </div>
+        <div class="open-with">
+          <button data-open="finder">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>
+          </button>
+          <button data-open="terminal">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3"/></svg>
+          </button>
+          <button data-open="editor" hidden>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.75 13.25 5.5 6 12.75H3.25V10z"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+    <p class="run-error error" hidden></p>
+
+    <div class="tabs" role="tablist" aria-label="Application">
+      <button role="tab" data-tab="overview">Overview</button>
+      <button role="tab" data-tab="git" hidden>Git</button>
+      <button role="tab" data-tab="dev" hidden>Dev</button>
+      <button role="tab" data-tab="containers" hidden>Containers</button>
+      <button role="tab" data-tab="logs">Logs</button>
+      <button role="tab" data-tab="requests">Requests</button>
+      <button role="tab" data-tab="mail" hidden>Mail</button>
+      <button role="tab" data-tab="packages">Packages</button>
+      <button role="tab" data-tab="resources">Resources</button>
+      <button role="tab" data-tab="settings">Settings</button>
+      <button class="icon-btn res-reload" title="Measure again" aria-label="Measure resources again" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    </div>
+
+    <section role="tabpanel" data-panel="overview">
+      <div class="procs" hidden></div>
+      <dl class="group">
+        <div class="row"><dt>Runs on</dt><dd data-field="runtime"></dd></div>
+        <div class="row"><dt>Folder</dt><dd class="path-cell"><span class="path" data-field="path"></span><button class="icon-btn path-open" data-open="finder" title="Show in Finder" aria-label="Show the folder in Finder"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></dd></div>
+        <div class="row php-only"><dt>Web root</dt><dd class="path-cell"><span class="path" data-field="root"></span><button class="icon-btn path-open" data-open="root" title="Show in Finder" aria-label="Show the web root in Finder"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></dd></div>
+        <div class="row db-row" hidden><dt>Database</dt><dd></dd></div>
+        <div class="row mail-row" hidden><dt>Mail</dt><dd></dd></div>
+        <div class="row browser-line" hidden><dt>Browser</dt><dd></dd></div>
+        <div class="row share-row" hidden><dt>Public address</dt><dd></dd></div>
+      </dl>
+      <div class="aliases" hidden>
+        <div class="aliases-head"><h3 class="res-sub">Aliases</h3><button class="inline-action aliases-add">Add Alias…</button></div>
+        <dl class="group res-list"></dl>
+      </div>
+      <div class="agents" hidden>
+        <h3 class="res-sub">Agents</h3>
+        <dl class="group res-list"></dl>
+      </div>
+    </section>
+
+    <section role="tabpanel" data-panel="git" hidden></section>
+
+    <section role="tabpanel" data-panel="dev" hidden></section>
+    <section role="tabpanel" data-panel="containers" hidden></section>
+
+    <section role="tabpanel" data-panel="logs" hidden></section>
+    <section role="tabpanel" data-panel="requests" hidden></section>
+    <section role="tabpanel" data-panel="mail" hidden></section>
+
+    <section role="tabpanel" data-panel="settings" hidden>
+      <dl class="group">
+        <div class="row">
+          <dt><label for="kind">Type</label></dt>
+          <dd><select id="kind"></select></dd>
+        </div>
+        <div class="row row-top serves-only">
+          <dt><label for="app-https">HTTPS</label></dt>
+          <dd class="https-cell">
+            <input id="app-https" type="checkbox" role="switch">
+            <span class="securing" hidden><span class="spin-dot"></span><span class="securing-text"></span></span>
+            <small>Serve at https:// with a trusted local certificate; http:// redirects there</small>
+          </dd>
+        </div>
+        <div class="row row-top shared-row">
+          <dt><label for="app-shared">Shared dependencies</label></dt>
+          <dd class="https-cell">
+            <input id="app-shared" type="checkbox" role="switch">
+            <span class="securing" hidden><span class="spin-dot"></span><span class="securing-text">Reinstalling…</span></span>
+            <small>pnpm links node_modules into its store instead of copying it there: an install takes a moment and next to no space</small>
+            <small class="shared-note" hidden></small>
+          </dd>
+        </div>
+        <div class="row row-top serves-only browser-row">
+          <dt><label for="app-browser">Browser errors</label></dt>
+          <dd class="https-cell">
+            <input id="app-browser" type="checkbox" role="switch">
+            <small>Your browser sends this app's JavaScript errors, failed requests and console errors to Anvil, for AI agents (MCP); one script is added to its pages</small>
+            <small class="error browser-blocked" hidden>This app's Content-Security-Policy keeps the script out of its pages, so nothing arrives</small>
+          </dd>
+        </div>
+        <div class="row php-only serves-only">
+          <dt><label for="app-root" title="The folder Anvil serves, inside the project folder">Web root</label></dt>
+          <dd class="root-cell">
+            <input id="app-root" spellcheck="false" autocomplete="off">
+            <button class="inline-action root-reset" hidden>Reset</button>
+            <small class="root-error" hidden></small>
+          </dd>
+        </div>
+        <div class="row php-only">
+          <dt><label for="php">PHP version</label></dt>
+          <dd><select id="php"></select></dd>
+        </div>
+        <div class="row row-top php-only app-exts-row">
+          <dt title="For this app only; it then gets a PHP-FPM of its own">PHP extensions</dt>
+          <dd class="app-exts"></dd>
+        </div>
+        <div class="row php-only">
+          <dt><label for="ini-memory">Memory limit</label></dt>
+          <dd><input id="ini-memory" data-ini="memory_limit" spellcheck="false"></dd>
+        </div>
+        <div class="row php-only">
+          <dt><label for="ini-upload" title="Largest file a form can upload">Upload limit</label></dt>
+          <dd><input id="ini-upload" data-ini="upload_max_filesize" spellcheck="false"></dd>
+        </div>
+        <div class="row php-only">
+          <dt><label for="ini-time" title="Seconds before a request is stopped">Max execution time</label></dt>
+          <dd><input id="ini-time" data-ini="max_execution_time" spellcheck="false"></dd>
+        </div>
+        <div class="row row-top php-only">
+          <dt><label for="ini-extra" title="Any php.ini setting, one per line">Other PHP settings</label></dt>
+          <dd><textarea id="ini-extra" rows="3" spellcheck="false" placeholder="display_errors = On"></textarea></dd>
+        </div>
+        <div class="row process-only">
+          <dt><label for="app-runtime" id="app-runtime-label">Version</label></dt>
+          <dd><select id="app-runtime"></select></dd>
+        </div>
+        <div class="row process-only">
+          <dt><label for="app-command" title="Runs in the project folder with $PORT set">Start command</label></dt>
+          <dd><input id="app-command" spellcheck="false"></dd>
+        </div>
+        <div class="row process-only">
+          <dt><label for="app-port">Port</label></dt>
+          <dd><input id="app-port" inputmode="numeric" spellcheck="false"></dd>
+        </div>
+        <div class="row process-only">
+          <dt><label for="app-autostart">Start with Anvil</label></dt>
+          <dd><input id="app-autostart" type="checkbox" role="switch"></dd>
+        </div>
+      </dl>
+      <dl class="group wt-hooks" hidden></dl>
+    </section>
+
+    <section role="tabpanel" data-panel="packages" hidden>
+      <div class="pkg-body"></div>
+    </section>
+
+    <section role="tabpanel" data-panel="resources" hidden>
+      <div class="res-body"></div>
+    </section>
+  </template>
+
+  <dialog id="new-app" class="sheet new-sheet" aria-labelledby="new-title">
+    <form method="dialog" id="new-form">
+      <div class="new-top">
+        <h2 id="new-title">New application</h2>
+        <label class="new-search">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3 3"/></svg>
+          <span class="visually-hidden">Search templates</span>
+          <input id="new-search" placeholder="Search" autocomplete="off" spellcheck="false" aria-controls="new-kinds">
+        </label>
+      </div>
+      <div id="new-kinds" class="kind-list" role="listbox" tabindex="0" aria-label="Type"></div>
+      <div class="picker-side">
+      <label class="field">
+        <span>Name</span>
+        <input id="new-name" required autocomplete="off" spellcheck="false" placeholder="my-app">
+        <small id="new-url"></small>
+      </label>
+      <label class="field">
+        <span>Location</span>
+        <select id="new-parent"></select>
+      </label>
+      <section id="new-options" class="new-options" aria-labelledby="new-opts-title">
+        <h3 id="new-opts-title" class="new-opts-title">Options</h3>
+        <div id="new-opts" class="new-opts"></div>
+      </section>
+      <p id="new-error" class="error" hidden></p>
+      </div>
+      <div class="sheet-actions">
+        <button type="button" id="new-existing" class="link" title="Serve a project that is already on this Mac; its type is detected">Use Existing Folder…</button>
+        <span class="spacer"></span>
+        <button type="button" id="new-cancel">Cancel</button>
+        <button type="submit" id="new-create" class="primary">Create</button>
+      </div>
+    </form>
+    <section id="new-progress" class="new-progress" hidden aria-live="polite">
+      <header class="new-head"><span id="new-state" class="new-state"></span><h2 id="new-progress-title"></h2></header>
+      <ol id="new-steps" class="new-steps"></ol>
+      <div class="console new-term"></div>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" id="new-reveal" hidden>Show in Finder</button>
+        <button type="button" id="new-done" class="primary">Open</button>
+      </div>
+    </section>
+  </dialog>
+
+  <template id="service-tpl">
+    <div class="site-top">
+    <header class="site-head">
+      <div class="site-title">
+        <span class="mark big" aria-hidden="true"></span>
+        <div>
+          <h1 class="site-name"></h1>
+          <div class="site-meta"><span class="meta"></span></div>
+        </div>
+      </div>
+      <div class="head-side">
+        <div class="run-box">
+          <span class="state"><span class="dot" aria-hidden="true"></span><span class="state-text" aria-live="polite"></span></span>
+          <button data-svc="start">Start</button>
+          <button data-svc="stop">Stop</button>
+        </div>
+        <div class="open-with">
+          <button data-svc-open="client" hidden>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="3.75" rx="5.25" ry="2"/><path d="M2.75 3.75v8.5c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2v-8.5M2.75 8c0 1.1 2.35 2 5.25 2s5.25-.9 5.25-2"/></svg>
+          </button>
+          <button data-svc-open="inbox" title="Open the Mailpit inbox" aria-label="Open the Mailpit inbox" hidden>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5"/><path d="m2.5 4.5 5.5 4 5.5-4"/></svg>
+          </button>
+          <button data-svc-open="data">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>
+          </button>
+          <button data-svc-open="log">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.75 1.75h6l2.5 2.5v10h-8.5z"/><path d="M6 7h4M6 9.5h4M6 12h2.5"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+    <p class="run-error error" hidden></p>
+    </div>
+
+    <div class="procs-head svc-contents-head"><h3 class="res-sub">Databases</h3></div>
+    <div class="svc-contents"></div>
+    <div class="svc-clients" hidden></div>
+
+    <dl class="group svc-settings">
+      <div class="row"><dt><label for="svc-port-edit">Port</label></dt><dd><input id="svc-port-edit" inputmode="numeric"></dd></div>
+      <div class="row svc-web" hidden><dt><label for="svc-web-edit">Inbox port</label></dt><dd><input id="svc-web-edit" inputmode="numeric"></dd></div>
+      <div class="row"><dt>Applications</dt><dd class="chips svc-apps"></dd></div>
+      <div class="row"><dt>Tags</dt><dd class="chips svc-tags"></dd></div>
+    </dl>
+
+    <h3 class="res-sub connect-head">Connect <span class="muted">.env</span> <select class="svc-db" aria-label="Database for the .env lines" hidden></select></h3>
+    <div class="env">
+      <pre class="svc-env"></pre>
+      <button class="icon-btn svc-copy" title="Copy the .env lines" aria-label="Copy the .env lines">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.5"/><path d="M10.75 5.25v-2a1 1 0 0 0-1-1h-6.5a1 1 0 0 0-1 1v6.5a1 1 0 0 0 1 1h2"/></svg>
+      </button>
+    </div>
+
+    <div class="below"><button class="link-quiet svc-remove">Remove Service…</button></div>
+  </template>
+
+  <dialog id="new-service" class="sheet new-sheet" aria-labelledby="svc-title">
+    <form method="dialog" id="svc-form">
+      <div class="new-top">
+        <h2 id="svc-title">Add service</h2>
+        <label class="new-search">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3 3"/></svg>
+          <span class="visually-hidden">Search services</span>
+          <input id="svc-search" placeholder="Search" autocomplete="off" spellcheck="false" aria-controls="svc-kinds">
+        </label>
+      </div>
+      <div id="svc-kinds" class="kind-list" role="listbox" tabindex="0" aria-label="Service"></div>
+      <div class="picker-side">
+      <label class="field">
+        <span>Name</span>
+        <input id="svc-name" required autocomplete="off" spellcheck="false">
+        <small id="svc-note"></small>
+      </label>
+      <label class="field">
+        <span>Version</span>
+        <select id="svc-version"></select>
+      </label>
+      <label class="field">
+        <span>Port</span>
+        <input id="svc-port" inputmode="numeric" autocomplete="off" spellcheck="false" aria-describedby="svc-port-note">
+        <small id="svc-port-note"></small>
+      </label>
+      <label class="field">
+        <span>Application</span>
+        <select id="svc-app"></select>
+      </label>
+      <section class="svc-license" aria-labelledby="svc-license-title">
+        <h3 id="svc-license-title" class="new-opts-title">License</h3>
+        <div class="opt-panel">
+          <p id="svc-license-text" class="svc-license-text"></p>
+          <label id="svc-license-accept" class="opt-check"><input type="checkbox" id="svc-license-check"> I accept this license</label>
+          <p id="svc-license-done" class="muted small" hidden></p>
+        </div>
+      </section>
+      <p id="svc-error" class="error" hidden></p>
+      </div>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" id="svc-cancel">Cancel</button>
+        <button type="submit" id="svc-create" class="primary">Add</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="ask" class="sheet ask-sheet" aria-labelledby="ask-label">
+    <form method="dialog" id="ask-form">
+      <h2 id="ask-label"></h2>
+      <div id="ask-body"></div>
+      <label class="field" id="ask-field">
+        <span id="ask-name"></span>
+        <input id="ask-input" autocomplete="off" spellcheck="false">
+        <small id="ask-hint"></small>
+      </label>
+      <div id="ask-checks"></div>
+      <p id="ask-error" class="error" hidden></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" id="ask-cancel">Cancel</button>
+        <button type="submit" id="ask-ok" class="primary"></button>
+      </div>
+    </form>
+  </dialog>
+  <script type="module">
+import "/test/mock.js";
+window.mockSetup = { resolver: true, ports: true, trusted: true, php: true, shims: true };
+const S = window.mockSnap.sites, m = window.mockSite;
+// shop: aliases (admin.shop, api.shop already) + worktrees
+S.push(m("shop--feature-checkout", "laravel", { worktree_of: "shop", branch: "feature/checkout", path: "/Users/x/Sites/shop-worktrees/feature-checkout", aliases: ["admin.shop--feature-checkout.test", "api.shop--feature-checkout.test"] }));
+S.push(m("shop--fix-cart", "laravel", { worktree_of: "shop", branch: "fix/cart-total", path: "/Users/x/Sites/shop-worktrees/fix-cart", aliases: ["admin.shop--fix-cart.test", "api.shop--fix-cart.test"] }));
+// api: a linked app with an alias (backend) on the same folder, and worktrees
+const p = "/Users/x/Code/api";
+S.push(m("api", "laravel", { linked: true, parked_in: null, path: p }));
+S.push(m("backend", "laravel", { linked: true, parked_in: null, path: p }));
+S.push(m("api--feature-x", "laravel", { worktree_of: "api", branch: "feature-x", parked_in: null, path: "/Users/x/Code/api-worktrees/feature-x", aliases: ["backend--feature-x.test"] }));
+S.push(m("api--hotfix", "laravel", { worktree_of: "api", branch: "hotfix/login", parked_in: null, path: "/Users/x/Code/api-worktrees/hotfix", aliases: ["backend--hotfix.test"] }));
+window.mockSnap.app_states = { shop: "running", "shop--feature-checkout": "running" };
+await import("/src/main.ts");
+</script>
+</body>
+</html>

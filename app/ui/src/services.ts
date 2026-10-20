@@ -367,8 +367,7 @@ export function renderService() {
     }
   }
   renderContents(svc, root);
-  if (browsable() && (svc.kind === "mysql" || svc.kind === "postgres"))
-    $(".svc-contents-head", root).append(browseButton(svc.id));
+  if (browsable() && (svc.kind === "mysql" || svc.kind === "postgres")) $(".svc-contents-head", root).append(browseButton(svc.id));
   $(".svc-remove", root).onclick = () => removeService(svc);
 }
 

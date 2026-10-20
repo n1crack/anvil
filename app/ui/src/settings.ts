@@ -120,7 +120,10 @@ function versionRow(
     const idle = () => {
       const acts: HTMLElement[] = [];
       if (act.makeDefault) acts.push(textAct("Make default", act.makeDefault));
-      if (!pinned) acts.push(textAct("Uninstall", () => confirmInRow(actions, `Uninstall? ${act.note ?? ""}`.trim(), "Uninstall", act.uninstall, idle)));
+      if (!pinned)
+        acts.push(
+          textAct("Uninstall", () => confirmInRow(actions, `Uninstall? ${act.note ?? ""}`.trim(), "Uninstall", act.uninstall, idle)),
+        );
       actions.replaceChildren(...acts);
     };
     idle();
@@ -154,7 +157,9 @@ function confirmInRow(box: HTMLElement, question: string, label: string, onYes: 
   box.classList.add("asking");
   box.replaceChildren(Object.assign(document.createElement("span"), { className: "muted", textContent: question }), no, yes);
   // Back to the row's actions once the mouse is elsewhere and nothing was chosen.
-  box.closest(".row")?.addEventListener("mouseleave", () => no.isConnected && !no.disabled && (box.classList.remove("asking"), restore()), { once: true });
+  box
+    .closest(".row")
+    ?.addEventListener("mouseleave", () => no.isConnected && !no.disabled && (box.classList.remove("asking"), restore()), { once: true });
 }
 
 async function loadRuntimes() {
@@ -271,7 +276,15 @@ function renderPackageManagers() {
         const idle = () =>
           actions.replaceChildren(
             textAct("Uninstall", () =>
-              confirmInRow(actions, pm.name === "pnpm" ? "Uninstall? An app that needs pnpm gets it again." : "Uninstall? Apps find the next one on their PATH.", "Uninstall", () => pmAction(pm.name, "package_manager_uninstall", "Uninstalling…"), idle),
+              confirmInRow(
+                actions,
+                pm.name === "pnpm"
+                  ? "Uninstall? An app that needs pnpm gets it again."
+                  : "Uninstall? Apps find the next one on their PATH.",
+                "Uninstall",
+                () => pmAction(pm.name, "package_manager_uninstall", "Uninstalling…"),
+                idle,
+              ),
             ),
           );
         idle();
@@ -744,7 +757,10 @@ function phpParts(v: Settings["php"][number]) {
   let below: HTMLElement | undefined;
   if (v.installed) {
     const on = v.extensions.filter((e) => e.on && e.built).length + (v.opcache === "missing" ? 0 : 1);
-    const busy = v.opcache_building || installing.has(`opcache@${v.version}`) || v.extensions.some((e) => e.building || installing.has(`ext@${v.version}@${e.name}`));
+    const busy =
+      v.opcache_building ||
+      installing.has(`opcache@${v.version}`) ||
+      v.extensions.some((e) => e.building || installing.has(`ext@${v.version}@${e.name}`));
     const t = Object.assign(document.createElement("button"), { type: "button", className: "ext-toggle" });
     t.innerHTML = `<span></span><span class="chevron" aria-hidden="true">›</span>`;
     t.firstElementChild!.textContent = `Extensions ${on}/${v.extensions.length + 1}`;
@@ -788,7 +804,9 @@ function extensionsList(v: Settings["php"][number]) {
     const idle = () =>
       opEnd.replaceChildren(
         Object.assign(document.createElement("span"), { className: "muted", textContent: "Not built" }),
-        textAct("Build", () => confirmInRow(opEnd, `Build OPcache for PHP ${v.version}? It takes a few minutes.`, "Build", () => addOpcache(v.version), idle)),
+        textAct("Build", () =>
+          confirmInRow(opEnd, `Build OPcache for PHP ${v.version}? It takes a few minutes.`, "Build", () => addOpcache(v.version), idle),
+        ),
       );
     idle();
   } else if (v.opcache === "ready") {
@@ -797,7 +815,13 @@ function extensionsList(v: Settings["php"][number]) {
       opEnd.replaceChildren(
         Object.assign(document.createElement("span"), { className: "muted", textContent: "On" }),
         textAct("Remove", () =>
-          confirmInRow(opEnd, `Remove OPcache from PHP ${v.version}? Building it again takes minutes.`, "Remove", () => removeOpcache(v.version), idle),
+          confirmInRow(
+            opEnd,
+            `Remove OPcache from PHP ${v.version}? Building it again takes minutes.`,
+            "Remove",
+            () => removeOpcache(v.version),
+            idle,
+          ),
         ),
       );
     idle();

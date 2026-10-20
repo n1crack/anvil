@@ -2755,7 +2755,13 @@ describe("sidebar worktrees", () => {
       ...before,
       w.mockSite("api", "laravel", { linked: true, parked_in: null, path: p }),
       w.mockSite("backend", "laravel", { linked: true, parked_in: null, path: p }),
-      w.mockSite("api--x", "laravel", { worktree_of: "api", branch: "x", parked_in: null, path: "/Users/x/Code/api-wt/x", aliases: ["backend--x.test"] }),
+      w.mockSite("api--x", "laravel", {
+        worktree_of: "api",
+        branch: "x",
+        parked_in: null,
+        path: "/Users/x/Code/api-wt/x",
+        aliases: ["backend--x.test"],
+      }),
     ];
     try {
       await refresh();

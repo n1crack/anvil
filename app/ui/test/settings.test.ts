@@ -158,7 +158,14 @@ describe("versions", () => {
       expect(toggle("8.2")).toBeNull();
       expect(lines("8.5").length).toBe(0);
       await openExts("8.5");
-      expect(lines("8.5").map((l) => l.querySelector(".ext-name")!.textContent)).toEqual(["OPcache", "xdebug", "pcov", "apcu", "igbinary", "msgpack"]);
+      expect(lines("8.5").map((l) => l.querySelector(".ext-name")!.textContent)).toEqual([
+        "OPcache",
+        "xdebug",
+        "pcov",
+        "apcu",
+        "igbinary",
+        "msgpack",
+      ]);
       expect(line("8.5", "OPcache").textContent).toBe("OPcacheBuilt in");
       // The list slides open in place: no redraw.
       expect(phpRow("8.5").querySelector(".ext-fold")!.classList.contains("open")).toBe(true);

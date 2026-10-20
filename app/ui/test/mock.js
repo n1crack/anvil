@@ -62,10 +62,36 @@ window.mockRequests = {
 // The mail catcher's inboxes (src/mail.rs), newest first, and one message read in full.
 window.mockMails = {
   shop: [
-    { id: "1792505339198-2", ts: 1792505339198, from: "Shop <hello@example.com>", to: ["user@example.com"], subject: "Şifre sıfırlama", size: 1536, attachments: 1 },
-    { id: "1792505319331-0", ts: 1792505319331, from: "hello@example.com", to: ["web@example.com"], subject: "", size: 304, attachments: 0 },
+    {
+      id: "1792505339198-2",
+      ts: 1792505339198,
+      from: "Shop <hello@example.com>",
+      to: ["user@example.com"],
+      subject: "Şifre sıfırlama",
+      size: 1536,
+      attachments: 1,
+    },
+    {
+      id: "1792505319331-0",
+      ts: 1792505319331,
+      from: "hello@example.com",
+      to: ["web@example.com"],
+      subject: "",
+      size: 304,
+      attachments: 0,
+    },
   ],
-  _other: [{ id: "1792505354071-4", ts: 1792505354071, from: "Node <node@example.com>", to: ["a@example.com"], subject: "From nobody", size: 900, attachments: 0 }],
+  _other: [
+    {
+      id: "1792505354071-4",
+      ts: 1792505354071,
+      from: "Node <node@example.com>",
+      to: ["a@example.com"],
+      subject: "From nobody",
+      size: 900,
+      attachments: 0,
+    },
+  ],
 };
 window.mockMailMessage = (id) => ({
   ...Object.values(window.mockMails)
