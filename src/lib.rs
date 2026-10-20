@@ -11,6 +11,7 @@ pub mod dns;
 pub mod git;
 pub mod logs;
 pub mod mcp;
+pub mod opcache;
 pub mod packages;
 pub mod processes;
 pub mod project;
@@ -1063,6 +1064,11 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     })?
     .0;
     println!("PHP {full} installed in {}", dir.display());
+    if opcache::BUILDS.contains(&minor)
+        && let Err(e) = opcache::build(minor)
+    {
+        println!("PHP {full} works without OPcache for now: {e}");
+    }
     Ok(())
 }
 
@@ -1970,6 +1976,7 @@ impl Server {
                     .arg(&conf)
                     .arg("-c")
                     .arg(php_dir(v).join("php.ini"))
+                    .args(opcache::fpm_args(cfg, v))
                     .spawn()
                     .with_context(|| format!("failed to start PHP {v}"))?,
             );

@@ -422,6 +422,8 @@ enum PhpCmd {
     Uninstall { version: String },
     /// Set a php.ini value for every site, or clear it by leaving out the value
     Ini { key: String, value: Option<String> },
+    /// Build OPcache for an installed PHP 8.1–8.4
+    Opcache { version: String },
 }
 
 fn dir_or_cwd(p: Option<PathBuf>) -> Result<PathBuf> {
@@ -1004,6 +1006,23 @@ fn run() -> Result<()> {
         Cmd::Php {
             cmd: PhpCmd::Ini { key, value },
         } => edit(&mut cfg, |c| set_global_ini(c, &key, value.as_deref()))?,
+        Cmd::Php {
+            cmd: PhpCmd::Opcache { version },
+        } => {
+            if !installed_php().contains(&version) {
+                bail!("PHP {version} is not installed — run `anvil php install {version}`");
+            }
+            if opcache::state(&version) == opcache::State::BuiltIn {
+                bail!("PHP {version} has OPcache built in");
+            }
+            opcache::build(&version)?;
+            println!(
+                "{}",
+                commands(
+                    "Restart Anvil to use it: `anvil start`, or the app reloads on its next refresh."
+                )
+            );
+        }
         Cmd::Clean {
             site: None,
             safe: true,
@@ -1065,7 +1084,12 @@ fn run() -> Result<()> {
                 } else {
                     String::new()
                 };
-                println!("{v}{mark}");
+                let opcache = match opcache::state(&v) {
+                    opcache::State::Ready => "opcache".into(),
+                    opcache::State::BuiltIn => "opcache (built in)".into(),
+                    opcache::State::Missing => dim(format!("no opcache (anvil php opcache {v})")),
+                };
+                println!("{v}  {opcache}{mark}");
             }
         }
         Cmd::Use { version } => edit(&mut cfg, |c| set_default_php(c, &version))?,
