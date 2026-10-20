@@ -21,4 +21,5 @@ tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-pn
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"

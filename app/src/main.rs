@@ -4120,6 +4120,9 @@ fn main() {
     // The binary's age now, for Relaunch to compare against.
     STARTED_EXE.get_or_init(exe_mtime);
     tauri::Builder::default()
+        // First: a second launch (Windows and Linux start one per double-click; macOS
+        // brings the running app forward itself) shows this one's window and ends.
+        .plugin(tauri_plugin_single_instance::init(|handle, _, _| show(handle)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
