@@ -16,7 +16,8 @@ Until 1.0.0, minor versions may contain breaking changes.
   PHP-FPM serves the next request, never an error page. Anvil downloads
   RoadRunner 2025.1.15 once into its own folder (checked against its
   SHA-256) and never writes `rr` or `.rr.yaml` into the project. A worktree's
-  Octane uses its own port and database.
+  Octane uses its own port and database. It runs two workers, not one per
+  core (140 MB instead of 455 MB on a 12-core Mac); edit the command for more.
 - A web root of your own for an app Anvil serves (PHP, static): a folder inside
   the project (`web`, `dist`, `.`) in the app's Settings, or `anvil app root
   <site> [<dir>]` (`--reset` goes back to `public/` when present). A worktree

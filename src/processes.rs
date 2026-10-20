@@ -273,7 +273,7 @@ pub fn octane_row(cfg: &crate::Config, site: &Site) -> Option<Process> {
     let (port, rpc) = octane_ports(cfg, site);
     let command = crate::octane::command(site, server, port, Some(rpc)).unwrap_or_else(|_| {
         format!(
-            "php artisan octane:start --server={} --host=127.0.0.1 --port={port}",
+            "php artisan octane:start --server={} --host=127.0.0.1 --port={port} --workers=2",
             server.name()
         )
     });
@@ -2256,7 +2256,7 @@ echo '{DEV_JSON}'
         assert_eq!(
             p.command,
             format!(
-                "php artisan octane:start --server=roadrunner --host=127.0.0.1 --port={port} --rpc-port={} --rr-config={}",
+                "php artisan octane:start --server=roadrunner --host=127.0.0.1 --port={port} --workers=2 --rpc-port={} --rr-config={}",
                 octane_ports(&cfg, &s).1,
                 crate::shims::sh_quote(&rr.join("rr.yaml").display().to_string())
             )

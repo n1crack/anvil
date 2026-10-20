@@ -123,10 +123,11 @@ fn install(url: &str, sum: &str, dir: &Path, zip: bool) -> Result<PathBuf> {
 ///
 /// RoadRunner: Octane writes an empty `.rr.yaml` into the project unless it's given one,
 /// so it gets the project's own when there is one, else Anvil's empty one; `rr` itself is
-/// found on PATH (`apps::process_env`), never in the project.
+/// found on PATH (`apps::process_env`), never in the project. Two workers, not one per
+/// core: measured on a 12-core Mac, 140 MB against 455 MB idle, and no slower in dev.
 pub fn command(site: &Site, server: Server, port: u16, admin: Option<u16>) -> Result<String> {
     let mut c = format!(
-        "php artisan octane:start --server={} --host=127.0.0.1 --port={port}",
+        "php artisan octane:start --server={} --host=127.0.0.1 --port={port} --workers=2",
         server.name()
     );
     match server {
