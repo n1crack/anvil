@@ -1812,7 +1812,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             continue;
         }
         s += &format!(
-            "\n{} {{\n\troot * \"{}\"\n\tencode\n",
+            "\n{} {{\n\troot * \"{}\"\n\tencode\n{HIDDEN}",
             addresses(site, &names),
             caddy_path(&site.root)
         );
@@ -1824,12 +1824,12 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             if let Some(fpm) = &fpm {
                 s += &format!("\t\t{fpm}");
             }
-            s += "\t\tfile_server {\n\t\t\thide .*\n\t\t\tstatus 200\n\t\t}\n\t}\n}\n";
+            s += "\t\tfile_server @hidden {\n\t\t\thide *\n\t\t}\n\t\tfile_server {\n\t\t\tstatus 200\n\t\t}\n\t}\n}\n";
         } else {
             if let Some(fpm) = &fpm {
                 s += &format!("\t{fpm}");
             }
-            s += "\tfile_server {\n\t\thide .*\n\t}\n}\n";
+            s += "\tfile_server @hidden {\n\t\thide *\n\t}\n\tfile_server\n}\n";
         }
         if site.secure {
             s += &redirect(&names);
@@ -1858,6 +1858,12 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
     }
     s
 }
+
+/// What a site's file server never serves: a file whose path under the web root has a
+/// part starting with a dot (`.env`, `.git/config`), answered 404 by a file server that
+/// hides everything. `hide .*` would also match the folders of the web root's own path
+/// (`.output/public`, a project in `~/.sites`), hiding every file.
+const HIDDEN: &str = "\t@hidden path */.*\n";
 
 /// Shown instead of a bare 502 when an app that runs its own server is stopped.
 fn not_running_page(name: &str) -> String {
@@ -3994,7 +4000,7 @@ mod tests {
         let out = caddyfile(&cfg, std::slice::from_ref(&app));
         let sock = fpm_socket(&app).unwrap();
         let block = format!(
-            "\nshop.test {{\n\troot * \"{path}\"\n\tencode\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors 502 {{\n\t\tphp_fastcgi unix/{}\n\t\tfile_server {{\n\t\t\thide .*\n\t\t\tstatus 200\n\t\t}}\n\t}}\n}}\n",
+            "\nshop.test {{\n\troot * \"{path}\"\n\tencode\n\t@hidden path */.*\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors 502 {{\n\t\tphp_fastcgi unix/{}\n\t\tfile_server @hidden {{\n\t\t\thide *\n\t\t}}\n\t\tfile_server {{\n\t\t\tstatus 200\n\t\t}}\n\t}}\n}}\n",
             sock.display()
         );
         assert!(out.contains(&block), "{out}");
@@ -4019,6 +4025,37 @@ mod tests {
     }
 
     #[test]
+    fn a_web_root_in_a_dot_folder_hides_only_dotfiles_under_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let public = dir.path().join(".output/public");
+        fs::create_dir_all(&public).unwrap();
+        let mut s = site("shop", dir.path().to_str().unwrap(), None);
+        s.kind = "static".into();
+        s.root = public.clone();
+        s.root_custom = Some(".output/public".into());
+        let out = caddyfile(&Config::default(), &[s]);
+        let block = format!(
+            "\troot * \"{}\"\n\tencode\n\t@hidden path */.*\n\tfile_server @hidden {{\n\t\thide *\n\t}}\n\tfile_server\n}}",
+            public.display()
+        );
+        assert!(out.contains(&block), "{out}");
+        // Caddy takes it, when this machine has Anvil's Caddy (CI has none).
+        let bin = PathBuf::from(std::env::var("HOME").unwrap()).join(".anvil/bin/caddy");
+        if bin.exists() {
+            fs::write(dir.path().join("Caddyfile"), &out).unwrap();
+            let adapt = crate::platform::command(&bin)
+                .args(["adapt", "--adapter", "caddyfile", "--config"])
+                .arg(dir.path().join("Caddyfile"))
+                .env("XDG_DATA_HOME", dir.path())
+                .env("XDG_CONFIG_HOME", dir.path())
+                .output()
+                .unwrap();
+            let err = String::from_utf8_lossy(&adapt.stderr);
+            assert!(adapt.status.success(), "{err}");
+        }
+    }
+
+    #[test]
     fn caddyfile_routes_php_sites_to_their_socket() {
         let cfg = Config::default();
         let sites = [
@@ -4028,7 +4065,16 @@ mod tests {
         let out = caddyfile(&cfg, &sites);
         assert!(out.contains("https_port 8443"));
         assert!(out.contains("default_bind 127.0.0.1 [::1]"));
-        assert_eq!(out.matches("hide .*").count(), 2);
+        assert_eq!(out.matches("@hidden path */.*").count(), 2);
+        assert_eq!(
+            out.matches("file_server @hidden {\n\t\thide *\n\t}\n\tfile_server\n}")
+                .count(),
+            2
+        );
+        assert!(
+            !out.contains("hide .*"),
+            "a dot in the root's own path hid every file"
+        );
         assert!(out.contains("\nshop.test {\n\troot * \"/s/shop/public\""));
         // HTTPS sites send their HTTP address on with a redirect the browser doesn't keep.
         assert!(out.contains("\nhttp://shop.test {\n\tredir https://{host}"));

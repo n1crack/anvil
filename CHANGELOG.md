@@ -40,7 +40,8 @@ Until 1.0.0, minor versions may contain breaking changes.
   the project (`web`, `dist`, `.`) in the app's Settings, or `anvil app root
   <site> [<dir>]` (`--reset` goes back to `public/` when present). A worktree
   serves the same folder of its own checkout. A web root that's gone shows a
-  page saying so, never the project folder.
+  page saying so, never the project folder. One in a dot folder
+  (`.output/public`) is served too; dotfiles inside it stay hidden.
 - PHP 8.1 to 8.4 get OPcache: Anvil builds it from php.net's source of the
   same version on your Mac (checked against php.net's checksum; needs the Xcode
   command line tools), and every version serves with OPcache tuned for
@@ -102,6 +103,10 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Fixed
 
+- An app whose folder is inside a folder starting with a dot (`~/.sites/shop`)
+  no longer answers 404 for its files (CSS, images, a static site's every
+  page): only files and folders starting with a dot inside its web root
+  (`.env`, `.git`) are hidden, as intended.
 - A .NET app no longer offers a version to pin, which did nothing: dotnet
   picks the SDK from the project's `global.json`. `anvil app runtime` refuses a
   .NET version.

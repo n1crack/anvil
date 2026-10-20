@@ -753,10 +753,10 @@ fn caddyfile_for_a_few_sites() {
         "\tdefault_bind 127.0.0.1 [::1]\n".into(),
         "\tadmin off\n".into(),
         format!(
-            "\nhttp://shop.test {{\n\troot * \"{sites}/shop/public\"\n\tencode\n\tphp_fastcgi unix/{home}/run/site-shop.sock\n\tfile_server {{\n\t\thide .*\n\t}}\n}}\n"
+            "\nhttp://shop.test {{\n\troot * \"{sites}/shop/public\"\n\tencode\n\t@hidden path */.*\n\tphp_fastcgi unix/{home}/run/site-shop.sock\n\tfile_server @hidden {{\n\t\thide *\n\t}}\n\tfile_server\n}}\n"
         ),
         format!(
-            "\nplain.test {{\n\troot * \"{sites}/plain\"\n\tencode\n\tphp_fastcgi unix/{home}/run/php-8.4.sock\n"
+            "\nplain.test {{\n\troot * \"{sites}/plain\"\n\tencode\n\t@hidden path */.*\n\tphp_fastcgi unix/{home}/run/php-8.4.sock\n"
         ),
         "\nhttp://plain.test {\n\tredir https://{host}".into(),
         "\nhttp://front.test, http://front.localhost {\n\treverse_proxy 127.0.0.1:45123\n".into(),
@@ -771,7 +771,7 @@ fn caddyfile_for_a_few_sites() {
         assert!(file.contains(&line), "missing {line:?} in:\n{file}");
     }
     assert!(!file.contains("quote"), "{file}");
-    assert_eq!(file.matches("hide .*").count(), 2, "{file}");
+    assert_eq!(file.matches("@hidden path */.*").count(), 2, "{file}");
 
     let fpm_conf = fs::read_to_string(env.home.join("run/php-8.4-fpm.conf")).unwrap();
     assert!(fpm_conf.contains("[site-shop]"), "{fpm_conf}");
