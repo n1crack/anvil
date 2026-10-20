@@ -1075,10 +1075,7 @@ fn run() -> Result<()> {
                     print_hooks(&worktrees::hooks(&cfg, s));
                 }
                 WorktreeCmd::UseDb { name, yes } => {
-                    let s = all
-                        .iter()
-                        .find(|s| s.name == site_name(&name) && s.worktree_of.is_some())
-                        .with_context(|| format!("No worktree named {name}"))?;
+                    let s = find_worktree(&all, &name)?;
                     let db = worktrees::db_name(s);
                     let question = format!(
                         "Use {db} for {}? Anvil didn't make it; its migrations and tests then change it.",
@@ -1096,10 +1093,7 @@ fn run() -> Result<()> {
                     force,
                     yes,
                 } => {
-                    let s = all
-                        .iter()
-                        .find(|s| s.name == site_name(&name) && s.worktree_of.is_some())
-                        .with_context(|| format!("No worktree named {name}"))?;
+                    let s = find_worktree(&all, &name)?;
                     if apps::running_anywhere(&s.name) {
                         bail!("Stop {} in Anvil first", s.name);
                     }
@@ -1845,6 +1839,41 @@ fn safety(s: resources::Safety, width: usize) -> String {
     match s {
         resources::Safety::Keep => yellow(text),
         _ => text,
+    }
+}
+
+/// A worktree by its name (`shop--feat`) or by its branch (`feat`, what `worktree add`
+/// took): of the app of the current folder first, else the only one with that branch.
+fn find_worktree<'a>(all: &'a [Site], name: &str) -> Result<&'a Site> {
+    let trees = || all.iter().filter(|s| s.worktree_of.is_some());
+    if let Some(s) = trees().find(|s| s.name == site_name(name)) {
+        return Ok(s);
+    }
+    let by_branch: Vec<&Site> = trees()
+        .filter(|s| s.branch.as_deref() == Some(name))
+        .collect();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let here = all
+        .iter()
+        .filter(|s| cwd.starts_with(&s.path))
+        .max_by_key(|s| s.path.as_os_str().len())
+        .map(|s| s.worktree_of.clone().unwrap_or_else(|| s.name.clone()));
+    if let Some(s) = by_branch
+        .iter()
+        .find(|s| here.as_deref() == s.worktree_of.as_deref())
+    {
+        return Ok(s);
+    }
+    match by_branch.as_slice() {
+        [s] => Ok(s),
+        [] => bail!("No worktree named {name}"),
+        many => bail!(
+            "Several worktrees are on {name}: {}",
+            many.iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 }
 

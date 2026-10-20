@@ -908,7 +908,16 @@ fn worktree_remove_without_a_terminal_names_the_data_and_refuses() {
         "{out}"
     );
     assert!(wt.join("database/database.sqlite").exists());
-    env.ok(&["worktree", "remove", "shop--feat", "--yes"]);
+    // By its branch too, as `worktree add` took it.
+    assert!(
+        env.fails(&["worktree", "remove", "feat"])
+            .contains("These will be deleted")
+    );
+    assert!(
+        env.fails(&["worktree", "remove", "nope"])
+            .contains("No worktree named nope")
+    );
+    env.ok(&["worktree", "remove", "feat", "--yes"]);
     assert!(!wt.exists());
 }
 
