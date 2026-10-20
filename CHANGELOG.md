@@ -16,6 +16,14 @@ Until 1.0.0, minor versions may contain breaking changes.
   show nothing. `anvil app mail <app>` prints the inbox address. The inbox
   opens unfiltered: apps share Laravel's default sender, so a sender filter
   could hide mail.
+- Requests: Caddy logs every request to an app (its redirects, extra server
+  rows and worktrees each to their app's list) as JSON in
+  `~/.anvil/log/requests/<app>.log`, rolled at 2 MiB with one older copy kept
+  a day, so an app holds about 2 MB. Cookie, Set-Cookie, Authorization and
+  Proxy-Authorization are written as REDACTED. `anvil app requests <app>`
+  prints the latest (`--status 4xx`, `--method POST`, `-n 50`, `--follow`;
+  Vite's, Next's and other static assets only with `--assets`). Disk's Logs
+  item covers them.
 - Laravel Octane: an app with `laravel/octane` gets an `octane` process
   (RoadRunner), left out of Dev start, on a private port of its own (no two
   apps share one, and none is among the ports macOS gives outgoing

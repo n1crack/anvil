@@ -431,6 +431,26 @@ enum AppCmd {
     },
     /// The inbox address of the Anvil Mailpit the app's .env sends mail to
     Mail { site: String },
+    /// The latest requests Caddy served for the app, oldest first: time, method, status,
+    /// duration, size and path. Static assets (Vite's, Next's, maps) only with --assets
+    Requests {
+        site: String,
+        /// Only one status class
+        #[arg(long, value_parser = ["1xx", "2xx", "3xx", "4xx", "5xx"])]
+        status: Option<String>,
+        /// Only one method, e.g. POST
+        #[arg(long)]
+        method: Option<String>,
+        /// How many requests
+        #[arg(short, default_value_t = 20)]
+        n: usize,
+        /// Include static assets
+        #[arg(long)]
+        assets: bool,
+        /// Keep printing new requests as they come
+        #[arg(long, short)]
+        follow: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -915,6 +935,38 @@ fn print_states(rows: &serde_json::Value, label: &str, keep: impl Fn(&serde_json
 }
 
 /// `anvil app start|stop|restart <site> [<process>]`, done by the app.
+/// `14:02:33 POST   419    12 ms   1.2 KB /login`; the host only when it isn't the app's.
+fn print_request(r: &requests::Request, host: &str) {
+    let at = r.ts as u64;
+    let status = format!("{:<3}", r.status);
+    let status = match r.status / 100 {
+        5 => red(status),
+        4 => yellow(status),
+        _ => status,
+    };
+    let ms = r.duration_ms;
+    let took = if ms < 1.0 {
+        format!("{ms:.1} ms")
+    } else if ms < 1000.0 {
+        format!("{ms:.0} ms")
+    } else {
+        format!("{:.2} s", ms / 1000.0)
+    };
+    let size = match r.size {
+        b if b < 1024 => format!("{b} B"),
+        b if b < 1_048_576 => format!("{:.1} KB", b as f64 / 1024.0),
+        b => format!("{:.1} MB", b as f64 / 1_048_576.0),
+    };
+    let own = r.host.split(':').next() == Some(host);
+    println!(
+        "{} {:<6} {status} {took:>8} {size:>8} {}{}",
+        dim(format!("{}:{:02}", platform::local_clock(at), at % 60)),
+        r.method,
+        if own { String::new() } else { dim(&r.host) },
+        r.uri
+    );
+}
+
 fn run_in_app(site: String, process: Option<String>, action: &str) -> Result<()> {
     let mut params = serde_json::json!({"site": site, "action": action});
     if let Some(p) = &process {
@@ -1483,6 +1535,41 @@ fn run() -> Result<()> {
                 }
                 let port = services::web_port(&cfg, &id).unwrap_or(8025);
                 println!("http://127.0.0.1:{port}");
+            }
+            AppCmd::Requests {
+                site,
+                status,
+                method,
+                n,
+                assets,
+                follow,
+            } => {
+                let s = sites(&cfg)
+                    .into_iter()
+                    .find(|s| s.name == site_name(&site))
+                    .with_context(|| format!("No app named {site}"))?;
+                let filter = requests::Filter {
+                    status,
+                    method,
+                    assets,
+                    ..Default::default()
+                };
+                let path = requests::file(&s.name);
+                let page = requests::read(&path, &filter, None, n)?;
+                for r in page.requests.iter().rev() {
+                    print_request(r, &s.host);
+                }
+                let mut from = page.end_offset;
+                if follow {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        let t = requests::tail(&path, from, &filter)?;
+                        for r in t.requests.iter().rev() {
+                            print_request(r, &s.host);
+                        }
+                        from = t.end_offset;
+                    }
+                }
             }
         },
         Cmd::New {

@@ -163,7 +163,7 @@ pub fn read(path: &Path, before: Option<u64>, max_bytes: u64) -> Result<Page> {
     let mut f = File::open(path)?;
     let len = f.metadata()?.len();
     let end = before.unwrap_or(len).min(len);
-    let (start, text) = window(&mut f, end, max_bytes)?;
+    let (start, text) = window(&mut f, end, max_bytes, first_header)?;
     let mut entries: Vec<Entry> = split(&text).into_iter().map(entry).collect();
     entries.reverse();
     Ok(Page {
@@ -257,7 +257,7 @@ pub fn search(
     let stop = end.saturating_sub(SEARCH_BYTES);
     let mut entries = Vec::new();
     while end > 0 && end > stop && entries.len() < limit {
-        let (start, text) = window(&mut f, end, SEARCH_CHUNK)?;
+        let (start, text) = window(&mut f, end, SEARCH_CHUNK, first_header)?;
         let mut hits: Vec<&str> = split(&text)
             .into_iter()
             .filter(|raw| level.is_none_or(|l| group(&level_of(raw)) == l))
@@ -279,8 +279,13 @@ pub fn search(
 }
 
 /// Bytes `[start, end)` where `start` is the beginning of an entry (or of the
-/// file), widened up to `MAX_WINDOW` to find one.
-fn window(f: &mut File, end: u64, size: u64) -> Result<(u64, String)> {
+/// file) as `starts` finds it in a buffer, widened up to `MAX_WINDOW` to find one.
+pub(crate) fn window(
+    f: &mut File,
+    end: u64,
+    size: u64,
+    starts: fn(&[u8]) -> Option<usize>,
+) -> Result<(u64, String)> {
     let mut size = size.max(1);
     loop {
         let start = end.saturating_sub(size);
@@ -290,7 +295,7 @@ fn window(f: &mut File, end: u64, size: u64) -> Result<(u64, String)> {
         if start == 0 {
             return Ok((0, String::from_utf8_lossy(&buf).into_owned()));
         }
-        let aligned = first_header(&buf).or_else(|| {
+        let aligned = starts(&buf).or_else(|| {
             (size * 2 > MAX_WINDOW).then(|| {
                 buf.iter()
                     .position(|&b| b == b'\n')

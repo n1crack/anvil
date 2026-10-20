@@ -747,26 +747,45 @@ fn caddyfile_for_a_few_sites() {
     let cfg = env.config();
     let file = fs::read_to_string(env.home.join("run/Caddyfile")).unwrap();
     let (home, sites) = (env.home.display(), parked.display());
+    // Each block logs its requests to its app's file.
+    let log = |n: &str| {
+        format!(
+            "\tlog {{\n\t\toutput file \"{home}/log/requests/{n}.log\" {{\n\t\t\troll_size 2MiB\n\t\t\troll_keep 1\n\t\t\troll_keep_for 24h\n\t\t}}\n\t\tformat json\n\t}}\n"
+        )
+    };
     for line in [
         format!("\thttp_port {}\n", cfg.http_port),
         format!("\thttps_port {}\n", cfg.https_port),
         "\tdefault_bind 127.0.0.1 [::1]\n".into(),
         "\tadmin off\n".into(),
         format!(
-            "\nhttp://shop.test {{\n\troot * \"{sites}/shop/public\"\n\tencode\n\t@hidden path */.*\n\tphp_fastcgi unix/{home}/run/site-shop.sock\n\tfile_server @hidden {{\n\t\thide *\n\t}}\n\tfile_server\n}}\n"
+            "\nhttp://shop.test {{\n{}\troot * \"{sites}/shop/public\"\n\tencode\n\t@hidden path */.*\n\tphp_fastcgi unix/{home}/run/site-shop.sock\n\tfile_server @hidden {{\n\t\thide *\n\t}}\n\tfile_server\n}}\n",
+            log("shop")
         ),
         format!(
-            "\nplain.test {{\n\troot * \"{sites}/plain\"\n\tencode\n\t@hidden path */.*\n\tphp_fastcgi unix/{home}/run/php-8.4.sock\n"
+            "\nplain.test {{\n{}\troot * \"{sites}/plain\"\n\tencode\n\t@hidden path */.*\n\tphp_fastcgi unix/{home}/run/php-8.4.sock\n",
+            log("plain")
         ),
-        "\nhttp://plain.test {\n\tredir https://{host}".into(),
-        "\nhttp://front.test, http://front.localhost {\n\treverse_proxy 127.0.0.1:45123\n".into(),
-        // Its docs server has an address of its own.
-        "\nhttp://front--docs.test, http://front--docs.localhost {\n\treverse_proxy 127.0.0.1:"
-            .into(),
+        format!(
+            "\nhttp://plain.test {{\n{}\tredir https://{{host}}",
+            log("plain")
+        ),
+        format!(
+            "\nhttp://front.test, http://front.localhost {{\n{}\treverse_proxy 127.0.0.1:45123\n",
+            log("front")
+        ),
+        // Its docs server has an address of its own, and logs to the app's file.
+        format!(
+            "\nhttp://front--docs.test, http://front--docs.localhost {{\n{}\treverse_proxy 127.0.0.1:",
+            log("front")
+        ),
         // ...and the old one redirects to it.
         "\nhttp://docs.front.localhost {\n\tredir http://front--docs.test:".into(),
         // A Vite app's docs server answers under the tld.
-        "\nhttp://ui--docs.test, http://ui--docs.localhost {\n\treverse_proxy 127.0.0.1:".into(),
+        format!(
+            "\nhttp://ui--docs.test, http://ui--docs.localhost {{\n{}\treverse_proxy 127.0.0.1:",
+            log("ui")
+        ),
     ] {
         assert!(file.contains(&line), "missing {line:?} in:\n{file}");
     }

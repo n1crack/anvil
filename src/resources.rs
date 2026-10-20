@@ -1166,6 +1166,22 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
                 std::fs::write(e.path(), "")?;
             }
         }
+        // Apps' request logs: Caddy writes on in the current one (emptied); the copies
+        // it rolled are only history.
+        for e in std::fs::read_dir(p.join("requests"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            if !e.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
+            if e.file_name().to_string_lossy().ends_with(".log") {
+                std::fs::write(e.path(), "")?;
+            } else {
+                std::fs::remove_file(e.path())?;
+            }
+        }
     } else {
         remove(&p)?;
     }
@@ -1433,6 +1449,26 @@ mod tests {
             assert!(clean_anvil(&item.path).unwrap() > 0);
             assert!(!gone.exists());
         }
+    }
+
+    #[test]
+    fn cleaning_logs_empties_request_logs_and_drops_their_rolled_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&crate::ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let current = crate::requests::file("shop");
+        let rolled = current.with_file_name("shop-2026-10-20T13-20-36.452-size.log.gz");
+        std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+        std::fs::write(&current, vec![b'x'; 5_000]).unwrap();
+        std::fs::write(&rolled, vec![1u8; 5_000]).unwrap();
+        let (_, items) = anvil_disk();
+        let logs = items.iter().find(|i| i.label == "Logs").unwrap();
+        assert!(logs.bytes >= 10_000);
+        assert!(clean_anvil(&logs.path).unwrap() >= 10_000);
+        // Caddy keeps the current one open: emptied, not deleted.
+        assert_eq!(std::fs::metadata(&current).unwrap().len(), 0);
+        assert!(!rolled.exists());
     }
 
     #[test]
