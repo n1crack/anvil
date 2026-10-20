@@ -2581,13 +2581,6 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     let named = |pid: u32| {
         platform::command_line(pid).is_some_and(|c| ours.as_ref().is_some_and(|h| c.contains(h)))
     };
-    let running = |p: u32| {
-        if group {
-            platform::group_alive(p)
-        } else {
-            platform::alive(p)
-        }
-    };
     let mut stopping = vec![];
     for line in pids {
         let (pid, at) = line
@@ -2605,12 +2598,25 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
                 _ => at.is_some_and(|at| started(n).as_deref() == Some(at)) || named(n),
             }
         } else {
-            group && running(n)
+            group && platform::group_alive(n)
         };
         if same && platform::term(n, group) {
             stopping.push(n);
         }
     }
+    finish_stopping(stopping, group);
+    let _ = fs::remove_file(pid_file);
+}
+
+/// After SIGTERM: wait up to `apps::GRACE` for them to end, then SIGKILL what is left.
+fn finish_stopping(stopping: Vec<u32>, group: bool) {
+    let running = |p: u32| {
+        if group {
+            platform::group_alive(p)
+        } else {
+            platform::alive(p)
+        }
+    };
     let deadline = std::time::Instant::now() + apps::GRACE;
     while stopping.iter().any(|p| running(*p)) && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -2618,7 +2624,20 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
     for p in stopping {
         platform::kill(p, group);
     }
-    let _ = fs::remove_file(pid_file);
+}
+
+/// Stop the dev shells a killed Anvil left that no pid file names any more (an older
+/// Anvil's sweep dropped the file, a later start wrote over it): orphaned group leaders
+/// whose last argument is the `anvil:<home>:<key>` tag `spawn` gives them, where `ours`
+/// accepts `<home>:<key>`. A live Anvil's children have a parent, so they are left alone.
+pub(crate) fn kill_tagged_orphans(ours: impl Fn(&str) -> bool) {
+    let stopping = platform::orphan_leaders()
+        .into_iter()
+        .filter(|(_, c)| c.rsplit_once(" anvil:").is_some_and(|(_, t)| ours(t)))
+        .map(|(p, _)| p)
+        .filter(|p| platform::term(*p, true))
+        .collect();
+    finish_stopping(stopping, true);
 }
 
 /// A pid file's first line: this Anvil's pid and start time (`kill_orphans`).
@@ -2650,6 +2669,17 @@ pub fn port_answers(port: u16) -> bool {
     // SYN); one that is listening answers in well under this.
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(250)).is_ok()
+}
+
+/// Whether a program here holds `port` on loopback: it can't be bound there, or it
+/// answers. Binding stays inside this Mac, so it can't hang the way a connection straight
+/// to Caddy's own port behind pf's 80/443 forwarding can (`port_answers` then reads
+/// "free" while Caddy listens).
+fn port_held(port: u16) -> bool {
+    // The probe's own listener is closed before asking, or it would answer itself.
+    let in_use = std::net::TcpListener::bind(("127.0.0.1", port))
+        .is_err_and(|e| e.kind() == std::io::ErrorKind::AddrInUse);
+    in_use || port_answers(port)
 }
 
 /// The first of `ports` that neither a program here nor `taken` uses.
@@ -2806,7 +2836,7 @@ pub struct Server {
 impl Server {
     pub fn start(cfg: &Config) -> Result<Server> {
         kill_orphans(&pid_file(), false);
-        if port_answers(cfg.https_port) {
+        if port_held(cfg.https_port) {
             bail!(
                 "Port {} is already in use — is Anvil already running?",
                 cfg.https_port
@@ -3175,7 +3205,7 @@ mod tests {
     fn ports_paths_and_homes() {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let p = l.local_addr().unwrap().port();
-        assert!(port_answers(p));
+        assert!(port_answers(p) && port_held(p));
         assert_ne!(free_port(&[], p..p.saturating_add(50)), Some(p));
         assert_eq!(free_port(&[p + 1], p + 1..p + 2), None);
         drop(l);

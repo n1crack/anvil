@@ -350,6 +350,43 @@ pub fn command_line(pid: u32) -> Option<String> {
     Some(String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
+/// Process-group leaders whose parent is gone (launchd adopted them), with their
+/// command lines: what a killed Anvil's dev shells become.
+// ponytail: "parent gone" is ppid 1; Linux with a subreaper (systemd --user) reparents
+// elsewhere and these are missed there, pid files still cover them.
+#[cfg(unix)]
+pub fn orphan_leaders() -> Vec<(u32, String)> {
+    let Ok(o) = Command::new("ps")
+        .args(["-axo", "pid=,ppid=,pgid=,command="])
+        .env("LC_ALL", "C")
+        .output()
+    else {
+        return vec![];
+    };
+    String::from_utf8_lossy(&o.stdout)
+        .lines()
+        .filter_map(|l| {
+            // Three numbers, then the command line as it is (a home may hold spaces).
+            let field = |s: &str| {
+                s.trim_start()
+                    .split_once(' ')
+                    .map(|(a, b)| (a.to_string(), b.to_string()))
+            };
+            let (pid, rest) = field(l)?;
+            let (ppid, rest) = field(&rest)?;
+            let (pgid, command) = field(&rest)?;
+            let pid: u32 = pid.parse().ok()?;
+            (ppid == "1" && pgid.parse() == Ok(pid)).then(|| (pid, command.trim().to_string()))
+        })
+        .collect()
+}
+
+/// Windows: no tag on the command line to recognise (`shell`); pid files only.
+#[cfg(windows)]
+pub fn orphan_leaders() -> Vec<(u32, String)> {
+    vec![]
+}
+
 /// Windows keeps the command line in the other process's memory; its program's path
 /// says as much here (Caddy and PHP live in Anvil's home).
 #[cfg(windows)]

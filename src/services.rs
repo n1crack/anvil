@@ -535,12 +535,15 @@ pub fn installed(kind: &str, version: &str) -> bool {
 }
 
 /// Ports every other instance uses (service and web), for clash checks.
+/// Ports a service can't get: other services', and Anvil's own (which a connection
+/// can't always tell are taken: `port_held`).
 fn ports_taken(cfg: &Config, except: &str) -> Vec<u16> {
     instances(cfg)
         .iter()
         .filter(|i| *i != except)
         .flat_map(|i| [Some(port(cfg, i)), web_port(cfg, i)])
         .flatten()
+        .chain([cfg.http_port, cfg.https_port, cfg.dns_port])
         .collect()
 }
 
@@ -952,11 +955,11 @@ fn check_port(cfg: &Config, id: &str, port: u16) -> Result<()> {
     if port < 1024 {
         bail!("Use a port of 1024 or higher");
     }
-    if ports_taken(cfg, id).contains(&port) {
-        bail!("Another Anvil service already uses port {port}");
-    }
     if [cfg.http_port, cfg.https_port, cfg.dns_port].contains(&port) {
         bail!("Port {port} is Anvil's own web or DNS port");
+    }
+    if ports_taken(cfg, id).contains(&port) {
+        bail!("Another Anvil service already uses port {port}");
     }
     Ok(())
 }

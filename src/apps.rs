@@ -543,6 +543,9 @@ fn orphans_in(home: &Path) {
             kill_orphans(&f.path(), true);
         }
     }
+    // Then what no pid file names any more, by the tag `spawn` gives a dev shell.
+    let home = home.display().to_string();
+    crate::kill_tagged_orphans(|t| t.strip_prefix(&home).is_some_and(|k| k.starts_with(':')));
 }
 
 /// How long a dev process gets to exit after SIGTERM before it is killed.
@@ -776,8 +779,11 @@ impl Apps {
         command: &str,
         env: Vec<(String, String)>,
     ) -> Result<()> {
-        // Its old shell, if a crashed Anvil left one, ends first: nothing writes the log meanwhile.
+        // Its old shell, if a killed Anvil left one, ends first (by its pid file, else by
+        // its tag): nothing writes the log meanwhile, and its port is free again.
         kill_orphans(&pid_in(&self.home, key), true);
+        let tag = format!("anvil:{}:{key}", self.home.display());
+        crate::kill_tagged_orphans(|t| t == &tag["anvil:".len()..]);
         crate::state_dirs_in(&self.home)?;
         // Emptied apart: Windows can't shorten a file opened only to append to.
         fs::File::create(log_in(&self.home, key))?;
@@ -786,8 +792,7 @@ impl Apps {
             .open(log_in(&self.home, key))?;
         let command = crate::processes::with_ansi(command);
         // The trailing argument is $0: it tags the shell with Anvil's home so a
-        // crashed Anvil's leftovers can be recognised and cleaned up.
-        let tag = format!("anvil:{}:{key}", self.home.display());
+        // crashed Anvil's leftovers can be recognised and cleaned up (above).
         // The app's "Shared dependencies" came with its env (`shared_env`).
         let shared = env.iter().any(|(k, _)| k == SHARED_VAR);
         let command = with_js_install(dir, &command, shared);
@@ -1601,6 +1606,77 @@ mod tests {
         for key in ["shop@dev", "shop@start", "shop@queue"] {
             assert!(!pid_in(&home, key).exists(), "{key}'s pid file is left");
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A killed Anvil's dev shell whose pid file is gone (an older Anvil's sweep removed it
+    /// without stopping anything): only its tag says whose it is. Adopted by launchd, which
+    /// is what tells it from a live Anvil's child; Linux may reparent to a subreaper.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_tagged_orphan_without_a_pid_file_stops_before_its_key_starts_and_at_startup() {
+        use nix::sys::signal::{Signal, killpg};
+        use nix::unistd::Pid;
+        let dir = project(&[("tagged/x", "")]);
+        let home = dir.join("home");
+        let tag = |h: &Path, key: &str| format!("anvil:{}:{key}", h.display());
+        // Its own group, `sleep 60 & wait` as `spawn`'s shells wait, its parent gone.
+        let orphan = |tag: &str| -> u32 {
+            let o = crate::platform::command("/bin/sh")
+                .args([
+                    "-c",
+                    "perl -e 'setpgrp(0,0); exec @ARGV' /bin/sh -c 'sleep 60 & wait' \"$1\" \
+                     </dev/null >/dev/null 2>&1 & echo $!",
+                    "sh",
+                    tag,
+                ])
+                .output()
+                .unwrap();
+            let pid: u32 = String::from_utf8_lossy(&o.stdout).trim().parse().unwrap();
+            let adopted = || {
+                crate::platform::orphan_leaders()
+                    .iter()
+                    .any(|(p, c)| *p == pid && c.ends_with(tag))
+            };
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !adopted() && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(adopted(), "{pid} isn't an orphaned group leader");
+            pid
+        };
+        let up = |g: u32| killpg(Pid::from_raw(g as i32), None).is_ok();
+        let vite = orphan(&tag(&home, "shop@vite"));
+        let queue = orphan(&tag(&home, "shop@queue"));
+        let elsewhere = orphan(&tag(&dir.join("home-2"), "shop@vite"));
+        // A live Anvil's (this test's) child with the same tag: not an orphan.
+        let mut live = crate::platform::command("/bin/sh")
+            .args(["-c", "sleep 60 & wait", &tag(&home, "shop@vite")])
+            .own_group()
+            .spawn()
+            .unwrap();
+
+        let mut apps = Apps::in_home(home.clone());
+        apps.spawn("shop@vite", &dir, "true", vec![]).unwrap();
+        let after_start = (up(vite), up(queue));
+        orphans_in(&home);
+        let after_sweep = up(queue);
+        let (others, live_up) = (up(elsewhere), up(live.id()));
+        for g in [vite, queue, elsewhere, live.id()] {
+            let _ = killpg(Pid::from_raw(g as i32), Signal::SIGKILL);
+        }
+        let _ = live.wait();
+        drop(apps);
+        assert_eq!(
+            after_start,
+            (false, true),
+            "start stops its own key's orphan only"
+        );
+        assert!(!after_sweep, "startup stops every orphan of this home");
+        assert!(
+            others && live_up,
+            "another home's orphan and a live child are left alone"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
