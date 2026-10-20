@@ -887,26 +887,18 @@ const node = (tag: string, cls: string, ...kids: (Node | string)[]) => {
 };
 
 type Performance = {
-  defender: "on" | "off" | "passive" | null;
   dev_drive_supported: boolean;
   folders: { name: string; path: string; dev_drive: boolean | null }[];
 };
 
-/** Settings › Performance (Windows): asked each time it opens, as both can change outside Anvil. */
+/** Settings › Performance (Windows): asked each time it opens, as a drive can change outside Anvil. */
 function loadPerformance() {
   const row = (label: string, note: string, value: string) =>
     node("div", "row", node("span", "", label, node("small", "", note)), node("span", "muted", value));
   invoke<Performance>("performance")
     .then((p) => {
-      const defender = { on: "On", off: "Off", passive: "Passive" }[p.defender ?? ""] ?? "Unknown";
-      const why =
-        p.defender === "passive"
-          ? "Another antivirus protects this computer; its own settings decide what it scans."
-          : "Real-time protection scans files as programs read them.";
-      $("#perf-system").replaceChildren(
-        row("Microsoft Defender", why, defender),
-        row("Dev Drive", "A drive whose files Defender scans without holding programs up.", p.dev_drive_supported ? "Available" : "Needs Windows 11"),
-      );
+      $("#perf-devdrive").textContent = p.dev_drive_supported ? "· Dev Drive available" : "· Dev Drive needs Windows 11";
+      $("#perf-guide").hidden = !p.dev_drive_supported;
       $("#perf-folders").replaceChildren(
         ...p.folders.map((f) => row(f.name, f.path, f.dev_drive ? "On a Dev Drive" : f.dev_drive === false ? "Not on a Dev Drive" : "Unknown")),
       );

@@ -3089,6 +3089,7 @@ body.activity {
 
 /* Settings › Performance: Defender and Dev Drive are Windows' own. */
 html:not(.windows) .windows-only { display: none; }
+#perf-devdrive { font-weight: 500; }
 
 /* The system's title bar sits above the page: no room for traffic lights, and the
  * sidebar shows Mica rather than vibrancy. */
