@@ -7,7 +7,7 @@
 **Your tools. Your rules.**
 
 A local development environment for web projects.<br>
-Free and open source. Runs on macOS (Apple Silicon); Linux and Windows are in development.
+Free and open source. Runs on macOS; Linux and Windows are in development.
 
 </div>
 
@@ -19,7 +19,7 @@ It comes as a desktop app and a CLI.
 
 ## Install
 
-### macOS (Apple Silicon)
+### macOS
 
 Available with the first release; until then, [build from source](#build-from-source). With [Homebrew](https://brew.sh), add Anvil's tap once:
 

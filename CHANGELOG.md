@@ -44,8 +44,8 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ## [0.1.0] - 2026-10-19
 
-The first public release of Anvil, a local development environment, for macOS on
-Apple Silicon. It comes as a desktop app that carries the `anvil` CLI.
+The first public release of Anvil, a local development environment for macOS.
+It comes as a desktop app that carries the `anvil` CLI.
 
 ### Added
 
