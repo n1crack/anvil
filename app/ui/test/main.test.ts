@@ -2681,6 +2681,29 @@ describe("sidebar worktrees", () => {
     document.querySelector(".pop")?.remove();
   });
 
+  test("Overview › Aliases: the app's, each removed after a confirm, and Add; a worktree's listed only", async () => {
+    const before = w.mockSnap.sites;
+    try {
+      await select("shop");
+      const row = $('[data-panel="overview"] .aliases-row');
+      expect(row.hidden).toBe(false);
+      expect([...row.querySelectorAll(".alias-tag .ask-addr")].map((e) => e.textContent)).toEqual(["admin.shop", "api.shop"]);
+      expect(row.querySelector("dd > button")!.textContent).toBe("Add…");
+      (row.querySelector(".alias-x") as HTMLElement).click();
+      expect(calls("remove_site").length).toBe(0);
+      ($(".pop-confirm button.primary") as HTMLElement).click();
+      await wait(60);
+      expect(calls("remove_site").at(-1)![1]).toEqual({ site: "admin.shop" });
+      await select("shop--feature-login");
+      const wt = $('[data-panel="overview"] .aliases-row');
+      expect(wt.querySelectorAll(".alias-x").length).toBe(0);
+      expect(wt.querySelector("dd")!.textContent).toContain("from shop");
+    } finally {
+      w.mockSnap.sites = before;
+      await refresh();
+    }
+  });
+
   test("a linked app keeps its worktrees under it, and its alias is no row of its own", async () => {
     const before = w.mockSnap.sites;
     const p = "/Users/x/Code/api";

@@ -1207,6 +1207,37 @@ function aliasPop(anchor, sites) {
   const close = popAt(anchor, pop, buttons[0], "left");
 }
 
+/** Overview › Aliases: the app's other addresses, each removable after a confirm, and Add.
+ * A worktree's are derived from its app's: listed, changed on the app. */
+function aliasesLine(s, root) {
+  const row = $(".aliases-row", root);
+  const dd = $("dd", row);
+  dd.replaceChildren();
+  const main = isMain(s);
+  const list = aliasesOf(s);
+  row.hidden = !serves(s) || (!main && !list.length);
+  if (row.hidden) return;
+  const host = (a) => a.host.replace(new RegExp(`\\.${snap.tld}$`), "");
+  for (const a of list) {
+    const chip = el("span", "alias-tag");
+    chip.append(el("span", "ask-addr", host(a)));
+    if (main) {
+      const x = el("button", "alias-x", "×");
+      x.title = `Remove ${a.host}`;
+      x.setAttribute("aria-label", x.title);
+      x.onclick = () =>
+        late.confirmPop(x, `Remove ${a.host}? The folder stays.`, "Remove", () => call("remove_site", { site: a.name }));
+      chip.append(x);
+    }
+    dd.append(chip);
+  }
+  if (main) {
+    const add = el("button", "inline-action", list.length ? "Add…" : "Add an alias…");
+    add.onclick = () => addAlias(s);
+    dd.append(add);
+  } else dd.append(el("span", "muted", `from ${s.worktree_of}`));
+}
+
 /** A small bubble under `anchor`, right-aligned with it (or left). Esc or a click elsewhere
  * closes it; the close function is returned. */
 export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | null, align: "left" | "right" = "right") {
@@ -1322,6 +1353,7 @@ export function renderSite() {
     };
     $('[data-field="runtime"]', root).append(" ", install);
   }
+  aliasesLine(s, root);
   projectNeeds(s, root);
   worktreeLines(s, root);
   leftoverLines(s, root);
