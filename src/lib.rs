@@ -1985,6 +1985,9 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
     {
         s += &dbviewer::caddy_block(cfg, &version_upstream(&v));
     }
+    // Any other host on the HTTP port: a plain 404 rather than Caddy's empty 200. Plain
+    // text, so the Host can't inject markup. HTTPS has no certificate for it: TLS fails.
+    s += "\nhttp:// {\n\theader Content-Type \"text/plain; charset=utf-8\"\n\trespond \"No app at {host}\" 404\n}\n";
     s
 }
 
@@ -2737,9 +2740,13 @@ pub fn stop_all(list: Vec<Stopping>, grace: std::time::Duration) {
 
 /// Running PHP-FPM pools and the web server.
 /// The files Anvil generates in `run` for one app (its own PHP-FPM master's config, its
-/// php.ini folders, Octane's Caddyfile) whose app is gone, or on another PHP version.
-fn prune_run(sites: &[Site]) {
-    let mut keep = BTreeSet::new();
+/// php.ini folders, Octane's Caddyfile) whose app is gone, or on another PHP version, and
+/// the config of a PHP version that no longer runs.
+fn prune_run(sites: &[Site], versions: &BTreeSet<String>) {
+    let mut keep: BTreeSet<String> = versions
+        .iter()
+        .map(|v| format!("php-{v}-fpm.conf"))
+        .collect();
     for s in sites {
         let p = pool(s);
         if let Some(v) = &s.php {
@@ -2753,9 +2760,9 @@ fn prune_run(sites: &[Site]) {
     let run = home().join("run");
     for e in fs::read_dir(&run).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
+        // A version's own config too: the Database viewer's, once it's off.
         let ours = (name.starts_with("php-")
-            && name.contains("-site-")
-            && (name.ends_with("-fpm.conf") || name.ends_with(".d")))
+            && (name.ends_with("-fpm.conf") || name.contains("-site-") && name.ends_with(".d")))
             || ((name.starts_with("swoole-site-") || name.starts_with("frankenphp-site-"))
                 && name.ends_with(".d"))
             || (name.starts_with("octane-site-") && name.ends_with(".Caddyfile"));
@@ -2804,7 +2811,7 @@ impl Server {
             }
         }
         state_dirs()?;
-        prune_run(&sites);
+        prune_run(&sites, &versions);
         // PHP and Caddy read them from the start; only while an app's bridge is on.
         if browser::any(&sites) {
             browser::write_files()?;
@@ -3438,6 +3445,7 @@ mod tests {
             "octane-site-shop.Caddyfile",
             "octane-site-gone.Caddyfile",
             "php-8.4-fpm.conf",
+            "php-8.5-fpm.conf",
             "Caddyfile",
             "site-gone.sock",
         ];
@@ -3455,7 +3463,8 @@ mod tests {
         for f in files {
             fs::write(run.join(f), "").unwrap();
         }
-        prune_run(&[site("shop", "/s/shop", Some("8.4"))]);
+        let versions = BTreeSet::from(["8.4".to_string()]);
+        prune_run(&[site("shop", "/s/shop", Some("8.4"))], &versions);
         let mut left: Vec<String> = fs::read_dir(&run)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -4474,7 +4483,12 @@ mod tests {
             php: Some("8.4".into()),
             ..Config::default()
         };
-        assert!(!caddyfile(&cfg, std::slice::from_ref(&shop)).contains("db.test"));
+        let off = caddyfile(&cfg, std::slice::from_ref(&shop));
+        assert!(!off.contains("db.test"));
+        // db.test, as any host no app has: a 404, not Caddy's empty 200.
+        assert!(off.ends_with(
+            "\nhttp:// {\n\theader Content-Type \"text/plain; charset=utf-8\"\n\trespond \"No app at {host}\" 404\n}\n"
+        ));
         assert!(!php_masters(&cfg, std::slice::from_ref(&shop)).contains("PHP 8.4"));
         cfg.db_viewer = true;
         let out = caddyfile(&cfg, std::slice::from_ref(&shop));
