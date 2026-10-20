@@ -954,9 +954,10 @@ mod tests {
         fs::write(&hot, format!("http://localhost:{port}")).unwrap();
         clear_vite_hot(dir.path());
         assert!(hot.exists());
-        // Gone: removed.
+        // Gone: removed. Port 1 (tcpmux) has no listener, and no parallel test takes it
+        // the way one could take `port` once it is free.
         drop(live);
-        fs::write(&hot, format!("http://[::1]:{port}")).unwrap();
+        fs::write(&hot, "http://[::1]:1").unwrap();
         clear_vite_hot(dir.path());
         assert!(!hot.exists());
         // Not this machine's: left alone.
