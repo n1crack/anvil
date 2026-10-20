@@ -31,6 +31,7 @@ contain breaking changes.
 
 ### Changed
 
+- Each window can run only the actions it offers; Settings and Processes can no longer change apps or processes.
 - New apps use pnpm by default (`anvil new --pm` picks another).
 - Settings: the sidebar is grouped (app, Languages, Plugins), and a plugin that is on gets its own page.
 - Settings › PHP: each version's extensions, OPcache included, slide open from "Extensions n/6"; OPcache can be built or removed, after a confirm.
