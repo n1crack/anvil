@@ -187,6 +187,13 @@ mod tests {
         crate::state_dirs().unwrap();
         drop(UnixListener::bind(socket_path()).unwrap());
         assert!(socket_path().exists());
+        // A child another test is spawning can hold a copy of the listener for a
+        // moment; wait until nothing accepts on it, then time the stale read.
+        let gone = Instant::now();
+        while UnixStream::connect(socket_path()).is_ok() && gone.elapsed() < Duration::from_secs(2)
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let t = Instant::now();
         assert_eq!(request("ping", json!({}), "t").unwrap(), None);
         assert!(t.elapsed() < Duration::from_millis(100));
