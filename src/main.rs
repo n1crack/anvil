@@ -812,11 +812,16 @@ fn project_cmd(
         .map(|n| n.label.chars().count())
         .max()
         .unwrap_or(0);
+    // Turned on for the app or its version: unmet only for want of a build.
+    let on = |e: &str| {
+        s.ext.iter().any(|x| x == e) || s.php.as_deref().is_some_and(|v| phpext::on(cfg, v, e))
+    };
     for n in &needs {
         let state = match (&n.overridden, n.met, n.kind.as_str()) {
             (Some(v), ..) => dim(format!("you chose {v} in Anvil")),
             (None, true, "php" | "node") => green("installed"),
             (None, true, "ext") => green("on"),
+            (None, false, "ext") if on(&n.install) => yellow("on, not built"),
             (None, false, "ext") => yellow("not on"),
             (None, true, _) => green("added"),
             (None, false, "php" | "node") => yellow("not installed"),
@@ -1170,6 +1175,25 @@ fn run() -> Result<()> {
                     };
                     println!("{:<9} {:<10} {state}", e.name, e.version);
                 }
+                // Apps on this version with extensions of their own.
+                let built = phpext::built_names(&v);
+                for s in sites(&cfg)
+                    .into_iter()
+                    .filter(|s| s.php.as_deref() == Some(v.as_str()) && !s.ext.is_empty())
+                {
+                    let list: Vec<String> = s
+                        .ext
+                        .iter()
+                        .map(|e| {
+                            if built.contains(&e.as_str()) {
+                                e.clone()
+                            } else {
+                                format!("{e} (not built: anvil app ext {} add {e})", s.name)
+                            }
+                        })
+                        .collect();
+                    println!("{} {}", dim(format!("{}:", s.name)), list.join(", "));
+                }
             } else {
                 control::notify_changed();
                 println!(
@@ -1249,7 +1273,11 @@ fn run() -> Result<()> {
                 println!("{v}  {opcache}{mark}");
             }
         }
-        Cmd::Use { version } => edit(&mut cfg, |c| set_default_php(c, &version))?,
+        Cmd::Use { version } => {
+            edit(&mut cfg, |c| set_default_php(c, &version))?;
+            phpext::build_missing(&cfg, &version);
+            control::notify_changed();
+        }
         Cmd::Service { cmd } => match cmd {
             ServiceCmd::List => {
                 let list = services::Services::default().info(&cfg);
@@ -1380,7 +1408,13 @@ fn run() -> Result<()> {
             RuntimeCmd::Uninstall { id, version } => runtime_uninstall(&cfg, &id, &version)?,
         },
         Cmd::App { cmd } => match cmd {
-            AppCmd::Php { site, version } => edit(&mut cfg, |c| set_site_php(c, &site, version))?,
+            AppCmd::Php { site, version } => {
+                edit(&mut cfg, |c| set_site_php(c, &site, version))?;
+                // Its own extensions, built for the version it's on now; the app then
+                // restarts PHP-FPM with them (`needs_restart`).
+                phpext::build_missing_for(&cfg, &site);
+                control::notify_changed();
+            }
             AppCmd::Root {
                 site,
                 dir: None,

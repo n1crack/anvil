@@ -51,17 +51,25 @@ Until 1.0.0, minor versions may contain breaking changes.
   against the PHP you run (checked against checksums pinned in Anvil; needs
   the Xcode command line tools), and the web, the terminal's `php` and an
   app's processes load the same ones, as does a PHP those start (queue
-  workers, `npm run dev` → `php artisan`, composer scripts). Xdebug starts only when a request
+  workers, `npm run dev` → `php artisan`, composer scripts), but not one in
+  another project started from there. Xdebug starts only when a request
   asks for it (`xdebug.start_with_request=trigger`). Off keeps the build, so
-  on again is instant; a new patch release of PHP builds them again.
+  on again is instant; a new patch release of PHP builds them again, and so
+  does moving an app to another version. One that is on without a build (it
+  failed) shows as not built, in Settings, `anvil php ext list` and `anvil
+  project`, not as on. `anvil php ext add|remove` restarts PHP-FPM in the open
+  app.
 - PHP extensions for one app: the same switches in the app's Settings tab, or
   `anvil app ext <site> add|remove <ext>`, e.g. Xdebug for the app you debug
   only. That app, and any other address of the same folder, gets a PHP-FPM of
-  its own; its terminal `php` and processes load the same extensions.
+  its own, with its own `xdebug.*` and `opcache.*` php.ini values; its
+  terminal `php` and processes load the same extensions. A worktree has its
+  app's until one is changed for it; from then on it has its own, so one its
+  app has can be off for it.
 - A project's `.anvil.toml` can ask for PHP extensions: `extensions =
-  ["xdebug"]`. One not on for the app or its PHP version shows in the
-  Overview's Project line with Add, which turns it on for that app (building
-  it first if needed); `anvil project --apply` does the same. A name Anvil
+  ["xdebug"]`. One not on (or not built) for the app or its PHP version shows
+  in the Overview's Project line with Add, which turns it on for that app
+  (building it first if needed); `anvil project --apply` does the same. A name Anvil
   doesn't offer is reported, like an unknown version.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service
   start|stop <id>` ask the running app to do it, so the change shows there at

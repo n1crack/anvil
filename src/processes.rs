@@ -1987,7 +1987,7 @@ echo '{DEV_JSON}'
         // On for 8.4 and for the app: loaded once.
         cfg.php_ext
             .insert("8.4".into(), vec!["apcu".into(), "xdebug".into()]);
-        cfg.sites.entry("shop".into()).or_default().ext = vec!["xdebug".into()];
+        cfg.sites.entry("shop".into()).or_default().ext = Some(vec!["xdebug".into()]);
         let s = crate::sites(&cfg)
             .into_iter()
             .find(|s| s.name == "shop")

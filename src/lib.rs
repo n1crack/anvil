@@ -137,8 +137,9 @@ pub struct SiteConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ini: BTreeMap<String, String>,
     /// Catalog extensions for this site only (`phpext::CATALOG`), over its version's.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ext: Vec<String>,
+    /// A worktree's unset is its app's; its own list, even empty, replaces that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ext: Option<Vec<String>>,
     /// Overrides the detected kind (see `apps::KINDS`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
@@ -625,10 +626,8 @@ fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
             .map(|s| s.ini.clone())
             .unwrap_or_default(),
         ext: o
-            .filter(|s| !s.ext.is_empty())
-            .or(m)
-            .map(|s| s.ext.clone())
-            .unwrap_or_default(),
+            .and_then(|s| s.ext.clone())
+            .or_else(|| m.and_then(|s| s.ext.clone())),
         port: o.and_then(|s| s.port),
         autostart: false,
         processes: BTreeMap::new(),
@@ -658,7 +657,7 @@ fn site_at(
     };
     let pinned = own.and_then(|s| s.php.clone());
     let ini = own.map(|s| s.ini.clone()).unwrap_or_default();
-    let ext = own.map(|s| s.ext.clone()).unwrap_or_default();
+    let ext = own.and_then(|s| s.ext.clone()).unwrap_or_default();
     let detected = apps::detect(&path);
     let kind = own
         .and_then(|s| s.kind.clone())
@@ -1240,14 +1239,9 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     {
         println!("PHP {full} works without OPcache for now: {e}");
     }
-    // A new patch release: the extensions turned on for it are built again for it.
-    for name in cfg.php_ext.get(minor).cloned().unwrap_or_default() {
-        if !phpext::built(minor, &name)
-            && let Err(e) = phpext::build(minor, &name)
-        {
-            println!("PHP {full} works without {name} for now: {e}");
-        }
-    }
+    // A new patch release: the extensions turned on for it, for the version or by an
+    // app on it, are built again for it.
+    phpext::build_missing(cfg, minor);
     Ok(())
 }
 
@@ -1931,10 +1925,34 @@ pub fn set_site_runtime(cfg: &mut Config, site: &str, version: Option<String>) -
     save(cfg)
 }
 
-/// True when the running server was started with a different set of sites.
+/// True when the running server was started with a different set of sites, or its PHP
+/// masters with other extensions (`anvil php ext add` in a terminal).
 pub fn needs_restart(cfg: &Config) -> bool {
-    fs::read_to_string(home().join("run").join("Caddyfile"))
-        .map_or(true, |old| old != caddyfile(cfg, &sites(cfg)))
+    let sites = sites(cfg);
+    let run = home().join("run");
+    let differs = |file: &str, now: String| fs::read_to_string(run.join(file)).ok() != Some(now);
+    differs("Caddyfile", caddyfile(cfg, &sites)) || differs("php-masters", php_masters(cfg, &sites))
+}
+
+/// What each PHP master starts with (`phpext::php_args_with`), a line each: the
+/// version's, then each app's own.
+fn php_masters(cfg: &Config, sites: &[Site]) -> String {
+    let versions: BTreeSet<_> = sites.iter().filter_map(|s| s.php.clone()).collect();
+    let mut out = String::new();
+    for v in &versions {
+        out += &format!(
+            "PHP {v}: {}\n",
+            phpext::php_args_with(cfg, v, None).join(" ")
+        );
+        for s in sites
+            .iter()
+            .filter(|s| s.own_master && s.php.as_deref() == Some(v))
+        {
+            let args = phpext::php_args_with(cfg, v, Some(s));
+            out += &format!("PHP {v} ({}): {}\n", s.name, args.join(" "));
+        }
+    }
+    out
 }
 
 pub fn trust() -> Result<()> {
@@ -2518,18 +2536,18 @@ impl Server {
             let conf = home().join("run").join(format!("php-{v}-fpm.conf"));
             fs::write(&conf, fpm_conf(cfg, v, &sites))?;
             // Started here, not by a PHP: `-d`s, no scan dir (`phpext::scan_env`).
-            let fpm = |conf: &Path, ext: &[String]| {
+            let fpm = |conf: &Path, site: Option<&Site>| {
                 crate::platform::command(php_dir(v).join("php-fpm"))
                     .arg("-y")
                     .arg(conf)
                     .arg("-c")
                     .arg(php_dir(v).join("php.ini"))
-                    .args(phpext::php_args_with(cfg, v, ext))
+                    .args(phpext::php_args_with(cfg, v, site))
                     .spawn()
                     .with_context(|| format!("failed to start PHP {v}"))
             };
             server.labels.push(format!("PHP {v} FPM"));
-            server.children.push(fpm(&conf, &[])?);
+            server.children.push(fpm(&conf, None)?);
             for site in sites
                 .iter()
                 .filter(|s| s.own_master && s.php.as_deref() == Some(v))
@@ -2540,10 +2558,14 @@ impl Server {
                 let conf = fpm_site_conf_file(v, site);
                 fs::write(&conf, text)?;
                 server.labels.push(format!("PHP {v} FPM ({})", site.name));
-                server.children.push(fpm(&conf, &site.ext)?);
+                server.children.push(fpm(&conf, Some(site))?);
             }
         }
 
+        fs::write(
+            home().join("run").join("php-masters"),
+            php_masters(cfg, &sites),
+        )?;
         let file = home().join("run").join("Caddyfile");
         fs::write(&file, caddyfile(cfg, &sites))?;
         let log = fs::File::create(caddy_log())?;
@@ -2595,7 +2617,7 @@ impl Server {
     /// its `cgi_ports`: the shared one with the global php.ini values, then one per site
     /// with values, extensions or a worktree's environment of its own.
     fn start_cgi(&mut self, cfg: &Config, v: &str, sites: &[Site]) -> Result<()> {
-        let mut pools = vec![(format!("php-{v}"), cfg.ini.clone(), vec![], vec![])];
+        let mut pools = vec![(format!("php-{v}"), cfg.ini.clone(), vec![], None)];
         for site in sites
             .iter()
             .filter(|s| s.php.as_deref() == Some(v) && own_pool(s))
@@ -2606,10 +2628,10 @@ impl Server {
             };
             let mut ini = cfg.ini.clone();
             ini.extend(site.ini.clone());
-            pools.push((pool(site), ini, env, site.ext.clone()));
+            pools.push((pool(site), ini, env, Some(site)));
         }
         let log = php_fpm_log(v);
-        for (name, ini, env, ext) in pools {
+        for (name, ini, env, site) in pools {
             for port in cgi_ports(&name) {
                 let err = fs::OpenOptions::new()
                     .create(true)
@@ -2620,7 +2642,7 @@ impl Server {
                     .arg(format!("127.0.0.1:{port}"))
                     .arg("-c")
                     .arg(php_dir(v).join("php.ini"))
-                    .args(phpext::php_args_with(cfg, v, &ext));
+                    .args(phpext::php_args_with(cfg, v, site));
                 for (k, val) in &ini {
                     cmd.arg("-d").arg(format!("{k}={val}"));
                 }
@@ -3031,6 +3053,89 @@ mod tests {
     fn add_worktree(main: &Path, at: &Path, branch: &str) {
         let at = at.to_str().unwrap();
         crate::worktrees::tests::git(main, &["worktree", "add", "-q", at, "-b", branch]);
+    }
+
+    #[test]
+    fn an_extension_changed_elsewhere_restarts_php() {
+        let _env = lock(&ENV_LOCK);
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        phpext::tests::fake_php("8.4", "8.4.23");
+        fs::write(php_dir("8.4").join(PHP_SERVER), "").unwrap();
+        phpext::tests::fake_so("8.4", "8.4.23", "apcu");
+        phpext::tests::fake_so("8.4", "8.4.23", "pcov");
+        let app = dir.path().join("shop");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("index.php"), "").unwrap();
+        let mut cfg = Config {
+            php: Some("8.4".into()),
+            ..Default::default()
+        };
+        cfg.links.insert("shop".into(), app);
+        // As `Server::start` leaves them.
+        let served = |cfg: &Config| {
+            state_dirs().unwrap();
+            let run = home().join("run");
+            fs::write(run.join("Caddyfile"), caddyfile(cfg, &sites(cfg))).unwrap();
+            fs::write(run.join("php-masters"), php_masters(cfg, &sites(cfg))).unwrap();
+        };
+        served(&cfg);
+        assert!(!needs_restart(&cfg));
+        // `anvil php ext add apcu`: same Caddyfile, other PHP-FPM arguments.
+        cfg.php_ext.insert("8.4".into(), vec!["apcu".into()]);
+        assert!(needs_restart(&cfg));
+        served(&cfg);
+        // `anvil app ext shop add pcov` with apcu its own already: its own master's.
+        cfg.sites.entry("shop".into()).or_default().ext = Some(vec!["apcu".into()]);
+        served(&cfg);
+        cfg.sites.get_mut("shop").unwrap().ext = Some(vec!["apcu".into(), "pcov".into()]);
+        assert!(needs_restart(&cfg));
+    }
+
+    #[test]
+    fn a_worktree_turns_off_an_extension_its_app_has() {
+        let root = crate::worktrees::tests::tmp("ext");
+        let shop = root.join("sites/shop");
+        app_repo(&shop);
+        add_worktree(&shop, &root.join("x"), "x");
+        let _env = lock(&ENV_LOCK);
+        let home_dir = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home_dir.path()) };
+        phpext::tests::fake_php("8.4", "8.4.23");
+        fs::write(php_dir("8.4").join(PHP_SERVER), "").unwrap();
+        phpext::tests::fake_so("8.4", "8.4.23", "xdebug");
+        phpext::tests::fake_so("8.4", "8.4.23", "apcu");
+        let mut cfg = Config {
+            php: Some("8.4".into()),
+            ..Default::default()
+        };
+        cfg.paths.push(root.join("sites"));
+        cfg.sites.entry("shop".into()).or_default().ext = Some(vec!["xdebug".into()]);
+        save(&cfg).unwrap();
+        let ext = |cfg: &Config, n: &str| sites(cfg).into_iter().find(|s| s.name == n).unwrap().ext;
+        assert_eq!(ext(&cfg, "shop--x"), ["xdebug"], "unset: its app's");
+
+        // Off for the worktree: a list of its own, kept empty; its app keeps xdebug.
+        let cfg = phpext::remove_site("shop--x", "xdebug").unwrap();
+        assert_eq!(cfg.sites["shop--x"].ext, Some(vec![]));
+        assert!(ext(&cfg, "shop--x").is_empty());
+        assert_eq!(ext(&cfg, "shop"), ["xdebug"]);
+        let text = fs::read_to_string(home().join("config.toml")).unwrap();
+        assert!(text.contains("ext = []"), "{text}");
+        assert_eq!(ext(&load().unwrap(), "shop--x"), Vec::<String>::new());
+
+        // On again: its own list; the app's last one off leaves nothing stored.
+        let cfg = phpext::add_site("shop--x", "apcu").unwrap();
+        assert_eq!(ext(&cfg, "shop--x"), ["apcu"]);
+        let cfg = phpext::remove_site("shop", "xdebug").unwrap();
+        assert_eq!(cfg.sites["shop"].ext, None);
+        assert_eq!(ext(&cfg, "shop--x"), ["apcu"]);
+        // An older config's list reads as the site's own.
+        let old: Config = toml::from_str("[sites.shop]\next = [\"xdebug\"]\n").unwrap();
+        assert_eq!(old.sites["shop"].ext, Some(vec!["xdebug".into()]));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -3643,7 +3748,7 @@ mod tests {
         cfg.links.insert("shop".into(), app.clone());
         cfg.links.insert("alias".into(), app.clone());
         cfg.links.insert("blog".into(), dir.path().into());
-        cfg.sites.entry("shop".into()).or_default().ext = vec!["xdebug".into()];
+        cfg.sites.entry("shop".into()).or_default().ext = Some(vec!["xdebug".into()]);
         let all = sites(&cfg);
         let master = |n: &str| all.iter().find(|s| s.name == n).unwrap().own_master;
         assert!(master("shop") && master("alias"), "same folder, same rule");
@@ -3697,6 +3802,8 @@ mod tests {
 
     #[test]
     fn fpm_gives_a_worktree_its_own_pool_with_env() {
+        // Its socket's path is in ANVIL_HOME.
+        let _env = lock(&ENV_LOCK);
         let (cfg, wt) = crate::worktrees::tests::worktree_site(
             "fpm",
             "DB_CONNECTION=mysql\nDB_DATABASE=shop\n",

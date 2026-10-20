@@ -48,6 +48,7 @@ window.mockSnap = {
   php_installed: ["8.4"],
   php_ext_catalog: ["xdebug", "pcov", "apcu", "igbinary", "msgpack"],
   php_ext: {},
+  php_ext_built: {},
   editor: "Zed",
   git_client: null,
   groups: {},
@@ -910,6 +911,7 @@ const mockHandle = (cmd, a) => {
           extensions: ["xdebug", "pcov", "apcu", "igbinary", "msgpack"].map((name) => ({
             name,
             on: window.mockExt?.[version]?.includes(name) ?? false,
+            built: !window.mockExtUnbuilt?.includes(`${version} ${name}`),
             building: window.mockExtBuilding?.includes(`${version} ${name}`) ?? false,
           })),
         })),

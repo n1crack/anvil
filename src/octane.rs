@@ -613,7 +613,7 @@ mod tests {
         let ini = scan_ini(&crate::apps::process_env(&s, &queue, &cfg).unwrap());
         assert!(ini.contains(&format!("extension={apcu}\n")), "{ini}");
         assert!(!ini.contains("swoole"), "{ini}");
-        let fpm = crate::phpext::php_args_with(&cfg, "8.4", &s.ext);
+        let fpm = crate::phpext::php_args_with(&cfg, "8.4", Some(&s));
         assert!(!fpm.iter().any(|a| a.contains("swoole")), "{fpm:?}");
         let cli = crate::phpext::cli_args(&cfg, "8.4", Some(&s));
         assert!(!cli.iter().any(|a| a.contains("swoole")), "{cli:?}");

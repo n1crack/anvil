@@ -84,6 +84,9 @@ struct Snapshot {
     php_ext_catalog: Vec<&'static str>,
     /// Extensions on for every app on a version (Settings › PHP), by version.
     php_ext: std::collections::BTreeMap<String, Vec<String>>,
+    /// The catalog extensions built for each version that has some turned on: one on
+    /// without a build loads nothing and shows as not built.
+    php_ext_built: std::collections::BTreeMap<String, Vec<&'static str>>,
 }
 
 /// What a worktree's Overview says about it.
@@ -380,6 +383,18 @@ fn snapshot(app: &App) -> Res<Snapshot> {
                 .collect()
         },
         leftovers: anvil::worktrees::leftovers(&cfg, &sites),
+        php_ext_built: sites
+            .iter()
+            .filter(|s| !s.ext.is_empty())
+            .filter_map(|s| s.php.clone())
+            .chain(cfg.php_ext.keys().cloned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(|v| {
+                let built = anvil::phpext::built_names(&v);
+                (v, built)
+            })
+            .collect(),
         sites,
         hidden: anvil::hidden_sites(&cfg),
         php_default: cfg.php.clone(),
@@ -481,6 +496,8 @@ fn set_php(
     version: Option<String>,
 ) -> Res<Snapshot> {
     let (cfg, ()) = edit(|c| anvil::set_site_php(c, &site, version))?;
+    // Its extensions, built for the version it's on now, before PHP-FPM restarts.
+    anvil::phpext::build_missing_for(&cfg, &site);
     if running(&app) {
         start(&app, &cfg);
     }
@@ -2919,6 +2936,8 @@ struct PhpVersion {
 struct PhpExt {
     name: &'static str,
     on: bool,
+    /// Built for the installed patch release; on without it loads nothing.
+    built: bool,
     /// Being built by this app, so a window opened meanwhile says so too.
     building: bool,
 }
@@ -3090,6 +3109,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                     .map(|e| PhpExt {
                         name: e.name,
                         on: anvil::phpext::on(&cfg, v, e.name),
+                        built: anvil::phpext::built(v, e.name),
                         building: anvil::lock(&EXT_BUILDS).contains(&(v.to_string(), e.name)),
                     })
                     .collect(),
@@ -3361,7 +3381,14 @@ fn open_config_dir() -> Res<()> {
 
 #[tauri::command(async)]
 fn set_default_php(handle: AppHandle, version: String) -> Res<Settings> {
-    apply(&handle, |cfg| anvil::set_default_php(cfg, &version), true)
+    let (cfg, ()) = edit(|cfg| anvil::set_default_php(cfg, &version))?;
+    anvil::phpext::build_missing(&cfg, &version);
+    let app = handle.state::<App>();
+    if running(&app) {
+        start(&app, &cfg);
+    }
+    changed(&handle);
+    settings(handle)
 }
 
 /// `site: None` changes the default for every site.
@@ -3892,8 +3919,9 @@ fn on_menu(handle: &AppHandle, id: &str) {
                 match anvil::update(|c| anvil::set_default_php(c, v)) {
                     Err(e) => *anvil::lock(&app.error) = Some(err(e)),
                     Ok((cfg, ())) if running(&app) => {
-                        let handle = handle.clone();
+                        let (handle, v) = (handle.clone(), v.to_string());
                         std::thread::spawn(move || {
+                            anvil::phpext::build_missing(&cfg, &v);
                             start(&handle.state::<App>(), &cfg);
                             changed(&handle);
                         });

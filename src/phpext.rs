@@ -160,6 +160,18 @@ pub fn built(minor: &str, name: &str) -> bool {
     installed_full(minor).is_ok_and(|full| so_path(minor, &full, name).exists())
 }
 
+/// The catalog extensions built for the PHP `minor` installed now (one PHP run): one
+/// turned on without a build there loads nothing and shows as not built.
+pub fn built_names(minor: &str) -> Vec<&'static str> {
+    let Ok(full) = installed_full(minor) else {
+        return vec![];
+    };
+    offered()
+        .filter(|e| so_path(minor, &full, e.name).exists())
+        .map(|e| e.name)
+        .collect()
+}
+
 /// Build `name` for the installed PHP `minor` and put it in place once PHP loads it.
 pub fn build(minor: &str, name: &str) -> Result<()> {
     let ext = CATALOG
@@ -304,24 +316,32 @@ pub fn add_site(site: &str, name: &str) -> Result<Config> {
     if !built(&minor, name) {
         build(&minor, name)?;
     }
-    let (cfg, ()) = crate::update(|c| {
-        let names = &mut c.sites.entry(site.clone()).or_default().ext;
-        if !names.iter().any(|n| n == name) {
-            names.push(name.into());
-        }
-        Ok(())
-    })?;
-    Ok(cfg)
+    set_site_ext(&site, name, true)
 }
 
 /// Turn one app's own `name` off; its `.so` stays.
 pub fn remove_site(site: &str, name: &str) -> Result<Config> {
     find(name)?;
-    let site = crate::site_name(site);
+    set_site_ext(&crate::site_name(site), name, false)
+}
+
+/// `name` on or off in the app's own list: the extensions it has now (a worktree's are
+/// its app's until it has its own), changed, as its own. A worktree's own list is kept
+/// even empty, so one its app has stays off for it; an app's empty list isn't stored.
+fn set_site_ext(site: &str, name: &str, on: bool) -> Result<Config> {
     let (cfg, ()) = crate::update(|c| {
-        if let Some(s) = c.sites.get_mut(&site) {
-            s.ext.retain(|n| n != name);
+        let found = crate::sites(c).into_iter().find(|s| s.name == site);
+        let mut names = found.as_ref().map(|s| s.ext.clone()).unwrap_or_default();
+        let worktree = found.is_some_and(|s| s.worktree_of.is_some());
+        if names.iter().any(|n| n == name) == on {
+            return Ok(());
         }
+        names.retain(|n| n != name);
+        if on {
+            names.push(name.into());
+        }
+        c.sites.entry(site.into()).or_default().ext =
+            (worktree || !names.is_empty()).then_some(names);
         Ok(())
     })?;
     Ok(cfg)
@@ -338,22 +358,70 @@ pub fn on(cfg: &Config, minor: &str, name: &str) -> bool {
 /// app processes): OPcache first, as it must load before Xdebug, then the extensions
 /// turned on for the version.
 pub fn php_args(cfg: &Config, minor: &str) -> Vec<String> {
-    php_args_with(cfg, minor, &[])
+    php_args_with(cfg, minor, None)
 }
 
-/// `php_args` with one app's own extensions (`Site::ext`) too, each loaded once.
-pub fn php_args_with(cfg: &Config, minor: &str, own: &[String]) -> Vec<String> {
-    let mut args = crate::opcache::fpm_args(cfg, minor);
+/// `php_args` for one app's PHP (its PHP-FPM master of its own, its CLI): its own
+/// extensions (`Site::ext`) too, each loaded once, and its own `opcache.*` and
+/// `xdebug.*` values over the global ones, which PHP reads only when it starts.
+pub fn php_args_with(cfg: &Config, minor: &str, site: Option<&crate::Site>) -> Vec<String> {
+    let mut ini = cfg.ini.clone();
+    ini.extend(site.map(|s| s.ini.clone()).unwrap_or_default());
+    let mut args = crate::opcache::fpm_args(&ini, minor);
+    let names = names_for(cfg, minor, site);
+    if !names.is_empty() {
+        args.extend(ini_args(&ini, minor, &names));
+    }
+    args
+}
+
+/// The extensions turned on for an app on `minor`: its version's, then its own.
+fn names_for(cfg: &Config, minor: &str, site: Option<&crate::Site>) -> Vec<String> {
     let mut names = cfg.php_ext.get(minor).cloned().unwrap_or_default();
-    for n in own {
+    for n in site.map_or(&[][..], |s| &s.ext) {
         if !names.contains(n) {
             names.push(n.clone());
         }
     }
-    if !names.is_empty() {
-        args.extend(ini_args(&cfg.ini, minor, &names));
+    names
+}
+
+/// Build what is turned on for PHP `minor` (for the version, or by an app on it) but
+/// not built for its installed patch release: after `anvil php install` brings a new
+/// one, or an app moves to `minor`. One that fails is said; it shows as not built.
+pub fn build_missing(cfg: &Config, minor: &str) {
+    for name in missing(cfg, minor) {
+        if let Err(e) = build(minor, name) {
+            println!("PHP {minor} works without {name} for now: {e:#}");
+        }
     }
-    args
+}
+
+/// What `build_missing` builds, in catalog order.
+fn missing(cfg: &Config, minor: &str) -> Vec<&'static str> {
+    let mut names = cfg.php_ext.get(minor).cloned().unwrap_or_default();
+    for s in crate::sites(cfg) {
+        if s.php.as_deref() == Some(minor) {
+            names.extend(s.ext);
+        }
+    }
+    let built = built_names(minor);
+    offered()
+        .map(|e| e.name)
+        .filter(|n| names.iter().any(|x| x == n) && !built.contains(n))
+        .collect()
+}
+
+/// `build_missing` for the PHP `site` is on now: after it moved to another version.
+pub fn build_missing_for(cfg: &Config, site: &str) {
+    let name = crate::site_name(site);
+    if let Some(v) = crate::sites(cfg)
+        .into_iter()
+        .find(|s| s.name == name)
+        .and_then(|s| s.php)
+    {
+        build_missing(cfg, &v);
+    }
 }
 
 /// `php_args_with` and then the php.ini values PHP-FPM's pool gives `site` (or, without
@@ -361,7 +429,7 @@ pub fn php_args_with(cfg: &Config, minor: &str, own: &[String]) -> Vec<String> {
 /// starts outside PHP-FPM reads. The CLI keeps its own `max_execution_time=0` and
 /// `max_input_time=-1`: PHP sets them over any ini file.
 pub fn cli_args(cfg: &Config, minor: &str, site: Option<&crate::Site>) -> Vec<String> {
-    let mut args = php_args_with(cfg, minor, site.map_or(&[], |s| &s.ext));
+    let mut args = php_args_with(cfg, minor, site);
     let mut ini = cfg.ini.clone();
     ini.extend(site.map(|s| s.ini.clone()).unwrap_or_default());
     for (k, v) in ini {
@@ -400,10 +468,20 @@ pub fn scan_env(
 /// `args` (`-d` pairs) as `dir/anvil.ini`, rewritten only when it differs, and the
 /// `PHP_INI_SCAN_DIR` that reads it: ours first, then the user's own, else PHP's
 /// built-in folder (the empty entry). An Anvil folder in the user's (a terminal opened
-/// from an app process) is left out: never two of Anvil's at once.
+/// from an app process) is left out: never two of Anvil's at once. With nothing to load,
+/// `None`, unless the user's names Anvil's folders: then the user's own entries only, so
+/// another project's extensions don't come along.
 pub(crate) fn scan_env_in(dir: &Path, args: &[String]) -> Result<Option<(String, String)>> {
+    let home = home();
+    let sep = crate::platform::PATH_SEP;
+    let theirs = std::env::var("PHP_INI_SCAN_DIR").unwrap_or_default();
+    let own: Vec<&str> = theirs
+        .split(sep)
+        .filter(|p| !Path::new(p).starts_with(&home))
+        .collect();
     if args.is_empty() {
-        return Ok(None);
+        let had_ours = own.len() != theirs.split(sep).count();
+        return Ok(had_ours.then(|| ("PHP_INI_SCAN_DIR".into(), own.join(&sep.to_string()))));
     }
     let text: String = args.chunks(2).map(|c| format!("{}\n", c[1])).collect();
     let file = dir.join("anvil.ini");
@@ -413,22 +491,15 @@ pub(crate) fn scan_env_in(dir: &Path, args: &[String]) -> Result<Option<(String,
         fs::write(&tmp, &text)?;
         fs::rename(&tmp, &file)?;
     }
-    let home = home();
-    let theirs = std::env::var("PHP_INI_SCAN_DIR").unwrap_or_default();
     let mut dirs = vec![dir.display().to_string()];
     if theirs.is_empty() {
         dirs.push(String::new());
     } else {
-        dirs.extend(
-            theirs
-                .split(crate::platform::PATH_SEP)
-                .filter(|p| !Path::new(p).starts_with(&home))
-                .map(String::from),
-        );
+        dirs.extend(own.into_iter().map(String::from));
     }
     Ok(Some((
         "PHP_INI_SCAN_DIR".into(),
-        dirs.join(&crate::platform::PATH_SEP.to_string()),
+        dirs.join(&sep.to_string()),
     )))
 }
 
@@ -793,6 +864,81 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn missing_counts_apps_on_the_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        for v in ["8.3", "8.4"] {
+            fake_php(v, &format!("{v}.9"));
+            fs::write(php_dir(v).join(crate::PHP_SERVER), "").unwrap();
+        }
+        let app = |n: &str| {
+            let d = dir.path().join(n);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("index.php"), "").unwrap();
+            d
+        };
+        let mut cfg = Config {
+            php: Some("8.4".into()),
+            ..Default::default()
+        };
+        cfg.links.insert("shop".into(), app("shop"));
+        cfg.links.insert("blog".into(), app("blog"));
+        cfg.php_ext.insert("8.4".into(), vec!["apcu".into()]);
+        cfg.sites.entry("shop".into()).or_default().ext = Some(vec!["xdebug".into()]);
+        let blog = cfg.sites.entry("blog".into()).or_default();
+        blog.ext = Some(vec!["pcov".into()]);
+        blog.php = Some("8.3".into());
+        // A new 8.4.9: the version's apcu and shop's own xdebug; blog's pcov is 8.3's.
+        assert_eq!(missing(&cfg, "8.4"), ["xdebug", "apcu"]);
+        fake_so("8.4", "8.4.9", "xdebug");
+        assert_eq!(missing(&cfg, "8.4"), ["apcu"]);
+        assert_eq!(missing(&cfg, "8.3"), ["pcov"]);
+        assert_eq!(built_names("8.4"), ["xdebug"]);
+    }
+
+    #[test]
+    fn an_apps_own_ini_reaches_its_master() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        fake_php("8.5", "8.5.1");
+        fake_so("8.5", "8.5.1", "xdebug");
+        let mut cfg = Config::default();
+        cfg.ini.insert("xdebug.client_port".into(), "9010".into());
+        cfg.ini
+            .insert("opcache.memory_consumption".into(), "512".into());
+        let mut s = crate::tests::site("shop", "/s/shop", Some("8.5"));
+        s.ext = vec!["xdebug".into()];
+        s.ini.insert("xdebug.mode".into(), "coverage".into());
+        s.ini
+            .insert("opcache.memory_consumption".into(), "1024".into());
+        let own = php_args_with(&cfg, "8.5", Some(&s));
+        for (want, not) in [
+            ("xdebug.mode=coverage", "xdebug.mode=debug"),
+            (
+                "opcache.memory_consumption=1024",
+                "opcache.memory_consumption=512",
+            ),
+        ] {
+            assert!(
+                own.contains(&want.into()) && !own.contains(&not.into()),
+                "{own:?}"
+            );
+        }
+        assert!(
+            own.contains(&"xdebug.client_port=9010".into()),
+            "the global one too"
+        );
+        // The version's master: the global values only, and no xdebug at all.
+        let shared = php_args_with(&cfg, "8.5", None);
+        assert!(shared.contains(&"opcache.memory_consumption=512".into()));
+        assert!(!shared.iter().any(|a| a.contains("xdebug")), "{shared:?}");
+    }
+
+    #[test]
     fn scan_dir_ini_and_the_users_own() {
         let dir = tempfile::tempdir().unwrap();
         let _env = crate::lock(&ENV_LOCK);
@@ -825,7 +971,18 @@ pub(crate) mod tests {
             env(Some(&format!("{}::/etc/php.d", other.display()))),
             format!("{ours}::/etc/php.d")
         );
+        // Nothing to load here, from an app process: its folder doesn't come along.
+        let none = |theirs: &str| {
+            // SAFETY: as above.
+            unsafe { std::env::set_var("PHP_INI_SCAN_DIR", theirs) };
+            scan_env_in(&conf, &[]).unwrap().map(|(_, v)| v)
+        };
+        let theirs = format!("{}:/etc/php.d", other.display());
+        assert_eq!(none(&theirs).as_deref(), Some("/etc/php.d"));
+        assert_eq!(none(&format!("{}:", other.display())).as_deref(), Some(""));
+        assert_eq!(none("/etc/php.d"), None, "the user's own stays as it is");
         unsafe { std::env::remove_var("PHP_INI_SCAN_DIR") };
+        assert_eq!(scan_env_in(&conf, &[]).unwrap(), None);
     }
 
     #[test]

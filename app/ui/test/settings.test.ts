@@ -213,8 +213,19 @@ describe("versions", () => {
         await wait(30);
         expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "xdebug", on: false }]);
         expect(exts("8.4").every((e) => !e.on)).toBe(true);
+
+        // On, but no build for the installed PHP: off, Not built; on builds it.
+        w.mockExt = { "8.4": ["pcov"] };
+        w.mockExtUnbuilt = ["8.4 pcov"];
+        w.refresh();
+        await open("php");
+        expect(exts("8.4").find((e) => e.name === "pcov")).toEqual({ name: "pcov", on: false, text: "pcovNot built" });
+        extSwitch("8.4", "pcov").click();
+        await wait(30);
+        expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "pcov", on: true }]);
       } finally {
         delete w.mockExt;
+        delete w.mockExtUnbuilt;
       }
     }));
 

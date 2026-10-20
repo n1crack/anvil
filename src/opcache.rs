@@ -1,7 +1,7 @@
 //! OPcache for PHP 8.1–8.4: the default builds lack it, so Anvil builds `opcache.so` from
 //! php.net's source of the same patch version on this Mac. 8.5 has it built in.
 
-use crate::{Config, fetch_json, fetch_tgz, home, php_dir, run};
+use crate::{fetch_json, fetch_tgz, home, php_dir, run};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::fs;
@@ -44,8 +44,9 @@ pub fn state(minor: &str) -> State {
 }
 
 /// PHP-FPM's `-d` arguments: the extension when built, then the dev settings the user
-/// hasn't set in the global php.ini overrides (theirs reach FPM through the pool).
-pub fn fpm_args(cfg: &Config, minor: &str) -> Vec<String> {
+/// hasn't set in `ini` (the php.ini overrides of the master's apps: global, or with one
+/// app's own over them), then theirs.
+pub fn fpm_args(ini: &std::collections::BTreeMap<String, String>, minor: &str) -> Vec<String> {
     let mut args = match state(minor) {
         State::Missing => return vec![],
         State::BuiltIn => vec![],
@@ -56,8 +57,8 @@ pub fn fpm_args(cfg: &Config, minor: &str) -> Vec<String> {
     };
     // OPcache reads most of its settings once, when FPM starts: a pool's php_value
     // comes too late, so the user's opcache.* values go here too, over the dev ones.
-    let mine = cfg.ini.iter().filter(|(k, _)| k.starts_with("opcache."));
-    let dev = DEV.iter().filter(|(k, _)| !cfg.ini.contains_key(*k));
+    let mine = ini.iter().filter(|(k, _)| k.starts_with("opcache."));
+    let dev = DEV.iter().filter(|(k, _)| !ini.contains_key(*k));
     for (k, v) in dev
         .map(|(k, v)| (*k, *v))
         .chain(mine.map(|(k, v)| (k.as_str(), v.as_str())))
@@ -306,7 +307,7 @@ mod tests {
         fs::create_dir_all(php_dir("8.4").join("ext")).unwrap();
         fs::write(so_path("8.4"), "").unwrap();
 
-        let args = fpm_args(&cfg, "8.4");
+        let args = fpm_args(&cfg.ini, "8.4");
         let so = format!(
             "zend_extension={}",
             home().join("php/8.4/ext/opcache.so").display()
@@ -316,10 +317,10 @@ mod tests {
         assert!(args.contains(&"opcache.revalidate_freq=0".into()));
         assert_eq!(state("8.4"), State::Ready);
 
-        assert!(fpm_args(&cfg, "8.3").is_empty());
+        assert!(fpm_args(&cfg.ini, "8.3").is_empty());
         assert_eq!(state("8.3"), State::Missing);
 
-        let args = fpm_args(&cfg, "8.5");
+        let args = fpm_args(&cfg.ini, "8.5");
         assert!(!args.iter().any(|a| a.starts_with("zend_extension")));
         assert!(args.contains(&"opcache.enable=1".into()));
         assert_eq!(state("8.5"), State::BuiltIn);
@@ -329,14 +330,14 @@ mod tests {
     fn user_ini_wins_over_dev_settings() {
         let mut cfg = Config::default();
         cfg.ini.insert("opcache.enable".into(), "0".into());
-        let args = fpm_args(&cfg, "8.5");
+        let args = fpm_args(&cfg.ini, "8.5");
         assert!(!args.contains(&"opcache.enable=1".into()));
         assert!(args.contains(&"opcache.enable=0".into()));
         assert!(args.contains(&"opcache.validate_timestamps=1".into()));
         // Read once at FPM start: a pool's php_value would be ignored.
         cfg.ini
             .insert("opcache.memory_consumption".into(), "512".into());
-        let args = fpm_args(&cfg, "8.5");
+        let args = fpm_args(&cfg.ini, "8.5");
         assert!(args.contains(&"opcache.memory_consumption=512".into()));
         assert!(!args.contains(&"opcache.memory_consumption=256".into()));
     }
