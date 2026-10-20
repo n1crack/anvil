@@ -209,8 +209,9 @@ Until 1.0.0, minor versions may contain breaking changes.
 ### Changed
 
 - An app's Overview has an Aliases group under its lines: a row per address
-  with Open and Remove (after a confirm; the folder stays), and Add Alias. A
-  worktree's lists the aliases derived from its app's, with Open only.
+  (a lock for HTTPS) that opens it, Remove asked in the row itself (the folder
+  stays), and Add Alias. A worktree's lists the aliases derived from its app's,
+  "from <app>" linking to the app, where they're changed.
 - Packages tab: no full package list, search or Outdated/All any more. The key
   packages are badges with their installed versions, the detected ones by
   default (Laravel, Livewire, Tailwind, Vite, PHP, Node…); × unpins one, + pins

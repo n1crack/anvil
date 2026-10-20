@@ -3305,3 +3305,16 @@ html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui
 .aliases-head .aliases-add { margin-left: auto; }
 .aliases-from { font-size: 12px; }
 .aliases-none { margin: 0; padding: 10px 14px; font-size: 12px; }
+.alias-line dt { flex-direction: row; align-items: center; gap: 6px; }
+.alias-line .lock { display: inline-grid; color: var(--muted); }
+.alias-line .lock svg { width: 11px; height: 11px; }
+.alias-go { color: var(--text); font: 12.5px ui-monospace, "SF Mono", Menlo, monospace; text-decoration: none; }
+.alias-go:hover { text-decoration: underline; }
+.alias-line .res-cells { gap: 10px; font-size: 12px; }
+.alias-remove { height: 22px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; }
+.alias-remove:hover { color: var(--text); }
+.alias-remove.danger { color: var(--danger); font-weight: 600; }
+.alias-line:not(:hover) .alias-remove:only-child { opacity: 0; }
+.alias-remove:focus-visible { opacity: 1; }
+.aliases-app { color: var(--text); text-decoration: none; }
+.aliases-app:hover { text-decoration: underline; }

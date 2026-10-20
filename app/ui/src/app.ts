@@ -1216,24 +1216,56 @@ function aliasesLine(s, root) {
   const main = isMain(s);
   box.hidden = !serves(s) || (!main && !list.length);
   if (box.hidden) return;
-  $(".aliases-from", box).textContent = main ? "" : `from ${s.worktree_of}`;
+  // A worktree's come from its app's: its name goes there, where they're changed.
+  const from = $(".aliases-from", box);
+  from.replaceChildren();
+  if (!main) {
+    const app = el("a", "aliases-app", s.worktree_of);
+    app.href = "#";
+    app.onclick = (e) => {
+      e.preventDefault();
+      select(s.worktree_of);
+    };
+    from.append("from ", app);
+  }
   const add = $(".aliases-add", box);
   add.hidden = !main;
   add.onclick = () => addAlias(s);
+  // A row per address: the address opens it; Remove asks in the row itself, no bubble.
   const rows = list.map((a) => {
-    const row = el("div", "row");
+    const row = el("div", "row alias-line");
     const dt = el("dt");
-    dt.append(el("span", "ask-addr", url(a).replace(/^https?:\/\//, "")));
-    const dd = el("dd", "res-cells");
-    const open = el("button", "inline-action", "Open");
-    open.onclick = () => invoke("open_url", { url: url(a) }).catch((e) => showError(String(e)));
-    dd.append(open);
-    if (main) {
-      const remove = el("button", "inline-action", "Remove");
-      remove.onclick = () =>
-        late.confirmPop(remove, `Remove ${a.host}? The folder stays.`, "Remove", () => call("remove_site", { site: a.name }));
-      dd.append(remove);
+    const go = el("a", "alias-go", url(a).replace(/^https?:\/\//, ""));
+    go.href = url(a);
+    go.title = `Open ${url(a)}`;
+    go.onclick = (e) => {
+      e.preventDefault();
+      invoke("open_url", { url: url(a) }).catch((err) => showError(String(err)));
+    };
+    if (a.secure) {
+      const lock = el("span", "lock");
+      lock.innerHTML = LOCK;
+      lock.title = "HTTPS";
+      dt.append(lock);
     }
+    dt.append(go);
+    const dd = el("dd", "res-cells");
+    const idle = () => {
+      if (!main) return dd.replaceChildren();
+      const remove = el("button", "alias-remove", "Remove");
+      remove.onclick = () => {
+        const no = el("button", "alias-remove", "Cancel");
+        const yes = el("button", "alias-remove danger", "Remove");
+        no.onclick = idle;
+        yes.onclick = () => {
+          yes.disabled = no.disabled = true;
+          call("remove_site", { site: a.name });
+        };
+        dd.replaceChildren(el("span", "muted", "Remove this address? The folder stays."), no, yes);
+      };
+      dd.replaceChildren(remove);
+    };
+    idle();
     row.append(dt, dd);
     return row;
   });

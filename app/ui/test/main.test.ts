@@ -2681,26 +2681,37 @@ describe("sidebar worktrees", () => {
     document.querySelector(".pop")?.remove();
   });
 
-  test("Overview › Aliases: a group of its own, a row per address with Open and Remove, and Add Alias; a worktree's with Open only", async () => {
+  test("Overview › Aliases: a group of its own, a row per address that opens it, Remove confirmed in the row; a worktree's without Remove", async () => {
     const before = w.mockSnap.sites;
     try {
       await select("shop");
       const box = $('[data-panel="overview"] .aliases');
       expect(box.hidden).toBe(false);
-      const rows = [...box.querySelectorAll(".row")];
-      expect(rows.map((r) => r.querySelector("dt")!.textContent)).toEqual(["admin.shop.test", "api.shop.test"]);
-      expect([...rows[0].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Open", "Remove"]);
+      const rows = [...box.querySelectorAll<HTMLElement>(".row")];
+      expect(rows.map((r) => r.querySelector(".alias-go")!.textContent)).toEqual(["admin.shop.test", "api.shop.test"]);
+      // A lock for HTTPS only (api.shop is plain http).
+      expect(rows.map((r) => !!r.querySelector(".lock"))).toEqual([true, false]);
+      (rows[0].querySelector(".alias-go") as HTMLElement).click();
+      expect(calls("open_url").at(-1)![1]).toEqual({ url: "https://admin.shop.test" });
       expect((box.querySelector(".aliases-add") as HTMLElement).hidden).toBe(false);
-      (rows[0].querySelectorAll("button")[1] as HTMLElement).click();
+      (rows[0].querySelector(".alias-remove") as HTMLElement).click();
       expect(calls("remove_site").length).toBe(0);
-      ($(".pop-confirm button.primary") as HTMLElement).click();
+      expect(rows[0].querySelector("dd")!.textContent).toBe("Remove this address? The folder stays.CancelRemove");
+      expect($(".pop")).toBeNull();
+      (rows[0].querySelectorAll(".alias-remove")[0] as HTMLElement).click();
+      expect(rows[0].querySelector("dd")!.textContent).toBe("Remove");
+      (rows[0].querySelector(".alias-remove") as HTMLElement).click();
+      (rows[0].querySelector(".alias-remove.danger") as HTMLElement).click();
       await wait(60);
       expect(calls("remove_site").at(-1)![1]).toEqual({ site: "admin.shop" });
       await select("shop--feature-login");
       const wt = $('[data-panel="overview"] .aliases');
-      expect([...wt.querySelectorAll(".row button")].map((b) => b.textContent)).toEqual(["Open"]);
+      expect(wt.querySelectorAll(".alias-remove").length).toBe(0);
       expect((wt.querySelector(".aliases-add") as HTMLElement).hidden).toBe(true);
       expect(wt.querySelector(".aliases-from")!.textContent).toBe("from shop");
+      (wt.querySelector(".aliases-app") as HTMLElement).click();
+      await wait(60);
+      expect($(`#list [data-name="shop"]`).getAttribute("aria-current")).toBe("true");
     } finally {
       w.mockSnap.sites = before;
       await refresh();
