@@ -44,6 +44,9 @@ Until 1.0.0, minor versions may contain breaking changes.
   line says Anvil catches the app's mail instead of pointing at Mailpit.
   The app's CSP allows remote images so that button can work; the mail's own
   frame blocks them until then.
+- Agents (MCP): a read-only `mail` tool lists an app's caught mail, newest
+  first, or reads one message's text, HTML (each cut at 20,000 characters)
+  and links, so an agent can follow a sign-up mail's link.
 - Mail: an app whose `.env` sends mail to an Anvil Mailpit (`MAIL_MAILER=smtp`
   to this computer on that Mailpit's SMTP port) gets a Mail line on its
   Overview: Open inbox while Mailpit runs, Start while it doesn't. Other apps

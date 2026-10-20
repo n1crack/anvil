@@ -182,7 +182,55 @@ fn tools() -> Vec<Value> {
             }),
             &["site", "field", "value"],
         ),
+        tool(
+            "mail",
+            "Mail the app sent, as the mail catcher (Settings › Plugins) caught it. Without an id: the latest, newest first. With an id: that message's text, HTML and links, e.g. to follow a sign-up mail's link. Read only",
+            json!({
+                "site": site,
+                "id": {"type": "string", "description": "A message id from the list"},
+                "n": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10},
+            }),
+            &["site"],
+        ),
     ]
+}
+
+/// The `mail` tool: an app's caught mail, or one message with its text, HTML and links.
+fn mail(cfg: &Config, args: &Value) -> Result<Value> {
+    let s = find(cfg, arg(args, "site")?)?;
+    if !crate::mail::caught(cfg, &s.name) {
+        bail!(
+            "Anvil doesn't catch {}'s mail: turn on Settings › Plugins › Mail catcher (and the app's Catch mail switch)",
+            s.name
+        );
+    }
+    let dir = crate::mail::root().join(&s.name);
+    // ponytail: a cap per body keeps one huge HTML mail from filling the agent's context.
+    const CAP: usize = 20_000;
+    let cut = |t: Option<String>| {
+        t.map(|t| match t.char_indices().nth(CAP) {
+            Some((i, _)) => format!("{}… (cut at {CAP} characters)", &t[..i]),
+            None => t,
+        })
+    };
+    if let Some(id) = args["id"].as_str() {
+        let m = crate::mail::read(&dir, id)?;
+        return Ok(json!({
+            "id": m.summary.id,
+            "from": m.summary.from,
+            "to": m.summary.to,
+            "cc": m.cc,
+            "subject": m.summary.subject,
+            "date": m.date,
+            "links": m.links,
+            "attachments": m.attachments.iter().filter(|a| !a.inline).map(|a| json!({"name": a.name, "type": a.mime, "size": a.size})).collect::<Vec<_>>(),
+            "text": cut(m.text),
+            "html": cut(m.html),
+        }));
+    }
+    let n = args["n"].as_u64().unwrap_or(10).clamp(1, 100) as usize;
+    let mails: Vec<_> = crate::mail::list(&dir).into_iter().take(n).collect();
+    Ok(json!({"mails": mails}))
 }
 
 fn arg<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
@@ -435,6 +483,7 @@ fn call(name: &str, args: &Value, client: &str) -> Result<Value> {
             }))
         }
         "settings" => settings(&cfg, &find(&cfg, arg(args, "site")?)?),
+        "mail" => mail(&cfg, args),
         "set" => {
             let s = find(&cfg, arg(args, "site")?)?;
             let field = arg(args, "field")?;
@@ -635,7 +684,8 @@ mod tests {
                 "worktrees",
                 "worktree_add",
                 "settings",
-                "set"
+                "set",
+                "mail"
             ]
         );
         for t in tools {
@@ -671,6 +721,40 @@ mod tests {
             !all.contains("worktree_remove"),
             "worktree_remove in tools/list"
         );
+    }
+
+    #[test]
+    fn mail_lists_an_apps_caught_mail_and_reads_one_with_its_links() {
+        let h = home();
+        app(&h, "shop", "folder");
+        let (text, err) = call_tool("mail", json!({"site": "shop"}));
+        assert!(err && text.contains("Mail catcher"), "{text}");
+        crate::update(|c| {
+            c.mail_catcher = true;
+            Ok(())
+        })
+        .unwrap();
+        let inbox = crate::mail::root().join("shop");
+        for subject in ["Welcome", "Verify your email"] {
+            let raw = format!(
+                "From: Shop <hello@example.com>\r\nTo: a@b.test\r\nSubject: {subject}\r\nContent-Type: text/html\r\n\r\n<a href=\"https://shop.test/verify?t=1&amp;u=2\">Verify</a>\r\n"
+            );
+            crate::mail::store(&inbox, raw.as_bytes(), "x", &[]).unwrap();
+        }
+        let (text, err) = call_tool("mail", json!({"site": "shop", "n": 1}));
+        assert!(!err, "{text}");
+        let v: Value = serde_json::from_str(&text).unwrap();
+        let mails = v["mails"].as_array().unwrap();
+        assert_eq!(mails.len(), 1);
+        assert_eq!(mails[0]["subject"], "Verify your email");
+        let id = mails[0]["id"].as_str().unwrap();
+        let (text, err) = call_tool("mail", json!({"site": "shop", "id": id}));
+        assert!(!err, "{text}");
+        let m: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(m["links"], json!(["https://shop.test/verify?t=1&u=2"]));
+        assert!(m["html"].as_str().unwrap().contains("Verify"));
+        let (text, err) = call_tool("mail", json!({"site": "shop", "id": "../x"}));
+        assert!(err, "{text}");
     }
 
     #[test]
