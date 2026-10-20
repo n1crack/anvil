@@ -21,6 +21,7 @@
       <p class="nav-head" aria-hidden="true"></p>
       <button data-page="worktrees"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 2.5-3.5 2-7 4"/></svg><span>Worktrees</span></button>
       <button data-page="storage"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3.5" width="12" height="9" rx="2"/><path d="M2 9h12M11 10.75h.01"/></svg><span>Storage</span></button>
+      <button data-page="performance" class="windows-only"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.5a5.5 5.5 0 1 1 11 0M8 11.5l2.75-3.75"/><circle cx="8" cy="11.5" r="0.75"/></svg><span>Performance</span></button>
       <button data-page="plugins"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 1.5v3M10 1.5v3M4 4.5h8v2.5a4 4 0 0 1-8 0zM8 11v3.5"/></svg><span>Plugins</span></button>
       <button data-page="shortcuts"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8" rx="1.5"/><path d="M4.25 6.75h.01M6.75 6.75h.01M9.25 6.75h.01M11.75 6.75h.01M5.5 9.5h5"/></svg><span>Shortcuts</span></button>
       <button data-page="about"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 7.25v4M8 4.85h.01"/></svg><span>About</span></button>
@@ -167,6 +168,14 @@
         <p class="hint" id="apps-hint"></p>
         <div id="app-sizes" class="group"></div>
       </div>
+    </section>
+    <section id="performance" class="page" hidden>
+      <h1>Performance</h1>
+      <p class="hint">Microsoft Defender scans every file a program opens. Installing packages and starting a dev server read thousands of them, so the first start after a restart or an install can take a minute; later ones are quick. A Dev Drive lets Defender scan without holding that up. Anvil changes none of this: set it up yourself if you want it.</p>
+      <div class="group" id="perf-system"></div>
+      <h2>Folders</h2>
+      <div class="group" id="perf-folders"></div>
+      <p class="hint"><a href="#" id="perf-guide">Set up a Dev Drive</a> and keep your projects there; Windows 11 only.</p>
     </section>
     <section id="plugins" class="page" hidden>
       <h1>Plugins</h1>

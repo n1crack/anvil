@@ -20,7 +20,7 @@ nix = { version = "0.31.3", features = ["signal", "user"] }
 
 [target.'cfg(windows)'.dependencies]
 uds_windows = "1.2.1"
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Diagnostics_ToolHelp", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time"] }
 
 [dev-dependencies]
 proptest = { version = "1", default-features = false, features = ["std"] }

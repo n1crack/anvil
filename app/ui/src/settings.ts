@@ -886,6 +886,40 @@ const node = (tag: string, cls: string, ...kids: (Node | string)[]) => {
   return n;
 };
 
+type Performance = {
+  defender: "on" | "off" | "passive" | null;
+  dev_drive_supported: boolean;
+  folders: { name: string; path: string; dev_drive: boolean | null }[];
+};
+
+/** Settings › Performance (Windows): asked each time it opens, as both can change outside Anvil. */
+function loadPerformance() {
+  const row = (label: string, note: string, value: string) =>
+    node("div", "row", node("span", "", label, node("small", "", note)), node("span", "muted", value));
+  invoke<Performance>("performance")
+    .then((p) => {
+      const defender = { on: "On", off: "Off", passive: "Passive" }[p.defender ?? ""] ?? "Unknown";
+      const why =
+        p.defender === "passive"
+          ? "Another antivirus protects this computer; its own settings decide what it scans."
+          : "Real-time protection scans files as programs read them.";
+      $("#perf-system").replaceChildren(
+        row("Microsoft Defender", why, defender),
+        row("Dev Drive", "A drive whose files Defender scans without holding programs up.", p.dev_drive_supported ? "Available" : "Needs Windows 11"),
+      );
+      $("#perf-folders").replaceChildren(
+        ...p.folders.map((f) => row(f.name, f.path, f.dev_drive ? "On a Dev Drive" : f.dev_drive === false ? "Not on a Dev Drive" : "Unknown")),
+      );
+    })
+    .catch((e) => showError(String(e)));
+}
+
+const guide = $("#perf-guide") as HTMLAnchorElement;
+guide.onclick = (e) => {
+  e.preventDefault();
+  confirmOpen(guide, "https://learn.microsoft.com/windows/dev-drive/");
+};
+
 /** A bubble under a credit's name: its site opens only on Open, so a stray click
  * while reading the list doesn't throw a browser window up. */
 function confirmOpen(anchor: HTMLElement, url: string) {
@@ -1033,6 +1067,7 @@ for (const b of document.querySelectorAll<HTMLElement>("[data-page]")) {
     if (LANGS.some(([id]) => id === b.dataset.page) && !runtimes) loadRuntimes();
     if (b.dataset.page === "node") loadPackageManagers();
     if (b.dataset.page === "about") loadCredits();
+    if (b.dataset.page === "performance") loadPerformance();
     if (b.dataset.page === "storage") {
       loadAnvilStorage();
       loadAppSizes();
