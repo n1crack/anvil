@@ -1176,13 +1176,7 @@ fn process_run(
                 None => !p.manual,
             })
         {
-            let key = anvil::processes::key(&s.name, &p.id);
-            let started = prepare(&app, &s)
-                .and_then(|()| anvil::octane::prepare(&s, &p))
-                .and_then(|()| anvil::lock(&app.apps).start_process(&s, &p, &cfg));
-            if let Err(e) = started {
-                anvil::lock(&app.app_errors).insert(key, err(e));
-            }
+            start_process(&app, &cfg, &s, &p);
         }
     }
     Ok(overview(&app, &cfg, &s))
@@ -1323,6 +1317,16 @@ fn start_process(app: &App, cfg: &Config, site: &Site, p: &anvil::processes::Pro
     if let Err(e) = started {
         let key = anvil::processes::key(&site.name, &p.id);
         anvil::lock(&app.app_errors).insert(key, err(e));
+        return;
+    }
+    // laravel/octane added while Anvil runs: the web server learns of the row only now,
+    // and sends the app's address to it.
+    if p.id == anvil::octane::ID
+        && running(app)
+        && let Ok(cfg) = anvil::load()
+        && anvil::needs_restart(&cfg)
+    {
+        start(app, &cfg);
     }
 }
 
@@ -1687,13 +1691,7 @@ fn set_process(
                 .into_iter()
                 .find(|p| p.id == id);
             if let Some(p) = p {
-                // Bound first: an `if let` scrutinee's guard would live through the block.
-                let started = prepare(&app, &s)
-                    .and_then(|()| anvil::octane::prepare(&s, &p))
-                    .and_then(|()| anvil::lock(&app.apps).start_process(&s, &p, &cfg));
-                if let Err(e) = started {
-                    anvil::lock(&app.app_errors).insert(key, err(e));
-                }
+                start_process(&app, &cfg, &s, &p);
             }
         }
         // Only a server row's route needs the web server reloaded, and that restart
@@ -4352,6 +4350,7 @@ mod tests {
             php_pinned: false,
             ext: vec![],
             own_master: false,
+            octane_ports: None,
             ini: Default::default(),
             linked: false,
             parked_in: None,

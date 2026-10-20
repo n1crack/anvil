@@ -261,6 +261,9 @@ pub struct Site {
     pub ext: Vec<String>,
     /// Served by a PHP-FPM master of its own (`mark_own_masters`).
     pub own_master: bool,
+    /// Its Octane row's port and RoadRunner's RPC one (`processes::assign_octane_ports`).
+    #[serde(skip)]
+    pub octane_ports: Option<(u16, u16)>,
     pub linked: bool,
     /// The parked directory this site comes from (`None` for linked sites).
     pub parked_in: Option<PathBuf>,
@@ -585,6 +588,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     }
     sites.sort_by(|a, b| a.name.cmp(&b.name));
     apps::assign_ports(cfg, &mut sites);
+    processes::assign_octane_ports(cfg, &mut sites);
     mark_own_masters(&mut sites);
     sites
 }
@@ -700,6 +704,7 @@ fn site_at(
         ini,
         ext,
         own_master: false,
+        octane_ports: None,
         php_pinned: pin_set && php.is_some(),
         php,
         kind_detected: detected.into(),
@@ -2923,6 +2928,7 @@ mod tests {
             php_pinned: false,
             ext: vec![],
             own_master: false,
+            octane_ports: None,
             ini: BTreeMap::new(),
             linked: false,
             parked_in: None,
