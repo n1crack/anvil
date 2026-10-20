@@ -1857,6 +1857,8 @@ function renderRunSettings(s, root) {
     : "Automatic uses the newest installed";
   rt.disabled = versions.length < 2;
   rt.onchange = () => call("set_runtime", { site: s.name, version: rt.value || null });
+  // dotnet picks the SDK from the project's global.json: nothing to pin.
+  if (rtId === "dotnet") rt.closest(".row").remove();
 
   const cmd = $("#app-command", root);
   cmd.value = s.command_custom ? s.command : "";

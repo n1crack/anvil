@@ -640,10 +640,13 @@ fn site_at(
         .clone()
         .or_else(|| apps::default_command(&kind, &path));
     let php_ok = !apps::runs_process(&kind) && apps::serves(&kind);
-    let runtime_version = apps::runtime(&kind).and_then(|rt| {
-        own.and_then(|s| s.runtime.clone())
-            .or_else(|| apps::runtime_version(rt, &path))
-    });
+    // dotnet picks its SDK from global.json: a .NET pin an older Anvil saved does nothing.
+    let runtime_pin = own
+        .and_then(|s| s.runtime.clone())
+        .filter(|_| kind != "dotnet");
+    let runtime_pinned = runtime_pin.is_some();
+    let runtime_version = apps::runtime(&kind)
+        .and_then(|rt| runtime_pin.or_else(|| apps::runtime_version(rt, &path)));
     let modified = fs::metadata(&path)
         .and_then(|m| m.modified())
         .ok()
@@ -676,7 +679,7 @@ fn site_at(
         command,
         port: own.and_then(|s| s.port),
         autostart: own.is_some_and(|s| s.autostart),
-        runtime_pinned: own.is_some_and(|s| s.runtime.is_some()),
+        runtime_pinned,
         worktree_of: None,
         branch: None,
         aliases: vec![],
@@ -1440,6 +1443,9 @@ pub fn set_site_runtime(cfg: &mut Config, site: &str, version: Option<String>) -
             .as_ref()
             .and_then(|s| apps::runtime(&s.kind))
             .context("This app doesn't run its own server")?;
+        if rt == "dotnet" {
+            bail!(".NET picks its SDK from the project's global.json; Anvil doesn't pin it");
+        }
         if !runtimes::installed(rt).contains(v) {
             bail!("{} {v} isn't installed", runtimes::name(rt));
         }
@@ -2545,6 +2551,26 @@ mod tests {
             Some("8.3")
         );
         assert_eq!(php(None, None, &["8.2", "8.3"]).as_deref(), Some("8.2"));
+    }
+
+    /// dotnet picks its SDK from global.json, so a .NET app has no version to pin.
+    #[test]
+    fn a_dotnet_app_is_never_pinned() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("Api.csproj"), "").unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
+        let mut cfg = Config::default();
+        cfg.links.insert("api".into(), dir.path().to_path_buf());
+        let err = set_site_runtime(&mut cfg, "api", Some("10.0".into())).unwrap_err();
+        assert!(err.to_string().contains("global.json"), "{err}");
+        // A pin an older Anvil saved is not in effect.
+        cfg.sites.entry("api".into()).or_default().runtime = Some("10.0".into());
+        let own = cfg.sites.get("api");
+        let site = site_at(&cfg, &[], "api".into(), dir.path().into(), None, own);
+        assert!(!site.runtime_pinned);
+        assert_ne!(site.runtime_version.as_deref(), Some("10.0"));
     }
 
     #[test]

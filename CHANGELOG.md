@@ -18,6 +18,12 @@ Until 1.0.0, minor versions may contain breaking changes.
   14:02"): an app's newest five on its Overview, all of them in Processes ›
   Agents, newest first. A failed action says why on its line.
 
+### Fixed
+
+- A .NET app no longer offers a version to pin, which did nothing: dotnet
+  picks the SDK from the project's `global.json`. `anvil app runtime` refuses a
+  .NET version.
+
 ## [0.1.0] - 2026-10-19
 
 The first public release of Anvil, a local development environment, for macOS on

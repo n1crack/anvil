@@ -1594,6 +1594,29 @@ describe("project file", () => {
   });
 });
 
+describe("run settings", () => {
+  test("a .NET app has no version picker: dotnet picks the SDK from global.json", async () => {
+    w.mockSnap.sites.push(w.mockSite("api", "dotnet", { runtime_version: "10.0" }));
+    w.mockSnap.runtimes.dotnet = ["10.0", "9.0"];
+    const state = async () => {
+      await (await import("../src/app")).call("state");
+      await wait(40);
+    };
+    try {
+      await state();
+      await select("vuefinder");
+      expect($("#site #app-runtime")).not.toBeNull();
+      await select("api");
+      expect($("#site #app-runtime")).toBeNull();
+      expect($("#site #app-command")).not.toBeNull();
+    } finally {
+      w.mockSnap.sites.pop();
+      delete w.mockSnap.runtimes.dotnet;
+      await state();
+    }
+  });
+});
+
 describe("worktrees", () => {
   const wt = "shop--feature-x";
   const sheetOpen = () => ($("#ask") as HTMLDialogElement).open;
