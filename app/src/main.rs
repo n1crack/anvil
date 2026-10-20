@@ -1979,13 +1979,23 @@ async fn clean_all_safe() -> Res<(u64, Vec<String>)> {
 #[tauri::command]
 async fn runtimes() -> Res<Vec<anvil::runtimes::RuntimeInfo>> {
     tauri::async_runtime::spawn_blocking(|| {
-        anvil::runtimes::RUNTIMES
+        let cfg = anvil::load().map_err(err)?;
+        Ok(anvil::runtimes::RUNTIMES
             .iter()
-            .map(|id| anvil::runtimes::info(id, true))
-            .collect()
+            .map(|id| {
+                let mut info = anvil::runtimes::info(id, true);
+                info.pinned_by = info
+                    .installed
+                    .iter()
+                    .map(|v| (v.clone(), anvil::pinned_to(&cfg, id, v)))
+                    .filter(|(_, apps)| !apps.is_empty())
+                    .collect();
+                info
+            })
+            .collect())
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?
 }
 
 /// npm, pnpm, yarn and bun as the Node apps Anvil runs would find them.
@@ -2022,7 +2032,8 @@ async fn runtime_install(handle: AppHandle, id: String, version: String) -> Res<
 
 #[tauri::command(async)]
 fn runtime_uninstall(handle: AppHandle, id: String, version: String) -> Res<()> {
-    anvil::runtimes::uninstall(&id, &version).map_err(err)?;
+    let cfg = anvil::load().map_err(err)?;
+    anvil::runtime_uninstall(&cfg, &id, &version).map_err(err)?;
     changed(&handle);
     Ok(())
 }
@@ -2854,6 +2865,8 @@ struct PhpVersion {
     version: &'static str,
     installed: bool,
     default: bool,
+    /// Apps pinned to it: it can't be uninstalled until they are unpinned.
+    pinned_by: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -3012,6 +3025,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                 version: v,
                 installed: installed.iter().any(|i| i == v),
                 default: cfg.php.as_deref() == Some(*v),
+                pinned_by: anvil::pinned_to(&cfg, "php", v),
             })
             .collect(),
         editors: installed_apps(&EDITORS),

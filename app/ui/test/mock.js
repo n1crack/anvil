@@ -885,6 +885,7 @@ const mockHandle = (cmd, a) => {
           version,
           installed: version === "8.5" || version === "8.4",
           default: version === "8.4",
+          pinned_by: window.mockPhpPins?.[version] ?? [],
         })),
         ini: { memory_limit: "512M", upload_max_filesize: "64M" },
         terminal: "Terminal",
@@ -930,7 +931,7 @@ const mockHandle = (cmd, a) => {
     }
     case "runtimes":
       return [
-        { id: "node", name: "Node.js", installed: ["24", "22"], available: ["26", "24", "22", "20"] },
+        { id: "node", name: "Node.js", installed: ["24", "22"], available: ["26", "24", "22", "20"], pinned_by: { 22: ["blog", "shop"] } },
         { id: "go", name: "Go", installed: [], available: ["1.27.2", "1.26.8"] },
         { id: "rust", name: "Rust", installed: ["stable"], available: ["stable"] },
         { id: "dotnet", name: ".NET", installed: ["10.0"], available: ["10.0", "9.0", "8.0"] },

@@ -43,6 +43,8 @@ pub struct RuntimeInfo {
     pub installed: Vec<String>,
     /// Versions offered for install, newest first.
     pub available: Vec<String>,
+    /// Installed versions apps are pinned to, with those apps (`crate::pinned_to`).
+    pub pinned_by: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 pub fn name(id: &str) -> &'static str {
@@ -460,6 +462,7 @@ pub fn info(id: &'static str, with_available: bool) -> RuntimeInfo {
         } else {
             vec![]
         },
+        pinned_by: Default::default(),
     }
 }
 

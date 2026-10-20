@@ -77,10 +77,11 @@ for (const [id, name, note] of LANGS) {
 const newest = (a: string, b: string) => b.localeCompare(a, undefined, { numeric: true });
 
 /** One row of a Versions list: muted with Install when missing, a check and
- * "Default" on the default, Make default and Uninstall on hover otherwise. */
+ * "Default" on the default, Make default and Uninstall on hover otherwise. A version
+ * apps are pinned to names them and offers no Uninstall (the core refuses it). */
 function versionRow(
   label: string,
-  v: { installed: boolean; default?: boolean },
+  v: { installed: boolean; default?: boolean; pinned_by?: string[] },
   busy: boolean,
   blocked: boolean,
   act: { install: () => void; uninstall: () => void; makeDefault?: () => void },
@@ -92,6 +93,15 @@ function versionRow(
   name.innerHTML = `<span class="ver-mark">${v.default ? CHECK : ""}</span><span class="ver-label"></span>`;
   $(".ver-label", name).textContent = label;
   if (v.default) name.append(Object.assign(document.createElement("span"), { className: "ver-default", textContent: "Default" }));
+  const pinned = v.installed && v.pinned_by?.length ? v.pinned_by.join(", ") : "";
+  if (pinned)
+    name.append(
+      Object.assign(document.createElement("span"), {
+        className: "ver-pinned",
+        textContent: `Pinned by ${pinned}`,
+        title: `Unpin ${pinned} first to uninstall it`,
+      }),
+    );
   const actions = document.createElement("span");
   actions.className = "actions-inline";
   if (busy) {
@@ -103,9 +113,11 @@ function versionRow(
   } else if (!v.default) {
     actions.classList.add("on-hover");
     if (act.makeDefault) actions.append(button("Make default", act.makeDefault));
-    const u = button("Uninstall", act.uninstall);
-    u.title = `Uninstall ${label}`;
-    actions.append(u);
+    if (!pinned) {
+      const u = button("Uninstall", act.uninstall);
+      u.title = `Uninstall ${label}`;
+      actions.append(u);
+    }
   }
   row.append(name, actions);
   return row;
@@ -129,10 +141,16 @@ function renderLanguages() {
     const blocked = [...installing].some((k) => k.startsWith(`${rt.id}@`));
     list.replaceChildren(
       ...all.map((v) =>
-        versionRow(`${rt.name} ${v}`, { installed: rt.installed.includes(v) }, installing.has(`${rt.id}@${v}`), blocked, {
-          install: () => installRuntime(rt.id, v),
-          uninstall: () => uninstallRuntime(rt, v),
-        }),
+        versionRow(
+          `${rt.name} ${v}`,
+          { installed: rt.installed.includes(v), pinned_by: rt.pinned_by?.[v] },
+          installing.has(`${rt.id}@${v}`),
+          blocked,
+          {
+            install: () => installRuntime(rt.id, v),
+            uninstall: () => uninstallRuntime(rt, v),
+          },
+        ),
       ),
     );
     if (!all.length) list.innerHTML = `<div class="row"><span class="muted">No versions found. Check the internet connection.</span></div>`;
@@ -155,7 +173,7 @@ async function installRuntime(id: string, version: string) {
 
 async function uninstallRuntime(rt, v: string) {
   const ok = await window.__TAURI__.dialog.ask(
-    `Applications using it switch to another installed version, or stop starting until one is installed.`,
+    `No application is pinned to it. Those using it automatically switch to another installed version, or stop starting until one is installed.`,
     { title: `Uninstall ${rt.name} ${v}?`, kind: "warning", okLabel: "Uninstall", cancelLabel: "Cancel" },
   );
   if (!ok) return;
@@ -600,12 +618,15 @@ export function render() {
         },
         makeDefault: () => call("set_default_php", { version: v.version }),
         uninstall: async () => {
-          const ok = await window.__TAURI__.dialog.ask("Applications pinned to it fall back to the default PHP version.", {
-            title: `Uninstall PHP ${v.version}?`,
-            kind: "warning",
-            okLabel: "Uninstall",
-            cancelLabel: "Cancel",
-          });
+          const ok = await window.__TAURI__.dialog.ask(
+            "No application is pinned to it. One whose .anvil.toml asks for it uses the default PHP version.",
+            {
+              title: `Uninstall PHP ${v.version}?`,
+              kind: "warning",
+              okLabel: "Uninstall",
+              cancelLabel: "Cancel",
+            },
+          );
           if (ok) call("php_uninstall", { version: v.version });
         },
       }),

@@ -1260,6 +1260,12 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-weight: 500;
 }
 
+.ver-pinned {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .ver .actions-inline { min-height: 26px; }
 
 .ver .on-hover { visibility: hidden; }

@@ -1194,7 +1194,7 @@ fn run() -> Result<()> {
                 }
             }
             RuntimeCmd::Install { id, version } => runtimes::install(&id, &version)?,
-            RuntimeCmd::Uninstall { id, version } => runtimes::uninstall(&id, &version)?,
+            RuntimeCmd::Uninstall { id, version } => runtime_uninstall(&cfg, &id, &version)?,
         },
         Cmd::App { cmd } => match cmd {
             AppCmd::Php { site, version } => edit(&mut cfg, |c| set_site_php(c, &site, version))?,

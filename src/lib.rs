@@ -952,17 +952,56 @@ pub fn php_dir(v: &str) -> PathBuf {
 /// PHP versions Anvil offers to install, newest first.
 pub const PHP_VERSIONS: [&str; 6] = ["8.5", "8.4", "8.3", "8.2", "8.1", "8.0"];
 
+/// The apps pinned to `version` of `lang` (`php` or a runtime id), by name: removing
+/// it would break them. Only pins in effect count (a .NET one never is).
+pub fn pinned_to(cfg: &Config, lang: &str, version: &str) -> Vec<String> {
+    let pins: Vec<&String> = cfg
+        .sites
+        .iter()
+        .filter(|(_, s)| {
+            let pin = if lang == "php" { &s.php } else { &s.runtime };
+            pin.as_deref() == Some(version)
+        })
+        .map(|(n, _)| n)
+        .collect();
+    if lang == "php" || pins.is_empty() {
+        return pins.into_iter().cloned().collect();
+    }
+    // A runtime pin is a bare version: it counts for apps that run on this language.
+    let all = sites(cfg);
+    pins.into_iter()
+        .filter(|n| {
+            all.iter()
+                .any(|s| &&s.name == n && s.runtime_pinned && apps::runtime(&s.kind) == Some(lang))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Refuse to remove a version while apps are pinned to it, naming them.
+fn refuse_pinned(cfg: &Config, lang: &str, label: &str, version: &str) -> Result<()> {
+    match pinned_to(cfg, lang, version).as_slice() {
+        [] => Ok(()),
+        [one] => bail!("{one} uses {label} {version} — switch it to another version first"),
+        many => bail!(
+            "{} use {label} {version} — switch them to another version first",
+            many.join(", ")
+        ),
+    }
+}
+
+/// Remove an installed language version, refused while apps are pinned to it.
+pub fn runtime_uninstall(cfg: &Config, id: &str, version: &str) -> Result<()> {
+    refuse_pinned(cfg, id, runtimes::name(id), version)?;
+    runtimes::uninstall(id, version)
+}
+
 /// Remove an installed PHP version. Refuses the default and versions sites are pinned to.
 pub fn php_uninstall(cfg: &Config, v: &str) -> Result<()> {
     if cfg.php.as_deref() == Some(v) {
         bail!("PHP {v} is the default version — choose another default first");
     }
-    if let Some(site) = cfg.sites.iter().find(|(_, s)| s.php.as_deref() == Some(v)) {
-        bail!(
-            "{} uses PHP {v} — switch it to another version first",
-            site.0
-        );
-    }
+    refuse_pinned(cfg, "php", "PHP", v)?;
     if !PHP_VERSIONS.contains(&v) {
         bail!("Unknown PHP version {v}");
     }
@@ -2551,6 +2590,53 @@ mod tests {
             Some("8.3")
         );
         assert_eq!(php(None, None, &["8.2", "8.3"]).as_deref(), Some("8.2"));
+    }
+
+    /// A version apps are pinned to stays until they are unpinned, for every language.
+    #[test]
+    fn uninstall_refuses_a_version_apps_are_pinned_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
+        let mut cfg = Config::default();
+        for (name, file, pin) in [
+            ("shop", "go.mod", Some("1.25.1")),
+            ("blog", "go.mod", Some("1.25.1")),
+            ("notes", "go.mod", None),
+            ("web", "package.json", Some("22")),
+        ] {
+            let app = dir.path().join(name);
+            fs::create_dir_all(&app).unwrap();
+            fs::write(app.join(file), "{}").unwrap();
+            cfg.links.insert(name.into(), app);
+            cfg.sites.entry(name.into()).or_default().runtime = pin.map(Into::into);
+        }
+        assert_eq!(pinned_to(&cfg, "go", "1.25.1"), ["blog", "shop"]);
+        assert_eq!(pinned_to(&cfg, "node", "22"), ["web"]);
+        assert!(pinned_to(&cfg, "go", "22").is_empty());
+        let err = runtime_uninstall(&cfg, "go", "1.25.1").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "blog, shop use Go 1.25.1 — switch them to another version first"
+        );
+        let err = runtime_uninstall(&cfg, "node", "22").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "web uses Node.js 22 — switch it to another version first"
+        );
+        // Not pinned: on to the uninstall itself.
+        let err = runtime_uninstall(&cfg, "go", "1.24.0").unwrap_err();
+        assert_eq!(err.to_string(), "Go 1.24.0 is not installed");
+
+        cfg.sites.entry("shop".into()).or_default().php = Some("8.3".into());
+        cfg.sites.entry("blog".into()).or_default().php = Some("8.3".into());
+        assert_eq!(pinned_to(&cfg, "php", "8.3"), ["blog", "shop"]);
+        let err = php_uninstall(&cfg, "8.3").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "blog, shop use PHP 8.3 — switch them to another version first"
+        );
     }
 
     /// dotnet picks its SDK from global.json, so a .NET app has no version to pin.

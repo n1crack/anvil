@@ -23,6 +23,9 @@ Until 1.0.0, minor versions may contain breaking changes.
 - A .NET app no longer offers a version to pin, which did nothing: dotnet
   picks the SDK from the project's `global.json`. `anvil app runtime` refuses a
   .NET version.
+- Uninstalling a Node.js, Go, Rust or Python version apps are pinned to is
+  refused, as for PHP, naming the apps; Settings shows them on the version
+  and offers no Uninstall until they are unpinned.
 
 ## [0.1.0] - 2026-10-19
 

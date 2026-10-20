@@ -85,6 +85,21 @@ describe("versions", () => {
     }
   });
 
+  test("PHP: a version apps are pinned to names them and offers Make default only", async () => {
+    w.mockPhpPins = { "8.5": ["shop"] };
+    w.refresh();
+    try {
+      await open("php");
+      const row = $$("#versions .ver")[0];
+      expect(row.querySelector(".ver-pinned")?.textContent).toBe("Pinned by shop");
+      expect([...row.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Make default"]);
+    } finally {
+      delete w.mockPhpPins;
+      w.refresh();
+      await open("php");
+    }
+  });
+
   test("installing shows progress in the row and holds the other Install buttons", async () => {
     w.mockDelay.php_install = 100;
     $$("#versions .ver")[2].querySelector("button")!.click();
@@ -103,6 +118,9 @@ describe("versions", () => {
     expect(rows.map((r) => r.classList.contains("missing"))).toEqual([true, false, false, true]);
     expect($$("#node .is-default").length).toBe(0);
     expect([...rows[1].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Uninstall"]);
+    // Apps are pinned to 22: named, and no Uninstall until they are unpinned.
+    expect(rows[2].querySelector(".ver-pinned")?.textContent).toBe("Pinned by blog, shop");
+    expect(rows[2].querySelectorAll("button").length).toBe(0);
     expect($("#node .note").textContent).toContain(".nvmrc");
   });
 
