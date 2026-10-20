@@ -797,7 +797,9 @@ const mockHandle = (cmd, a) => {
     case "log_tail":
       return { entries: window.mockTail?.splice(0) ?? [], start_offset: 0, end_offset: window.mockLogPage.end_offset, truncated: false };
     case "requests_read":
-      return a.before == null ? window.mockRequests : { requests: [window.mockRequest({ uri: "/older" })], start_offset: 0, end_offset: 900, truncated: false };
+      return a.before == null
+        ? window.mockRequests
+        : { requests: [window.mockRequest({ uri: "/older" })], start_offset: 0, end_offset: 900, truncated: false };
     case "requests_tail": {
       const fresh = window.mockRequestsTail?.splice(0) ?? [];
       return { requests: fresh, start_offset: a.from, end_offset: a.from + fresh.length * 100, truncated: false };

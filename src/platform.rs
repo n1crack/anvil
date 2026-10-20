@@ -559,31 +559,6 @@ pub fn process_table() -> Vec<(u32, u32, u64, f32, String)> {
     out
 }
 
-/// Microsoft Defender's real-time protection: "on", "off", "passive" (another antivirus
-/// runs; Defender only scans on demand), or `None` when Defender can't be asked. Windows only.
-pub fn defender() -> Option<&'static str> {
-    if !cfg!(windows) {
-        return None;
-    }
-    let out = command("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$s = Get-MpComputerStatus; \"$($s.AMRunningMode)|$($s.RealTimeProtectionEnabled)\"",
-        ])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    let (mode, on) = text.trim().split_once('|')?;
-    Some(match (mode, on) {
-        (m, _) if m.contains("Passive") || m.contains("Not running") => "passive",
-        (_, "True") => "on",
-        _ => "off",
-    })
-}
-
 /// Whether this Windows can make Dev Drives (Windows 11 22H2, build 22621, and later).
 pub fn dev_drive_supported() -> bool {
     #[cfg(windows)]

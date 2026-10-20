@@ -3423,14 +3423,12 @@ struct PerfFolder {
 
 #[derive(Serialize)]
 struct Performance {
-    /// Defender's real-time protection: "on", "off", "passive", or unknown.
-    defender: Option<&'static str>,
     dev_drive_supported: bool,
     folders: Vec<PerfFolder>,
 }
 
-/// What makes file-heavy work slow on Windows, read only: Defender's state, and which of
-/// Anvil's and the apps' folders sit on a Dev Drive. Anvil changes neither.
+/// Which of Anvil's and the apps' folders sit on a Dev Drive (Windows), read only: Anvil
+/// changes nothing about Defender or drives.
 #[tauri::command(async)]
 fn performance() -> Res<Performance> {
     let cfg = anvil::load().map_err(err)?;
@@ -3448,7 +3446,6 @@ fn performance() -> Res<Performance> {
             .map(|s| folder(s.name.clone(), &s.path)),
     );
     Ok(Performance {
-        defender: anvil::platform::defender(),
         dev_drive_supported: anvil::platform::dev_drive_supported(),
         folders,
     })

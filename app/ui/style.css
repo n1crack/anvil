@@ -932,7 +932,8 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-bar button { display: inline-flex; align-items: center; gap: 6px; }
 .dev-bar svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .dev-bar .spin-dot { flex: none; width: 10px; height: 10px; margin: 2px; }
-.dev-chevron { margin-left: -2px; color: var(--muted); font-size: 10px; }
+.dev-chevron { display: inline-flex; margin-left: -2px; }
+.dev-cmds-head .dev-chevron svg { width: 12px; height: 12px; stroke-width: 1.75; }
 .dev-start { color: var(--ok-text); }
 .dev-start svg { fill: currentColor; }
 .dev-stop { color: var(--danger); }
@@ -946,6 +947,12 @@ button.proc-name:hover { text-decoration: underline; }
 /* The processes and, below in a box of their own, the one-off commands. */
 .dev-card { max-width: none; overflow: hidden; }
 .dev-cmds-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; padding: 2px 4px 2px 12px; color: var(--muted); font-size: 11px; font-weight: 600; }
+/* Too narrow for the title: Run alone, never cut to "Co…". */
+.dev-cmds { container-type: inline-size; }
+@container (max-width: 150px) {
+  .dev-cmds-head > span { display: none; }
+  .dev-cmds-head { justify-content: flex-end; }
+}
 .dev-cmds-head .dev-run { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 22px; padding: 0 8px; font-size: 12px; font-weight: 400; white-space: nowrap; }
 .dev-cmds-head .dev-chevron { font-size: 10px; }
 .dev-cmds-head .dev-run svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -967,6 +974,7 @@ button.proc-name:hover { text-decoration: underline; }
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 3v8a4 4 0 0 0 4 4h11'/%3E%3Cpath d='m16 11 4 4-4 4'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 /* One-off runs are their own section, not parts of All: aligned, without the arrow. */
+.dev-item[data-key^="once:"] { padding-left: 12px; }
 .dev-item[data-key^="once:"]::before { content: none; }
 .dev-item[aria-selected="true"] { background: var(--selected); }
 /* The status column, one width for a process's dot and a run's spinner, ✓ or ✕. */
@@ -978,6 +986,20 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dev-exit { flex: none; color: var(--muted); font: 11px ui-monospace, "SF Mono", Menlo, monospace; }
 .dev-exit.bad { color: var(--danger); }
+/* Start/Stop in All's row, ▶ or ■ in a process's: at the row's end, small. */
+.dev-item .dev-act { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+.dev-item .dev-all { height: 22px; padding: 0 8px; font-size: 12px; }
+.dev-item .dev-proc { width: 22px; height: 22px; justify-content: center; padding: 0; border: 0; background: none; border-radius: var(--radius-s); }
+.dev-item .dev-proc:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.dev-item .dev-act svg { flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.dev-item .dev-start svg { fill: currentColor; }
+.dev-item .dev-act .spin-dot { width: 9px; height: 9px; }
+/* A narrow list: All's Start or Stop as its icon (or spinner) alone. */
+.dev-procs { container-type: inline-size; }
+@container (max-width: 200px) {
+  .dev-item .dev-all { width: 22px; justify-content: center; padding: 0; }
+  .dev-item .dev-all > span:not(.spin-dot) { display: none; }
+}
 .dev-dismiss { flex: none; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; line-height: 1; }
 .dev-dismiss:hover { color: var(--text); }
 .dev-item:not(:hover) .dev-dismiss:not(:focus-visible) { visibility: hidden; }
@@ -987,7 +1009,12 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-out:focus-visible { outline-offset: -2px; }
 /* The keys, one muted line under the output; gone when the pane is too narrow for it. */
 .dev-keys { flex: none; margin: 0; padding: 3px 14px 4px; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #8d959f; font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; }
-@container (max-width: 460px) { .dev-keys { display: none; } }
+.dev-keys-short { display: none; }
+@container (max-width: 460px) {
+  .dev-keys { text-align: right; cursor: help; }
+  .dev-keys-full { display: none; }
+  .dev-keys-short { display: inline; }
+}
 .dev-head .console-title { flex: none; }
 .dev-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .dev-pane.is-empty .dev-head-start { display: none; }
@@ -1009,12 +1036,15 @@ button.proc-name:hover { text-decoration: underline; }
 .containers .dev-exit { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
 
 /* Run ▾: the app's scripts, each with its script muted. */
-.dev-run-menu { display: flex; flex-direction: column; min-width: 240px; max-width: 460px; max-height: 360px; padding: 4px; overflow-y: auto; }
-.dev-run-group { padding: 6px 8px 2px; color: var(--muted); font-size: 11px; }
+.dev-run-menu { display: flex; flex-direction: column; min-width: 180px; max-width: 320px; max-height: 360px; padding: 4px; overflow-y: auto; }
+/* Where the scripts come from: the file's name in small bold monospace over its scripts,
+ * which sit a little in; a line between the sources. */
+.dev-run-group { padding: 6px 8px 3px; color: var(--muted); font: 600 10.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.dev-run-group:not(:first-child) { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+.dev-run-group ~ .dev-run-item { padding-left: 16px; }
 .dev-run-item { display: flex; align-items: baseline; gap: 12px; padding: 5px 8px; border: 0; border-radius: var(--radius-s); background: none; color: var(--text); font-size: 12px; text-align: left; }
 .dev-run-item:hover, .dev-run-item:focus-visible { background: var(--selected); outline: none; }
 .dev-run-name { flex: none; }
-.dev-run-cmd { min-width: 0; overflow: hidden; color: var(--muted); font: 11px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Configure: one row per process. */
 .dev-conf-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -3111,6 +3141,7 @@ body.activity {
 
 /* Settings › Performance: Defender and Dev Drive are Windows' own. */
 html:not(.windows) .windows-only { display: none; }
+#perf-devdrive { font-weight: 500; }
 
 /* The system's title bar sits above the page: no room for traffic lights, and the
  * sidebar shows Mica rather than vibrancy. */

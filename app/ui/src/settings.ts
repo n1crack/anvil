@@ -618,28 +618,35 @@ export function render() {
   const phpBusy = [...installing].some((k) => k.startsWith("php@"));
   $("#versions").replaceChildren(
     ...s.php.map((v) =>
-      versionRow(`PHP ${v.version}`, v, installing.has(`php@${v.version}`), phpBusy, {
-        install: async () => {
-          installing.add(`php@${v.version}`);
-          render();
-          await call("php_install", { version: v.version });
-          installing.delete(`php@${v.version}`);
-          render();
+      versionRow(
+        `PHP ${v.version}`,
+        v,
+        installing.has(`php@${v.version}`),
+        phpBusy,
+        {
+          install: async () => {
+            installing.add(`php@${v.version}`);
+            render();
+            await call("php_install", { version: v.version });
+            installing.delete(`php@${v.version}`);
+            render();
+          },
+          makeDefault: () => call("set_default_php", { version: v.version }),
+          uninstall: async () => {
+            const ok = await window.__TAURI__.dialog.ask(
+              "No application is pinned to it. One whose .anvil.toml asks for it uses the default PHP version.",
+              {
+                title: `Uninstall PHP ${v.version}?`,
+                kind: "warning",
+                okLabel: "Uninstall",
+                cancelLabel: "Cancel",
+              },
+            );
+            if (ok) call("php_uninstall", { version: v.version });
+          },
         },
-        makeDefault: () => call("set_default_php", { version: v.version }),
-        uninstall: async () => {
-          const ok = await window.__TAURI__.dialog.ask(
-            "No application is pinned to it. One whose .anvil.toml asks for it uses the default PHP version.",
-            {
-              title: `Uninstall PHP ${v.version}?`,
-              kind: "warning",
-              okLabel: "Uninstall",
-              cancelLabel: "Cancel",
-            },
-          );
-          if (ok) call("php_uninstall", { version: v.version });
-        },
-      }, phpParts(v)),
+        phpParts(v),
+      ),
     ),
   );
 
@@ -668,8 +675,7 @@ function phpParts(v: Settings["php"][number]) {
   if (!reason) return { slot, below };
   const error = Object.assign(document.createElement("div"), { className: "ver-error" });
   error.append(Object.assign(document.createElement("span"), { textContent: reason }));
-  if (reason.includes("xcode-select --install"))
-    error.append(button("Install command line tools", () => invoke("xcode_tools_install")));
+  if (reason.includes("xcode-select --install")) error.append(button("Install command line tools", () => invoke("xcode_tools_install")));
   return { slot, error, below };
 }
 
@@ -876,7 +882,13 @@ const SOFTWARE: [string, string, string, string, string][] = [
   ["Mailpit", "Catches the mail apps send", "MIT", "https://mailpit.axllent.org", "Downloaded"],
   ["Versity S3 Gateway", "S3-compatible file storage", "Apache-2.0", "https://github.com/versity/versitygw", "Downloaded"],
   ["SILO", "S3-compatible file storage, a MinIO fork", "AGPL-3.0", "https://silo.pgsty.com", "Downloaded"],
-  ["Tauri", windows ? "The app’s windows and tray icon" : "The app’s windows and menu bar", "MIT OR Apache-2.0", "https://tauri.app", "Bundled"],
+  [
+    "Tauri",
+    windows ? "The app’s windows and tray icon" : "The app’s windows and menu bar",
+    "MIT OR Apache-2.0",
+    "https://tauri.app",
+    "Bundled",
+  ],
 ];
 
 const node = (tag: string, cls: string, ...kids: (Node | string)[]) => {
@@ -887,38 +899,29 @@ const node = (tag: string, cls: string, ...kids: (Node | string)[]) => {
 };
 
 type Performance = {
-  defender: "on" | "off" | "passive" | null;
   dev_drive_supported: boolean;
   folders: { name: string; path: string; dev_drive: boolean | null }[];
 };
 
-/** Settings › Performance (Windows): asked each time it opens, as both can change outside Anvil. */
+/** Settings › Performance (Windows): asked each time it opens, as a drive can change outside Anvil. */
 function loadPerformance() {
   const row = (label: string, note: string, value: string) =>
     node("div", "row", node("span", "", label, node("small", "", note)), node("span", "muted", value));
   invoke<Performance>("performance")
     .then((p) => {
-      const defender = { on: "On", off: "Off", passive: "Passive" }[p.defender ?? ""] ?? "Unknown";
-      const why =
-        p.defender === "passive"
-          ? "Another antivirus protects this computer; its own settings decide what it scans."
-          : "Real-time protection scans files as programs read them.";
-      $("#perf-system").replaceChildren(
-        row("Microsoft Defender", why, defender),
-        row("Dev Drive", "A drive whose files Defender scans without holding programs up.", p.dev_drive_supported ? "Available" : "Needs Windows 11"),
-      );
+      $("#perf-devdrive").textContent = p.dev_drive_supported ? "· Dev Drive available" : "· Dev Drive needs Windows 11";
+      $("#perf-guide").hidden = !p.dev_drive_supported;
       $("#perf-folders").replaceChildren(
-        ...p.folders.map((f) => row(f.name, f.path, f.dev_drive ? "On a Dev Drive" : f.dev_drive === false ? "Not on a Dev Drive" : "Unknown")),
+        ...p.folders.map((f) =>
+          row(f.name, f.path, f.dev_drive ? "On a Dev Drive" : f.dev_drive === false ? "Not on a Dev Drive" : "Unknown"),
+        ),
       );
     })
     .catch((e) => showError(String(e)));
 }
 
-const guide = $("#perf-guide") as HTMLAnchorElement;
-guide.onclick = (e) => {
-  e.preventDefault();
-  confirmOpen(guide, "https://learn.microsoft.com/windows/dev-drive/");
-};
+const guide = $("#perf-guide") as HTMLElement;
+guide.onclick = () => confirmOpen(guide, "https://learn.microsoft.com/windows/dev-drive/");
 
 /** A bubble under a credit's name: its site opens only on Open, so a stray click
  * while reading the list doesn't throw a browser window up. */

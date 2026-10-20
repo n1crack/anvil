@@ -181,14 +181,22 @@ export function mark(s) {
   m.className = "mark";
   m.setAttribute("aria-hidden", "true");
   m.textContent = (s.name.match(/[a-z0-9]/) ?? ["?"])[0].toUpperCase();
+  const img = (src) => {
+    const i = new Image();
+    i.src = src;
+    i.alt = "";
+    return i;
+  };
+  // The first time, the letter until the icon has loaded; after that the icon at once:
+  // every redraw (a right-click, a refresh) showing the letter first made it flash.
   const show = (src) => {
     if (!src) return;
-    const img = new Image();
-    img.src = src;
-    img.alt = "";
-    img.onload = () => m.replaceChildren(img);
+    const i = img(src);
+    i.onload = () => m.replaceChildren(i);
   };
-  if (icons.has(s.name)) show(icons.get(s.name));
+  const known = icons.get(s.name);
+  if (known) m.replaceChildren(img(known));
+  else if (icons.has(s.name)) return m;
   else
     invoke("icon", { site: s.name }).then(
       (src) => {

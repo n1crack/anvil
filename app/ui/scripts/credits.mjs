@@ -10,13 +10,19 @@ import { fileURLToPath } from "node:url";
 
 const ui = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Windows: pnpm is a .cmd, which only a shell runs.
-const run = (cmd, args, cwd) =>
-  execFileSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 1 << 28, shell: process.platform === "win32" });
+const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 1 << 28, shell: process.platform === "win32" });
 
 const meta = JSON.parse(
   run(
     "cargo",
-    ["metadata", "--format-version=1", "--locked", "--filter-platform=aarch64-apple-darwin", "--filter-platform=x86_64-apple-darwin", "--filter-platform=x86_64-pc-windows-msvc"],
+    [
+      "metadata",
+      "--format-version=1",
+      "--locked",
+      "--filter-platform=aarch64-apple-darwin",
+      "--filter-platform=x86_64-apple-darwin",
+      "--filter-platform=x86_64-pc-windows-msvc",
+    ],
     join(ui, "..", ".."),
   ),
 );

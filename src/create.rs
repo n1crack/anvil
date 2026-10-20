@@ -122,6 +122,14 @@ pub fn log_file(name: &str) -> PathBuf {
     home().join("log").join(format!("create-{name}.log"))
 }
 
+/// Whether `git` runs here (Windows comes without it).
+fn git_installed() -> bool {
+    crate::platform::command("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
 /// A template's choices, by option key: `{"kit": "livewire", "git": "on"}`.
 pub type Options = BTreeMap<String, String>;
 
@@ -232,7 +240,11 @@ pub fn options(kind: &str, cfg: &Config) -> Vec<Opt> {
     if apps::runtime(kind) == Some("node") {
         v.extend(versions("node", "Node", runtimes::installed("node"), None));
     }
-    v.push(on_off("git", "Git"));
+    let mut git = on_off("git", "Git");
+    if !git_installed() {
+        git.default = "off".into();
+    }
+    v.push(git);
     // Every template is served; Settings › "HTTPS for new applications" sets the default.
     let mut https = on_off("https", "HTTPS");
     if cfg.https_default != Some(true) {
@@ -636,7 +648,10 @@ fn build(
             )?;
         }
     }
-    if on(opts, "git") {
+    if on(opts, "git") && !git_installed() {
+        // Windows comes without Git: the app is made all the same.
+        writeln!(&*log, "Git isn't installed: no repository made")?;
+    } else if on(opts, "git") {
         // A repository with everything in a first commit; a missing git name or
         // email only skips the commit.
         sh(crate::platform::command("git").args(["init", "-q"]), dir)?;

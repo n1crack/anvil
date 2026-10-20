@@ -274,9 +274,16 @@ export interface Settings {
   dns_port: number;
   editor: string | null;
   editors: string[];
-  php: { version: string; installed: boolean; default: boolean; pinned_by: string[]; opcache: "builtin" | "ready" | "missing"; opcache_building: boolean;
+  php: {
+    version: string;
+    installed: boolean;
+    default: boolean;
+    pinned_by: string[];
+    opcache: "builtin" | "ready" | "missing";
+    opcache_building: boolean;
     /** The catalog, each on or off for every app on the version. */
-    extensions: { name: string; on: boolean; built: boolean; building: boolean }[] }[];
+    extensions: { name: string; on: boolean; built: boolean; building: boolean }[];
+  }[];
   ini: Record<string, string>;
   terminal: string | null;
   terminals: string[];
