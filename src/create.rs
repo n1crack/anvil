@@ -207,7 +207,7 @@ pub fn options(kind: &str, cfg: &Config) -> Vec<Opt> {
         v.push(pick(
             "js",
             "Packages",
-            &[("npm", "npm"), ("pnpm", "pnpm"), ("bun", "bun")],
+            &[("pnpm", "pnpm"), ("npm", "npm"), ("bun", "bun")],
         ));
     }
     let versions = |key, label: &str, list: Vec<String>, default: Option<String>| {
@@ -293,7 +293,7 @@ fn on(opts: &Options, key: &str) -> bool {
 }
 
 fn js(opts: &Options) -> &str {
-    opts.get("js").map_or("npm", String::as_str)
+    opts.get("js").map_or("pnpm", String::as_str)
 }
 
 /// npx arguments creating a JS template's project without installing it;
@@ -477,8 +477,12 @@ fn build(
             )?;
             return Ok(());
         };
+        if manager == "pnpm" {
+            runtimes::pnpm_ready(node)?;
+        }
+        // A new app is no worktree: its node_modules are its own (`apps::shared_deps`).
         sh(
-            crate::platform::shell(&apps::js_install(manager), None).envs(node.clone()),
+            crate::platform::shell(&apps::js_install(manager, false), None).envs(node.clone()),
             dir,
         )
     };
@@ -728,7 +732,7 @@ mod tests {
         assert!(keys("laravel").ends_with(&["git", "https"]));
         let full = resolve("next", &cfg, &Options::new()).unwrap();
         assert_eq!(full["ts"], "on");
-        assert_eq!(full["js"], "npm");
+        assert_eq!(full["js"], "pnpm");
         assert_eq!(full["git"], "on");
         let bad = |k: &str, v: &str| {
             resolve("next", &cfg, &Options::from([(k.into(), v.into())])).is_err()
@@ -782,7 +786,10 @@ mod tests {
         }
         let next = npx_args("next", "web", &o(&[("ts", "on"), ("tailwind", "off")]));
         assert!(next.contains(&"--ts".into()) && next.contains(&"--no-tailwind".into()));
-        assert!(next.contains(&"--use-npm".into()));
+        assert!(
+            next.contains(&"--use-pnpm".into()),
+            "pnpm unless chosen otherwise"
+        );
         let vite = npx_args("vite", "ui", &o(&[("framework", "vue"), ("ts", "on")]));
         assert!(
             vite.ends_with(&["--template".into(), "vue-ts".into()]),

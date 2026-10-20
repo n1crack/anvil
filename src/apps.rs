@@ -164,16 +164,37 @@ pub fn js_manager(dir: &Path) -> &'static str {
     .map_or("npm", |(_, m)| m)
 }
 
+const PNPM_INSTALL: &str = "pnpm install --config.strict-dep-builds=false";
+
+/// pnpm's env name of `--config.virtual-store-type`.
+pub const SHARED_VAR: &str = "pnpm_config_virtual_store_type";
+
+/// The app's "Shared dependencies" as pnpm's setting, for every pnpm run with the app's
+/// env (its processes, a terminal's `pnpm` shim): a plain `pnpm install` without it
+/// quietly makes a full node_modules of the app's own again.
+pub fn shared_env(site: &Site) -> Option<(String, String)> {
+    (site.shared_deps == Some(true)).then(|| (SHARED_VAR.into(), "global".into()))
+}
+
+/// Whether a pnpm app's node_modules link into pnpm's store (its global virtual store):
+/// the user's choice, else on for a worktree (a new checkout installs in a moment) and
+/// off for an app. Never for Next.js: Turbopack doesn't compile files outside the project.
+pub fn shared_deps(kind: &str, set: Option<bool>, worktree: bool) -> bool {
+    kind != "next" && set.unwrap_or(worktree)
+}
+
 /// The shell command installing a JS project's dependencies with `manager`.
-/// pnpm and yarn come through Corepack when they aren't on the PATH. pnpm 11
-/// fails an install whose dependencies' build scripts it skipped (esbuild); a
-/// dev server runs without them, so that's no reason to stop.
-pub fn js_install(manager: &str) -> String {
+/// yarn comes through Corepack when it isn't on the PATH; pnpm is the user's or
+/// Anvil's (`runtimes::pnpm_ready`). pnpm 11 fails an install whose dependencies'
+/// build scripts it skipped (esbuild); a dev server runs without them, so that's no
+/// reason to stop. `shared`: pnpm links node_modules into its store (`shared_deps`).
+pub fn js_install(manager: &str, shared: bool) -> String {
     let via = |m: &str| {
         format!("$(command -v {m} || echo env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack {m})")
     };
     match manager {
-        "pnpm" => format!("{} install --config.strict-dep-builds=false", via("pnpm")),
+        "pnpm" if shared => format!("{PNPM_INSTALL} --config.virtual-store-type=global"),
+        "pnpm" => PNPM_INSTALL.into(),
         "yarn" => format!("{} install", via("yarn")),
         "bun" => "bun install".into(),
         _ => "npm install".into(),
@@ -231,11 +252,11 @@ pub fn clear_vite_hot(dir: &Path) {
     }
 }
 
-pub fn with_js_install(dir: &Path, command: &str) -> String {
+pub fn with_js_install(dir: &Path, command: &str, shared: bool) -> String {
     if !runs_package_script(command) || !dir.join("package.json").exists() {
         return command.to_string();
     }
-    let install = js_install(js_manager(dir));
+    let install = js_install(js_manager(dir), shared);
     if cfg!(windows) {
         format!("(if not exist node_modules {install}) && {command}")
     } else {
@@ -767,7 +788,12 @@ impl Apps {
         // The trailing argument is $0: it tags the shell with Anvil's home so a
         // crashed Anvil's leftovers can be recognised and cleaned up.
         let tag = format!("anvil:{}:{key}", self.home.display());
-        let command = with_js_install(dir, &command);
+        // The app's "Shared dependencies" came with its env (`shared_env`).
+        let shared = env.iter().any(|(k, _)| k == SHARED_VAR);
+        let command = with_js_install(dir, &command, shared);
+        if command.contains("pnpm") {
+            runtimes::pnpm_ready(&env)?;
+        }
         // `<site>`, `<site>@<process>` or `<site>#<script>`.
         let site = key.split(['@', '#']).next().unwrap_or(key);
         let (columns, lines) = self.sizes.get(site).copied().unwrap_or(TERM_SIZE);
@@ -1194,10 +1220,10 @@ mod tests {
         let dir = project(&[("package.json", "{}")]);
         assert_eq!(js_manager(&dir), "npm");
         assert_eq!(
-            with_js_install(&dir, "npm run dev"),
+            with_js_install(&dir, "npm run dev", false),
             "{ [ -d node_modules ] || npm install; } && npm run dev"
         );
-        assert_eq!(with_js_install(&dir, "cargo run"), "cargo run");
+        assert_eq!(with_js_install(&dir, "cargo run", false), "cargo run");
         for (lock, manager) in [
             ("pnpm-lock.yaml", "pnpm"),
             ("yarn.lock", "yarn"),
@@ -1206,13 +1232,42 @@ mod tests {
         ] {
             fs::write(dir.join(lock), "").unwrap();
             assert_eq!(js_manager(&dir), manager);
-            assert!(with_js_install(&dir, "npx vite").contains(&js_install(manager)));
+            assert!(with_js_install(&dir, "npx vite", false).contains(&js_install(manager, false)));
             fs::remove_file(dir.join(lock)).unwrap();
         }
         // Without a package.json there is nothing to install.
         fs::remove_file(dir.join("package.json")).unwrap();
-        assert_eq!(with_js_install(&dir, "npm run dev"), "npm run dev");
+        assert_eq!(with_js_install(&dir, "npm run dev", false), "npm run dev");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pnpm_installs_and_shared_dependencies() {
+        let plain = "pnpm install --config.strict-dep-builds=false";
+        assert_eq!(js_install("pnpm", false), plain);
+        assert_eq!(
+            js_install("pnpm", true),
+            format!("{plain} --config.virtual-store-type=global")
+        );
+        // No Corepack for pnpm any more; the others don't share.
+        assert!(!js_install("pnpm", true).contains("corepack"));
+        assert!(js_install("yarn", true).contains("corepack yarn"));
+        assert_eq!(js_install("npm", true), "npm install");
+        assert_eq!(js_install("bun", true), "bun install");
+        // On for a worktree, off for an app, the user's choice over both; never Next.js.
+        assert!(shared_deps("vite", None, true));
+        assert!(!shared_deps("vite", None, false));
+        assert!(shared_deps("vite", Some(true), false));
+        assert!(!shared_deps("vite", Some(false), true));
+        assert!(!shared_deps("next", None, true));
+        assert!(!shared_deps("next", Some(true), false));
+        let mut site = site_at(Path::new("/tmp/x"));
+        assert_eq!(shared_env(&site), None);
+        site.shared_deps = Some(true);
+        assert_eq!(
+            shared_env(&site),
+            Some((SHARED_VAR.into(), "global".into()))
+        );
     }
 
     #[test]
@@ -1293,6 +1348,7 @@ mod tests {
             runtime_pinned: false,
             browser: false,
             packages_pinned: None,
+            shared_deps: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],

@@ -1,4 +1,4 @@
-//! Terminal shims: `php`, `composer`, `laravel`, `node`, `npm` and `npx` in
+//! Terminal shims: `php`, `composer`, `laravel`, `node`, `npm`, `npx` and `pnpm` in
 //! `~/.anvil/shims` run `anvil shim <tool>`, which picks the version of the site
 //! the current folder belongs to.
 
@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const TOOLS: [&str; 6] = ["php", "composer", "laravel", "node", "npm", "npx"];
+pub const TOOLS: [&str; 7] = ["php", "composer", "laravel", "node", "npm", "npx", "pnpm"];
 
 const BLOCK_START: &str = "# Anvil: php, composer, laravel and node follow each site's versions";
 const BLOCK_END: &str = "# Anvil end";
@@ -244,6 +244,7 @@ fn extra_env(
     };
     let test = is_test_run(tool, args);
     let mut env = crate::worktrees::checked_env(cfg, s, test)?;
+    env.extend(apps::shared_env(s));
     // The mail catcher's, as the app's processes get it (`processes::env`).
     if !test {
         env.extend(crate::mail::env(cfg, s));
@@ -318,6 +319,27 @@ fn resolve_for(
                 bail!("Node {v} isn't installed in Anvil: run `anvil runtime install node {v}`");
             }
             Ok((program, vec![], runtimes::env("node", &v)))
+        }
+        // The user's pnpm, else Anvil's (`runtimes::with_pms`), with the site's Node.js when
+        // there is one; its env carries the app's "Shared dependencies" (`extra_env`).
+        "pnpm" => {
+            let mut env = match resolve_for("node", cwd, cfg, fetch, site) {
+                Ok((_, _, env)) => env,
+                Err(_) => vec![("PATH".into(), runtimes::with_pms(&crate::env_path()))],
+            };
+            // Never this shim again.
+            let shims = h.join("shims");
+            let (_, path) = env.iter_mut().find(|(k, _)| k == "PATH").unwrap();
+            *path = std::env::join_paths(std::env::split_paths(&path).filter(|d| *d != shims))?
+                .to_string_lossy()
+                .into_owned();
+            let path = path.clone();
+            if fetch {
+                runtimes::pnpm_ready(&env)?;
+            }
+            let program = runtimes::which("pnpm", &path)
+                .context("No pnpm found: install it in Settings › Node.js")?;
+            Ok((program, vec![], env))
         }
         _ => bail!(
             "Anvil has no shim for {tool}: use one of {}",

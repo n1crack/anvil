@@ -500,10 +500,78 @@ fn pm_dirs() -> [PathBuf; 2] {
     [root("pm").join("bin"), root("bun").join("bin")]
 }
 
-/// `path` with Anvil's package managers in front.
+/// `path` with Anvil's package managers in front, and Anvil's pnpm last: a pnpm of the
+/// user's comes first, their choice stands.
 pub fn with_pms(path: &str) -> String {
     let [pm, bun] = pm_dirs();
-    crate::prepend_path(&pm, &crate::prepend_path(&bun, path))
+    let path = crate::prepend_path(&pm, &crate::prepend_path(&bun, path));
+    format!("{path}{}{}", platform::PATH_SEP, pnpm_dir().display())
+}
+
+/// pnpm, pinned: its standalone build, a native program that needs no Node.js (Corepack
+/// isn't bundled with Node.js 25 and later). A newer pin replaces the older (`ensure_pnpm`).
+pub const PNPM: &str = "12.14.0";
+/// GitHub's SHA-256 of each release asset, confirmed by hashing the downloads.
+const PNPM_ASSETS: [(&str, &str, &str); 3] = [
+    (
+        "macos-aarch64",
+        "pnpm-darwin-arm64.tar.gz",
+        "50f48e0e17508952790a3fbf58fcf14f3b82efa5f594ca04ad904e29aaf854b0",
+    ),
+    (
+        "macos-x86_64",
+        "pnpm-darwin-x64.tar.gz",
+        "2c412e07382049b4edb04fa6da78f3d4ef7810b75853c80544dcfb7c0ed79880",
+    ),
+    (
+        "windows-x86_64",
+        "pnpm-win32-x64.zip",
+        "6f0f38e917c8ce76ef31db528c357e2bfa354a1bcb16464e3cdec39e6530d784",
+    ),
+];
+
+fn pnpm_dir() -> PathBuf {
+    root("pnpm").join(PNPM)
+}
+
+/// The release asset and its digest for `os`-`arch` (Rust's names).
+fn pnpm_asset(os: &str, arch: &str) -> Result<(&'static str, &'static str)> {
+    let target = format!("{os}-{arch}");
+    PNPM_ASSETS
+        .iter()
+        .find(|(t, _, _)| *t == target)
+        .map(|(_, file, sum)| (*file, *sum))
+        .with_context(|| format!("Anvil has no pnpm for {target}: install pnpm yourself"))
+}
+
+/// Download the pinned pnpm once, checked against its digest, and drop older pins.
+/// The archive is the program and its `dist` folder (node-gyp), kept side by side.
+pub fn ensure_pnpm() -> Result<PathBuf> {
+    let dir = pnpm_dir();
+    let bin = dir.join(platform::exe("pnpm"));
+    if !bin.exists() {
+        let (file, sum) = pnpm_asset(std::env::consts::OS, std::env::consts::ARCH)?;
+        let url = format!("https://github.com/pnpm/pnpm/releases/download/v{PNPM}/{file}");
+        replace_dir(&dir, |d| fetch_tgz(&url, d, false, Some(sum)))?;
+    }
+    for old in subdirs(&root("pnpm")).into_iter().filter(|v| v != PNPM) {
+        let _ = fs::remove_dir_all(root("pnpm").join(old));
+    }
+    Ok(bin)
+}
+
+/// Anvil's pnpm downloaded when nothing on `env`'s PATH is a pnpm, so a command run with
+/// it finds one. Only for commands that use pnpm.
+pub fn pnpm_ready(env: &[(String, String)]) -> Result<()> {
+    let path = env
+        .iter()
+        .rev()
+        .find(|(k, _)| k == "PATH")
+        .map_or_else(crate::env_path, |(_, v)| v.clone());
+    if which("pnpm", &path).is_none() {
+        ensure_pnpm()?;
+    }
+    Ok(())
 }
 
 /// One package manager as found on a PATH.
@@ -564,21 +632,27 @@ fn find(name: &str, path: &str, envs: &[(String, String)]) -> Option<(Found, Pat
     ))
 }
 
+/// The env of an app with no Node.js of its own: the newest Anvil Node.js, else Anvil's
+/// package managers in front.
+pub fn apps_env() -> Vec<(String, String)> {
+    match installed("node").first() {
+        Some(v) => env("node", v),
+        None => vec![("PATH".into(), with_pms(&crate::env_path()))],
+    }
+}
+
 /// npm, pnpm, yarn and bun as an app sees them (the newest Anvil Node.js) and
 /// as a terminal does (the login shell's PATH, without Anvil's runtimes).
 pub fn package_managers() -> Vec<PackageManager> {
     let base = crate::env_path();
-    let apps_env = match installed("node").first() {
-        Some(v) => env("node", v),
-        None => vec![("PATH".into(), with_pms(&base))],
-    };
+    let apps_env = apps_env();
     let apps_path = apps_env
         .iter()
         .find(|(k, _)| k == "PATH")
         .map(|(_, v)| v.clone())
         .unwrap_or_default();
     let login = crate::login_path().unwrap_or(base);
-    let mine = [root("pm"), root("bun")];
+    let mine = [root("pm"), root("bun"), root("pnpm")];
     ["npm", "pnpm", "yarn", "bun"]
         .into_iter()
         .map(|name| {
@@ -603,7 +677,7 @@ pub fn package_managers() -> Vec<PackageManager> {
 }
 
 /// The first executable `name` in a PATH string.
-fn which(name: &str, path: &str) -> Option<PathBuf> {
+pub(crate) fn which(name: &str, path: &str) -> Option<PathBuf> {
     path.split(crate::platform::PATH_SEP)
         .filter(|d| !d.is_empty())
         .map(|d| Path::new(d).join(crate::platform::exe(name)))
@@ -669,12 +743,14 @@ pub fn install_pm(name: &str) -> Result<()> {
     })
 }
 
-/// pnpm and yarn with the newest Anvil Node.js's npm into `<anvil>/runtimes/pm`;
-/// bun as its official release, checked against the published SHA-256.
+/// pnpm as its pinned standalone build (`ensure_pnpm`); yarn with the newest Anvil
+/// Node.js's npm into `<anvil>/runtimes/pm`; bun as its official release, checked
+/// against the published SHA-256.
 fn install_pm_in(name: &str, anvil: &Path, runner: Runner) -> Result<()> {
     let runtimes = anvil.join("runtimes");
     match name {
-        "pnpm" | "yarn" => {
+        "pnpm" => ensure_pnpm().map(drop),
+        "yarn" => {
             let node = runtimes.join("node");
             let v = subdirs(&node)
                 .into_iter()
@@ -744,6 +820,14 @@ fn uninstall_pm_in(name: &str, anvil: &Path) -> Result<()> {
     let missing = || format!("{name} isn't installed in Anvil");
     match name {
         "bun" => fs::remove_dir_all(runtimes.join("bun")).with_context(missing),
+        // The pinned build, then an npm one an older Anvil installed, if any.
+        "pnpm" if runtimes.join("pnpm").is_dir() => {
+            fs::remove_dir_all(runtimes.join("pnpm"))?;
+            match runtimes.join("pm/lib/node_modules/pnpm").is_dir() {
+                true => uninstall_pm_in(name, anvil),
+                false => Ok(()),
+            }
+        }
         "pnpm" | "yarn" => {
             let pm = runtimes.join("pm");
             let pkg = pm.join("lib").join("node_modules").join(name);
@@ -908,8 +992,8 @@ mod tests {
             ran.push(argv);
             Ok(())
         };
-        // pnpm and yarn need an Anvil Node.js for its npm.
-        let err = install_pm_in("pnpm", &anvil, &mut fake).unwrap_err();
+        // yarn needs an Anvil Node.js for its npm.
+        let err = install_pm_in("yarn", &anvil, &mut fake).unwrap_err();
         assert!(err.to_string().contains("install Node.js first"), "{err}");
         for v in ["22", "24"] {
             fs::create_dir_all(anvil.join("runtimes/node").join(v)).unwrap();
@@ -977,7 +1061,27 @@ mod tests {
         assert!(dirs[0].ends_with("runtimes/node/24/bin"), "{path}");
         assert!(dirs[1].ends_with("runtimes/pm/bin"), "{path}");
         assert!(dirs[2].ends_with("runtimes/bun/bin"), "{path}");
+        // Anvil's pnpm last: a pnpm on the user's PATH wins.
+        assert!(
+            dirs.last()
+                .unwrap()
+                .ends_with(&format!("runtimes/pnpm/{PNPM}")),
+            "{path}"
+        );
         fs::remove_dir_all(anvil).unwrap();
+    }
+
+    #[test]
+    fn pnpm_assets_per_platform() {
+        let (file, sum) = pnpm_asset("macos", "aarch64").unwrap();
+        assert_eq!(file, "pnpm-darwin-arm64.tar.gz");
+        assert_eq!(sum.len(), 64);
+        assert!(pnpm_asset("macos", "x86_64").is_ok());
+        assert_eq!(
+            pnpm_asset("windows", "x86_64").unwrap().0,
+            "pnpm-win32-x64.zip"
+        );
+        assert!(pnpm_asset("windows", "aarch64").is_err());
     }
 
     #[test]

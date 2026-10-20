@@ -1200,6 +1200,55 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
     (total, items)
 }
 
+/// pnpm's store, where `pnpm store path` says: its default place, the user's own, which
+/// Anvil never moves (no storeDir, no XDG_DATA_HOME).
+#[derive(Serialize)]
+pub struct PnpmStore {
+    pub path: String,
+    pub bytes: u64,
+}
+
+/// The pnpm apps get (`runtimes::apps_env`), with that env; `None` without one.
+fn pnpm() -> Option<(PathBuf, Vec<(String, String)>)> {
+    let env = crate::runtimes::apps_env();
+    let path = env.iter().rev().find(|(k, _)| k == "PATH")?.1.clone();
+    Some((crate::runtimes::which("pnpm", &path)?, env))
+}
+
+/// The store and its size. `du` counts an APFS clone whole, and on macOS pnpm clones the
+/// store's files into node_modules, so the size overstates the disk space it holds alone.
+pub fn pnpm_store() -> Option<PnpmStore> {
+    let (bin, env) = pnpm()?;
+    let out = crate::output_within(
+        crate::platform::command(bin)
+            .args(["store", "path"])
+            .envs(env)
+            .current_dir(std::env::temp_dir()),
+        std::time::Duration::from_secs(10),
+    )?;
+    let path = PathBuf::from(out.trim());
+    let bytes = du(std::slice::from_ref(&path)).values().sum();
+    Some(PnpmStore {
+        path: path.display().to_string(),
+        bytes,
+    })
+}
+
+/// `pnpm store prune`: packages no project uses any more go. Returns the bytes freed as
+/// `du` sees the store, which overstates what comes back where a pruned file was a clone
+/// of one in a node_modules (`pnpm_store`).
+pub fn pnpm_prune() -> Result<u64> {
+    let (bin, env) = pnpm().ok_or_else(|| anyhow::anyhow!("No pnpm found"))?;
+    let before = pnpm_store().map_or(0, |s| s.bytes);
+    crate::run(
+        crate::platform::command(bin)
+            .args(["store", "prune"])
+            .envs(env)
+            .current_dir(std::env::temp_dir()),
+    )?;
+    Ok(before.saturating_sub(pnpm_store().map_or(0, |s| s.bytes)))
+}
+
 /// Delete one of Anvil's own cleanable items: a cache folder, leftovers, or logs.
 /// Logs are truncated, not deleted, so running programs keep a valid file.
 /// Anvil's cache folders as they exist on disk; only these exact paths can be
@@ -1712,6 +1761,7 @@ mod tests {
             runtime_pinned: false,
             browser: false,
             packages_pinned: None,
+            shared_deps: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],
@@ -1774,6 +1824,7 @@ mod tests {
             runtime_pinned: false,
             browser: false,
             packages_pinned: None,
+            shared_deps: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],
@@ -1847,6 +1898,7 @@ mod tests {
             runtime_pinned: false,
             browser: false,
             packages_pinned: None,
+            shared_deps: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],

@@ -994,6 +994,7 @@ mod tests {
             runtime_pinned: false,
             browser: false,
             packages_pinned: None,
+            shared_deps: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],

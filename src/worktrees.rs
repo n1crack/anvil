@@ -2056,7 +2056,8 @@ fn in_worktree(v: &str) -> bool {
 
 /// `list` (`after_create`) for a worktree in `dir`: `{install}` is the JS install its lock
 /// file asks for (`npm ci` with package-lock.json), a command with it left out without package.json.
-fn commands(list: &[String], dir: &Path) -> Vec<String> {
+/// `shared`: the worktree's "Shared dependencies" (`apps::shared_deps`).
+fn commands(list: &[String], dir: &Path, shared: bool) -> Vec<String> {
     // `js_manager` says npm without a lock file too: then there's nothing to install from.
     let install = match crate::apps::js_manager(dir) {
         _ if !dir.join("package.json").is_file() => None,
@@ -2064,8 +2065,7 @@ fn commands(list: &[String], dir: &Path) -> Vec<String> {
             .join("package-lock.json")
             .is_file()
             .then(|| "npm ci".to_string()),
-        // pnpm 11 fails an install whose dependencies' build scripts it skipped (`js_install`).
-        "pnpm" => Some("pnpm install --config.strict-dep-builds=false".into()),
+        "pnpm" => Some(crate::apps::js_install("pnpm", shared)),
         m => Some(format!("{m} install")),
     };
     list.iter()
@@ -2079,7 +2079,11 @@ fn commands(list: &[String], dir: &Path) -> Vec<String> {
 
 /// The worktree's `after_create` commands, ready to run (`commands`).
 pub fn after_create(cfg: &Config, site: &Site) -> Vec<String> {
-    commands(&hooks(cfg, site).after_create, &site.path)
+    commands(
+        &hooks(cfg, site).after_create,
+        &site.path,
+        site.shared_deps == Some(true),
+    )
 }
 
 /// Run one of the worktree's `after_create` commands in it, with what its processes get
@@ -2094,6 +2098,9 @@ pub fn run_after(cfg: &Config, site: &Site, command: &str, quiet: bool) -> anyho
         && let Some((_, path)) = env.iter_mut().find(|(k, _)| k == "PATH")
     {
         *path = crate::prepend_path(&shims, path);
+    }
+    if command.contains("pnpm") {
+        crate::runtimes::pnpm_ready(&env)?;
     }
     let mut cmd = crate::platform::shell(command, None);
     cmd.envs(env).current_dir(&site.path).stdin(Stdio::null());
@@ -2171,8 +2178,12 @@ pub fn install(cfg: &Config, site: &Site, what: &str) -> anyhow::Result<()> {
             (php, pre, env)
         }
         "js" => {
-            let install = crate::apps::js_install(crate::apps::js_manager(dir));
+            let manager = crate::apps::js_manager(dir);
+            let install = crate::apps::js_install(manager, site.shared_deps == Some(true));
             let (_, _, env) = resolve_with("node", dir, cfg, false)?;
+            if manager == "pnpm" {
+                crate::runtimes::pnpm_ready(&env)?;
+            }
             let (sh, args) = crate::platform::shell_args(&install);
             (sh, args, env)
         }
@@ -4741,14 +4752,19 @@ pub(crate) mod tests {
             .worktree
             .after_create = Some(vec!["{install}".into(), "touch ran".into()]);
         let list = ["{install}".to_string(), "touch ran".into()];
-        assert_eq!(commands(&list, &app.path), ["npm ci", "touch ran"]);
+        assert_eq!(commands(&list, &app.path, true), ["npm ci", "touch ran"]);
         // No lock file: no install to offer (`npm ci` needs one).
         fs::remove_file(app.path.join("package-lock.json")).unwrap();
-        assert_eq!(commands(&list, &app.path), ["touch ran"]);
+        assert_eq!(commands(&list, &app.path, false), ["touch ran"]);
         fs::write(app.path.join("pnpm-lock.yaml"), "").unwrap();
         assert_eq!(
-            commands(&list, &app.path)[0],
+            commands(&list, &app.path, false)[0],
             "pnpm install --config.strict-dep-builds=false"
+        );
+        // Shared dependencies: linked into pnpm's store.
+        assert_eq!(
+            commands(&list, &app.path, true)[0],
+            "pnpm install --config.strict-dep-builds=false --config.virtual-store-type=global"
         );
         let (folder, _) = add(&cfg, &app, "feat", true, None).unwrap();
         // `add` made it and ran nothing: the caller asks first.

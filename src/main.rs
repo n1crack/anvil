@@ -117,7 +117,7 @@ enum Cmd {
     /// Download the web server, put the terminal shims on PATH and print the
     /// one-time system setup command
     Setup,
-    /// The program `php`, `composer`, `laravel`, `node`, `npm` or `npx` runs in this folder
+    /// The program `php`, `composer`, `laravel`, `node`, `npm`, `npx` or `pnpm` runs in this folder
     Which { tool: String },
     /// What an app's .anvil.toml asks for (PHP, Node.js, services) and what's missing
     /// (default: the app of the current folder); --apply installs and adds it
@@ -172,7 +172,7 @@ struct NewOpts {
     /// vite: react, vue, svelte or vanilla
     #[arg(long)]
     framework: Option<String>,
-    /// laravel, statamic, next, nuxt, vite: npm, pnpm or bun
+    /// laravel, statamic, next, nuxt, vite: pnpm (the default), npm or bun
     #[arg(long, value_name = "MANAGER")]
     pm: Option<String>,
     /// laravel, statamic, symfony, php: an installed PHP version, e.g. 8.4
@@ -447,6 +447,9 @@ enum AppCmd {
     },
     /// Share the app at a temporary public address (a Cloudflare quick tunnel) until Ctrl-C
     Share { site: String },
+    /// Switch an npm or yarn app to pnpm: pnpm-lock.yaml from its lock file, node_modules
+    /// installed again; the old lock file goes only after that works. Test the app after
+    Pnpm { site: String },
     /// The app's latest mails, oldest first, while the mail catcher (Settings › Plugins)
     /// catches them; else the inbox address of the Anvil Mailpit its .env sends to
     Mail {
@@ -741,7 +744,7 @@ fn print_setup(cfg: &Config) -> Result<()> {
     }
     if !status.shims {
         println!(
-            "Adding {} to PATH in {} so php, composer, laravel, node, npm and npx follow each site's versions.",
+            "Adding {} to PATH in {} so php, composer, laravel, node, npm, npx and pnpm follow each site's versions.",
             home().join("shims").display(),
             shims::shell_rc_files(&user_home())
                 .iter()
@@ -783,7 +786,7 @@ fn print_setup(cfg: &Config) -> Result<()> {
 fn print_setup_windows(cfg: &Config, status: &anvil::Setup) -> Result<()> {
     if !status.shims {
         println!(
-            "Adding {} to your PATH so php, composer, laravel, node, npm and npx follow each site's versions.",
+            "Adding {} to your PATH so php, composer, laravel, node, npm, npx and pnpm follow each site's versions.",
             home().join("shims").display()
         );
     }
@@ -1667,6 +1670,14 @@ fn run() -> Result<()> {
             })?,
             AppCmd::Runtime { site, version } => {
                 edit(&mut cfg, |c| set_site_runtime(c, &site, version))?
+            }
+            AppCmd::Pnpm { site } => {
+                let s = sites(&cfg)
+                    .into_iter()
+                    .find(|s| s.name == site_name(&site))
+                    .with_context(|| format!("No site named {site}"))?;
+                let lock = anvil::packages::switch_to_pnpm(&cfg, &s)?;
+                println!("{} uses pnpm now; {lock} is gone. Test the app.", s.name);
             }
             AppCmd::Autostart { site, on } => edit(&mut cfg, |c| {
                 set_site_app(c, &site, None, None, None, Some(on))

@@ -197,6 +197,10 @@ pub struct SiteConfig {
     /// ones (`packages::Packages::defaults`), a worktree's unset its app's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub packages_pinned: Option<Vec<String>>,
+    /// The Settings tab's "Shared dependencies" (`apps::shared_deps`); a worktree's unset is
+    /// on, not its app's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_deps: Option<bool>,
 }
 
 /// What the user changed about one process of an app (see `processes::set_process`).
@@ -317,6 +321,9 @@ pub struct Site {
     pub browser: bool,
     /// Its Packages tab's badges (`SiteConfig::packages_pinned`); `None` is the defaults.
     pub packages_pinned: Option<Vec<String>>,
+    /// A pnpm app's "Shared dependencies" in effect (`apps::shared_deps`); `None` for an
+    /// app without pnpm-lock.yaml.
+    pub shared_deps: Option<bool>,
     /// For a git worktree of another app: that app's name (its processes and runtimes are shared).
     pub worktree_of: Option<String>,
     /// A worktree's branch, `None` when detached.
@@ -682,6 +689,8 @@ fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
         packages_pinned: o
             .and_then(|s| s.packages_pinned.clone())
             .or_else(|| m.and_then(|s| s.packages_pinned.clone())),
+        // A worktree's default, on (`apps::shared_deps`).
+        shared_deps: Some(o.and_then(|s| s.shared_deps).unwrap_or(true)),
     }
 }
 
@@ -740,6 +749,10 @@ fn site_at(
     } else {
         format!("{name}.{}", cfg.tld)
     };
+    let shared_deps = path
+        .join("pnpm-lock.yaml")
+        .is_file()
+        .then(|| apps::shared_deps(&kind, own.and_then(|s| s.shared_deps), false));
     Site {
         host,
         secure: own
@@ -761,6 +774,7 @@ fn site_at(
         runtime_pinned,
         browser: own.and_then(|s| s.browser).unwrap_or(false),
         packages_pinned: own.and_then(|s| s.packages_pinned.clone()),
+        shared_deps,
         worktree_of: None,
         branch: None,
         aliases: vec![],
@@ -3285,6 +3299,7 @@ mod tests {
             runtime_pinned: false,
             browser: false,
             packages_pinned: None,
+            shared_deps: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],

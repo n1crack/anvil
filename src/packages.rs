@@ -1101,6 +1101,9 @@ pub fn audit(dir: &Path, eco: &str, cfg: &crate::Config) -> anyhow::Result<Vec<A
             crate::shims::resolve("node", dir, cfg)?.2,
         ),
     };
+    if tool == "pnpm" {
+        crate::runtimes::pnpm_ready(&env)?;
+    }
     // ponytail: no time limit, the tools time out on the network themselves.
     let out = crate::platform::command(&program)
         .args(pre)
@@ -1162,6 +1165,98 @@ pub fn audit(dir: &Path, eco: &str, cfg: &crate::Config) -> anyhow::Result<Vec<A
     });
     list.dedup();
     Ok(list)
+}
+
+/// The Packages tab's "Switch to pnpm" (`anvil app pnpm`) for an npm or yarn app, only
+/// when the user says so. Returns the lock file that went.
+pub fn switch_to_pnpm(cfg: &crate::Config, site: &crate::Site) -> anyhow::Result<&'static str> {
+    let mut env = crate::processes::env(cfg, site, false)?;
+    crate::runtimes::pnpm_ready(&env)?;
+    // pnpm's colours stay out of the error; with no terminal it asks nothing.
+    env.push(("NO_COLOR".into(), "1".into()));
+    let set = cfg.sites.get(&site.name).and_then(|s| s.shared_deps);
+    let shared = crate::apps::shared_deps(&site.kind, set, site.worktree_of.is_some());
+    let install = crate::apps::js_install("pnpm", shared);
+    switch_in(&site.path, &install, &mut |command| {
+        let out = crate::platform::shell(command, None)
+            .envs(env.iter().cloned())
+            .current_dir(&site.path)
+            .stdin(std::process::Stdio::null())
+            .output()?;
+        if out.status.success() {
+            return Ok(());
+        }
+        // pnpm says what went wrong on stdout.
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        anyhow::bail!(
+            "{command} failed: {}",
+            tail[tail.len().saturating_sub(3)..].join("\n")
+        )
+    })
+}
+
+/// `pnpm import` makes pnpm-lock.yaml from the old lock file, node_modules is set aside,
+/// `install` fills a new one; the old lock file goes only once that worked. On a
+/// failure the old node_modules comes back and the old lock file was never touched.
+fn switch_in(
+    dir: &Path,
+    install: &str,
+    run: &mut dyn FnMut(&str) -> anyhow::Result<()>,
+) -> anyhow::Result<&'static str> {
+    use anyhow::{Context, bail};
+    if dir.join("pnpm-lock.yaml").exists() {
+        bail!("This app already uses pnpm");
+    }
+    let lock = ["package-lock.json", "yarn.lock"]
+        .into_iter()
+        .find(|f| dir.join(f).is_file())
+        .context("No package-lock.json or yarn.lock to switch from")?;
+    // pnpm refuses a project whose packageManager names another (ERR_PNPM_OTHER_PM_EXPECTED).
+    if let Some(pm) = json(&dir.join("package.json"))
+        .and_then(|v| v["packageManager"].as_str().map(String::from))
+        .filter(|pm| !pm.starts_with("pnpm@"))
+    {
+        bail!("package.json's packageManager asks for {pm}: change it to pnpm or remove it first");
+    }
+    let (pnpm_lock, workspace) = (dir.join("pnpm-lock.yaml"), dir.join("pnpm-workspace.yaml"));
+    let had_workspace = workspace.exists();
+    // Only what pnpm made goes; the old lock file and package.json stay as they were.
+    let undo = || {
+        let _ = fs::remove_file(&pnpm_lock);
+        if !had_workspace {
+            let _ = fs::remove_file(&workspace);
+        }
+    };
+    if let Err(e) = run("pnpm import") {
+        undo();
+        return Err(e);
+    }
+    let (modules, aside) = (
+        dir.join("node_modules"),
+        dir.join("node_modules.before-pnpm"),
+    );
+    let _ = fs::remove_dir_all(&aside);
+    let moved = modules.exists();
+    if moved && let Err(e) = fs::rename(&modules, &aside) {
+        undo();
+        return Err(e).context("couldn't set node_modules aside");
+    }
+    if let Err(e) = run(install) {
+        let _ = fs::remove_dir_all(&modules);
+        if moved {
+            let _ = fs::rename(&aside, &modules);
+        }
+        undo();
+        bail!("Nothing changed, {lock} and node_modules are as they were. {e}");
+    }
+    let _ = fs::remove_dir_all(&aside);
+    fs::remove_file(dir.join(lock))?;
+    Ok(lock)
 }
 
 #[cfg(test)]
@@ -1733,6 +1828,71 @@ renamed = { package = "real-name", version = "0.3" }
         )
         .unwrap();
         assert_eq!(cached(&dir).ecosystems[0].packages.len(), 2);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn switch_to_pnpm_replaces_the_lock_only_after_an_install() {
+        let dir = std::env::temp_dir().join(format!("anvil-pkg-switch-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("node_modules/old")).unwrap();
+        fs::write(dir.join("package.json"), "{}").unwrap();
+        fs::write(dir.join("package-lock.json"), "old lock").unwrap();
+        let mut ran = vec![];
+        // pnpm import writes its lock; the install fills node_modules, then fails.
+        let fake = |fail: bool| {
+            let dir = dir.clone();
+            move |c: &str| -> anyhow::Result<()> {
+                if c == "pnpm import" {
+                    fs::write(dir.join("pnpm-lock.yaml"), "new lock")?;
+                    fs::write(dir.join("pnpm-workspace.yaml"), "")?;
+                    return Ok(());
+                }
+                fs::create_dir_all(dir.join("node_modules/new"))?;
+                if fail {
+                    anyhow::bail!("pnpm install failed: ERR_PNPM_X")
+                }
+                Ok(())
+            }
+        };
+        let mut run = |c: &str| {
+            ran.push(c.to_string());
+            fake(true)(c)
+        };
+        let e = switch_in(&dir, "pnpm install", &mut run).unwrap_err();
+        assert!(e.to_string().contains("ERR_PNPM_X"), "{e}");
+        assert_eq!(ran, ["pnpm import", "pnpm install"]);
+        // As it was: the old lock and node_modules, nothing of pnpm's.
+        assert_eq!(
+            fs::read_to_string(dir.join("package-lock.json")).unwrap(),
+            "old lock"
+        );
+        assert!(dir.join("node_modules/old").is_dir());
+        assert!(!dir.join("node_modules/new").exists());
+        assert!(!dir.join("pnpm-lock.yaml").exists());
+        assert!(!dir.join("pnpm-workspace.yaml").exists());
+        assert!(!dir.join("node_modules.before-pnpm").exists());
+
+        assert_eq!(
+            switch_in(&dir, "pnpm install", &mut fake(false)).unwrap(),
+            "package-lock.json"
+        );
+        assert!(!dir.join("package-lock.json").exists());
+        assert!(dir.join("pnpm-lock.yaml").is_file());
+        assert!(dir.join("node_modules/new").is_dir() && !dir.join("node_modules/old").exists());
+        assert!(!dir.join("node_modules.before-pnpm").exists());
+        // Once is enough; another manager's pin is refused before anything runs.
+        assert!(switch_in(&dir, "pnpm install", &mut fake(false)).is_err());
+        fs::remove_file(dir.join("pnpm-lock.yaml")).unwrap();
+        fs::write(dir.join("yarn.lock"), "").unwrap();
+        fs::write(
+            dir.join("package.json"),
+            r#"{"packageManager":"yarn@4.5.0"}"#,
+        )
+        .unwrap();
+        let mut none = |_: &str| -> anyhow::Result<()> { panic!("ran") };
+        let e = switch_in(&dir, "pnpm install", &mut none).unwrap_err();
+        assert!(e.to_string().contains("yarn@4.5.0"), "{e}");
         fs::remove_dir_all(&dir).unwrap();
     }
 }

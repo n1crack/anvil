@@ -1142,6 +1142,7 @@ pub fn env(cfg: &crate::Config, site: &Site, test: bool) -> anyhow::Result<Vec<(
         env.extend(crate::phpext::scan_env(cfg, v, Some(site))?);
     }
     env.push(("PATH".into(), path));
+    env.extend(apps::shared_env(site));
     env.extend(crate::worktrees::checked_env(cfg, site, test)?);
     // Not a test run's: phpunit.xml's MAIL_MAILER=array doesn't replace a set variable.
     if !test {
@@ -1342,6 +1343,7 @@ mod tests {
             runtime_pinned: false,
             browser: false,
             packages_pinned: None,
+            shared_deps: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],

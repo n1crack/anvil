@@ -2180,6 +2180,22 @@ fn storage_last() -> Option<(u64, Vec<anvil::resources::AppSize>)> {
     anvil::resources::last_app_sizes()
 }
 
+/// Storage › Anvil's pnpm store; `None` without a pnpm.
+#[tauri::command]
+async fn pnpm_store() -> Res<Option<anvil::resources::PnpmStore>> {
+    tauri::async_runtime::spawn_blocking(anvil::resources::pnpm_store)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `pnpm store prune`, once the user confirmed; the bytes freed.
+#[tauri::command]
+async fn pnpm_prune() -> Res<u64> {
+    tauri::async_runtime::spawn_blocking(|| anvil::resources::pnpm_prune().map_err(err))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn clean_anvil(path: String) -> Res<u64> {
     tauri::async_runtime::spawn_blocking(move || anvil::resources::clean_anvil(&path).map_err(err))
@@ -3619,6 +3635,38 @@ fn set_browser(handle: AppHandle, app: State<App>, site: String, on: bool) -> Re
     snapshot(&app)
 }
 
+/// The Settings tab's "Shared dependencies", once the user confirmed: saved, then
+/// node_modules installed again that way, so turning it off leaves one of the app's own.
+#[tauri::command]
+async fn set_shared_deps(handle: AppHandle, site: String, on: bool) -> Res<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if find_site(&site)?.kind == "next" {
+            return Err("Next.js doesn't compile dependencies outside the project".into());
+        }
+        let (cfg, ()) = edit(|c| {
+            c.sites.entry(site.clone()).or_default().shared_deps = Some(on);
+            Ok(())
+        })?;
+        changed(&handle);
+        anvil::worktrees::install(&cfg, &site_in(&cfg, &site)?, "js").map_err(err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The Packages tab's "Switch to pnpm", once the user confirmed. Returns the lock file that went.
+#[tauri::command]
+async fn switch_to_pnpm(handle: AppHandle, site: String) -> Res<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (cfg, s) = find_site_cfg(&site)?;
+        let lock = anvil::packages::switch_to_pnpm(&cfg, &s).map_err(err)?;
+        changed(&handle);
+        Ok(lock.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// An app's browser errors for its Overview and Settings: how many, since when, and
 /// whether its CSP keeps the script out.
 #[tauri::command]
@@ -4466,6 +4514,8 @@ fn main() {
             set_db_viewer,
             set_mail_caught,
             set_browser,
+            set_shared_deps,
+            switch_to_pnpm,
             browser_status,
             mail_list,
             mail_read,
@@ -4515,6 +4565,8 @@ fn main() {
             storage_apps,
             storage_last,
             clean_anvil,
+            pnpm_store,
+            pnpm_prune,
             clean_all_safe,
             runtimes,
             package_managers,
@@ -4822,6 +4874,7 @@ mod tests {
             runtime_pinned: false,
             browser: false,
             packages_pinned: None,
+            shared_deps: None,
             worktree_of: None,
             branch: None,
             aliases: vec![],
