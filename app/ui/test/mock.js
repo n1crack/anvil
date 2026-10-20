@@ -31,6 +31,32 @@ const mockSite = (name, kind, extra = {}) => ({
   ...extra,
 });
 window.mockSite = mockSite;
+// A request as Caddy logged it (src/requests.rs), 14:02:33 on 20 Oct 2026 UTC.
+window.mockRequest = (extra = {}) => ({
+  ts: 1792504953.25,
+  method: "GET",
+  uri: "/",
+  host: "shop.test",
+  proto: "HTTP/2.0",
+  status: 200,
+  duration_ms: 12.4,
+  size: 5321,
+  req_headers: { Accept: ["text/html"], Cookie: ["REDACTED"] },
+  resp_headers: { "Content-Type": ["text/html; charset=UTF-8"], "Set-Cookie": ["REDACTED"] },
+  remote: "127.0.0.1",
+  tls: true,
+  ...extra,
+});
+window.mockRequests = {
+  requests: [
+    window.mockRequest({ method: "POST", uri: "/login?next=%2F", status: 419, duration_ms: 0.4, size: 0 }),
+    window.mockRequest({ uri: "/docs/intro", host: "shop--docs.test", status: 502, duration_ms: 1250 }),
+    window.mockRequest(),
+  ],
+  start_offset: 400,
+  end_offset: 1200,
+  truncated: true,
+};
 window.mockSnap = {
   sites: [
     mockSite("shop", "laravel"),
@@ -49,6 +75,7 @@ window.mockSnap = {
   php_ext_catalog: ["xdebug", "pcov", "apcu", "igbinary", "msgpack"],
   php_ext: {},
   php_ext_built: {},
+  mail: { shop: "mailpit" },
   editor: "Zed",
   git_client: null,
   groups: {},
@@ -769,6 +796,12 @@ const mockHandle = (cmd, a) => {
       return window.mockLogPage;
     case "log_tail":
       return { entries: window.mockTail?.splice(0) ?? [], start_offset: 0, end_offset: window.mockLogPage.end_offset, truncated: false };
+    case "requests_read":
+      return a.before == null ? window.mockRequests : { requests: [window.mockRequest({ uri: "/older" })], start_offset: 0, end_offset: 900, truncated: false };
+    case "requests_tail": {
+      const fresh = window.mockRequestsTail?.splice(0) ?? [];
+      return { requests: fresh, start_offset: a.from, end_offset: a.from + fresh.length * 100, truncated: false };
+    }
     case "packages":
       return window.mockPackages;
     case "package_updates":

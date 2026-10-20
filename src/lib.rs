@@ -18,6 +18,7 @@ pub mod phpext;
 pub mod platform;
 pub mod processes;
 pub mod project;
+pub mod requests;
 pub mod resources;
 pub mod runtimes;
 pub mod services;
@@ -1332,10 +1333,21 @@ pub fn set_default_php(cfg: &mut Config, version: &str) -> Result<()> {
 }
 
 /// Pin a site to a PHP version, or back to the default with `None`.
+/// A setting for an app Anvil doesn't know would only leave an empty entry behind.
+fn known_site(cfg: &Config, site: &str) -> Result<()> {
+    let name = site_name(site);
+    if sites(cfg).iter().any(|s| s.name == name) {
+        Ok(())
+    } else {
+        bail!("No site named {site}")
+    }
+}
+
 pub fn set_site_php(cfg: &mut Config, site: &str, version: Option<String>) -> Result<()> {
     if let Some(v) = &version {
         php_offered(v).map_err(anyhow::Error::msg)?;
     }
+    known_site(cfg, site)?;
     if let Some(v) = &version
         && !installed_php().contains(v)
     {
@@ -1573,6 +1585,7 @@ pub fn set_https_default(cfg: &mut Config, on: bool) {
 }
 
 pub fn set_secure(cfg: &mut Config, site: &str, on: bool) -> Result<()> {
+    known_site(cfg, site)?;
     cfg.sites.entry(site_name(site)).or_default().https = Some(on);
     save(cfg)
 }
@@ -1644,6 +1657,7 @@ pub fn set_site_root(cfg: &mut Config, site: &str, dir: Option<&str>) -> Result<
 }
 
 pub fn set_site_ini(cfg: &mut Config, site: &str, key: &str, value: Option<&str>) -> Result<()> {
+    known_site(cfg, site)?;
     let key = key.trim();
     let entry = cfg.sites.entry(site_name(site)).or_default();
     match value.map(str::trim) {
@@ -1669,11 +1683,12 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         443 => String::new(),
         p => format!(":{p}"),
     };
-    let redirect = |names: &[String]| {
+    let redirect = |site: &Site, names: &[String]| {
         let http: Vec<_> = names.iter().map(|n| format!("http://{n}")).collect();
         format!(
-            "\n{} {{\n\tredir https://{{host}}{https_port}{{uri}}\n}}\n",
-            http.join(", ")
+            "\n{} {{\n{}\tredir https://{{host}}{https_port}{{uri}}\n}}\n",
+            http.join(", "),
+            access_log(&site.name)
         )
     };
     // A site without HTTPS only answers http://, so Caddy makes no certificate for it.
@@ -1689,6 +1704,10 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             })
             .collect();
         list.join(", ")
+    };
+    // A block's addresses and opening brace, then where it logs its requests.
+    let open = |site: &Site, names: &[String]| {
+        format!("{} {{\n{}", addresses(site, names), access_log(&site.name))
     };
     // Caddy refuses a whole Caddyfile that has one address twice, so each host goes to one
     // block: sites (with their aliases) first, then dev-server rows, then old-host redirects.
@@ -1732,12 +1751,12 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         }
         if let (true, Some(port)) = (apps::runs_process(&site.kind), site.port) {
             s += &format!(
-                "\n{} {{\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
-                addresses(site, &names),
+                "\n{}\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
+                open(site, &names),
                 not_running_page(&site.name),
             );
             if site.secure {
-                s += &redirect(&names);
+                s += &redirect(site, &names);
             }
             // The app's other dev servers (a docs site) answer at <app>--<row>.<tld>.
             for row in processes::server_rows(cfg, site) {
@@ -1752,13 +1771,13 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
                     continue;
                 }
                 s += &format!(
-                    "\n{} {{\n\treverse_proxy 127.0.0.1:{}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
-                    addresses(site, &names),
+                    "\n{}\treverse_proxy 127.0.0.1:{}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
+                    open(site, &names),
                     row.port,
                     not_running_page(&names[0]),
                 );
                 if site.secure {
-                    s += &redirect(&names);
+                    s += &redirect(site, &names);
                 }
                 if site.worktree_of.is_none() {
                     // A worktree never had an old host.
@@ -1780,8 +1799,8 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             }
             if !site.root.is_dir() {
                 s += &format!(
-                    "\n{} {{\n\theader Content-Type \"text/html; charset=utf-8\"\n\trespond `{}` 502\n}}\n",
-                    addresses(site, &names),
+                    "\n{}\theader Content-Type \"text/html; charset=utf-8\"\n\trespond `{}` 502\n}}\n",
+                    open(site, &names),
                     error_page(
                         &format!("{}'s web root {dir} doesn't exist", site.name),
                         &format!(
@@ -1791,15 +1810,15 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
                     ),
                 );
                 if site.secure {
-                    s += &redirect(&names);
+                    s += &redirect(site, &names);
                 }
                 continue;
             }
         }
         if let Err(reason) = worktrees::web_env(cfg, site) {
             s += &format!(
-                "\n{} {{\n\theader Content-Type \"text/html; charset=utf-8\"\n\trespond `{}` 502\n}}\n",
-                addresses(site, &names),
+                "\n{}\theader Content-Type \"text/html; charset=utf-8\"\n\trespond `{}` 502\n}}\n",
+                open(site, &names),
                 error_page(
                     &format!("{} has no database of its own", site.name),
                     &format!(
@@ -1808,13 +1827,13 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
                 ),
             );
             if site.secure {
-                s += &redirect(&names);
+                s += &redirect(site, &names);
             }
             continue;
         }
         s += &format!(
-            "\n{} {{\n\troot * \"{}\"\n\tencode\n{HIDDEN}",
-            addresses(site, &names),
+            "\n{}\troot * \"{}\"\n\tencode\n{HIDDEN}",
+            open(site, &names),
             caddy_path(&site.root)
         );
         let fpm = php_upstream(site).map(|upstream| format!("php_fastcgi {upstream}\n"));
@@ -1833,7 +1852,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             s += "\tfile_server @hidden {\n\t\thide *\n\t}\n\tfile_server\n}\n";
         }
         if site.secure {
-            s += &redirect(&names);
+            s += &redirect(site, &names);
         }
     }
     // ponytail: remove the old-host redirect one release after 0.2
@@ -1866,6 +1885,20 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
 /// (`.output/public`, a project in `~/.sites`), hiding every file.
 const HIDDEN: &str = "\t@hidden path */.*\n";
 
+/// A site block's access log: JSON, one file per app (its server rows and redirects too),
+/// rolled by Caddy at 2 MiB with one older copy kept a day, so an app holds at most ~4 MB.
+/// Caddy writes Cookie, Set-Cookie, Authorization and Proxy-Authorization as REDACTED.
+/// A home whose path would break out of the quotes gets no log.
+fn access_log(site: &str) -> String {
+    let path = caddy_path(&requests::file(site));
+    if path.contains(['"', '\\', '\n', '\r']) {
+        return String::new();
+    }
+    format!(
+        "\tlog {{\n\t\toutput file \"{path}\" {{\n\t\t\troll_size 2MiB\n\t\t\troll_keep 1\n\t\t\troll_keep_for 24h\n\t\t}}\n\t\tformat json\n\t}}\n"
+    )
+}
+
 /// Shown instead of a bare 502 when an app that runs its own server is stopped.
 fn not_running_page(name: &str) -> String {
     error_page(
@@ -1890,6 +1923,7 @@ pub fn set_site_app(
     port: Option<Option<u16>>,
     autostart: Option<bool>,
 ) -> Result<()> {
+    known_site(cfg, site)?;
     let entry = cfg.sites.entry(site_name(site)).or_default();
     if let Some(kind) = kind {
         if let Some(k) = &kind
@@ -2792,6 +2826,18 @@ impl Drop for Server {
 mod tests {
     use super::*;
 
+    /// The Caddyfile without its access logs (one test covers those), so the others read
+    /// each block's directives as they follow its address.
+    fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
+        let mut c = super::caddyfile(cfg, sites);
+        while let Some(at) = c.find("\tlog {\n") {
+            let end = "\t\tformat json\n\t}\n";
+            let to = at + c[at..].find(end).unwrap() + end.len();
+            c.replace_range(at..to, "");
+        }
+        c
+    }
+
     /// A group leader is stopped with its group (a grandchild that ignores nothing
     /// dies too); a plain child alone, and one that ignores SIGTERM is killed.
     #[test]
@@ -3193,7 +3239,7 @@ mod tests {
         let served = |cfg: &Config| {
             state_dirs().unwrap();
             let run = home().join("run");
-            fs::write(run.join("Caddyfile"), caddyfile(cfg, &sites(cfg))).unwrap();
+            fs::write(run.join("Caddyfile"), super::caddyfile(cfg, &sites(cfg))).unwrap();
             fs::write(run.join("php-masters"), php_masters(cfg, &sites(cfg))).unwrap();
         };
         served(&cfg);
@@ -3603,6 +3649,39 @@ mod tests {
     }
 
     /// PHP 8.0 is end of life: install, default and pin say so, before any download.
+    #[test]
+    fn settings_for_an_unknown_app_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
+        let mut cfg = Config::default();
+        let no = "No site named ghost";
+        assert_eq!(
+            set_site_php(&mut cfg, "ghost", None)
+                .unwrap_err()
+                .to_string(),
+            no
+        );
+        assert_eq!(
+            set_site_ini(&mut cfg, "ghost", "memory_limit", Some("1G"))
+                .unwrap_err()
+                .to_string(),
+            no
+        );
+        assert_eq!(
+            set_secure(&mut cfg, "ghost", true).unwrap_err().to_string(),
+            no
+        );
+        assert_eq!(
+            set_site_app(&mut cfg, "ghost", None, None, None, Some(true))
+                .unwrap_err()
+                .to_string(),
+            no
+        );
+        assert!(cfg.sites.is_empty());
+    }
+
     #[test]
     fn php_8_0_is_not_offered() {
         assert_eq!(PHP_VERSIONS, ["8.5", "8.4", "8.3", "8.2", "8.1"]);
@@ -4156,6 +4235,58 @@ mod tests {
                 .unwrap();
             let err = String::from_utf8_lossy(&adapt.stderr);
             assert!(adapt.status.success(), "{err}");
+        }
+    }
+
+    /// Every block that answers for an app (its redirects and extra server rows too) logs
+    /// to the app's one access log, which Caddy rolls at 2 MiB.
+    #[test]
+    fn every_block_of_an_app_logs_its_requests_to_the_apps_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
+        let app_dir = dir.path().join("vuefinder");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(
+            app_dir.join("package.json"),
+            r#"{"scripts":{"dev":"vite","docs:dev":"vitepress dev docs"}}"#,
+        )
+        .unwrap();
+        let mut vf = site("vuefinder", app_dir.to_str().unwrap(), None);
+        vf.kind = "vite".into();
+        vf.port = Some(41001);
+        let shop = site("shop", dir.path().to_str().unwrap(), Some("8.4"));
+        let out = super::caddyfile(&Config::default(), &[vf, shop]);
+        let log = |name: &str| {
+            format!(
+                "\tlog {{\n\t\toutput file \"{}\" {{\n\t\t\troll_size 2MiB\n\t\t\troll_keep 1\n\t\t\troll_keep_for 24h\n\t\t}}\n\t\tformat json\n\t}}\n",
+                caddy_path(&requests::file(name))
+            )
+        };
+        // The app, its redirect, the docs row and its redirect.
+        assert_eq!(out.matches(&log("vuefinder")).count(), 4, "{out}");
+        assert_eq!(out.matches(&log("shop")).count(), 2, "{out}");
+        assert_eq!(out.matches("\tlog {").count(), 6, "{out}");
+        // Caddy takes it, when this machine has Anvil's Caddy (CI has none). `adapt`
+        // opens no log file.
+        let bin = PathBuf::from(std::env::var("HOME").unwrap()).join(".anvil/bin/caddy");
+        if bin.exists() {
+            fs::write(dir.path().join("Caddyfile"), &out).unwrap();
+            let adapt = crate::platform::command(&bin)
+                .args(["adapt", "--adapter", "caddyfile", "--config"])
+                .arg(dir.path().join("Caddyfile"))
+                .env("XDG_DATA_HOME", dir.path())
+                .env("XDG_CONFIG_HOME", dir.path())
+                .output()
+                .unwrap();
+            assert!(
+                adapt.status.success(),
+                "{}",
+                String::from_utf8_lossy(&adapt.stderr)
+            );
+            let json = String::from_utf8_lossy(&adapt.stdout);
+            assert!(json.contains(r#""roll_keep_days":1"#), "{json}");
         }
     }
 

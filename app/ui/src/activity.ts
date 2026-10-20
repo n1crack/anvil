@@ -43,6 +43,7 @@ export function load() {
     try {
       [data, agents] = await Promise.all([invoke("activity"), invoke("agent_activity", { site: null })]);
       showError(null, "activity");
+      showError(data?.docker_error, "docker");
     } catch (e) {
       return showError(String(e), "activity");
     } finally {

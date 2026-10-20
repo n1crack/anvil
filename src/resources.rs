@@ -585,8 +585,43 @@ pub fn ps() -> Vec<Ps> {
 
 #[cfg(not(windows))]
 pub fn ps() -> Vec<Ps> {
+    table(&["-A"])
+}
+
+/// `ps` of the process groups `groups`, the pids `pids` and Anvil's own group (where the
+/// web server's and services' children are), not of every process: what the Processes
+/// window measures. Nothing to measure, nothing run.
+#[cfg(not(windows))]
+pub fn ps_of(groups: &[u32], pids: &[u32]) -> Vec<Ps> {
+    if groups.is_empty() && pids.is_empty() {
+        return vec![];
+    }
+    let list = |ids: &mut dyn Iterator<Item = u32>| {
+        ids.map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+    };
+    let own = nix::unistd::getpgrp().as_raw() as u32;
+    let groups = list(&mut groups.iter().copied().chain([own]));
+    let pids = list(&mut pids.iter().copied());
+    let mut select = vec!["-g", &groups];
+    if !pids.is_empty() {
+        select.extend(["-p", &pids]);
+    }
+    table(&select)
+}
+
+/// The whole table on Windows, read without running anything.
+#[cfg(windows)]
+pub fn ps_of(_groups: &[u32], _pids: &[u32]) -> Vec<Ps> {
+    ps()
+}
+
+#[cfg(not(windows))]
+fn table(select: &[&str]) -> Vec<Ps> {
     let out = crate::platform::command("ps")
-        .args(["-A", "-o", "pid=,ppid=,pgid=,rss=,%cpu=,command="])
+        .args(select)
+        .args(["-o", "pid=,ppid=,pgid=,rss=,%cpu=,command="])
+        // A Turkish terminal's "0,5" isn't a number to `parse`; every row would be dropped.
+        .env("LC_ALL", "C")
         .output();
     let Ok(out) = out else { return vec![] };
     String::from_utf8_lossy(&out.stdout)
@@ -670,6 +705,20 @@ pub fn processes(site: &Site, app_pid: Option<u32>) -> Vec<Process> {
         });
     }
     out
+}
+
+/// The Anvil Mailpit an app's .env sends mail to: SMTP to this computer on its port.
+pub fn mailpit_for(cfg: &Config, dir: &Path) -> Option<String> {
+    let env = dotenv(dir);
+    if env.get("MAIL_MAILER").map(String::as_str) != Some("smtp")
+        || !is_local(env.get("MAIL_HOST").map(String::as_str))
+    {
+        return None;
+    }
+    let port: u16 = env.get("MAIL_PORT")?.parse().ok()?;
+    services::instances(cfg).into_iter().find(|id| {
+        services::kind_of(cfg, id).is_ok_and(|k| k == "mailpit") && services::port(cfg, id) == port
+    })
 }
 
 /// Read `KEY=value` pairs from the project's .env.
@@ -1152,6 +1201,22 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
                 std::fs::write(e.path(), "")?;
             }
         }
+        // Apps' request logs: Caddy writes on in the current one (emptied); the copies
+        // it rolled are only history.
+        for e in std::fs::read_dir(p.join("requests"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            if !e.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
+            if e.file_name().to_string_lossy().ends_with(".log") {
+                std::fs::write(e.path(), "")?;
+            } else {
+                std::fs::remove_file(e.path())?;
+            }
+        }
     } else {
         remove(&p)?;
     }
@@ -1366,6 +1431,72 @@ pub fn touched(dir: &Path) -> Option<u64> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn ps_of_reads_only_the_groups_and_pids_asked_for() {
+        use std::os::unix::process::CommandExt;
+        assert!(ps_of(&[], &[]).is_empty());
+        let mut leader = crate::platform::command("sh")
+            .args(["-c", "sleep 30 & wait"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let g = leader.id();
+        let mut single = crate::platform::command("sleep").arg("30").spawn().unwrap();
+        // Its child, in its group, may take a moment to start.
+        let mut table = vec![];
+        for _ in 0..100 {
+            table = ps_of(&[g], &[single.id()]);
+            if table.iter().filter(|p| p.pgid == g).count() == 2 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let _ = leader.kill();
+        let _ = single.kill();
+        let _ = (leader.wait(), single.wait());
+        assert_eq!(table.iter().filter(|p| p.pgid == g).count(), 2);
+        assert!(table.iter().any(|p| p.pid == single.id() && p.rss > 0));
+        // Not every process: launchd/init (pid 1) is in none of them.
+        assert!(!table.iter().any(|p| p.pid == 1));
+        let (_, memory) = usage(&table, g, true);
+        assert!(memory > 0);
+    }
+
+    #[test]
+    fn mail_goes_to_the_mailpit_on_its_smtp_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        for (id, kind, port) in [("redis", "redis", 1025), ("mail", "mailpit", 1026)] {
+            cfg.services.insert(
+                id.into(),
+                services::ServiceConfig {
+                    kind: Some(kind.into()),
+                    port: Some(port),
+                    ..Default::default()
+                },
+            );
+        }
+        let to = |env: &str| {
+            std::fs::write(dir.path().join(".env"), env).unwrap();
+            mailpit_for(&cfg, dir.path())
+        };
+        let smtp = "MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT=";
+        assert_eq!(to(&format!("{smtp}1026")).as_deref(), Some("mail"));
+        assert_eq!(
+            to("MAIL_MAILER=smtp\nMAIL_PORT=1026").as_deref(),
+            Some("mail")
+        );
+        // Another kind on that port, another host, another mailer, no port: not Mailpit.
+        assert_eq!(to(&format!("{smtp}1025")), None);
+        assert_eq!(
+            to("MAIL_MAILER=smtp\nMAIL_HOST=mailpit\nMAIL_PORT=1026"),
+            None
+        );
+        assert_eq!(to("MAIL_MAILER=log\nMAIL_PORT=1026"), None);
+        assert_eq!(to("MAIL_MAILER=smtp"), None);
+    }
+
     #[test]
     fn build_tools_are_cleanable() {
         let dir = tempfile::tempdir().unwrap();
@@ -1385,6 +1516,26 @@ mod tests {
             assert!(clean_anvil(&item.path).unwrap() > 0);
             assert!(!gone.exists());
         }
+    }
+
+    #[test]
+    fn cleaning_logs_empties_request_logs_and_drops_their_rolled_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&crate::ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let current = crate::requests::file("shop");
+        let rolled = current.with_file_name("shop-2026-10-20T13-20-36.452-size.log.gz");
+        std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+        std::fs::write(&current, vec![b'x'; 5_000]).unwrap();
+        std::fs::write(&rolled, vec![1u8; 5_000]).unwrap();
+        let (_, items) = anvil_disk();
+        let logs = items.iter().find(|i| i.label == "Logs").unwrap();
+        assert!(logs.bytes >= 10_000);
+        assert!(clean_anvil(&logs.path).unwrap() >= 10_000);
+        // Caddy keeps the current one open: emptied, not deleted.
+        assert_eq!(std::fs::metadata(&current).unwrap().len(), 0);
+        assert!(!rolled.exists());
     }
 
     #[test]

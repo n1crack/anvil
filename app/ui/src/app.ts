@@ -970,6 +970,7 @@ export function showTab(root, name, fallback = false) {
   for (const p of root.querySelectorAll("[role=tabpanel]")) p.hidden = p.dataset.panel !== name;
   $(".res-reload", root).hidden = name !== "resources";
   window.logsTab?.(root, name === "logs");
+  window.requestsTab?.(root, name === "requests");
   if (name === "dev") late.devTab?.();
   if (name === "containers") late.containersTab?.();
   // Measuring (du, lsof, docker) only happens when someone looks at it.
@@ -1169,6 +1170,8 @@ export function renderSite() {
   for (const el of root.querySelectorAll(".php-only")) el.hidden = process;
   for (const el of root.querySelectorAll(".process-only")) el.hidden = !process;
 
+  // Caddy serves neither a compose project nor a plain folder.
+  $('.tabs [data-tab="requests"]', root).hidden = s.kind === "compose" || s.kind === "folder";
   for (const b of root.querySelectorAll(".tabs [role=tab]")) b.onclick = () => showTab(root, b.dataset.tab);
   $(".tabs", root).onkeydown = (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;

@@ -330,9 +330,12 @@ pub fn remove_site(site: &str, name: &str) -> Result<Config> {
 /// even empty, so one its app has stays off for it; an app's empty list isn't stored.
 fn set_site_ext(site: &str, name: &str, on: bool) -> Result<Config> {
     let (cfg, ()) = crate::update(|c| {
-        let found = crate::sites(c).into_iter().find(|s| s.name == site);
-        let mut names = found.as_ref().map(|s| s.ext.clone()).unwrap_or_default();
-        let worktree = found.is_some_and(|s| s.worktree_of.is_some());
+        let found = crate::sites(c)
+            .into_iter()
+            .find(|s| s.name == site)
+            .with_context(|| format!("No site named {site}"))?;
+        let mut names = found.ext.clone();
+        let worktree = found.worktree_of.is_some();
         if names.iter().any(|n| n == name) == on {
             return Ok(());
         }

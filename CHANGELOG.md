@@ -10,6 +10,24 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Mail: an app whose `.env` sends mail to an Anvil Mailpit (`MAIL_MAILER=smtp`
+  to this computer on that Mailpit's SMTP port) gets a Mail line on its
+  Overview: Open inbox while Mailpit runs, Start while it doesn't. Other apps
+  show nothing. `anvil app mail <app>` prints the inbox address. The inbox
+  opens unfiltered: apps share Laravel's default sender, so a sender filter
+  could hide mail.
+- Requests: Caddy logs every request to an app (its redirects, extra server
+  rows and worktrees each to their app's list) as JSON in
+  `~/.anvil/log/requests/<app>.log`, rolled at 2 MiB with one older copy kept
+  a day, so an app holds about 2 MB. Cookie, Set-Cookie, Authorization and
+  Proxy-Authorization are written as REDACTED. `anvil app requests <app>`
+  prints the latest (`--status 4xx`, `--method POST`, `-n 50`, `--follow`;
+  Vite's, Next's and other static assets only with `--assets`). Disk's Logs
+  item covers them. In the app, a Requests tab after Logs lists them newest
+  first (time, method, status, path, duration, size; another host of the app
+  shown before the path), new ones coming in while the tab is shown. Filter
+  by status class, method or path, show assets, Clear; a row opens to its
+  request and response headers, protocol, TLS and remote address.
 - Laravel Octane: an app with `laravel/octane` gets an `octane` process
   (RoadRunner), left out of Dev start, on a private port of its own (no two
   apps share one, and none is among the ports macOS gives outgoing
@@ -102,8 +120,19 @@ Until 1.0.0, minor versions may contain breaking changes.
 - Removing a worktree names the files git doesn't keep that go with its
   folder (its SQLite database, an edited `.env`) before you confirm. `anvil
   worktree remove` asks on a terminal and elsewhere refuses until `--yes`.
+- Polling costs less while a window is open. The Overview, the Containers tab,
+  the app list and the Processes window share one `docker ps` per 2 s, and a
+  compose file's services are read again only when a compose or `.env` file
+  changes, not twice per 2 s. The Processes window measures only the
+  processes Anvil started instead of listing every process on the Mac.
+- The Processes window says why Docker couldn't list the containers ("Docker
+  isn't running") instead of leaving them out without a word.
 
 ### Fixed
+
+- The Processes window and an app's Resources tab show CPU and memory when
+  Anvil was started from a terminal whose language writes decimal commas
+  (Turkish); they showed nothing measured.
 
 - An app whose folder is inside a folder starting with a dot (`~/.sites/shop`)
   no longer answers 404 for its files (CSS, images, a static site's every

@@ -1127,6 +1127,107 @@ describe("logs", () => {
   });
 });
 
+describe("requests", () => {
+  const rows = () => $$(".req-list .log");
+  const cell = (r: HTMLElement, c: string) => r.querySelector(c)?.textContent;
+
+  test("the tab comes after Logs, and not for an app Caddy doesn't serve", async () => {
+    await select("stack");
+    expect($('.tabs [data-tab="requests"]').hidden).toBe(true);
+    await select("shop");
+    const tabs = $$(".tabs [role=tab]").map((t) => t.dataset.tab);
+    expect(tabs.indexOf("requests")).toBe(tabs.indexOf("logs") + 1);
+    expect($('.tabs [data-tab="requests"]').hidden).toBe(false);
+  });
+
+  test("lists the newest first: method, status, path, duration and size; assets hidden", async () => {
+    $('.tabs [data-tab="requests"]').click();
+    await wait(80);
+    expect(calls("requests_read").at(-1)![1]).toEqual({
+      site: "shop",
+      filter: { status: null, method: null, query: "", assets: false },
+      before: null,
+    });
+    const [post, docs, home] = rows();
+    expect(cell(post, ".req-method")).toBe("POST");
+    expect(cell(post, ".req-status")).toBe("419");
+    expect(post.querySelector(".req-status")!.classList.contains("st-4")).toBe(true);
+    expect(cell(post, ".log-msg")).toBe("/login?next=%2F");
+    expect(cell(post, ".req-dur")).toBe("0.4 ms");
+    expect(cell(post, ".req-size")).toBe("0 B");
+    expect(cell(home, ".req-dur")).toBe("12 ms");
+    expect(cell(docs, ".req-dur")).toBe("1.25 s");
+    // Another of the app's hosts (a server row) shows its host; the app's own doesn't.
+    expect(cell(docs, ".log-msg")).toBe("shop--docs.test/docs/intro");
+    expect(home.querySelector(".req-host")).toBeNull();
+  });
+
+  test("a row opens to its headers, the redacted ones said so, the host first", async () => {
+    const home = rows()[2];
+    (home.querySelector(".log-head") as HTMLElement).click();
+    const detail = home.querySelector(".log-detail")!;
+    expect(detail.querySelector(".log-meta")?.textContent).toContain("HTTP/2.0 · TLS · from 127.0.0.1");
+    const req = [...detail.querySelectorAll(".req-headers")[0].querySelectorAll("div")].map((d) => d.textContent);
+    expect(req).toEqual(["Hostshop.test","Accepttext/html", "Cookieredacted"]);
+    expect(detail.querySelectorAll(".req-headers")[1].textContent).toContain("Set-Cookieredacted");
+    expect(detail.querySelector(".req-headers .redacted")).not.toBeNull();
+  });
+
+  test("filters go to the backend; Clear puts them back", async () => {
+    ($('.req-bar .seg [data-id="4xx"]') as HTMLElement).click();
+    await wait(30);
+    expect(calls("requests_read").at(-1)![1].filter.status).toBe("4xx");
+    const method = $(".req-method-pick") as HTMLSelectElement;
+    method.value = "POST";
+    method.dispatchEvent(new Event("change"));
+    await wait(30);
+    expect(calls("requests_read").at(-1)![1].filter.method).toBe("POST");
+    const assets = $(".req-assets input") as HTMLInputElement;
+    assets.click();
+    await wait(30);
+    expect(calls("requests_read").at(-1)![1].filter.assets).toBe(true);
+    const search = $(".req-bar .logs-search") as HTMLInputElement;
+    search.value = "login";
+    search.dispatchEvent(new Event("input"));
+    await wait(350);
+    expect(calls("requests_read").at(-1)![1].filter.query).toBe("login");
+    const clear = $(".req-clear");
+    expect(clear.hidden).toBe(false);
+    clear.click();
+    await wait(30);
+    expect(calls("requests_read").at(-1)![1].filter).toEqual({ status: null, method: null, query: "", assets: false });
+    expect(clear.hidden).toBe(true);
+    expect(search.value).toBe("");
+    expect(assets.checked).toBe(false);
+    expect($('.req-bar .seg [data-id="all"]').getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("Load older asks for what comes before the page", async () => {
+    $(".req-more").click();
+    await wait(30);
+    expect(calls("requests_read").at(-1)![1].before).toBe(400);
+    expect(cell(rows().at(-1)!, ".log-msg")).toBe("/older");
+    expect($(".req-more").hidden).toBe(true);
+  });
+
+  test("new requests come in on top while the tab is shown, not while another is", async () => {
+    const req = await import("../src/requests");
+    req.poll(false); // ticks by hand
+    w.mockRequestsTail = [w.mockRequest({ uri: "/new" })];
+    await req.tick();
+    expect(cell(rows()[0], ".log-msg")).toBe("/new");
+    expect(calls("requests_tail").at(-1)![1]).toEqual({
+      site: "shop",
+      filter: { status: null, method: null, query: "", assets: false },
+      from: 1200,
+    });
+    $('.tabs [data-tab="overview"]').click();
+    const n = calls("requests_tail").length;
+    await req.tick();
+    expect(calls("requests_tail").length).toBe(n);
+  });
+});
+
 describe("polls and races", () => {
   const entry = (message: string) => ({ time: "2026-10-17 10:00:00", env: "local", level: "error", message, context: null, trace: [] });
 
@@ -1752,6 +1853,32 @@ describe("project file", () => {
       w.mockDelay = {};
       w.refresh();
       await wait(80);
+    }
+  });
+});
+
+describe("mail", () => {
+  test("an app sending to an Anvil Mailpit gets a Mail line: Start while stopped, then Open inbox", async () => {
+    const mailpit = w.mockServices.find((s: any) => s.id === "mailpit");
+    const row = () => $('[data-panel="overview"] .mail-row');
+    try {
+      await w.loadServices();
+      $('.modes [data-mode="apps"]').click();
+      await select("vuefinder");
+      expect(row().hidden).toBe(true);
+      await select("shop");
+      expect(row().hidden).toBe(false);
+      expect(row().querySelector("dd")!.textContent).toBe("mailpit is stopped Start");
+      mailpit.running = true; // what service_run hands back
+      (row().querySelector("button") as HTMLButtonElement).click();
+      await wait(40);
+      expect(calls("service_run").at(-1)![1]).toEqual({ id: "mailpit", action: "start" });
+      expect(row().querySelector("dd")!.textContent).toBe("mailpit Open inbox");
+      (row().querySelector("button") as HTMLButtonElement).click();
+      expect(calls("open_url").at(-1)![1]).toEqual({ url: "http://127.0.0.1:8025" });
+    } finally {
+      mailpit.running = false;
+      await w.loadServices();
     }
   });
 });

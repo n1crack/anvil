@@ -5,6 +5,7 @@ import "./app";
 import "./newapp";
 import "./git";
 import "./logs";
+import "./requests";
 import "./services";
 import "./packages";
 import "./processes";
