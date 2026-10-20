@@ -330,11 +330,30 @@ fn config_round_trip() {
     env.fails(&["php", "ini", "bad]key", "1"]);
     env.ok(&["php", "ini", "memory_limit"]);
     assert!(env.config().ini.is_empty());
-    env.ok(&["ini", "Shop", "upload_max_filesize", "64M"]);
+    env.ok(&["app", "ini", "Shop", "upload_max_filesize", "64M"]);
     assert_eq!(env.config().sites["shop"].ini["upload_max_filesize"], "64M");
-    env.fails(&["ini", "shop", "upload_max_filesize", "1M\n[evil]"]);
-    env.ok(&["ini", "shop", "upload_max_filesize"]);
+    env.fails(&["app", "ini", "shop", "upload_max_filesize", "1M\n[evil]"]);
+    env.ok(&["app", "ini", "shop", "upload_max_filesize"]);
     assert!(env.config().sites["shop"].ini.is_empty());
+
+    // An app's PHP: pinned, then back to the default by leaving the version out.
+    env.fake("php/8.3/php-fpm");
+    let err = env.fails(&["app", "php", "shop", "8.1"]);
+    assert!(err.contains("anvil php install 8.1"), "{err}");
+    env.ok(&["app", "php", "Shop", "8.3"]);
+    assert_eq!(env.config().sites["shop"].php.as_deref(), Some("8.3"));
+    env.ok(&["app", "php", "shop"]);
+    assert_eq!(env.config().sites["shop"].php, None);
+
+    // The old spellings are gone.
+    assert!(
+        env.fails(&["use", "8.3", "--site", "shop"])
+            .contains("--site")
+    );
+    assert!(
+        env.fails(&["ini", "shop", "memory_limit", "1G"])
+            .contains("unrecognized subcommand")
+    );
 
     // forget
     env.ok(&["forget", parked.to_str().unwrap()]);
@@ -662,7 +681,7 @@ fn caddyfile_for_a_few_sites() {
     write(&parked.join("bad\"quote/index.html"), "hi");
     env.ok(&["park", parked.to_str().unwrap()]);
     env.ok(&["use", "8.4"]);
-    env.ok(&["ini", "shop", "memory_limit", "1G"]);
+    env.ok(&["app", "ini", "shop", "memory_limit", "1G"]);
     env.ok(&["app", "port", "front", "45123"]);
     // New sites get HTTP; `plain` is switched to HTTPS.
     env.ok(&["https", "plain"]);

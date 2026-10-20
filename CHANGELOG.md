@@ -42,9 +42,10 @@ Apple Silicon. It comes as a desktop app that carries the `anvil` CLI.
 - Automatic detection of Laravel, Statamic, Symfony, PHP, static, Next.js, Nuxt,
   Vite, Node.js, Rust, Go, .NET, Django, FastAPI, Flask and Docker Compose
   projects, with a manual override per app.
-- Isolated PHP 8.0 to 8.5 from portable builds, a default version and a pinned
-  version per application.
-- php.ini settings for all applications or for one; an application with its own
+- Isolated PHP 8.0 to 8.5 from portable builds, a default version (`anvil use
+  8.4`) and a pinned version per application (`anvil app php <site> 8.3`).
+- php.ini settings for all applications (`anvil php ini <key> <value>`) or for
+  one (`anvil app ini <site> <key> <value>`); an application with its own
   settings gets its own PHP-FPM pool.
 - Node.js, Go, Rust, .NET and Python toolchains installed into `~/.anvil`, with
   their package and build caches kept there too. Node.js follows `.nvmrc` or

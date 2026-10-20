@@ -51,18 +51,8 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PhpCmd,
     },
-    /// Set the PHP version globally, or for one site with --site
-    Use {
-        version: String,
-        #[arg(long)]
-        site: Option<String>,
-    },
-    /// Set a php.ini value for one site, or clear it by leaving out the value
-    Ini {
-        site: String,
-        key: String,
-        value: Option<String>,
-    },
+    /// Set the default PHP version
+    Use { version: String },
     /// Databases, cache, mail and S3 storage: mysql, postgres, redis, mailpit, versitygw, silo
     Service {
         #[command(subcommand)]
@@ -73,7 +63,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: RuntimeCmd,
     },
-    /// Apps that run their own server (Node, Rust, Go, .NET, Python)
+    /// Settings and processes of one app
     App {
         #[command(subcommand)]
         cmd: AppCmd,
@@ -372,6 +362,17 @@ enum RuntimeCmd {
 
 #[derive(Subcommand)]
 enum AppCmd {
+    /// Pin the app's PHP version (e.g. `8.3`), or leave it out for the default
+    Php {
+        site: String,
+        version: Option<String>,
+    },
+    /// Set a php.ini value for the app, or clear it by leaving out the value
+    Ini {
+        site: String,
+        key: String,
+        value: Option<String>,
+    },
     /// Set the start command (leave it out to go back to the default)
     Command {
         site: String,
@@ -1065,10 +1066,7 @@ fn run() -> Result<()> {
                 println!("{v}{mark}");
             }
         }
-        Cmd::Use { version, site } => match site {
-            Some(name) => edit(&mut cfg, |c| set_site_php(c, &name, Some(version)))?,
-            None => edit(&mut cfg, |c| set_default_php(c, &version))?,
-        },
+        Cmd::Use { version } => edit(&mut cfg, |c| set_default_php(c, &version))?,
         Cmd::Service { cmd } => match cmd {
             ServiceCmd::List => {
                 let list = services::Services::default().info(&cfg);
@@ -1199,6 +1197,10 @@ fn run() -> Result<()> {
             RuntimeCmd::Uninstall { id, version } => runtimes::uninstall(&id, &version)?,
         },
         Cmd::App { cmd } => match cmd {
+            AppCmd::Php { site, version } => edit(&mut cfg, |c| set_site_php(c, &site, version))?,
+            AppCmd::Ini { site, key, value } => {
+                edit(&mut cfg, |c| set_site_ini(c, &site, &key, value.as_deref()))?
+            }
             AppCmd::Command { site, command } => edit(&mut cfg, |c| {
                 set_site_app(c, &site, None, Some(command), None, None)
             })?,
@@ -1501,9 +1503,6 @@ fn run() -> Result<()> {
                     Err(err) => println!("  {}", red(format!("{err:#}"))),
                 }
             }
-        }
-        Cmd::Ini { site, key, value } => {
-            edit(&mut cfg, |c| set_site_ini(c, &site, &key, value.as_deref()))?
         }
         Cmd::Https { site, off } => {
             let s = sites(&cfg)
