@@ -50,15 +50,12 @@ describe("sidebar", () => {
       "Python",
       "Worktrees",
       "Storage",
-      "Performance",
       "Plugins",
       "Shortcuts",
       "About",
     ]);
     expect($$(".nav button").every((b) => b.querySelector("svg"))).toBe(true);
     expect($("[data-page='languages']")).toBeNull();
-    // Defender and Dev Drive are Windows' own: the page is there only for Windows (style.css).
-    expect($("[data-page='performance']").classList.contains("windows-only")).toBe(true);
     // Each language its own glyph, drawn in currentColor by the stylesheet (no fill of its own).
     const glyphs = ["php", "node", "go", "rust", "dotnet", "python"].map((id) => $(`[data-page="${id}"] svg.glyph path`));
     expect(new Set(glyphs.map((p) => p.getAttribute("d"))).size).toBe(6);

@@ -42,8 +42,11 @@ export function streamPane(o: {
   const term = termOut("console-out dev-out");
   const empty = el("div", "dev-empty");
   term.out.tabIndex = 0;
-  // The keys (see main.onkeydown), said once; hidden when the pane is too narrow for it.
-  const keysHint = el("p", "dev-keys", "↑↓ select · s start · x stop · r restart · q stop all · c clear");
+  // The keys (see main.onkeydown), said once; a narrow pane shows ⌨ Keys, and the line on hover.
+  const keys = "↑↓ select · s start · x stop · r restart · q stop all · c clear";
+  const keysHint = el("p", "dev-keys");
+  keysHint.append(el("span", "dev-keys-full", keys), el("span", "dev-keys-short", "⌨ Keys"));
+  keysHint.title = keys;
   pane.append(head, term.out, empty, keysHint);
   main.append(list, listSplitter(main, o.widthKey, o.minWidth), pane);
   box.append(bar, main);

@@ -39,7 +39,8 @@ const pane = streamPane({
   listCls: "dev-list",
   label: "Processes",
   widthKey: "dev-list-width",
-  minWidth: 120,
+  // "All processes" with its Start, and Commands with Run, still fit.
+  minWidth: 168,
   sel: devSel,
   draw: (name) => drawDev(name),
   tick: () => devTick(),
@@ -221,6 +222,18 @@ function entry(name: string, x: Item) {
   const label =
     x.run?.source === "composer.json" && runItems(name).some((y) => y.key !== x.key && y.name === x.name) ? `composer ${x.name}` : x.name;
   const parts = [status, el("span", `dev-name ${x.color}`.trim(), label)];
+  // All starts or stops everything; each process has its own ▶ or ■. A click on either
+  // acts without picking the row.
+  const act = x.key === "all" ? devButton(name) : x.row ? procAct(name, x) : null;
+  if (act) {
+    const go = act.onclick;
+    act.classList.add("dev-act");
+    act.onclick = (e) => {
+      e.stopPropagation();
+      go?.call(act, e);
+    };
+    parts.push(act);
+  }
   if (x.run) {
     const c = x.run;
     const x2 = procBtn("×", c.running ? `Stop and dismiss ${c.name}` : `Dismiss ${c.name}`, () => dismiss(name, c));
@@ -229,6 +242,17 @@ function entry(name: string, x: Item) {
     parts.push(x2);
   }
   return pane.entry(name, x.key, parts, x.key === "all" ? undefined : (it) => itemMenu(name, x, it));
+}
+
+/** A process's own button in its row: ▶ starts it, ■ stops it. */
+function procAct(name: string, x: Item) {
+  const running = !!x.row?.running;
+  const b = el("button", `dev-proc ${running ? "dev-stop" : "dev-start"}`);
+  b.append(icon(running ? "stop" : "start"));
+  b.title = running ? `Stop ${x.name}` : `Start ${x.name}`;
+  b.setAttribute("aria-label", b.title);
+  b.onclick = () => runProc(name, x, running ? "stop" : "start");
+  return b;
 }
 
 /** Run ▾: the app's one-off scripts by name, under where they come from (the script
@@ -273,6 +297,7 @@ const ICONS = {
   configure: '<path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/>',
   start: '<path d="M4.5 3v10l8.5-5z"/>',
   stop: '<rect x="4" y="4" width="8" height="8" rx="1"/>',
+  chevron: '<path d="M4.5 6.5 8 10l3.5-3.5"/>',
 };
 export function icon(name: keyof typeof ICONS) {
   const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -317,10 +342,10 @@ function drawBar(name: string) {
     if (changed(name)) confirmPop(cfg, "Discard the changes?", "Discard", () => closeConf(name));
     else closeConf(name);
   };
-  // Configure on the left; on the right Start or Stop, or Table | JSON while configuring.
+  // Configure on the left; Table | JSON on the right while configuring. Start and Stop
+  // sit in All's row.
   bar.append(cfg, el("span", "spacer"));
-  const right = configuring === name ? modeSeg : devButton(name);
-  if (right) bar.append(right);
+  if (configuring === name) bar.append(modeSeg);
 }
 
 /** Below the processes, a small box of their own for one-off scripts: Run ▾ and each
@@ -333,7 +358,9 @@ function commandsBox(name: string, runs: Item[]) {
   head.append(el("span", null, "Commands"));
   if (cmds.length) {
     const run = barBtn("dev-run", icon("run"), "Run");
-    run.append(el("span", "dev-chevron", "▾"));
+    const chevron = el("span", "dev-chevron");
+    chevron.append(icon("chevron"));
+    run.append(chevron);
     run.title = "Run one of the app’s scripts";
     run.setAttribute("aria-haspopup", "menu");
     run.onclick = () => runMenu(name, run);
@@ -378,9 +405,9 @@ export function drawDev(name: string) {
 
   const running = procs.filter((x) => x.running).length;
   const anyBad = procs.some((x) => x.crashed);
-  const procCard = el("div", "group procs-list dev-card");
+  const procCard = el("div", "group procs-list dev-card dev-procs");
   procCard.append(
-    entry(name, { key: "all", name: "All", color: "", running: !!running, crashed: anyBad }),
+    entry(name, { key: "all", name: "All processes", color: "", running: !!running, crashed: anyBad }),
     ...procs.map((x) => entry(name, x)),
   );
   if (!procs.length) procCard.append(el("p", "dev-none", "No processes yet. Configure adds one."));
@@ -388,7 +415,7 @@ export function drawDev(name: string) {
   list.replaceChildren(procCard, ...(cmdCard ? [cmdCard] : []));
 
   const one = items.find((x) => x.key === key);
-  if (!one) pane.heading("All", `${running} of ${procs.length} running`);
+  if (!one) pane.heading("All processes", `${running} of ${procs.length} running`);
   else if (one.run) {
     const c = one.run;
     const bad = c.exit && !c.running && c.exit.code !== 0 ? [el("span", "dev-exit bad", exitText(c))] : [];

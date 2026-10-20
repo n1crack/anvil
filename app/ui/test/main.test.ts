@@ -264,22 +264,24 @@ describe("overview", () => {
   test("the header says what runs and opens Dev; Dev's Start leaves out what Dev start does", async () => {
     await select("vuefinder");
     expect($("#site [data-all]")).toBeNull();
-    // Configure on the left, Start or Stop on the right; Run lives with the commands.
-    expect($$(".dev-bar button").map((b) => b.className)).toEqual(["dev-configure", "dev-all dev-stop"]);
-    expect($(".dev-bar .spacer")).not.toBeNull();
+    // Configure in the bar; Start or Stop in All's row, ▶ or ■ in each process's; Run
+    // lives with the commands.
+    expect($$(".dev-bar button").map((b) => b.className)).toEqual(["dev-configure"]);
+    expect($('.dev-item[data-key="all"] .dev-all').className).toBe("dev-all dev-stop dev-act");
+    expect($$(".dev-item .dev-proc").length).toBe(w.mockOv.vuefinder.rows.length);
     expect($(".dev-list .dev-cmds .dev-cmds-head .dev-run")).not.toBeNull();
     const ov = w.mockOv.vuefinder;
     const before = structuredClone(ov.rows);
     for (const r of ov.rows) r.running = false;
     await select("shop");
     await select("vuefinder");
-    expect($(".dev-bar .dev-all").textContent).toBe("Start");
-    expect($(".dev-bar .dev-all").className).toBe("dev-all dev-start");
+    expect($(".dev-list .dev-all").textContent).toBe("Start");
+    expect($(".dev-list .dev-all").className).toBe("dev-all dev-start dev-act");
     for (const r of ov.rows) r.running = r.id !== "docs-site";
     ov.rows.find((r) => r.id === "docs-site").manual = true;
     await select("shop");
     await select("vuefinder");
-    expect($(".dev-bar .dev-all").textContent).toBe("Stop");
+    expect($(".dev-list .dev-all").textContent).toBe("Stop");
     expect($("#site .state-text").textContent).toBe("2 running");
     ($("#site .state-link") as HTMLElement).click();
     await wait(80);
@@ -287,14 +289,14 @@ describe("overview", () => {
     // Stop: "Stopping…" with a spinner while it works, then Dev stop for everything.
     const n = calls("process_run").length;
     w.mockDelay = { process_run: 60 };
-    ($(".dev-bar .dev-all") as HTMLElement).click();
+    ($(".dev-list .dev-all") as HTMLElement).click();
     await wait(10);
-    expect($(".dev-bar .dev-all").textContent).toBe("Stopping…");
-    expect($(".dev-bar .dev-all .spin-dot")).not.toBeNull();
+    expect($(".dev-list .dev-all").textContent).toBe("Stopping…");
+    expect($(".dev-list .dev-all .spin-dot")).not.toBeNull();
     await wait(120);
     w.mockDelay = {};
     expect(calls("process_run").slice(n)[0][1]).toEqual({ site: "vuefinder", name: null, action: "stop" });
-    expect($(".dev-bar .dev-all").textContent).toBe("Stop");
+    expect($(".dev-list .dev-all").textContent).toBe("Stop");
     ov.rows = before;
     $('.tabs [data-tab="overview"]').click();
     await select("shop");
@@ -592,7 +594,9 @@ describe("dev", () => {
         .map(([, a]) => [a.name, a.action]);
     const list = $(".dev-list");
     const out = $(".dev-out");
-    expect($(".dev-keys").textContent).toBe("↑↓ select · s start · x stop · r restart · q stop all · c clear");
+    // The line, and on hover when the pane is too narrow for it (⌨ Keys).
+    expect($(".dev-keys .dev-keys-full").textContent).toBe("↑↓ select · s start · x stop · r restart · q stop all · c clear");
+    expect($(".dev-keys").getAttribute("title")).toBe($(".dev-keys .dev-keys-full").textContent);
     expect(out.tabIndex).toBe(0);
     $('.tabs [data-tab="overview"]').click();
     devTab().click();
@@ -1168,7 +1172,7 @@ describe("requests", () => {
     const detail = home.querySelector(".log-detail")!;
     expect(detail.querySelector(".log-meta")?.textContent).toContain("HTTP/2.0 · TLS · from 127.0.0.1");
     const req = [...detail.querySelectorAll(".req-headers")[0].querySelectorAll("div")].map((d) => d.textContent);
-    expect(req).toEqual(["Hostshop.test","Accepttext/html", "Cookieredacted"]);
+    expect(req).toEqual(["Hostshop.test", "Accepttext/html", "Cookieredacted"]);
     expect(detail.querySelectorAll(".req-headers")[1].textContent).toContain("Set-Cookieredacted");
     expect(detail.querySelector(".req-headers .redacted")).not.toBeNull();
   });
