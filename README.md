@@ -13,9 +13,24 @@ Free and open source. Runs on macOS; Linux and Windows are in development.
 
 ---
 
-Anvil turns the folders on your computer into running applications at local domains like `myapp.test`. PHP, Node.js, Go, Rust, .NET, Python, MySQL, PostgreSQL, Redis, Mailpit and S3 storage (Versity S3 Gateway or SILO) run natively, isolated in `~/.anvil`, without touching your system packages. If a project brings its own Docker Compose file, Anvil shows and controls its containers too. The few system changes it makes are ones you approve, and `anvil uninstall` removes them.
+Anvil turns the folders on your computer into running applications at local domains like `myapp.test`. It comes as a desktop app and a CLI.
 
-It comes as a desktop app and a CLI.
+<p align="center">
+  <img src="https://anvil.tr/screenshots/overview.webp" width="820" alt="The Anvil app: the applications list and a Laravel app's Overview">
+</p>
+
+## What you get
+
+- **An address per project.** Park a folder and every project in it answers at `<folder>.test`, with HTTPS from a local certificate authority.
+- **Versions per project.** PHP 8.1–8.5, Node.js, Go, Rust, .NET and Python, pinned per project. `php` and `node` in your terminal follow the folder you're in.
+- **Services.** MySQL, PostgreSQL, Redis, Mailpit and S3 storage (Versity S3 Gateway or SILO), as many as you need, on the ports you pick.
+- **Dev processes.** Queue workers, Vite and other dev scripts run in the background with live output, restart and a crash alert.
+- **Branches side by side.** A Git worktree gets its own address, processes and database while main keeps running.
+- **Readable logs and requests.** Laravel, Symfony and PHP-FPM logs as entries with stack frames that open in your editor, and every request the app served.
+- **Plugins, off by default.** A mail inbox per app, a database viewer, a public address through a Cloudflare tunnel, browser errors, and an MCP server for AI agents.
+- **Docker Compose.** If a project brings its own compose file, Anvil shows and controls its containers too.
+
+Everything runs natively and lives in `~/.anvil`; your system packages stay untouched. The few system changes Anvil makes are ones you approve, and `anvil uninstall` removes them.
 
 ## Install
 
