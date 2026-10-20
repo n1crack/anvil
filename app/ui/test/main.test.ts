@@ -146,7 +146,11 @@ describe("app extensions", () => {
       return { name: l.querySelector(".ver-ext-name")?.textContent, on: input.checked, held: input.disabled, text: l.textContent };
     });
   const flip = (name: string) =>
-    ($$('[data-panel="settings"] .app-exts .ver-ext').find((l) => l.textContent?.startsWith(name))!.querySelector("input") as HTMLInputElement).click();
+    (
+      $$('[data-panel="settings"] .app-exts .ver-ext')
+        .find((l) => l.textContent?.startsWith(name))!
+        .querySelector("input") as HTMLInputElement
+    ).click();
 
   test("app_tab_extensions: the catalog as switches for this app; the version's held on; Building… and errors inline", async () => {
     w.mockSnap.php_ext = { "8.4": ["apcu"] };
@@ -462,7 +466,9 @@ describe("dev", () => {
     expect(names).toEqual(w.mockOv.vuefinder.commands.map((c) => c.name));
     expect(names).not.toContain("docs:dev");
     const build = $$(".dev-run-item").find((b) => b.querySelector(".dev-run-name")!.textContent === "build")!;
-    expect(build.querySelector(".dev-run-cmd")!.textContent).toBe("vite build");
+    // The script is the tooltip: the menu stays a short list of names.
+    expect(build.title).toBe("vite build");
+    expect(build.textContent).toBe("build");
     build.click();
     await wait();
     expect(calls("command_run")).toHaveLength(0);

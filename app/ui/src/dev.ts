@@ -231,7 +231,8 @@ function entry(name: string, x: Item) {
   return pane.entry(name, x.key, parts, x.key === "all" ? undefined : (it) => itemMenu(name, x, it));
 }
 
-/** Run ▾: the app's one-off scripts, each with its script muted; choosing one asks first. */
+/** Run ▾: the app's one-off scripts by name, under where they come from (the script
+ * itself is the tooltip); choosing one asks first. */
 function runMenu(name: string, btn: HTMLElement) {
   const cmds = procCache.get(name)?.commands ?? [];
   const pop = el("div", "dev-run-menu");
@@ -242,7 +243,7 @@ function runMenu(name: string, btn: HTMLElement) {
     for (const c of cmds.filter((c) => c.source === src)) {
       const b = el("button", "dev-run-item");
       b.setAttribute("role", "menuitem");
-      b.append(el("span", "dev-run-name", c.name), el("span", "dev-run-cmd", c.command));
+      b.append(el("span", "dev-run-name", c.name));
       b.title = c.command;
       b.onclick = () => {
         close();
@@ -260,6 +261,10 @@ function runMenu(name: string, btn: HTMLElement) {
     e.preventDefault();
   });
   const close = popAt(btn, pop, pop.querySelector("button"));
+  // Run sits at the left of the window: the menu opens rightwards from it, kept inside.
+  const r = btn.getBoundingClientRect();
+  const left = Math.max(8, Math.min(r.left, document.documentElement.clientWidth - pop.offsetWidth - 8));
+  Object.assign(pop.style, { right: "", left: `${left + window.scrollX}px` });
 }
 
 // Outline icons, 14px, drawn in the label's color.

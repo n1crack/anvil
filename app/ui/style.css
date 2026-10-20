@@ -946,6 +946,8 @@ button.proc-name:hover { text-decoration: underline; }
 /* The processes and, below in a box of their own, the one-off commands. */
 .dev-card { max-width: none; overflow: hidden; }
 .dev-cmds-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; padding: 2px 4px 2px 12px; color: var(--muted); font-size: 11px; font-weight: 600; }
+/* A narrow list shortens the title, never Run. */
+.dev-cmds-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dev-cmds-head .dev-run { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 22px; padding: 0 8px; font-size: 12px; font-weight: 400; white-space: nowrap; }
 .dev-cmds-head .dev-chevron { font-size: 10px; }
 .dev-cmds-head .dev-run svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -967,6 +969,7 @@ button.proc-name:hover { text-decoration: underline; }
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 3v8a4 4 0 0 0 4 4h11'/%3E%3Cpath d='m16 11 4 4-4 4'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 /* One-off runs are their own section, not parts of All: aligned, without the arrow. */
+.dev-item[data-key^="once:"] { padding-left: 12px; }
 .dev-item[data-key^="once:"]::before { content: none; }
 .dev-item[aria-selected="true"] { background: var(--selected); }
 /* The status column, one width for a process's dot and a run's spinner, ✓ or ✕. */
@@ -1009,12 +1012,13 @@ button.proc-name:hover { text-decoration: underline; }
 .containers .dev-exit { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
 
 /* Run ▾: the app's scripts, each with its script muted. */
-.dev-run-menu { display: flex; flex-direction: column; min-width: 240px; max-width: 460px; max-height: 360px; padding: 4px; overflow-y: auto; }
-.dev-run-group { padding: 6px 8px 2px; color: var(--muted); font-size: 11px; }
+.dev-run-menu { display: flex; flex-direction: column; min-width: 180px; max-width: 320px; max-height: 360px; padding: 4px; overflow-y: auto; }
+/* Where the scripts come from: a heading over its own, a line between the sources. */
+.dev-run-group { padding: 6px 8px 3px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.dev-run-group:not(:first-child) { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
 .dev-run-item { display: flex; align-items: baseline; gap: 12px; padding: 5px 8px; border: 0; border-radius: var(--radius-s); background: none; color: var(--text); font-size: 12px; text-align: left; }
 .dev-run-item:hover, .dev-run-item:focus-visible { background: var(--selected); outline: none; }
 .dev-run-name { flex: none; }
-.dev-run-cmd { min-width: 0; overflow: hidden; color: var(--muted); font: 11px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Configure: one row per process. */
 .dev-conf-table { width: 100%; border-collapse: collapse; font-size: 12px; }
