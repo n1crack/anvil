@@ -1442,10 +1442,10 @@ describe("packages", () => {
 
   test("nothing below the checks until one runs; Check outdated: the notice, then a tab per manager", async () => {
     expect(calls("package_updates")).toHaveLength(0);
-    expect($$(".pkg-checks button").map((b) => b.textContent)).toEqual(["Check outdated", "Check security"]);
+    expect($$(".pkg-checks button").map((b) => b.textContent)).toEqual(["Outdated", "Security"]);
     expect($$(".pkg-notice, .pkg-results, .pkg-checked")).toHaveLength(0);
     $(".pkg-check-outdated").click();
-    expect($(".pkg-check-outdated").textContent).toBe("Checking…");
+    expect($(".pkg-check-outdated").textContent).toBe("Checking outdated…");
     await wait(80);
     expect(calls("package_updates")).toHaveLength(1);
     expect($(".pkg-notice.warn").textContent).toBe("7 updates available");
@@ -1476,7 +1476,7 @@ describe("packages", () => {
 
   test("Check security audits each manager: advisories in red with severity, CVE and range; a failure inline", async () => {
     $(".pkg-check-security").click();
-    expect($(".pkg-check-security").textContent).toBe("Checking…");
+    expect($(".pkg-check-security").textContent).toBe("Checking security…");
     await wait(80);
     expect(calls("package_audit").map(([, a]) => a.ecosystem)).toEqual(["composer", "npm"]);
     expect($(".pkg-notice.bad").textContent).toBe("1 security advisory");

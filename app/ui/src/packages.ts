@@ -136,40 +136,53 @@ export function drawPackages(name) {
     return body.append(el("p", "muted", "No composer.json, package.json, Cargo.toml, go.mod or .csproj in this folder."));
   }
   body.append(pinsLine(name, p));
+  body.append(el("p", "muted pkg-hint", "Key packages at a glance: + pins another installed package, × takes one off."));
 
-  // The two checks; what they last found under them, nothing before the first.
+  // The two checks, set apart from the badges; what they last found under them.
   const up = updatesOf(name);
   const audits = auditsOf(name);
   const audited = p.ecosystems.filter((e) => AUDITED.has(e.id));
   const bar = el("div", "pkg-checks");
-  const outdated = el("button", "inline-action pkg-check-outdated", busy.has(name) ? "Checking…" : "Check outdated");
+  bar.append(el("span", "pkg-label", "Check"));
+  const outdated = el("button", "text-act pkg-check-outdated", busy.has(name) ? "Checking outdated…" : "Outdated");
   outdated.disabled = busy.has(name);
   outdated.onclick = () => checkUpdates(name);
   bar.append(outdated);
   if (audited.length) {
     const auditing = audited.some((e) => busy.has(`${name}:${e.id}`));
-    const security = el("button", "inline-action pkg-check-security", auditing ? "Checking…" : "Check security");
+    const security = el("button", "text-act pkg-check-security", auditing ? "Checking security…" : "Security");
     security.disabled = auditing;
     security.onclick = () => audited.forEach((e) => checkAudit(name, e.id));
     bar.append(security);
   }
-  // An npm or yarn app can move to pnpm, only when asked.
+  body.append(bar);
+  // An npm or yarn app can move to pnpm, only when asked and confirmed in the line.
   const js = p.ecosystems.find((e) => e.id === "npm");
   const lock = js?.lock === "package-lock.json" || js?.lock === "yarn.lock" ? js.lock : null;
   if (lock) {
+    const line = el("div", "pkg-checks pkg-switch-line");
     const going = busy.has(`${name}:pnpm`);
-    const b = el("button", "inline-action pkg-switch", going ? "Switching…" : "Switch to pnpm");
-    b.disabled = going;
-    b.onclick = () =>
-      late.confirmPop(
-        b,
-        `Replace ${lock} with pnpm-lock.yaml and install node_modules again with pnpm? Test the app afterwards.`,
-        "Switch",
-        () => switchToPnpm(name),
-      );
-    bar.append(b);
+    const idle = () => {
+      line.classList.remove("asking");
+      const b = el("button", "text-act pkg-switch", "Switch to pnpm");
+      b.onclick = () => {
+        const no = el("button", "text-act", "Cancel");
+        no.onclick = idle;
+        const yes = el("button", "text-act danger", "Switch");
+        yes.onclick = () => switchToPnpm(name);
+        line.classList.add("asking");
+        line.replaceChildren(
+          el("span", "muted", `Replace ${lock} with pnpm-lock.yaml and install node_modules again? Test the app afterwards.`),
+          no,
+          yes,
+        );
+      };
+      line.replaceChildren(el("span", "pkg-label", `Installs with ${lock === "yarn.lock" ? "yarn" : "npm"}`), b);
+    };
+    if (going) line.replaceChildren(el("span", "pkg-label", "Switching to pnpm…"));
+    else idle();
+    body.append(line);
   }
-  body.append(bar);
   const sw = switched.get(name);
   if (sw) body.append(el("p", sw.ok ? "muted pkg-checked" : "pkg-error", sw.text));
 

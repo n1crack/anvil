@@ -529,7 +529,7 @@ window.mockServices = [
     id: "npm",
     label: "npm",
     manager: "pnpm 9.15.0",
-    lock: "pnpm-lock.yaml",
+    lock: localStorage.getItem("mockJsLock") ?? "pnpm-lock.yaml",
     facts: [["Node", ">=20"]],
     packages: [
       N("axios", "^1.7.4", "1.7.9", false),
