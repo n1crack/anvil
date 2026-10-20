@@ -174,10 +174,10 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "set",
-            "Change one of an app's settings. php, node: a version, or empty for the default. https, autostart: true or false. ini: \"key=value\", or \"key=\" to clear. command: the start command, or empty for the default",
+            "Change one of an app's settings. php, node: a version, or empty for the default. https, autostart: true or false. The start command and php.ini are not offered: they choose what Anvil runs",
             json!({
                 "site": site,
-                "field": {"type": "string", "enum": ["php", "node", "https", "ini", "command", "autostart"]},
+                "field": {"type": "string", "enum": ["php", "node", "https", "autostart"]},
                 "value": {"type": ["string", "boolean"]},
             }),
             &["site", "field", "value"],
@@ -471,28 +471,12 @@ fn call(name: &str, args: &Value, client: &str) -> Result<Value> {
                     crate::update(|c| crate::set_secure(c, name, on))?;
                     format!("turned HTTPS {}", if on { "on" } else { "off" })
                 }
-                "ini" => {
-                    let (key, v) = word
-                        .split_once('=')
-                        .context("ini takes \"key=value\", or \"key=\" to clear")?;
-                    let v = Some(v.trim()).filter(|v| !v.is_empty());
-                    crate::update(|c| crate::set_site_ini(c, name, key, v))?;
-                    match v {
-                        Some(v) => format!("set {} to {v}", key.trim()),
-                        None => format!("cleared {}", key.trim()),
-                    }
-                }
-                "command" => {
-                    let cmd = Some(word.clone()).filter(|w| !w.is_empty());
-                    crate::update(|c| crate::set_site_app(c, name, None, Some(cmd), None, None))?;
-                    "set the start command".into()
-                }
                 "autostart" => {
                     let on = flag()?;
                     crate::update(|c| crate::set_site_app(c, name, None, None, None, Some(on)))?;
                     format!("turned autostart {}", if on { "on" } else { "off" })
                 }
-                f => bail!("Not a field: {f} (php, node, https, ini, command or autostart)"),
+                f => bail!("Not a field: {f} (php, node, https or autostart)"),
             };
             done(name, what, client);
             let cfg = crate::load()?;
@@ -744,20 +728,14 @@ mod tests {
             Some("8.4")
         );
         assert_eq!(*seen.lock().unwrap(), ["config_changed", "set_done"]);
-        let (text, err) = call_tool(
-            "set",
-            json!({"site": "shop", "field": "ini", "value": "memory_limit=1G"}),
-        );
-        assert!(!err, "{text}");
-        assert_eq!(
-            crate::load().unwrap().sites["shop"].ini["memory_limit"],
-            "1G"
-        );
-        call_tool(
-            "set",
-            json!({"site": "shop", "field": "ini", "value": "memory_limit="}),
-        );
-        assert!(crate::load().unwrap().sites["shop"].ini.is_empty());
+        // What Anvil runs is never an agent's to choose.
+        for field in ["command", "ini"] {
+            let (text, err) = call_tool(
+                "set",
+                json!({"site": "shop", "field": field, "value": "touch /tmp/x"}),
+            );
+            assert!(err && text.contains("Not a field"), "{text}");
+        }
         let (text, err) = call_tool(
             "set",
             json!({"site": "shop", "field": "port", "value": "1"}),
