@@ -975,6 +975,10 @@ fn init(cfg: &Config, kind: &str, id: &str, log: &fs::File) -> Result<()> {
     if data.exists() {
         return Ok(());
     }
+    // mysqld makes the data folder but not ~/.anvil/data above it (a fresh install).
+    if let Some(parent) = data.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let d = dir(kind, &version(cfg, id));
     let status = match kind {
         "mysql" => crate::platform::command(d.join("bin/mysqld"))
