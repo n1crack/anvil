@@ -1140,7 +1140,7 @@ fn fpm_conf(cfg: &Config, v: &str, sites: &[Site]) -> String {
         .filter(|s| s.php.as_deref() == Some(v) && own_pool(s))
     {
         // A worktree Anvil can't separate from main gets no pool (Caddy shows why).
-        let Ok(env) = worktrees::run_env(cfg, site, false) else {
+        let Ok(env) = worktrees::web_env(cfg, site) else {
             continue;
         };
         s += &pool_conf(&pool(site), &fpm_socket(site).unwrap(), 8);
@@ -1326,7 +1326,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         {
             continue;
         }
-        if let Err(reason) = worktrees::run_env(cfg, site, false) {
+        if let Err(reason) = worktrees::web_env(cfg, site) {
             s += &format!(
                 "\n{} {{\n\theader Content-Type \"text/html; charset=utf-8\"\n\trespond `{}` 502\n}}\n",
                 addresses(site, &names),
@@ -2763,6 +2763,31 @@ mod tests {
         assert!(!block.contains("php_fastcgi"), "{block}");
         assert!(block.contains("DATABASE_URL uses a kind of database Anvil can't rewrite"));
         assert!(block.contains("respond `"));
+    }
+
+    #[test]
+    fn a_worktree_gets_no_pool_until_its_database_is_made() {
+        // Its name may be there already, not Anvil's (kept after a Remove, say).
+        let (cfg, wt) = crate::worktrees::tests::worktree_site(
+            "fpm-pending",
+            "DB_CONNECTION=pgsql\nDB_PORT=5433\nDB_DATABASE=shop\n",
+        );
+        let mut cfg = crate::worktrees::tests::with_postgres(cfg);
+        let sites = [wt.clone()];
+        assert!(!fpm_conf(&cfg, "8.4", &sites).contains("[site-shop--feature-x]"));
+        let caddy = caddyfile(&cfg, &sites);
+        let block = &caddy[caddy.find("http://shop--feature-x.test").expect("its host")..];
+        assert!(!block.contains("php_fastcgi"), "{block}");
+        assert!(block.contains("shop_feature_x isn't made yet"), "{block}");
+        // Made (and recorded): served, on the database recorded.
+        cfg.worktrees.entry(wt.name.clone()).or_default().copies =
+            vec![("postgres-x".into(), "shop_x_older".into())];
+        let conf = fpm_conf(&cfg, "8.4", &sites);
+        assert!(
+            conf.contains("env[DB_DATABASE] = \"shop_x_older\"\n"),
+            "{conf}"
+        );
+        assert!(caddyfile(&cfg, &sites).contains("php_fastcgi"));
     }
 
     #[test]

@@ -126,8 +126,8 @@ fn worktree_view(
             Some(to.strip_prefix(&s.path).unwrap_or(to).display().to_string()),
             Some(format!("{main}'s")),
         ),
-        MainDb::Anvil { database, .. } => (Some(w::db_name(s)), Some(database.clone())),
-        MainDb::External => (Some(w::db_name(s)), None),
+        MainDb::Anvil { database, .. } => (Some(w::own_db(cfg, s)), Some(database.clone())),
+        MainDb::External => (Some(w::own_db(cfg, s)), None),
     };
     WorktreeView {
         db: w::choice(cfg, s),
@@ -1262,6 +1262,16 @@ fn prepare(app: &App, site: &Site) -> anyhow::Result<()> {
         }
     });
     anvil::lock(&app.preparing).remove(&site.name);
+    // Its web requests wait for its own database (`worktrees::web_env`): served once it's
+    // there, made now or from a terminal before.
+    if made.is_ok()
+        && site.worktree_of.is_some()
+        && running(app)
+        && let Ok(cfg) = anvil::load()
+        && anvil::needs_restart(&cfg)
+    {
+        start(app, &cfg);
+    }
     made
 }
 

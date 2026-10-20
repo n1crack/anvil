@@ -456,6 +456,13 @@ fn start(cfg: &Config) -> Result<()> {
             Err(e) => eprintln!("  {}: {}", site.name, style::error(format!("{e:#}"))),
         }
     }
+    // A worktree's web requests wait for its own database (`worktrees::web_env`): served
+    // now that it's made.
+    let now = load()?;
+    if needs_restart(&now) {
+        drop(server);
+        server = Server::start(&now)?;
+    }
     for s in sites(cfg) {
         println!(
             "  {}  {}",

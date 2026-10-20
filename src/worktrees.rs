@@ -453,14 +453,23 @@ pub fn db_name(site: &Site) -> String {
         .worktree_of
         .as_ref()
         .and_then(|main| Some((main, site.name.strip_prefix(&format!("{main}--"))?)));
-    let raw = match rest {
-        Some((main, rest)) => format!("{main}_{rest}"),
-        None => site.name.clone(),
+    // Read back to its names only when the app's has no `-` or `.` (where it ends is clear)
+    // and its own part no `.` (it reads as a `-`): else a hash of the whole, so app shop-a's
+    // worktree x and app shop's worktree a-x don't share shop_a_x.
+    let (raw, clear) = match rest {
+        Some((main, rest)) => (
+            format!("{main}_{rest}"),
+            !main.contains(['-', '.']) && !rest.contains('.'),
+        ),
+        None => (site.name.clone(), false),
     };
     let mut name: String = raw
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
+    if !clear {
+        name = format!("{name}_{}", crate::short_hash(&site.name));
+    }
     // Postgres' limit is 63 bytes (MySQL's 64): a longer one keeps its start and gets a
     // hash of the whole, so two long names that start alike still differ.
     // Never main's own (main `shop` on `shop_dev`, worktree `dev`): a name of its own.
@@ -471,6 +480,14 @@ pub fn db_name(site: &Site) -> String {
         name = format!("{name}_wt_{}", crate::short_hash(&name));
     }
     fit(name)
+}
+
+/// The database the worktree uses: the one Anvil recorded for it, else `db_name`'s.
+pub fn own_db(cfg: &Config, site: &Site) -> String {
+    cfg.worktrees
+        .get(&site.name)
+        .and_then(|w| w.copies.first())
+        .map_or_else(|| db_name(site), |(_, db)| db.clone())
 }
 
 /// At most 63 bytes (Postgres' limit, MySQL's is 64): a longer name keeps its start and
@@ -1200,7 +1217,7 @@ fn env_with(
         return Err("its composer.json sets extra.runtime.dotenv_path, so its env files aren't the ones Anvil reads and could reach main's database: take it out to run it".into());
     }
     let mut env: Vec<(String, String)> = Vec::new();
-    let db = db_name(site);
+    let db = own_db(cfg, site);
     let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
     // What its processes would load: main's `.env` (copied in), then its own files
     // over it, in the order its framework loads them (the last one wins).
@@ -1505,6 +1522,21 @@ pub fn run_env(cfg: &Config, site: &Site, test: bool) -> Result<Vec<(String, Str
 }
 
 /// `run_env`, or the error that refuses to start anything of a worktree it can't separate from main.
+/// `run_env` for its web requests (PHP-FPM; Caddy shows the reason). Nothing until its
+/// own database on an Anvil server is made: one of that name may be there and not be
+/// Anvil's, which only `prepare` refuses.
+pub fn web_env(cfg: &Config, site: &Site) -> Result<Vec<(String, String)>, String> {
+    let env = run_env(cfg, site, false)?;
+    if let Some((_, MainDb::Anvil { .. })) = pending(cfg, site) {
+        return Err(format!(
+            "{} isn't made yet; start {} in Anvil to make it",
+            db_name(site),
+            site.name
+        ));
+    }
+    Ok(env)
+}
+
 pub fn checked_env(cfg: &Config, site: &Site, test: bool) -> anyhow::Result<Vec<(String, String)>> {
     run_env(cfg, site, test).map_err(|reason| {
         anyhow::anyhow!(
@@ -2719,7 +2751,7 @@ pub(crate) mod tests {
         site.path.with_file_name("copying")
     }
 
-    fn with_postgres(mut cfg: Config) -> Config {
+    pub(crate) fn with_postgres(mut cfg: Config) -> Config {
         cfg.services.insert(
             "postgres-x".into(),
             crate::services::ServiceConfig {
@@ -3003,6 +3035,30 @@ pub(crate) mod tests {
         assert!(na.starts_with("shop_aaaa"));
         assert!(crate::databases::check_db(&na).is_ok());
         assert_eq!(db_name(&a), na, "stable");
+    }
+
+    #[test]
+    fn db_names_of_two_apps_never_clash() {
+        // App shop-a's worktree x and app shop's worktree a-x; a `.` reads as a `-`.
+        let names = [
+            ("shop-a", "x"),
+            ("shop", "a-x"),
+            ("shop", "v1.2"),
+            ("shop", "v1-2"),
+        ];
+        let dbs: Vec<String> = names
+            .iter()
+            .map(|(app, rest)| {
+                let mut s = crate::tests::site(&joined(app, rest), "/w", None);
+                s.worktree_of = Some(app.to_string());
+                db_name(&s)
+            })
+            .collect();
+        for (i, a) in dbs.iter().enumerate() {
+            assert!(crate::databases::check_db(a).is_ok(), "{a}");
+            assert!(!dbs[i + 1..].contains(a), "{dbs:?}");
+        }
+        assert_eq!(dbs[1], "shop_a_x", "the usual name stays as it was");
     }
 
     #[test]
