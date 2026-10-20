@@ -1741,9 +1741,20 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 /* Type tag in the list: quiet, only the label changes. */
 .item .kind {
+  overflow: hidden;
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A narrow sidebar: the name keeps its room, the kind label takes what's left and,
+ * below ~260px, goes. */
+.item:not(.child) { grid-template-columns: 32px auto minmax(0, 1fr); }
+.item:not(.child) .end { min-width: 0; justify-content: flex-end; overflow: hidden; }
+#list { container-type: inline-size; }
+@container (max-width: 260px) {
+  .item .kind { display: none; }
 }
 
 /* Hidden from Anvil: dimmed, not served. */

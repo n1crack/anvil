@@ -210,7 +210,8 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 - Sidebar: an app's worktrees fold from a "⑂ 2 ›" chip right after its name,
   so the kind labels sit flush right; the lock, name, chip and a worktree's
-  branch are centred on one line, and every lock is the same size.
+  branch are centred on one line, and every lock is the same size. In a
+  narrow sidebar the names keep their room: the kind labels shrink, then go.
 - Addresses carry a lock before them everywhere (sidebar, header, Aliases, the
   address list): a muted green closed one for HTTPS, a muted red open one for
   plain HTTP, in their own tones for light and dark. A folder or Compose
