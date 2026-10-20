@@ -144,13 +144,13 @@ export function drawPackages(name) {
   const audited = p.ecosystems.filter((e) => AUDITED.has(e.id));
   const bar = el("div", "pkg-checks");
   bar.append(el("span", "pkg-label", "Check"));
-  const outdated = el("button", "text-act pkg-check-outdated", busy.has(name) ? "Checking outdated…" : "Outdated");
+  const outdated = el("button", "pkg-btn pkg-check-outdated", busy.has(name) ? "Checking outdated…" : "Outdated packages");
   outdated.disabled = busy.has(name);
   outdated.onclick = () => checkUpdates(name);
   bar.append(outdated);
   if (audited.length) {
     const auditing = audited.some((e) => busy.has(`${name}:${e.id}`));
-    const security = el("button", "text-act pkg-check-security", auditing ? "Checking security…" : "Security");
+    const security = el("button", "pkg-btn pkg-check-security", auditing ? "Checking security…" : "Security advisories");
     security.disabled = auditing;
     security.onclick = () => audited.forEach((e) => checkAudit(name, e.id));
     bar.append(security);
@@ -164,7 +164,7 @@ export function drawPackages(name) {
     const going = busy.has(`${name}:pnpm`);
     const idle = () => {
       line.classList.remove("asking");
-      const b = el("button", "text-act pkg-switch", "Switch to pnpm");
+      const b = el("button", "pkg-btn pkg-switch", "Switch to pnpm…");
       b.onclick = () => {
         const no = el("button", "text-act", "Cancel");
         no.onclick = idle;

@@ -2870,6 +2870,10 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .pkg-checks:last-of-type { margin-bottom: 10px; }
 .pkg-checks .pkg-label { color: var(--muted); min-width: 120px; }
 .pkg-checks .text-act:disabled { color: var(--muted); }
+/* Plain rectangular buttons: clearly clickable, unlike the rounded package badges above. */
+.pkg-btn { height: 24px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--steel-raised); color: var(--text); font-size: 12px; }
+.pkg-btn:hover:not(:disabled) { background: var(--steel-hover); }
+.pkg-btn:disabled { color: var(--muted); }
 .pkg-error { margin: 0 0 6px; color: var(--danger); font-size: 12px; user-select: text; -webkit-user-select: text; }
 .pkg-checked { margin: 0 0 12px; font-size: 12px; }
 

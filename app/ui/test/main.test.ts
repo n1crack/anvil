@@ -1442,7 +1442,7 @@ describe("packages", () => {
 
   test("nothing below the checks until one runs; Check outdated: the notice, then a tab per manager", async () => {
     expect(calls("package_updates")).toHaveLength(0);
-    expect($$(".pkg-checks button").map((b) => b.textContent)).toEqual(["Outdated", "Security"]);
+    expect($$(".pkg-checks button").map((b) => b.textContent)).toEqual(["Outdated packages", "Security advisories"]);
     expect($$(".pkg-notice, .pkg-results, .pkg-checked")).toHaveLength(0);
     $(".pkg-check-outdated").click();
     expect($(".pkg-check-outdated").textContent).toBe("Checking outdated…");
