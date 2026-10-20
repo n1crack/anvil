@@ -837,9 +837,13 @@ $("#open-config-about").onclick = () => invoke("open_config_dir").catch((e) => s
 /** What Anvil downloads onto the Mac or ships, hand-kept: name, what it's for, license
  * (SPDX where one exists), homepage, how it gets here. Each license was read from the
  * project's own LICENSE file (October 2026); check again when a source or version changes. */
+const windows = document.documentElement.classList.contains("windows");
+
 const SOFTWARE: [string, string, string, string, string][] = [
   ["Caddy", "Web server and HTTPS certificates", "Apache-2.0", "https://caddyserver.com", "Downloaded"],
-  ["PHP", "PHP apps, in static-php-cli’s builds (MIT); PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded"],
+  windows
+    ? ["PHP", "PHP apps, in windows.php.net’s builds; PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded"]
+    : ["PHP", "PHP apps, in static-php-cli’s builds (MIT); PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded"],
   ["Composer", "PHP packages", "MIT", "https://getcomposer.org", "Downloaded"],
   ["Node.js", "JavaScript apps", "MIT", "https://nodejs.org", "Downloaded"],
   ["pnpm", "JavaScript packages", "MIT", "https://pnpm.io", "Downloaded"],
@@ -852,17 +856,24 @@ const SOFTWARE: [string, string, string, string, string][] = [
   ["uv", "Installs Python and its packages", "MIT OR Apache-2.0", "https://docs.astral.sh/uv", "Downloaded"],
   ["MySQL", "Database (Community Server), with the Universal FOSS Exception", "GPL-2.0-only", "https://www.mysql.com", "Downloaded"],
   ["PostgreSQL", "Database, in theseus-rs’s builds (PostgreSQL license)", "PostgreSQL", "https://www.postgresql.org", "Downloaded"],
-  [
-    "Redis",
-    "Cache. 8.x: your choice of the three; 7.4: RSALv2 or SSPL-1.0; 7.2: BSD-3-Clause",
-    "RSALv2 / SSPL-1.0 / AGPL-3.0",
-    "https://redis.io",
-    "Built on this Mac",
-  ],
+  ...((windows
+    ? [
+        ["Garnet", "Cache, Redis-compatible: Redis has no Windows build", "MIT", "https://microsoft.github.io/garnet", "Downloaded"],
+        [".NET Runtime", "Runs Garnet", "MIT", "https://dotnet.microsoft.com", "Downloaded"],
+      ]
+    : [
+        [
+          "Redis",
+          "Cache. 8.x: your choice of the three; 7.4: RSALv2 or SSPL-1.0; 7.2: BSD-3-Clause",
+          "RSALv2 / SSPL-1.0 / AGPL-3.0",
+          "https://redis.io",
+          "Built on this Mac",
+        ],
+      ]) as [string, string, string, string, string][]),
   ["Mailpit", "Catches the mail apps send", "MIT", "https://mailpit.axllent.org", "Downloaded"],
   ["Versity S3 Gateway", "S3-compatible file storage", "Apache-2.0", "https://github.com/versity/versitygw", "Downloaded"],
   ["SILO", "S3-compatible file storage, a MinIO fork", "AGPL-3.0", "https://silo.pgsty.com", "Downloaded"],
-  ["Tauri", "The app’s windows and menu bar", "MIT OR Apache-2.0", "https://tauri.app", "Bundled"],
+  ["Tauri", windows ? "The app’s windows and tray icon" : "The app’s windows and menu bar", "MIT OR Apache-2.0", "https://tauri.app", "Bundled"],
 ];
 
 const node = (tag: string, cls: string, ...kids: (Node | string)[]) => {
@@ -872,13 +883,42 @@ const node = (tag: string, cls: string, ...kids: (Node | string)[]) => {
   return n;
 };
 
+/** A bubble under a credit's name: its site opens only on Open, so a stray click
+ * while reading the list doesn't throw a browser window up. */
+function confirmOpen(anchor: HTMLElement, url: string) {
+  document.querySelector(".pop")?.remove();
+  const yes = node("button", "primary", "Open") as HTMLButtonElement;
+  const no = node("button", "", "Cancel") as HTMLButtonElement;
+  const pop = node("div", "pop pop-confirm", node("span", "", new URL(url).host), no, yes);
+  pop.setAttribute("role", "dialog");
+  const close = () => {
+    pop.remove();
+    document.removeEventListener("mousedown", outside, true);
+    document.removeEventListener("scroll", close, true);
+  };
+  const outside = (e: MouseEvent) => !pop.contains(e.target as Node) && close();
+  pop.addEventListener("keydown", (e) => e.key === "Escape" && close());
+  yes.onclick = () => {
+    close();
+    invoke("open_url", { url }).catch((err) => showError(String(err)));
+  };
+  no.onclick = close;
+  const r = anchor.getBoundingClientRect();
+  Object.assign(pop.style, { top: `${r.bottom + window.scrollY + 6}px`, left: `${r.left + window.scrollX}px` });
+  document.body.append(pop);
+  document.addEventListener("mousedown", outside, true);
+  // The list scrolls inside its pane; a bubble left behind would point at nothing.
+  document.addEventListener("scroll", close, true);
+  yes.focus();
+}
+
 $("#credits-software").replaceChildren(
   ...SOFTWARE.map(([name, use, license, url, how]) => {
     const link = node("a", "", name) as HTMLAnchorElement;
     link.href = url;
     link.onclick = (e) => {
       e.preventDefault();
-      invoke("open_url", { url }).catch((err) => showError(String(err)));
+      confirmOpen(link, url);
     };
     return node(
       "div",

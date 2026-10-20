@@ -86,6 +86,24 @@ pub fn shell(script_in: &str, tag: Option<&str>) -> Command {
     }
 }
 
+/// One word for a `shell` command line, whatever it holds: sh's `'…'`, or on Windows
+/// `"…"` (cmd has no single quotes), left bare when it needs no quotes.
+pub fn shell_quote(word: &str) -> String {
+    if cfg!(windows) {
+        let plain = !word.is_empty()
+            && word
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_.:/\\@+=,".contains(c));
+        if plain {
+            word.to_string()
+        } else {
+            format!("\"{}\"", word.replace('"', "\"\""))
+        }
+    } else {
+        crate::shims::sh_quote(word)
+    }
+}
+
 /// `shell` as a program and its arguments.
 pub fn shell_args(script: &str) -> (PathBuf, Vec<String>) {
     if cfg!(windows) {
