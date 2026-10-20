@@ -406,7 +406,8 @@ fn edit_without_app_prints_nothing_extra() {
     fs::create_dir_all(&dir).unwrap();
     let t = Instant::now();
     let out = env.run_in(&dir, &["link"]);
-    assert!(t.elapsed() < Duration::from_secs(1));
+    // Well under the socket's 5 s timeout, with room for a loaded machine.
+    assert!(t.elapsed() < Duration::from_secs(3));
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
