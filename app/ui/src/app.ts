@@ -356,10 +356,10 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   };
   const text = document.createElement("span");
   text.className = "text";
-  text.innerHTML = `<span class="name"></span><span class="sub"></span>`;
+  text.innerHTML = `<span class="name"><span class="label"></span></span><span class="sub"></span>`;
   // The folder's name: not every project is a site, so no address in the list.
   // A worktree is named by its branch.
-  $(".name", text).textContent = child || s.worktree_of ? (s.branch ?? s.name) : s.name;
+  $(".name .label", text).textContent = child || s.worktree_of ? (s.branch ?? s.name) : s.name;
   // HTTPS shows as a lock after the name; it's turned on and off from the right-click menu.
   // While it changes only a spinner shows: words would be cut off here; the header says them.
   // Folders and Compose projects have no address: a leftover HTTPS flag means nothing there.
@@ -377,8 +377,8 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   else $(".sub", text).remove();
   if (!path && !child) b.classList.add("compact");
 
-  // Kind labels line up in one column: the version comes before the kind, and every
-  // row ends in the same fixed slot (the aliases' "2 ›", or empty).
+  // Kind labels line up flush right: the version comes before the kind; the worktrees'
+  // "⑂ 2 ›" goes after the name, not in a column of its own.
   const end = document.createElement("span");
   end.className = "end";
   // Only call out sites that differ from the default.
@@ -397,8 +397,8 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
     kind.textContent = snap.kinds.find(([id]) => id === s.kind)?.[1] ?? s.kind;
     end.append(kind);
   }
-  const d = el("span", "disclosure");
   if (kids) {
+    const d = el("span", "disclosure");
     const open = !collapsed.has(s.name);
     b.setAttribute("aria-expanded", String(open));
     d.title = open ? "Hide worktrees" : "Show worktrees";
@@ -408,8 +408,8 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
       e.stopPropagation();
       toggle(s.name);
     };
+    $(".name", text).append(d);
   }
-  end.append(d);
   if (child) b.append(childMark(), text, end);
   else {
     const state = s.hiddenApp ? undefined : snap.app_states[s.name];

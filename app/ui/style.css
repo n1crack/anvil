@@ -364,12 +364,16 @@ button, select, input { font: inherit; color: inherit; }
   min-width: 0;
 }
 
-.item .name,
+.item .name .label,
 .item .sub {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* The name's line: its lock or folder, the name (cut short first), the worktrees' chip;
+ * all centred on one line. */
+.item .name { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.item .name > :not(.label) { flex: none; }
 
 .item .name { font-weight: 600; }
 
@@ -404,11 +408,8 @@ button, select, input { font: inherit; color: inherit; }
 .lock.on { color: var(--lock-on); }
 .lock.off { color: var(--lock-off); }
 .lock.none { color: var(--cold); }
-.item .name .lock {
-  display: inline-flex;
-  margin-right: 5px;
-  vertical-align: -1px;
-}
+.lock { display: inline-grid; place-items: center; width: 13px; height: 13px; }
+.lock svg { display: block; width: 12px; height: 12px; }
 
 .item .ver {
   font-size: 11px;
@@ -432,6 +433,16 @@ button, select, input { font: inherit; color: inherit; }
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+
+/* The worktrees' "⑂ 2 ›" after an app's name: a quiet chip that folds them. */
+.item .name .disclosure {
+  width: auto;
+  height: 18px;
+  margin-left: 1px;
+  padding: 0 6px;
+  background: var(--steel-raised);
+}
+.item .name .disclosure svg { display: block; }
 
 .item .disclosure:not(:empty):hover {
   background: var(--steel-raised);
@@ -654,7 +665,6 @@ button, select, input { font: inherit; color: inherit; }
 .site-meta .meta { display: inline-flex; flex-wrap: wrap; align-items: center; min-width: 0; }
 .site-meta .sep { margin: 0 7px; opacity: 0.5; }
 .site-meta .addr { display: inline-flex; align-items: center; gap: 5px; }
-.site-meta .lock { display: inline-flex; }
 .site-meta .securing { display: inline-flex; align-items: center; gap: 5px; margin-left: 3px; }
 .https-cell { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 10px; }
 .https-cell .securing { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
@@ -698,8 +708,6 @@ button, select, input { font: inherit; color: inherit; }
 }
 .alias-row:hover,
 .alias-row:focus-visible { background: color-mix(in srgb, var(--text) 9%, transparent); outline: none; }
-.alias-row .lock { display: grid; place-items: center; }
-.alias-row .lock svg { width: 11px; height: 11px; }
 .alias-url { overflow: hidden; font: 12px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; text-overflow: ellipsis; }
 .alias-open { color: var(--muted); font-size: 11px; opacity: 0; }
 .alias-row:hover .alias-open,
@@ -3312,8 +3320,6 @@ html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui
 .aliases-head .aliases-add { margin-left: auto; }
 .aliases-none { margin: 0; padding: 10px 14px; font-size: 12px; }
 .alias-line dt { flex-direction: row; align-items: center; gap: 6px; }
-.alias-line .lock { display: inline-grid; }
-.alias-line .lock svg { width: 11px; height: 11px; }
 .alias-go { color: var(--text); font: 12.5px ui-monospace, "SF Mono", Menlo, monospace; text-decoration: none; }
 .alias-go:hover { text-decoration: underline; }
 .alias-line .res-cells { gap: 10px; font-size: 12px; }
