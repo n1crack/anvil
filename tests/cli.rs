@@ -326,9 +326,12 @@ fn config_round_trip() {
     assert_eq!(env.ok(&["sites"]), "");
 }
 
+/// What the fake app saw: `(method, client, params)`.
+type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, String, serde_json::Value)>>>;
+
 /// A stand-in for the running app on `env`'s control socket: answers every method
-/// and records `(method, client)`.
-fn fake_app(env: &Env) -> std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> {
+/// (`run` and `service` with rows, like the app) and records what it saw.
+fn fake_app(env: &Env) -> Seen {
     use std::sync::{Arc, Mutex};
     // `bind` reads ANVIL_HOME from this process; tests run in parallel.
     static ENV: Mutex<()> = Mutex::new(());
@@ -343,8 +346,18 @@ fn fake_app(env: &Env) -> std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>
             l,
             Arc::new(move |r| {
                 let mut log = log.lock().unwrap();
-                log.push((r.method.clone(), r.client.clone()));
-                Ok(serde_json::json!({"version": "test"}))
+                log.push((r.method.clone(), r.client.clone(), r.params.clone()));
+                Ok(match r.method.as_str() {
+                    "run" => serde_json::json!({"rows": [
+                        {"id": "api", "name": "api", "running": true},
+                        {"id": "queue", "name": "queue", "running": false},
+                    ]}),
+                    "service" => serde_json::json!([
+                        {"id": "mysql", "running": false},
+                        {"id": "redis", "running": true},
+                    ]),
+                    _ => serde_json::json!({"version": "test"}),
+                })
             }),
         )
     });
@@ -378,9 +391,63 @@ fn edit_tells_a_running_app() {
     assert!(
         seen.lock()
             .unwrap()
-            .contains(&("config_changed".into(), "Terminal".into())),
+            .iter()
+            .any(|(m, c, _)| m == "config_changed" && c == "Terminal"),
         "{:?}",
         seen.lock().unwrap()
+    );
+}
+
+#[test]
+fn app_restart_sends_run() {
+    let env = Env::short("ctl-run");
+    let seen = fake_app(&env);
+    assert_eq!(env.ok(&["app", "restart", "shop", "api"]), "api: running\n");
+    assert_eq!(
+        seen.lock().unwrap().last().unwrap(),
+        &(
+            "run".into(),
+            "Terminal".into(),
+            serde_json::json!({"site": "shop", "process": "api", "action": "restart"})
+        )
+    );
+}
+
+#[test]
+fn app_stop_lists_every_process() {
+    let env = Env::short("ctl-all");
+    let seen = fake_app(&env);
+    let out = env.ok(&["app", "stop", "shop"]);
+    assert_eq!(out, "api: running\nqueue: stopped\n");
+    assert_eq!(
+        seen.lock().unwrap().last().unwrap().2,
+        serde_json::json!({"site": "shop", "action": "stop"})
+    );
+}
+
+#[test]
+fn service_stop_sends_service() {
+    let env = Env::short("ctl-svc");
+    let seen = fake_app(&env);
+    assert_eq!(env.ok(&["service", "stop", "mysql"]), "mysql: stopped\n");
+    assert_eq!(
+        seen.lock().unwrap().last().unwrap(),
+        &(
+            "service".into(),
+            "Terminal".into(),
+            serde_json::json!({"id": "mysql", "action": "stop"})
+        )
+    );
+}
+
+#[test]
+fn app_start_without_anvil() {
+    let env = Env::short("ctl-off");
+    let out = env.run_in(&env.root, &["app", "start", "shop"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "Anvil isn't running. Open it, then try again.\n"
     );
 }
 

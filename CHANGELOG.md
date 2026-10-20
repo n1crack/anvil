@@ -36,6 +36,10 @@ Until 1.0.0, minor versions may contain breaking changes.
   A database key left empty, or one whose placeholder has no value, stops the
   worktree instead, and tests always get the worktree's own. `anvil worktree hooks` prints an app's hooks, where each
   comes from, and any mistake in them.
+- `anvil app start|stop|restart <site> [<process>]` and `anvil service
+  start|stop <id>` ask the running app to do it, so the change shows there at
+  once, and print each process's state (`api: running`). Without the app open
+  they say so and exit with 1.
 
 ### Changed
 

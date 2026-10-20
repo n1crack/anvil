@@ -346,6 +346,10 @@ enum ServiceCmd {
     Enable { id: String },
     /// Don't start the service with Anvil
     Disable { id: String },
+    /// Start the service in the running Anvil (and with Anvil from now on)
+    Start { id: String },
+    /// Stop the service in the running Anvil (and don't start it with Anvil)
+    Stop { id: String },
     /// Set the port, or reset it to the default by leaving it out
     Port {
         id: String,
@@ -388,6 +392,21 @@ enum AppCmd {
     Type { site: String, kind: Option<String> },
     /// Pin the app's private port, or leave it out for an automatic one
     Port { site: String, port: Option<u16> },
+    /// Start the app's processes, or one of them, in the running Anvil
+    Start {
+        site: String,
+        process: Option<String>,
+    },
+    /// Stop the app's processes, or one of them
+    Stop {
+        site: String,
+        process: Option<String>,
+    },
+    /// Restart the app's processes, or one of them
+    Restart {
+        site: String,
+        process: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -754,6 +773,49 @@ fn edit<T>(cfg: &mut Config, f: impl FnOnce(&mut Config) -> Result<T>) -> Result
     Ok(out)
 }
 
+/// Asks the running app, which owns every process; exits 1 when none runs.
+fn ask_app(method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    match control::request(method, params, "Terminal")? {
+        Some(v) => Ok(v),
+        None => {
+            eprintln!("Anvil isn't running. Open it, then try again.");
+            std::process::exit(1)
+        }
+    }
+}
+
+/// `name: running` for each row `keep` picks from the app's reply.
+fn print_states(rows: &serde_json::Value, label: &str, keep: impl Fn(&serde_json::Value) -> bool) {
+    for r in rows.as_array().into_iter().flatten().filter(|r| keep(r)) {
+        let state = if r["running"] == true {
+            "running"
+        } else {
+            "stopped"
+        };
+        println!("{}: {state}", r[label].as_str().unwrap_or_default());
+    }
+}
+
+/// `anvil app start|stop|restart <site> [<process>]`, done by the app.
+fn run_in_app(site: String, process: Option<String>, action: &str) -> Result<()> {
+    let mut params = serde_json::json!({"site": site, "action": action});
+    if let Some(p) = &process {
+        params["process"] = p.as_str().into();
+    }
+    let overview = ask_app("run", params)?;
+    print_states(&overview["rows"], "name", |r| {
+        process.as_ref().is_none_or(|p| r["id"] == p.as_str())
+    });
+    Ok(())
+}
+
+/// `anvil service start|stop <id>`, done by the app.
+fn service_in_app(id: String, action: &str) -> Result<()> {
+    let rows = ask_app("service", serde_json::json!({"id": id, "action": action}))?;
+    print_states(&rows, "id", |r| r["id"] == id.as_str());
+    Ok(())
+}
+
 fn run() -> Result<()> {
     let mut args = std::env::args_os().skip(1);
     if args.next().is_some_and(|a| a == "shim") {
@@ -1101,6 +1163,8 @@ fn run() -> Result<()> {
             }
             ServiceCmd::Enable { id } => edit(&mut cfg, |c| services::set_enabled(c, &id, true))?,
             ServiceCmd::Disable { id } => edit(&mut cfg, |c| services::set_enabled(c, &id, false))?,
+            ServiceCmd::Start { id } => service_in_app(id, "start")?,
+            ServiceCmd::Stop { id } => service_in_app(id, "stop")?,
             ServiceCmd::Port { id, port, web } => {
                 // With --web, the SMTP port only changes when it's given too.
                 if let Some(web) = web {
@@ -1143,6 +1207,9 @@ fn run() -> Result<()> {
             AppCmd::Port { site, port } => edit(&mut cfg, |c| {
                 set_site_app(c, &site, None, None, Some(port), None)
             })?,
+            AppCmd::Start { site, process } => run_in_app(site, process, "start")?,
+            AppCmd::Stop { site, process } => run_in_app(site, process, "stop")?,
+            AppCmd::Restart { site, process } => run_in_app(site, process, "restart")?,
         },
         Cmd::New {
             kind,
