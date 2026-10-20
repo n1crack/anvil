@@ -2123,3 +2123,49 @@ describe("sidebar worktrees", () => {
     expect($(`#list [data-name="shop"] .count`).textContent).toBe("6");
   });
 });
+
+describe("agent activity", () => {
+  const at = (h: number, m: number) => new Date(2026, 9, 19, h, m).getTime() / 1000;
+  const act = (what: string, h: number, m: number, more = {}) => ({
+    at: at(h, m),
+    client: "Claude Code",
+    site: "vuefinder",
+    what,
+    ok: true,
+    detail: null,
+    ...more,
+  });
+  const lines = () => $$("#site .agents .row").map((r) => r.querySelector(".agent-line")!.textContent);
+  const refreshed = async () => {
+    await wait(550); // refresh reads the state again only half a second after the last read
+    w.refresh();
+    await wait(80);
+  };
+
+  test("overview_lists_agent_actions: that app's newest, through the existing refresh", async () => {
+    await select("vuefinder");
+    w.mockAgents = [act("restarted api", 14, 2), act("started queue", 13, 58), act("stopped dev", 13, 40, { client: "Terminal" })];
+    await refreshed();
+    expect($("#site .agents").hidden).toBe(false);
+    expect($("#site .agents .res-sub").textContent).toBe("Agents");
+    expect(lines()).toEqual(["Claude Code restarted api · 14:02", "Claude Code started queue · 13:58", "Terminal stopped dev · 13:40"]);
+    expect(calls("agent_activity").at(-1)![1]).toEqual({ site: "vuefinder" });
+    w.mockAgents = [...w.mockAgents, ...[1, 2, 3].map((n) => act(`started p${n}`, 12, n))];
+    await refreshed();
+    expect(lines()).toHaveLength(5);
+  });
+
+  test("overview_hides_agents_when_empty", async () => {
+    w.mockAgents = [];
+    await refreshed();
+    expect($("#site .agents").hidden).toBe(true);
+  });
+
+  test("failed_action_shows_detail: inline, in the error colour", async () => {
+    w.mockAgents = [act("restarted api", 14, 2, { ok: false, detail: "No process api" })];
+    await refreshed();
+    const d = $("#site .agents .row .agent-detail");
+    expect([d.textContent, d.classList.contains("error-text")]).toEqual(["No process api", true]);
+    w.mockAgents = [];
+  });
+});

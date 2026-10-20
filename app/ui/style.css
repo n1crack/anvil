@@ -2881,6 +2881,8 @@ body.activity {
 
 .act-name { font-weight: 500; }
 .act-detail { color: var(--muted); font-weight: 400; }
+/* Why an agent's action failed: inline, in Processes › Agents and the Overview's Agents. */
+.agent-detail.error-text { color: var(--danger); }
 
 .act-empty { margin: 40px 0; color: var(--muted); text-align: center; }
 

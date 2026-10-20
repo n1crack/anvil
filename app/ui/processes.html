@@ -13,16 +13,23 @@
       <button role="tab" data-tab="apps">Apps<span class="act-count"></span></button>
       <button role="tab" data-tab="services">Services<span class="act-count"></span></button>
       <button role="tab" data-tab="anvil" title="Anvil's own: Caddy, PHP-FPM, DNS">Anvil<span class="act-count"></span></button>
+      <button role="tab" data-tab="agents" title="What agents and the terminal did through Anvil">Agents</button>
     </div>
   </header>
   <p id="error" class="error" role="alert" hidden></p>
   <div class="act-main">
   <div class="act-table">
-    <table>
+    <table id="procs">
       <thead>
         <tr><th>Name</th><th class="num">Port</th><th class="num">PID</th><th class="num">CPU</th><th class="num">Memory</th><th class="act-st">Status</th></tr>
       </thead>
       <tbody id="rows"></tbody>
+    </table>
+    <table id="agents" hidden>
+      <thead>
+        <tr><th>Action</th><th>App</th><th class="num">Time</th></tr>
+      </thead>
+      <tbody id="agent-rows"></tbody>
     </table>
     <p id="empty" class="act-empty" hidden>Nothing running</p>
   </div>

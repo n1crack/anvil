@@ -29,6 +29,16 @@ pub(crate) fn record(log: &Mutex<VecDeque<AgentAction>>, a: AgentAction) {
     log.push_back(a);
 }
 
+/// The actions newest first, for the UI; only one app's with `site`.
+pub(crate) fn newest(log: &Mutex<VecDeque<AgentAction>>, site: Option<&str>) -> Vec<AgentAction> {
+    let log = anvil::lock(log);
+    log.iter()
+        .rev()
+        .filter(|a| site.is_none() || a.site.as_deref() == site)
+        .cloned()
+        .collect()
+}
+
 fn param<'a>(req: &'a Request, key: &str) -> Option<&'a str> {
     req.params.get(key).and_then(Value::as_str)
 }
@@ -186,5 +196,24 @@ mod tests {
         assert_eq!(log.len(), 200);
         assert_eq!(log.front().unwrap().what, "action 5");
         assert_eq!(log.back().unwrap().what, "action 204");
+    }
+
+    #[test]
+    fn newest_first_and_by_site() {
+        let log = Mutex::new(VecDeque::new());
+        for (at, site) in [(1, Some("shop")), (2, None), (3, Some("shop"))] {
+            let a = AgentAction {
+                at,
+                client: "t".into(),
+                site: site.map(String::from),
+                what: "w".into(),
+                ok: true,
+                detail: None,
+            };
+            record(&log, a);
+        }
+        let at = |v: Vec<AgentAction>| v.iter().map(|a| a.at).collect::<Vec<_>>();
+        assert_eq!(at(newest(&log, None)), [3, 2, 1]);
+        assert_eq!(at(newest(&log, Some("shop"))), [3, 1]);
     }
 }

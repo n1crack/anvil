@@ -14,6 +14,9 @@ Until 1.0.0, minor versions may contain breaking changes.
   start|stop <id>` ask the running app to do it, so the change shows there at
   once, and print each process's state (`api: running`). Without the app open
   they say so and exit with 1.
+- What agents and the terminal did through Anvil ("Claude Code restarted api ·
+  14:02"): an app's newest five on its Overview, all of them in Processes ›
+  Agents, newest first. A failed action says why on its line.
 
 ## [0.1.0] - 2026-10-19
 

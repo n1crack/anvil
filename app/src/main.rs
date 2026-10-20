@@ -831,6 +831,13 @@ fn exit_detail(e: &anvil::apps::Exit) -> String {
     }
 }
 
+/// What agents and the terminal did through the control socket, newest first: one app's
+/// for its Overview, all of them for Processes › Agents.
+#[tauri::command]
+fn agent_activity(app: State<App>, site: Option<String>) -> Vec<control::AgentAction> {
+    control::newest(&app.agent_log, site.as_deref())
+}
+
 /// Everything Anvil runs: the web server, apps with their processes and containers, services.
 #[tauri::command(async)]
 fn activity(app: State<App>) -> Res<Activity> {
@@ -3701,6 +3708,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             state,
             activity,
+            agent_activity,
             activity_log,
             activity_log_clear,
             refresh,

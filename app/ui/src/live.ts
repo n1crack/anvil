@@ -30,6 +30,9 @@ export function shown() {
   return visible;
 }
 
+/** An agent action's local time: "14:02". */
+export const clock = (at: number) => new Date(at * 1000).toTimeString().slice(0, 5);
+
 /** The banner's errors by owner (usually the command): `msg` for `owner`, or null to clear
  * that owner's error only, so a poll that works doesn't hide an action that failed.
  * Returns the newest error left, the one to show. */

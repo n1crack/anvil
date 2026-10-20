@@ -1,7 +1,7 @@
-import type { Container, Overview } from "./types";
+import type { AgentAction, Container, Overview } from "./types";
 import { $, el, invoke, mode, popAt, renderSite, selected, showError, showTab, snap, tab } from "./app";
 import { late } from "./late";
-import { shown } from "./live";
+import { clock, shown } from "./live";
 
 /* An app's processes as the Overview and the header see them: the backend's overview
  * (rows, one-off scripts, Docker Compose containers), the header's Dev start/stop, one
@@ -16,7 +16,33 @@ export const procBusy = new Map<string, string>(); // "site/service" -> "startin
 window.renderProcesses = (s) => {
   drawProcs(s.name);
   loadProcs(s.name);
+  loadAgents(s.name);
 };
+
+/** The Overview's Agents group: the app's newest 5 actions from agents and the terminal,
+ * hidden when there are none. Asked on every render, which `changed()` triggers. */
+async function loadAgents(name: string) {
+  let list: AgentAction[];
+  try {
+    list = await invoke("agent_activity", { site: name });
+    showError(null, "agent_activity");
+  } catch (e) {
+    return showError(String(e), "agent_activity");
+  }
+  const box = $("#site .agents");
+  if (selected !== name || !box) return;
+  box.hidden = !list.length;
+  $(".group", box).replaceChildren(
+    ...list.slice(0, 5).map((a) => {
+      const row = el("div", "row");
+      const dt = el("dt");
+      dt.append(el("span", "agent-line", `${a.client} ${a.what} · ${clock(a.at)}`));
+      if (!a.ok && a.detail) dt.append(el("small", "agent-detail error-text", a.detail));
+      row.append(dt);
+      return row;
+    }),
+  );
+}
 
 let procAsked = 0; // numbers every request for an overview
 const procShown = new Map<string, number>(); // site name -> newest number in procCache

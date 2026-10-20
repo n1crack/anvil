@@ -1,7 +1,7 @@
-import type { Activity } from "./types";
+import type { Activity, AgentAction } from "./types";
 import { follower } from "./console";
 import { splitter } from "./split";
-import { ownError, shown } from "./live";
+import { clock, ownError, shown } from "./live";
 import { type Sgr, clean, colorize, sgr } from "./term";
 
 /* The Processes window: everything Anvil runs, with usage, Restart/Stop (right-click)
@@ -19,9 +19,10 @@ export let replace = true; // the next page replaces the log (new row, error sho
 export const busy = new Set<string>(); // keys with an action on its way
 // Folded application groups, kept across windows like the main list's folds.
 export const folded = new Set(JSON.parse(localStorage.getItem("act-folded") ?? "[]"));
-// Which tab is shown: apps, services or anvil (Anvil's own: Caddy, PHP-FPM, DNS…); the
-// last one comes back. "web" was anvil's name before.
-const TABS = ["apps", "services", "anvil"];
+// Which tab is shown: apps, services, anvil (Anvil's own: Caddy, PHP-FPM, DNS…) or agents
+// (what agents and the terminal did); the last one comes back. "web" was anvil's name before.
+const TABS = ["apps", "services", "anvil", "agents"];
+let agents: AgentAction[] = []; // newest first, from `agent_activity`
 export const storedTab = (v: string | null) => (v === "web" ? "anvil" : TABS.includes(v!) ? v! : "apps");
 export let tab = storedTab(localStorage.getItem("act-tab"));
 let logStyle: Sgr | undefined; // colors carried from one page of the log to the next
@@ -39,7 +40,7 @@ export let loading: Promise<void> | null = null; // the `activity` request on it
 export function load() {
   loading ??= (async () => {
     try {
-      data = await invoke("activity");
+      [data, agents] = await Promise.all([invoke("activity"), invoke("agent_activity", { site: null })]);
       showError(null, "activity");
     } catch (e) {
       return showError(String(e), "activity");
@@ -206,13 +207,22 @@ export function render() {
   if (selected && !keys.includes(selected)) select(null);
   // Redraw only on a change, so hover and focus survive the polling; usage changes all
   // the time, so it is left out and written into its cells.
-  const now = JSON.stringify([data, selected, [...busy], tab], (k, v) => (k === "cpu" || k === "memory" ? undefined : v));
-  if (now === drawn) return usage(rows[tab]);
+  const now = JSON.stringify([data, agents, selected, [...busy], tab], (k, v) => (k === "cpu" || k === "memory" ? undefined : v));
+  if (now === drawn) return tab === "agents" || usage(rows[tab]);
   drawn = now;
   for (const b of document.querySelectorAll("#tabs [role=tab]") as NodeListOf<HTMLElement>) {
     b.setAttribute("aria-selected", String(b.dataset.tab === tab));
-    const n = rows[b.dataset.tab!].length;
-    $(".act-count", b).textContent = n ? String(n) : "";
+    const n = rows[b.dataset.tab!]?.length;
+    const c = $(".act-count", b);
+    if (c) c.textContent = n ? String(n) : "";
+  }
+  $("#empty").textContent = tab === "agents" ? "No actions from agents or the terminal yet" : "Nothing running";
+  $("#agents").hidden = tab !== "agents" || !agents.length;
+  if (tab === "agents") {
+    $("#agent-rows").replaceChildren(...agents.map(agentRow));
+    $("#procs").hidden = true;
+    $("#empty").hidden = agents.length > 0;
+    return;
   }
   const out: any[] = [];
   if (tab === "anvil") out.push(...data.web.map((r) => row(r)));
@@ -225,7 +235,21 @@ export function render() {
   }
   $("#rows").replaceChildren(...out);
   $("#empty").hidden = rows[tab].length > 0;
-  $(".act-table table").hidden = !rows[tab].length;
+  $("#procs").hidden = !rows[tab].length;
+}
+
+/** "Claude Code restarted api", its app and time; a failure says why, inline. Not a link. */
+function agentRow(a: AgentAction) {
+  const tr = document.createElement("tr");
+  const what = td(`${a.client} ${a.what}`, "act-name");
+  if (!a.ok && a.detail) {
+    const d = document.createElement("span");
+    d.className = "act-detail agent-detail error-text";
+    d.textContent = a.detail;
+    what.append(" ", d);
+  }
+  tr.append(what, td(a.site ?? ""), td(clock(a.at), "num"));
+  return tr;
 }
 
 /** CPU and memory into the drawn rows, only the cells whose text changed. */

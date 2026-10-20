@@ -970,6 +970,8 @@ const mockHandle = (cmd, a) => {
       return window.mockStorageLast ?? null;
     case "clean_all_safe":
       return [162529280, []];
+    case "agent_activity":
+      return (window.mockAgents ?? []).filter((x) => !a.site || x.site === a.site);
     case "update_check":
       return window.mockUpdate ?? null;
     default:

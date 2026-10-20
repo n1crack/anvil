@@ -206,6 +206,16 @@ interface ActivityRow {
   web: string | null;
 }
 
+/** What a client did through the control socket (app/src/control.rs). */
+export interface AgentAction {
+  at: number; // unix seconds
+  client: string; // "Claude Code", or "Terminal" for the CLI
+  site: string | null;
+  what: string; // "restarted api"
+  ok: boolean;
+  detail: string | null; // the error, when it failed
+}
+
 export interface Activity {
   web: ActivityRow[];
   apps: { site: string; rows: ActivityRow[] }[];

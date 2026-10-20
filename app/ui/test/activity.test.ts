@@ -47,6 +47,7 @@ beforeAll(async () => {
       invoke: async (cmd: string, a: any) => {
         (w.actCalls ??= []).push([cmd, a]);
         if (cmd === "activity") return structuredClone(activity);
+        if (cmd === "agent_activity") return structuredClone(w.agents ?? []);
         if (cmd === "activity_log_clear") return void (w.logCleared = true);
         return w.logCleared ? { text: "", end_offset: 0 } : { text: LOG, end_offset: LOG.length };
       },
@@ -126,6 +127,7 @@ describe("processes tabs", () => {
       "apps",
       "services",
       "anvil",
+      "agents",
     ]);
     expect(tabBtn("apps").getAttribute("aria-selected")).toBe("true");
     tabBtn("services").click();
@@ -145,6 +147,32 @@ describe("processes tabs", () => {
     tabBtn("anvil").click();
     expect($("#pane").hidden).toBe(false);
     tabBtn("apps").click();
+  });
+
+  test("agents_tab_lists_all_newest_first, from the activity poll", async () => {
+    const { load } = await import("../src/activity");
+    const at = (h: number, m: number) => new Date(2026, 9, 19, h, m).getTime() / 1000;
+    // The backend sends them newest first.
+    w.agents = [
+      { at: at(14, 2), client: "Claude Code", site: "shop", what: "restarted queue", ok: false, detail: "No process queue" },
+      { at: at(9, 5), client: "Terminal", site: null, what: "started mysql", ok: true, detail: null },
+    ];
+    tabBtn("agents").click();
+    expect($("#empty").textContent).toBe("No actions from agents or the terminal yet");
+    await load();
+    expect(w.actCalls.filter((c: any) => c[0] === "agent_activity").at(-1)[1]).toEqual({ site: null });
+    expect($("#empty").hidden).toBe(true);
+    expect($("#rows").closest("table")!.hidden).toBe(true);
+    const rows = [...document.querySelectorAll("#agent-rows tr")].map((tr) => [...tr.children].map((c) => c.firstChild?.textContent ?? ""));
+    expect(rows).toEqual([
+      ["Claude Code restarted queue", "shop", "14:02"],
+      ["Terminal started mysql", "", "09:05"],
+    ]);
+    const d = $("#agent-rows .agent-detail");
+    expect([d.textContent, d.classList.contains("error-text")]).toEqual(["No process queue", true]);
+    w.agents = [];
+    tabBtn("apps").click();
+    expect($("#agents").hidden).toBe(true);
   });
 });
 
