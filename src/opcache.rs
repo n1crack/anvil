@@ -74,45 +74,13 @@ pub fn build(minor: &str) -> Result<()> {
         bail!("PHP {minor} has OPcache built in");
     }
     let php = php_dir(minor).join("php");
-    let out = Command::new(&php)
-        .args(["-n", "-r", "echo PHP_VERSION;"])
-        .output()
-        .with_context(|| format!("PHP {minor} is not installed"))?;
-    let full = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if !out.status.success() || !full.starts_with(&format!("{minor}.")) {
-        bail!("couldn't read the version of PHP {minor}");
-    }
+    let (full, src) = source_tree(minor)?;
     println!("Building OPcache for PHP {full}…");
-    let sum = source_sum(&full)?;
-    let src = home().join("cache").join("php-src").join(&full);
-    let _ = fs::remove_dir_all(&src);
-    fetch_tgz(
-        &format!("https://www.php.net/distributions/php-{full}.tar.gz"),
-        &src,
-        true,
-        Some(&sum),
-    )?;
-    run(Command::new("./configure")
-        .args([
-            "--quiet",
-            "--disable-all",
-            "--disable-cgi",
-            "--disable-phpdbg",
-            "--without-sqlite3",
-            "--without-pdo-sqlite",
-            "--enable-opcache=shared",
-        ])
-        .current_dir(&src))
-    .map_err(tools_error)?;
-    let info = Command::new(&php).args(["-n", "-i"]).output()?;
-    let config_h = fs::read_to_string(src.join("main/php_config.h"))?;
-    build_matches(&String::from_utf8_lossy(&info.stdout), &config_h)
-        .map_err(|why| anyhow::anyhow!("OPcache can't be built for PHP {full}: {why}"))?;
     let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
     run(Command::new("make")
         .args(["-s", &format!("-j{jobs}")])
         .current_dir(&src))
-    .map_err(tools_error)?;
+    .map_err(|e| tools_error("OPcache", e))?;
     let built = src.join("modules/opcache.so");
     // A `.so` PHP rejects would only print a warning on every start: check it first.
     let check = Command::new(&php)
@@ -127,6 +95,66 @@ pub fn build(minor: &str) -> Result<()> {
     install_so(&built, &so_path(minor))?;
     println!("OPcache built for PHP {full}");
     Ok(())
+}
+
+/// The exact version (`8.4.23`) of the installed PHP `minor`.
+pub(crate) fn installed_full(minor: &str) -> Result<String> {
+    let out = Command::new(php_dir(minor).join("php"))
+        .args(["-n", "-r", "echo PHP_VERSION;"])
+        .output()
+        .with_context(|| format!("PHP {minor} is not installed"))?;
+    let full = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || !full.starts_with(&format!("{minor}.")) {
+        bail!("couldn't read the version of PHP {minor}");
+    }
+    Ok(full)
+}
+
+/// php.net's source of the installed PHP `minor`'s exact version, verified and
+/// configured like that binary, in `~/.anvil/cache/php-src/<full>`: made once, then
+/// reused by OPcache and extensions. `make install-headers` puts the headers, phpize
+/// and php-config in its `stage` folder. Returns the full version and the folder.
+pub fn source_tree(minor: &str) -> Result<(String, PathBuf)> {
+    let full = installed_full(minor)?;
+    let src = home().join("cache").join("php-src").join(&full);
+    let done = src.join(".anvil-configured");
+    if done.exists() {
+        return Ok((full, src));
+    }
+    println!("Getting PHP {full}'s source…");
+    let sum = source_sum(&full)?;
+    let _ = fs::remove_dir_all(&src);
+    fetch_tgz(
+        &format!("https://www.php.net/distributions/php-{full}.tar.gz"),
+        &src,
+        true,
+        Some(&sum),
+    )?;
+    run(Command::new("./configure")
+        .arg("--quiet")
+        // php-config and phpize carry the prefix: the stage is where they are.
+        .arg(format!("--prefix={}", src.join("stage").display()))
+        .args([
+            "--disable-all",
+            "--disable-cgi",
+            "--disable-phpdbg",
+            "--without-sqlite3",
+            "--without-pdo-sqlite",
+            "--enable-opcache=shared",
+            // The default builds have sessions: igbinary and msgpack add their
+            // session serializers only when the headers say so.
+            "--enable-session",
+        ])
+        .current_dir(&src))
+    .map_err(|e| tools_error("PHP's source", e))?;
+    let info = Command::new(php_dir(minor).join("php"))
+        .args(["-n", "-i"])
+        .output()?;
+    let config_h = fs::read_to_string(src.join("main/php_config.h"))?;
+    build_matches(&String::from_utf8_lossy(&info.stdout), &config_h)
+        .map_err(|why| anyhow::anyhow!("nothing can be built for PHP {full}: {why}"))?;
+    fs::write(&done, "")?;
+    Ok((full, src))
 }
 
 /// The SHA-256 php.net publishes for `php-<full>.tar.gz`.
@@ -192,10 +220,11 @@ pub(crate) fn build_matches(php_i: &str, php_config_h: &str) -> Result<(), Strin
 
 /// Copy the built `.so` in under a temporary name and rename it into place, so `to`
 /// is never a half-written file.
-fn install_so(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn install_so(from: &Path, to: &Path) -> Result<()> {
     let dir = to.parent().context("no parent folder")?;
     fs::create_dir_all(dir)?;
-    let tmp = dir.join(".opcache.so.tmp");
+    let name = to.file_name().context("no file name")?.to_string_lossy();
+    let tmp = dir.join(format!(".{name}.tmp"));
     let ok = fs::copy(from, &tmp)
         .map_err(anyhow::Error::from)
         .and_then(|_| Ok(fs::rename(&tmp, to)?));
@@ -205,10 +234,11 @@ fn install_so(from: &Path, to: &Path) -> Result<()> {
     ok
 }
 
-fn tools_error(e: anyhow::Error) -> anyhow::Error {
-    e.context(
-        "Building OPcache failed — OPcache needs the Xcode Command Line Tools: xcode-select --install",
-    )
+/// A failed configure or make, with what to do about the usual reason.
+pub(crate) fn tools_error(what: &str, e: anyhow::Error) -> anyhow::Error {
+    e.context(format!(
+        "Building {what} failed — it needs the Xcode Command Line Tools: xcode-select --install"
+    ))
 }
 
 #[cfg(test)]
@@ -322,7 +352,10 @@ mod tests {
 
     #[test]
     fn missing_tools_is_a_clear_error() {
-        let e = tools_error(anyhow::anyhow!("\"make\" exited with exit status: 1"));
+        let e = tools_error(
+            "OPcache",
+            anyhow::anyhow!("\"make\" exited with exit status: 1"),
+        );
         assert!(e.to_string().contains("xcode-select --install"), "{e}");
     }
 }

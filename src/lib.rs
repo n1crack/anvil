@@ -13,6 +13,7 @@ pub mod logs;
 pub mod mcp;
 pub mod opcache;
 pub mod packages;
+pub mod phpext;
 pub mod processes;
 pub mod project;
 pub mod resources;

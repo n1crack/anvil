@@ -1036,6 +1036,13 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
         ));
     }
     entries.push((
+        "Build tools".into(),
+        crate::phpext::tools_dir(),
+        "Cache",
+        Safety::Safe,
+        "Built again when a PHP extension needs them",
+    ));
+    entries.push((
         "Logs".into(),
         h.join("log"),
         "Logs",
@@ -1087,7 +1094,8 @@ fn cache_dirs(h: &Path) -> Vec<PathBuf> {
 pub fn clean_anvil(path: &str) -> Result<u64> {
     let h = home();
     let p = PathBuf::from(path);
-    let is_cache = p == h.join("build") || cache_dirs(&h).contains(&p);
+    let is_cache =
+        p == h.join("build") || p == crate::phpext::tools_dir() || cache_dirs(&h).contains(&p);
     if p != h.join("log") && !is_cache {
         bail!("Anvil doesn't clean {path}");
     }
@@ -1316,6 +1324,22 @@ pub fn touched(dir: &Path) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_tools_are_cleanable() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&crate::ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let tools = crate::phpext::tools_dir();
+        std::fs::create_dir_all(tools.join("bin")).unwrap();
+        std::fs::write(tools.join("bin/m4"), vec![1u8; 5_000]).unwrap();
+        let (_, items) = anvil_disk();
+        let item = items.iter().find(|i| i.label == "Build tools").unwrap();
+        assert!(item.safety == Safety::Safe);
+        assert!(clean_anvil(&item.path).unwrap() > 0);
+        assert!(!tools.exists());
+    }
 
     #[test]
     fn touched_skips_dependencies_and_hidden_folders() {
