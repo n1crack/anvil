@@ -1019,12 +1019,18 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-out:focus-visible { outline-offset: -2px; }
 /* The keys, one muted line under the output; gone when the pane is too narrow for it. */
 .dev-keys { flex: none; margin: 0; padding: 3px 14px 4px; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #8d959f; font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; }
-.dev-keys-short { display: none; }
+.dev-keys { position: relative; }
+.dev-keys-short { display: none; height: auto; padding: 0 4px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; }
+.dev-keys-short:hover, .dev-keys-short[aria-expanded="true"] { background: rgba(255, 255, 255, 0.08); color: #c9d1d9; }
 @container (max-width: 460px) {
-  .dev-keys { text-align: right; cursor: help; }
+  .dev-keys { text-align: right; }
   .dev-keys-full { display: none; }
   .dev-keys-short { display: inline; }
 }
+/* ⌨ Keys' card: above the line, at the pane's right, in the console's colors. */
+.dev-keys-card { position: absolute; right: 10px; bottom: calc(100% + 6px); z-index: 5; display: grid; grid-template-columns: auto auto; gap: 4px 12px; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: #1b1f24; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); text-align: left; }
+.dev-keys-card[hidden] { display: none; }
+.dev-keys-card kbd { color: #e6edf3; font: 600 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 .dev-head .console-title { flex: none; }
 .dev-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .dev-pane.is-empty .dev-head-start { display: none; }

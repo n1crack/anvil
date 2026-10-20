@@ -598,9 +598,15 @@ describe("dev", () => {
         .map(([, a]) => [a.name, a.action]);
     const list = $(".dev-list");
     const out = $(".dev-out");
-    // The line, and on hover when the pane is too narrow for it (⌨ Keys).
+    // The line, and when the pane is too narrow for it ⌨ Keys, which opens them as a card.
     expect($(".dev-keys .dev-keys-full").textContent).toBe("↑↓ select · s start · x stop · r restart · q stop all · c clear");
-    expect($(".dev-keys").getAttribute("title")).toBe($(".dev-keys .dev-keys-full").textContent);
+    const card = $(".dev-keys-card") as HTMLElement;
+    expect(card.hidden).toBe(true);
+    ($(".dev-keys-short") as HTMLElement).click();
+    expect(card.hidden).toBe(false);
+    expect($$(".dev-keys-card kbd").map((k) => k.textContent)).toEqual(["↑↓", "s", "x", "r", "q", "c"]);
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(card.hidden).toBe(true);
     expect(out.tabIndex).toBe(0);
     $('.tabs [data-tab="overview"]').click();
     devTab().click();
