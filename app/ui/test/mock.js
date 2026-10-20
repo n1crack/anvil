@@ -1114,6 +1114,8 @@ const mockHandle = (cmd, a) => {
       if (window.mockOpcacheError) throw window.mockOpcacheError;
       (window.mockOpcache ??= {})[a.version] = "ready";
       return mockHandle("settings");
+    case "pnpm_store":
+      return window.mockPnpmStore ?? { path: "/Users/x/Library/pnpm/store/v11", bytes: 4_400_000_000 };
     case "php_opcache_remove":
       (window.mockOpcache ??= {})[a.version] = "missing";
       return mockHandle("settings");

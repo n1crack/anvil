@@ -9,6 +9,11 @@ contain breaking changes.
 
 ### Added
 
+- pnpm comes with Anvil: apps without a pnpm of yours use Anvil's, so Node.js 25+ apps install without Corepack.
+- Shared dependencies: a pnpm app's node_modules can link into pnpm's store; on for worktrees (app Settings tab).
+- Switch to pnpm: move an npm or yarn app to pnpm from the Packages tab (`anvil app pnpm <app>`).
+- Storage shows pnpm's store and can prune it.
+- `pnpm` in a terminal follows each app, like `node` and `npm`.
 - PHP extensions: Xdebug, PCOV, APCu, igbinary and msgpack, per PHP version, per app or from `.anvil.toml`.
 - OPcache for PHP 8.1–8.4.
 - Laravel Octane with RoadRunner, FrankenPHP or Swoole (experimental).
@@ -26,6 +31,7 @@ contain breaking changes.
 
 ### Changed
 
+- New apps use pnpm by default (`anvil create --pm` picks another).
 - Settings: the sidebar is grouped (app, Languages, Plugins), and a plugin that is on gets its own page.
 - Settings › PHP: each version's extensions, OPcache included, slide open from "Extensions n/6"; OPcache can be built or removed, after a confirm.
 - Settings: Make default and Uninstall are quiet text actions; Uninstall asks in the row.

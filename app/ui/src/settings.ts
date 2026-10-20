@@ -271,7 +271,7 @@ function renderPackageManagers() {
         const idle = () =>
           actions.replaceChildren(
             textAct("Uninstall", () =>
-              confirmInRow(actions, "Uninstall? Apps find the next one on their PATH.", "Uninstall", () => pmAction(pm.name, "package_manager_uninstall", "Uninstalling…"), idle),
+              confirmInRow(actions, pm.name === "pnpm" ? "Uninstall? An app that needs pnpm gets it again." : "Uninstall? Apps find the next one on their PATH.", "Uninstall", () => pmAction(pm.name, "package_manager_uninstall", "Uninstalling…"), idle),
             ),
           );
         idle();
@@ -421,7 +421,7 @@ async function loadPnpmStore() {
   info.append(
     Object.assign(document.createElement("span"), { textContent: tilde(st.path) }),
     Object.assign(document.createElement("small"), {
-      textContent: pnpmState.note ?? "Packages every pnpm project shares; Prune removes the ones no project uses",
+      textContent: pnpmState.note ?? "Shared by every pnpm project",
       className: pnpmState.error ? "bad" : "",
     }),
   );
@@ -431,13 +431,14 @@ async function loadPnpmStore() {
     actions.innerHTML = `<span class="spin-dot"></span><span class="muted"></span>`;
     $(".muted", actions).textContent = pnpmState.busy;
   } else if (pnpmState.asking) {
+    actions.classList.add("asking");
     actions.append(
-      Object.assign(document.createElement("span"), { className: "muted", textContent: "Prune the store?" }),
-      button("Cancel", () => {
+      Object.assign(document.createElement("span"), { className: "muted", textContent: "Prune? Packages no project uses go." }),
+      textAct("Cancel", () => {
         pnpmState = {};
         loadPnpmStore();
       }),
-      button("Prune", prunePnpm),
+      Object.assign(textAct("Prune", prunePnpm), { className: "text-act danger" }),
     );
   } else {
     actions.append(
