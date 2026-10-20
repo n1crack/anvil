@@ -2012,6 +2012,10 @@ kbd {
 .update .update-toggle { padding: 0 4px; border-color: transparent; background: none; color: var(--muted); }
 .update .update-toggle:hover, .update .update-toggle[aria-expanded="true"] { color: var(--text); }
 .update-note { color: var(--muted); }
+.update-pop { width: 280px; }
+.update-pop .update-note { color: var(--text); }
+.update-pop button { border: 1px solid var(--line); border-radius: var(--radius-s); background: none; color: var(--text); }
+.update-pop button:hover:not(:disabled) { background: var(--steel-hover); }
 .update-note.error-text { color: var(--danger); }
 
 /* Credits: grouped lists like the other pages, left-aligned under the centred header. */

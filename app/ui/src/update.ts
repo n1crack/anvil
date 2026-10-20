@@ -26,33 +26,57 @@ export async function restart(button: HTMLButtonElement, status: HTMLElement, re
 const el = (tag: string, cls: string | null, text: string) =>
   Object.assign(document.createElement(tag), { className: cls ?? "", textContent: text });
 
-/** The main window's "Update available" / "Relaunch", at the right end of the titlebar. */
-export function updateBar() {
+/** The main window's "Update available" / "Relaunch" at the right end of the titlebar; it
+ * opens a bubble with what is new and Restart. `popAt` is the app's bubble (passed in so
+ * Settings, which uses `restart`, doesn't load the main window's code). */
+export function updateBar(popAt: (anchor: Element, pop: HTMLElement, focus?: HTMLElement | null) => () => void) {
   const bar = document.querySelector("#update") as HTMLElement;
-  let open = false;
+  let close: (() => void) | null = null;
   let busy = false;
+  // The bubble closes on the mousedown before the toggle's click: that click must not
+  // open it again. Window capture runs before the bubble's own document listener.
+  let wasOpen = false;
+  window.addEventListener("mousedown", (e) => (wasOpen = bar.contains(e.target as Node) && !!document.querySelector(".update-pop")), true);
   const draw = async () => {
     if (busy) return;
     const st = await invoke("update_state").catch(() => null);
     const update: Release | null = st?.update ?? null;
     const relaunch = !update && !!st?.relaunch;
     bar.hidden = !update && !relaunch;
-    const toggle = el("button", "update-toggle", update ? "Update available" : "Relaunch");
+    const toggle = el("button", "update-toggle", update ? "Update available" : "Relaunch") as HTMLButtonElement;
     toggle.title = update ? "A new version of Anvil" : "A newer build of Anvil is on disk";
-    toggle.setAttribute("aria-expanded", String(open));
     toggle.onclick = () => {
-      open = !open;
-      draw();
+      if (wasOpen) return (wasOpen = false);
+      const pop = el("div", "pop-confirm wide update-pop", "");
+      const note = el("p", "update-note", update ? `Anvil ${update.version} is ready.` : "A newer build of Anvil is on disk.");
+      const what = el("p", "muted", "Anvil restarts; the apps running now start again.");
+      const later = el("button", null, "Later") as HTMLButtonElement;
+      const go = el("button", "primary", update ? "Restart to update" : "Restart") as HTMLButtonElement;
+      pop.append(note, what, later, go);
+      toggle.setAttribute("aria-expanded", "true");
+      const shut = popAt(toggle, pop, go);
+      close = () => {
+        if (busy) return;
+        shut();
+        toggle.setAttribute("aria-expanded", "false");
+      };
+      // A click elsewhere removes the bubble on its own; the toggle follows.
+      new MutationObserver((_, o) => {
+        if (!pop.isConnected) {
+          toggle.setAttribute("aria-expanded", "false");
+          o.disconnect();
+        }
+      }).observe(document.body, { childList: true });
+      later.onclick = close;
+      go.onclick = async () => {
+        busy = true;
+        later.disabled = true;
+        await restart(go, what, relaunch);
+        busy = false;
+        later.disabled = false;
+      };
     };
-    if (!open) return bar.replaceChildren(toggle);
-    const note = el("span", "update-note", update ? `Version ${update.version}` : "A newer build is on disk");
-    const go = el("button", null, update ? "Restart to update" : "Restart") as HTMLButtonElement;
-    go.onclick = async () => {
-      busy = true;
-      await restart(go, note, relaunch);
-      busy = false;
-    };
-    bar.replaceChildren(note, go, toggle);
+    bar.replaceChildren(toggle);
   };
   window.__TAURI__.event.listen("update", draw);
   draw();

@@ -1005,6 +1005,8 @@ const mockHandle = (cmd, a) => {
     case "mail_clear":
       window.mockMails[a.inbox] = [];
       return null;
+    case "update_state":
+      return { update: null, relaunch: localStorage.getItem("mockRelaunch") === "1" };
     case "settings":
       return {
         mcp: window.mockMcp ?? false,
