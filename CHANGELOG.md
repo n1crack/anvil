@@ -13,10 +13,25 @@ Until 1.0.0, minor versions may contain breaking changes.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service
   start|stop <id>` ask the running app to do it, so the change shows there at
   once, and print each process's state (`api: running`). Without the app open
-  they say so and exit with 1.
+  they say so and exit with 1. A setting changed with `anvil` (link, park,
+  https, an app's command) shows in the open app at once.
 - What agents and the terminal did through Anvil ("Claude Code restarted api ·
   14:02"): an app's newest five on its Overview, all of them in Processes ›
   Agents, newest first. A failed action says why on its line.
+- Agents (MCP), off by default in Settings › Plugins: `anvil mcp` lets AI
+  agents list apps and their processes, start, stop and restart them and
+  services, read logs, ask what failed since their last check, add and remove
+  worktrees, and change an app's PHP or Node.js version, HTTPS, php.ini,
+  start command and autostart. Nothing that can't be undone is offered: no
+  database drop, no service data removal, no clean, no uninstall, and a
+  worktree is removed without its database. Claude Code connects with
+  `claude mcp add anvil -- anvil mcp`. While it's off, `anvil mcp` says where
+  to turn it on and exits with 1.
+
+### Changed
+
+- `anvil start` refuses while the Anvil app runs, which already serves your
+  apps.
 
 ### Fixed
 

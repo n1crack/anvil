@@ -133,6 +133,8 @@ enum Cmd {
     Trust,
     /// Run DNS, PHP-FPM and the web server in the foreground
     Start,
+    /// Serve Anvil to AI agents (MCP, stdio)
+    Mcp,
     /// Serve a site over HTTPS, its http:// address redirecting there; with --off,
     /// HTTP only. New sites get HTTP unless `https_default = true` in config.toml
     Https {
@@ -1569,6 +1571,18 @@ fn run() -> Result<()> {
                 bail!("Anvil is running and already serves your apps");
             }
             start(&cfg)?
+        }
+        Cmd::Mcp => {
+            if !cfg.mcp {
+                eprintln!("{}", mcp::TURNED_OFF);
+                std::process::exit(1);
+            }
+            let mut client = "Agent".to_string();
+            mcp::serve(
+                std::io::stdin().lock(),
+                std::io::stdout().lock(),
+                &mut client,
+            )?
         }
         Cmd::Uninstall { yes } => anvil::uninstall::uninstall(&cfg, config_ok, yes)?,
     }

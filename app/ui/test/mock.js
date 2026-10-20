@@ -871,8 +871,12 @@ const mockHandle = (cmd, a) => {
       s.secure = a.on;
       return mockSnap;
     }
+    case "set_mcp":
+      window.mockMcp = a.on;
+      return mockHandle("settings", {});
     case "settings":
       return {
+        mcp: window.mockMcp ?? false,
         paths: ["/Users/x/Sites"],
         hidden: ["old-blog"],
         tld: "test",

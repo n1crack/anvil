@@ -2891,6 +2891,8 @@ struct Settings {
     notifications: bool,
     https_default: bool,
     worktree_db: anvil::worktrees::DbChoice,
+    /// Settings › Plugins › Agents (MCP).
+    mcp: bool,
     /// Settings › Worktrees: each preset as it applies.
     worktree_presets: Vec<PresetView>,
     login: bool,
@@ -3041,6 +3043,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         notifications: cfg.notifications,
         https_default: cfg.https_default == Some(true),
         worktree_db: cfg.worktree_db,
+        mcp: cfg.mcp,
         worktree_presets,
         hidden: cfg.hidden.clone(),
         paths: cfg.paths,
@@ -3222,6 +3225,19 @@ fn set_worktree_preset(
             Ok(())
         },
         true,
+    )
+}
+
+/// Settings › Plugins › Agents (MCP): whether `anvil mcp` serves, and the socket answers it.
+#[tauri::command(async)]
+fn set_mcp(handle: AppHandle, on: bool) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.mcp = on;
+            Ok(())
+        },
+        false,
     )
 }
 
@@ -3789,6 +3805,7 @@ fn main() {
             set_trim_app_logs,
             set_notifications,
             set_worktree_db,
+            set_mcp,
             set_worktree_preset,
             set_login,
             open_config_dir,

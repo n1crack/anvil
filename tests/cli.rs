@@ -499,6 +499,45 @@ fn start_refuses_while_the_app_runs() {
 }
 
 #[test]
+fn mcp_off_by_default() {
+    let env = Env::short("mcp-off");
+    let out = env.run_in(&env.root, &["mcp"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "Turn on Agents (MCP) in Settings › Plugins\n"
+    );
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn mcp_on_answers_on_stdout() {
+    use std::io::Write;
+    let env = Env::short("mcp-on");
+    write(&env.home.join("config.toml"), "mcp = true\n");
+    let mut child = env
+        .cmd(&["mcp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let init =
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"t"}}}"#;
+    let list = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
+    writeln!(child.stdin.take().unwrap(), "{init}\n{list}").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let lines: Vec<serde_json::Value> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["result"]["serverInfo"]["name"], "anvil");
+    assert_eq!(lines[1]["result"]["tools"][0]["name"], "apps");
+}
+
+#[test]
 fn services_without_network() {
     let env = Env::new("services");
     let bin = env.fake(REDIS);

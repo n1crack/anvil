@@ -10,6 +10,7 @@ pub mod databases;
 pub mod dns;
 pub mod git;
 pub mod logs;
+pub mod mcp;
 pub mod packages;
 pub mod processes;
 pub mod project;
@@ -114,6 +115,9 @@ pub struct Config {
     /// Per worktree site (`<app>--<name>`): its database choice and copies made.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub worktrees: BTreeMap<String, worktrees::WorktreeConfig>,
+    /// Settings › Plugins › Agents (MCP): `anvil mcp` serves AI agents. Stored only when on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mcp: bool,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -204,6 +208,7 @@ impl Default for Config {
             worktree_db: worktrees::DbChoice::Empty,
             worktree_presets: BTreeMap::new(),
             worktrees: BTreeMap::new(),
+            mcp: false,
         }
     }
 }

@@ -51,6 +51,13 @@ fn need(req: &Request, key: &str) -> Res<String> {
 
 /// The site and what a request does, as the activity list words it; `None` for reads.
 pub(crate) fn describe(req: &Request) -> Option<(Option<String>, String)> {
+    // A config write `anvil mcp` made itself, told so the list shows it.
+    if req.method == "set_done" {
+        return Some((
+            param(req, "site").map(String::from),
+            need(req, "what").ok()?,
+        ));
+    }
     let done = match param(req, "action")? {
         "start" => "started",
         "stop" => "stopped",
@@ -82,8 +89,41 @@ fn value(v: impl Serialize) -> Res<Value> {
     serde_json::to_value(v).map_err(|e| e.to_string())
 }
 
+/// Methods behind Settings › Plugins › Agents (MCP).
+const MCP_ONLY: [&str; 2] = ["set_done", "exits"];
+
+/// The app's processes for `check`: each with its log key, state and how it ended. A
+/// process a signal ended (`Exit.code` None) reads as code -1.
+fn exits(app: &App, site: &str) -> Res<Vec<Value>> {
+    let (cfg, s) = find_site_cfg(site)?;
+    Ok(process_rows(app, &cfg, &s)
+        .into_iter()
+        // A PHP or static app's row is the web server's, no process of its own.
+        .filter(|r| r.kind != "site")
+        .map(|r| {
+            let key = if r.main {
+                s.name.clone()
+            } else {
+                anvil::processes::key(&s.name, &r.process.id)
+            };
+            let state = match (&r.crashed, r.running) {
+                (_, true) => "running",
+                (Some(_), false) => "exited",
+                (None, false) => "stopped",
+            };
+            let exit = r.crashed.as_ref().map(|e| (e.code.unwrap_or(-1), e.at));
+            json!({"key": key, "label": r.process.name, "state": state,
+                "port": r.process.port, "exit": exit})
+        })
+        .collect())
+}
+
 /// Answers one socket request; `run` and `service` land in the activity list, failed or not.
 pub(crate) fn dispatch(handle: &AppHandle, req: &Request) -> Res<Value> {
+    // Only `anvil mcp` sends these: refused, and not listed, while Agents (MCP) is off.
+    if MCP_ONLY.contains(&req.method.as_str()) && !anvil::load().is_ok_and(|c| c.mcp) {
+        return Err(anvil::mcp::TURNED_OFF.into());
+    }
     let out = answer(handle, req);
     if let Some((site, what)) = describe(req) {
         let at = std::time::SystemTime::now()
@@ -130,6 +170,9 @@ fn answer(handle: &AppHandle, req: &Request) -> Res<Value> {
             let (id, action) = (need(req, "id")?, action(req)?);
             value(service_run(handle.clone(), handle.state(), id, action)?)
         }
+        "exits" => value(exits(&handle.state::<App>(), &need(req, "site")?)?),
+        // `dispatch` records it; the config change came as `config_changed` before it.
+        "set_done" => Ok(Value::Null),
         "activity" => {
             let site = param(req, "site");
             let app = handle.state::<App>();
@@ -175,6 +218,11 @@ mod tests {
             Some((None, "stopped mysql".into()))
         );
         assert_eq!(describe(&req("apps", json!({}))), None);
+        let set = json!({"site": "shop", "what": "set PHP to 8.4"});
+        assert_eq!(
+            describe(&req("set_done", set)),
+            Some((Some("shop".into()), "set PHP to 8.4".into()))
+        );
     }
 
     #[test]

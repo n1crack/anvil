@@ -1477,6 +1477,12 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .below { margin-top: 8px; }
 
+.page .row code {
+  font: 12px ui-monospace, "SF Mono", Menlo, monospace;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .actions-inline {
   display: flex;
   align-items: center;

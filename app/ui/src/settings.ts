@@ -590,6 +590,8 @@ export function render() {
   $("#address").textContent = `${scheme}://name.${s.tld}${port === std ? "" : `:${port}`}`;
   $("#https-default").checked = s.https_default;
   $("#worktree-db").checked = s.worktree_db === "copy";
+  $("#mcp").checked = s.mcp;
+  $("#mcp-line").hidden = !s.mcp;
   renderPresets();
   // .localhost works without setup; another suffix needs the resolver step once.
   const tld = $("#tld");
@@ -721,6 +723,14 @@ $("#trim-logs").onchange = (e) => call("set_trim_app_logs", { on: e.target.check
 $("#notifications").onchange = (e) => call("set_notifications", { on: e.target.checked });
 $("#https-default").onchange = (e) => call("set_https_default", { on: e.target.checked });
 $("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.checked ? "copy" : "empty" });
+$("#mcp").onchange = (e) => call("set_mcp", { on: e.target.checked });
+// "Copied" in the button for a moment, no toast.
+$("#mcp-copy").onclick = async (e) => {
+  const b = e.currentTarget;
+  await navigator.clipboard.writeText("anvil mcp").catch(() => {});
+  b.textContent = "Copied";
+  setTimeout(() => (b.textContent = "Copy"), 1500);
+};
 $("#theme").onchange = (e) => call("set_theme", { theme: e.target.value || null });
 $("#editor").onchange = (e) => call("set_editor", { editor: e.target.value || null });
 $("#terminal").onchange = (e) => call("set_terminal", { terminal: e.target.value || null });

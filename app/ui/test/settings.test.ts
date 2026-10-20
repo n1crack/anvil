@@ -48,6 +48,7 @@ describe("sidebar", () => {
       "Python",
       "Worktrees",
       "Storage",
+      "Plugins",
       "Shortcuts",
       "About",
     ]);
@@ -212,6 +213,26 @@ describe("about", () => {
     expect($("#update-result").textContent).toBe("Version 0.2.0 is available");
     expect($("#update-go").hidden).toBe(false);
     expect($("#update-notes").textContent).toBe("Faster starts.");
+  });
+});
+
+describe("plugins", () => {
+  test("plugins_switch_shows_the_line: anvil mcp and Copy only while Agents (MCP) is on", async () => {
+    await open("plugins");
+    const box = $("#mcp") as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect($("#mcp-line").hidden).toBe(true);
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    await wait();
+    expect(w.mockCalls.at(-1)).toEqual(["set_mcp", { on: true }]);
+    expect($("#mcp-line").hidden).toBe(false);
+    expect($("#mcp-line code").textContent).toBe("anvil mcp");
+    expect($("#mcp-copy").textContent).toBe("Copy");
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    await wait();
+    expect($("#mcp-line").hidden).toBe(true);
   });
 });
 

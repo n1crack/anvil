@@ -21,6 +21,7 @@
       <p class="nav-head" aria-hidden="true"></p>
       <button data-page="worktrees"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 2.5-3.5 2-7 4"/></svg><span>Worktrees</span></button>
       <button data-page="storage"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3.5" width="12" height="9" rx="2"/><path d="M2 9h12M11 10.75h.01"/></svg><span>Storage</span></button>
+      <button data-page="plugins"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 1.5v3M10 1.5v3M4 4.5h8v2.5a4 4 0 0 1-8 0zM8 11v3.5"/></svg><span>Plugins</span></button>
       <button data-page="shortcuts"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8" rx="1.5"/><path d="M4.25 6.75h.01M6.75 6.75h.01M9.25 6.75h.01M11.75 6.75h.01M5.5 9.5h5"/></svg><span>Shortcuts</span></button>
       <button data-page="about"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 7.25v4M8 4.85h.01"/></svg><span>About</span></button>
     </nav>
@@ -167,6 +168,20 @@
         <div id="app-sizes" class="group"></div>
       </div>
     </section>
+    <section id="plugins" class="page" hidden>
+      <h1>Plugins</h1>
+      <div class="group">
+        <label class="row">
+          <span>Agents (MCP)<small>AI agents such as Claude Code see your apps, start and stop their processes and services, read logs, add worktrees and change app settings. Nothing that can’t be undone is offered.</small></span>
+          <input id="mcp" type="checkbox" role="switch">
+        </label>
+        <div class="row" id="mcp-line" hidden>
+          <span>Command for the agent’s MCP settings<small>Claude Code: claude mcp add anvil -- anvil mcp</small></span>
+          <span class="actions-inline"><code>anvil mcp</code><button id="mcp-copy">Copy</button></span>
+        </div>
+      </div>
+    </section>
+
     <section id="shortcuts" class="page" hidden>
       <h1>Shortcuts</h1>
       <h2>Applications window</h2>

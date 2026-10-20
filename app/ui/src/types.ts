@@ -268,6 +268,8 @@ export interface Settings {
   notifications: boolean;
   https_default: boolean;
   worktree_db: DbChoice;
+  /** Settings › Plugins › Agents (MCP). */
+  mcp: boolean;
   /** Settings › Worktrees: each preset as it applies. */
   worktree_presets: { id: string; name: string; kinds: string[]; hooks: Hooks; edited: boolean }[];
   login: boolean;
