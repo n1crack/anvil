@@ -289,14 +289,41 @@ pub fn octane_row(cfg: &crate::Config, site: &Site) -> Option<Process> {
     })
 }
 
+/// Octane's ports start here, below apps' own (41000) and package.json rows' (45000),
+/// both 4000 wide: 49000 and up ran into macOS's and Windows' ephemeral ports (49152+),
+/// which outgoing connections take.
+const OCTANE_PORTS: u16 = 37000;
+
 /// The Octane row's port and its server's second one (RoadRunner's RPC), stable per app
-/// and clear of the ports other apps and services are set to.
+/// and clear of the ports other apps (their Octane's too) and services are set to.
 pub fn octane_ports(cfg: &crate::Config, site: &Site) -> (u16, u16) {
+    site.octane_ports
+        .unwrap_or_else(|| pick_octane_ports(cfg, site, &[]))
+}
+
+fn pick_octane_ports(cfg: &crate::Config, site: &Site, others: &[u16]) -> (u16, u16) {
     let mut taken = taken_ports(cfg, site);
-    let port = apps::hashed_port(&format!("{}@octane", site.name), 49000, &taken, cfg);
+    taken.extend(others);
+    let key = |what: &str| format!("{}@{what}", site.name);
+    let port = apps::hashed_port(&key("octane"), OCTANE_PORTS, &taken, cfg);
     taken.push(port);
-    let rpc = apps::hashed_port(&format!("{}@octane-rpc", site.name), 49000, &taken, cfg);
+    let rpc = apps::hashed_port(&key("octane-rpc"), OCTANE_PORTS, &taken, cfg);
     (port, rpc)
+}
+
+/// Each app with laravel/octane gets its Octane ports, in name order: clear of every
+/// app's own port and of the Octane ports before it, as two apps' hashes can meet.
+// ponytail: an app added that sorts first and collides can move another's ports, as with apps' own.
+pub(crate) fn assign_octane_ports(cfg: &crate::Config, sites: &mut [Site]) {
+    let mut others: Vec<u16> = sites.iter().filter_map(|s| s.port).collect();
+    for s in sites.iter_mut() {
+        if !apps::is_php(&s.kind) || crate::octane::server(&s.path).is_none() {
+            continue;
+        }
+        let (port, rpc) = pick_octane_ports(cfg, s, &others);
+        others.extend([port, rpc]);
+        s.octane_ports = Some((port, rpc));
+    }
 }
 
 /// Ports set for apps (and this one's own) and services.
@@ -1296,6 +1323,7 @@ mod tests {
             php_pinned: false,
             ext: vec![],
             own_master: false,
+            octane_ports: None,
             ini: Default::default(),
             linked: false,
             parked_in: None,
@@ -1987,7 +2015,7 @@ echo '{DEV_JSON}'
         // On for 8.4 and for the app: loaded once.
         cfg.php_ext
             .insert("8.4".into(), vec!["apcu".into(), "xdebug".into()]);
-        cfg.sites.entry("shop".into()).or_default().ext = vec!["xdebug".into()];
+        cfg.sites.entry("shop".into()).or_default().ext = Some(vec!["xdebug".into()]);
         let s = crate::sites(&cfg)
             .into_iter()
             .find(|s| s.name == "shop")
@@ -2387,7 +2415,10 @@ echo '{DEV_JSON}'
         assert_eq!(octane_ports(&cfg, &s), (port, rpc), "stable");
         assert_ne!(port, rpc);
         for p in [port, rpc] {
-            assert!((49000..53100).contains(&p), "{p}");
+            assert!(
+                (37000..41000).contains(&p),
+                "below apps' own and ephemeral ports: {p}"
+            );
             assert!(![cfg.http_port, cfg.https_port].contains(&p));
         }
         // Another app's dev server on that port: Octane moves, as package.json rows do.
@@ -2402,6 +2433,42 @@ echo '{DEV_JSON}'
         let mut other = s.clone();
         other.name = "blog".into();
         assert_ne!(octane_ports(&cfg, &other).0, moved);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn two_apps_octane_ports_never_meet() {
+        let (dir, s) = octane_app("meet");
+        let cfg = crate::Config::default();
+        // Two app names whose Octane ports hash to the same one on their own.
+        let alone = |name: &str| {
+            let mut a = s.clone();
+            a.name = name.into();
+            octane_ports(&cfg, &a).0
+        };
+        let mut seen = BTreeMap::new();
+        let (a, b) = (0..)
+            .map(|i| format!("app{i}"))
+            .find_map(|n| {
+                let p = alone(&n);
+                seen.insert(p, n.clone()).map(|first| (first, n))
+            })
+            .unwrap();
+        let mut sites: Vec<Site> = [&a, &b, &"vite".to_string()]
+            .into_iter()
+            .map(|n| Site {
+                name: n.clone(),
+                ..s.clone()
+            })
+            .collect();
+        sites[2].kind = "vite".into();
+        sites[2].port = Some(alone(&b));
+        assign_octane_ports(&cfg, &mut sites);
+        let (pa, pb) = (octane_ports(&cfg, &sites[0]), octane_ports(&cfg, &sites[1]));
+        let all = [pa.0, pa.1, pb.0, pb.1, sites[2].port.unwrap()];
+        let distinct: std::collections::BTreeSet<_> = all.iter().collect();
+        assert_eq!(distinct.len(), 5, "{a} {b}: {all:?}");
+        assert_eq!(sites[2].octane_ports, None, "no laravel/octane, no ports");
         fs::remove_dir_all(&dir).unwrap();
     }
 

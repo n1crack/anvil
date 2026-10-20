@@ -1293,19 +1293,23 @@ const appExtErrors = new Map<string, string>(); // app -> why its last extension
 const appExtBuilding = new Set<string>(); // `<app>@<extension>` being turned on (maybe built)
 
 /** The Settings tab's PHP extensions: the catalog as switches, as in Settings › PHP, for
- * this app only. One on for every app on its version shows on and held, saying where. */
+ * this app only. One on for every app on its version shows on and held, saying where. One
+ * on without a build for the app's PHP shows off, "Not built"; on builds it. */
 function appExtensions(s, root) {
   const cell = $(".app-exts", root);
   cell.replaceChildren();
   const line = el("div", "ver-exts app-ext-list");
   const shared = snap.php_ext?.[s.php] ?? [];
+  const built = snap.php_ext_built?.[s.php];
   for (const name of snap.php_ext_catalog ?? []) {
     const forAll = shared.includes(name);
     const building = appExtBuilding.has(`${s.name}@${name}`);
+    const on = forAll || s.ext.includes(name);
+    const unbuilt = on && !!built && !built.includes(name) && !building;
     const label = el("label", "ver-ext");
     const input = Object.assign(document.createElement("input"), {
       type: "checkbox",
-      checked: forAll || s.ext.includes(name),
+      checked: on && !unbuilt,
       disabled: forAll || building,
     });
     input.setAttribute("role", "switch");
@@ -1313,6 +1317,7 @@ function appExtensions(s, root) {
     if (forAll) label.title = `On for every app on PHP ${s.php} (Settings › PHP)`;
     label.append(input, el("span", "ver-ext-name", name));
     if (building) label.append(el("span", "muted", "Building…"));
+    if (unbuilt) label.append(el("span", "muted", "Not built"));
     line.append(label);
   }
   cell.append(line);

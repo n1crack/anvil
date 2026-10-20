@@ -137,8 +137,9 @@ pub struct SiteConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ini: BTreeMap<String, String>,
     /// Catalog extensions for this site only (`phpext::CATALOG`), over its version's.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ext: Vec<String>,
+    /// A worktree's unset is its app's; its own list, even empty, replaces that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ext: Option<Vec<String>>,
     /// Overrides the detected kind (see `apps::KINDS`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
@@ -260,6 +261,9 @@ pub struct Site {
     pub ext: Vec<String>,
     /// Served by a PHP-FPM master of its own (`mark_own_masters`).
     pub own_master: bool,
+    /// Its Octane row's port and RoadRunner's RPC one (`processes::assign_octane_ports`).
+    #[serde(skip)]
+    pub octane_ports: Option<(u16, u16)>,
     pub linked: bool,
     /// The parked directory this site comes from (`None` for linked sites).
     pub parked_in: Option<PathBuf>,
@@ -584,6 +588,7 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     }
     sites.sort_by(|a, b| a.name.cmp(&b.name));
     apps::assign_ports(cfg, &mut sites);
+    processes::assign_octane_ports(cfg, &mut sites);
     mark_own_masters(&mut sites);
     sites
 }
@@ -625,10 +630,8 @@ fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
             .map(|s| s.ini.clone())
             .unwrap_or_default(),
         ext: o
-            .filter(|s| !s.ext.is_empty())
-            .or(m)
-            .map(|s| s.ext.clone())
-            .unwrap_or_default(),
+            .and_then(|s| s.ext.clone())
+            .or_else(|| m.and_then(|s| s.ext.clone())),
         port: o.and_then(|s| s.port),
         autostart: false,
         processes: BTreeMap::new(),
@@ -658,7 +661,7 @@ fn site_at(
     };
     let pinned = own.and_then(|s| s.php.clone());
     let ini = own.map(|s| s.ini.clone()).unwrap_or_default();
-    let ext = own.map(|s| s.ext.clone()).unwrap_or_default();
+    let ext = own.and_then(|s| s.ext.clone()).unwrap_or_default();
     let detected = apps::detect(&path);
     let kind = own
         .and_then(|s| s.kind.clone())
@@ -701,6 +704,7 @@ fn site_at(
         ini,
         ext,
         own_master: false,
+        octane_ports: None,
         php_pinned: pin_set && php.is_some(),
         php,
         kind_detected: detected.into(),
@@ -1235,19 +1239,15 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     })?
     .0;
     println!("PHP {full} installed in {}", dir.display());
+    opcache::prune_sources();
     if opcache::BUILDS.contains(&minor)
         && let Err(e) = opcache::build(minor)
     {
         println!("PHP {full} works without OPcache for now: {e}");
     }
-    // A new patch release: the extensions turned on for it are built again for it.
-    for name in cfg.php_ext.get(minor).cloned().unwrap_or_default() {
-        if !phpext::built(minor, &name)
-            && let Err(e) = phpext::build(minor, &name)
-        {
-            println!("PHP {full} works without {name} for now: {e}");
-        }
-    }
+    // A new patch release: the extensions turned on for it, for the version or by an
+    // app on it, are built again for it.
+    phpext::build_missing(cfg, minor);
     Ok(())
 }
 
@@ -1813,7 +1813,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             continue;
         }
         s += &format!(
-            "\n{} {{\n\troot * \"{}\"\n\tencode\n",
+            "\n{} {{\n\troot * \"{}\"\n\tencode\n{HIDDEN}",
             addresses(site, &names),
             caddy_path(&site.root)
         );
@@ -1825,12 +1825,12 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             if let Some(fpm) = &fpm {
                 s += &format!("\t\t{fpm}");
             }
-            s += "\t\tfile_server {\n\t\t\thide .*\n\t\t\tstatus 200\n\t\t}\n\t}\n}\n";
+            s += "\t\tfile_server @hidden {\n\t\t\thide *\n\t\t}\n\t\tfile_server {\n\t\t\tstatus 200\n\t\t}\n\t}\n}\n";
         } else {
             if let Some(fpm) = &fpm {
                 s += &format!("\t{fpm}");
             }
-            s += "\tfile_server {\n\t\thide .*\n\t}\n}\n";
+            s += "\tfile_server @hidden {\n\t\thide *\n\t}\n\tfile_server\n}\n";
         }
         if site.secure {
             s += &redirect(&names);
@@ -1859,6 +1859,12 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
     }
     s
 }
+
+/// What a site's file server never serves: a file whose path under the web root has a
+/// part starting with a dot (`.env`, `.git/config`), answered 404 by a file server that
+/// hides everything. `hide .*` would also match the folders of the web root's own path
+/// (`.output/public`, a project in `~/.sites`), hiding every file.
+const HIDDEN: &str = "\t@hidden path */.*\n";
 
 /// Shown instead of a bare 502 when an app that runs its own server is stopped.
 fn not_running_page(name: &str) -> String {
@@ -1931,10 +1937,34 @@ pub fn set_site_runtime(cfg: &mut Config, site: &str, version: Option<String>) -
     save(cfg)
 }
 
-/// True when the running server was started with a different set of sites.
+/// True when the running server was started with a different set of sites, or its PHP
+/// masters with other extensions (`anvil php ext add` in a terminal).
 pub fn needs_restart(cfg: &Config) -> bool {
-    fs::read_to_string(home().join("run").join("Caddyfile"))
-        .map_or(true, |old| old != caddyfile(cfg, &sites(cfg)))
+    let sites = sites(cfg);
+    let run = home().join("run");
+    let differs = |file: &str, now: String| fs::read_to_string(run.join(file)).ok() != Some(now);
+    differs("Caddyfile", caddyfile(cfg, &sites)) || differs("php-masters", php_masters(cfg, &sites))
+}
+
+/// What each PHP master starts with (`phpext::php_args_with`), a line each: the
+/// version's, then each app's own.
+fn php_masters(cfg: &Config, sites: &[Site]) -> String {
+    let versions: BTreeSet<_> = sites.iter().filter_map(|s| s.php.clone()).collect();
+    let mut out = String::new();
+    for v in &versions {
+        out += &format!(
+            "PHP {v}: {}\n",
+            phpext::php_args_with(cfg, v, None).join(" ")
+        );
+        for s in sites
+            .iter()
+            .filter(|s| s.own_master && s.php.as_deref() == Some(v))
+        {
+            let args = phpext::php_args_with(cfg, v, Some(s));
+            out += &format!("PHP {v} ({}): {}\n", s.name, args.join(" "));
+        }
+    }
+    out
 }
 
 pub fn trust() -> Result<()> {
@@ -2488,6 +2518,40 @@ pub fn stop_all(list: Vec<Stopping>, grace: std::time::Duration) {
 }
 
 /// Running PHP-FPM pools and the web server.
+/// The files Anvil generates in `run` for one app (its own PHP-FPM master's config, its
+/// php.ini folders, Octane's Caddyfile) whose app is gone, or on another PHP version.
+fn prune_run(sites: &[Site]) {
+    let mut keep = BTreeSet::new();
+    for s in sites {
+        let p = pool(s);
+        if let Some(v) = &s.php {
+            keep.insert(format!("php-{v}-{p}-fpm.conf"));
+            keep.insert(format!("php-{v}-{p}.d"));
+        }
+        keep.insert(format!("swoole-{p}.d"));
+        keep.insert(format!("frankenphp-{p}.d"));
+        keep.insert(format!("octane-{p}.Caddyfile"));
+    }
+    let run = home().join("run");
+    for e in fs::read_dir(&run).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let ours = (name.starts_with("php-")
+            && name.contains("-site-")
+            && (name.ends_with("-fpm.conf") || name.ends_with(".d")))
+            || ((name.starts_with("swoole-site-") || name.starts_with("frankenphp-site-"))
+                && name.ends_with(".d"))
+            || (name.starts_with("octane-site-") && name.ends_with(".Caddyfile"));
+        if ours && !keep.contains(&name) {
+            let path = e.path();
+            let _ = if e.file_type().is_ok_and(|t| t.is_dir()) {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+        }
+    }
+}
+
 pub struct Server {
     children: Vec<Child>,
     /// What each child is, parallel to `children`.
@@ -2516,6 +2580,7 @@ impl Server {
             }
         }
         state_dirs()?;
+        prune_run(&sites);
 
         let mut server = Server {
             children: vec![],
@@ -2534,18 +2599,18 @@ impl Server {
             let conf = home().join("run").join(format!("php-{v}-fpm.conf"));
             fs::write(&conf, fpm_conf(cfg, v, &sites))?;
             // Started here, not by a PHP: `-d`s, no scan dir (`phpext::scan_env`).
-            let fpm = |conf: &Path, ext: &[String]| {
+            let fpm = |conf: &Path, site: Option<&Site>| {
                 crate::platform::command(php_dir(v).join("php-fpm"))
                     .arg("-y")
                     .arg(conf)
                     .arg("-c")
                     .arg(php_dir(v).join("php.ini"))
-                    .args(phpext::php_args_with(cfg, v, ext))
+                    .args(phpext::php_args_with(cfg, v, site))
                     .spawn()
                     .with_context(|| format!("failed to start PHP {v}"))
             };
             server.labels.push(format!("PHP {v} FPM"));
-            server.children.push(fpm(&conf, &[])?);
+            server.children.push(fpm(&conf, None)?);
             for site in sites
                 .iter()
                 .filter(|s| s.own_master && s.php.as_deref() == Some(v))
@@ -2556,10 +2621,14 @@ impl Server {
                 let conf = fpm_site_conf_file(v, site);
                 fs::write(&conf, text)?;
                 server.labels.push(format!("PHP {v} FPM ({})", site.name));
-                server.children.push(fpm(&conf, &site.ext)?);
+                server.children.push(fpm(&conf, Some(site))?);
             }
         }
 
+        fs::write(
+            home().join("run").join("php-masters"),
+            php_masters(cfg, &sites),
+        )?;
         let file = home().join("run").join("Caddyfile");
         fs::write(&file, caddyfile(cfg, &sites))?;
         let log = fs::File::create(caddy_log())?;
@@ -2611,7 +2680,7 @@ impl Server {
     /// its `cgi_ports`: the shared one with the global php.ini values, then one per site
     /// with values, extensions or a worktree's environment of its own.
     fn start_cgi(&mut self, cfg: &Config, v: &str, sites: &[Site]) -> Result<()> {
-        let mut pools = vec![(format!("php-{v}"), cfg.ini.clone(), vec![], vec![])];
+        let mut pools = vec![(format!("php-{v}"), cfg.ini.clone(), vec![], None)];
         for site in sites
             .iter()
             .filter(|s| s.php.as_deref() == Some(v) && own_pool(s))
@@ -2622,10 +2691,10 @@ impl Server {
             };
             let mut ini = cfg.ini.clone();
             ini.extend(site.ini.clone());
-            pools.push((pool(site), ini, env, site.ext.clone()));
+            pools.push((pool(site), ini, env, Some(site)));
         }
         let log = php_fpm_log(v);
-        for (name, ini, env, ext) in pools {
+        for (name, ini, env, site) in pools {
             for port in cgi_ports(&name) {
                 let err = fs::OpenOptions::new()
                     .create(true)
@@ -2636,7 +2705,7 @@ impl Server {
                     .arg(format!("127.0.0.1:{port}"))
                     .arg("-c")
                     .arg(php_dir(v).join("php.ini"))
-                    .args(phpext::php_args_with(cfg, v, &ext));
+                    .args(phpext::php_args_with(cfg, v, site));
                 for (k, val) in &ini {
                     cmd.arg("-d").arg(format!("{k}={val}"));
                 }
@@ -2918,6 +2987,7 @@ mod tests {
             php_pinned: false,
             ext: vec![],
             own_master: false,
+            octane_ports: None,
             ini: BTreeMap::new(),
             linked: false,
             parked_in: None,
@@ -3048,6 +3118,140 @@ mod tests {
     fn add_worktree(main: &Path, at: &Path, branch: &str) {
         let at = at.to_str().unwrap();
         crate::worktrees::tests::git(main, &["worktree", "add", "-q", at, "-b", branch]);
+    }
+
+    #[test]
+    fn run_keeps_generated_files_of_apps_that_are_there() {
+        let _env = lock(&ENV_LOCK);
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let run = dir.path().join("run");
+        let files = [
+            "php-8.4-site-shop-fpm.conf",
+            "php-8.3-site-shop-fpm.conf",
+            "php-8.4-site-gone-fpm.conf",
+            "octane-site-shop.Caddyfile",
+            "octane-site-gone.Caddyfile",
+            "php-8.4-fpm.conf",
+            "Caddyfile",
+            "site-gone.sock",
+        ];
+        let dirs = [
+            "php-8.4-site-shop.d",
+            "php-8.4-site-gone.d",
+            "swoole-site-gone.d",
+            "frankenphp-site-shop.d",
+            "frankenphp-site-gone.d",
+        ];
+        for d in dirs {
+            fs::create_dir_all(run.join(d)).unwrap();
+            fs::write(run.join(d).join("anvil.ini"), "").unwrap();
+        }
+        for f in files {
+            fs::write(run.join(f), "").unwrap();
+        }
+        prune_run(&[site("shop", "/s/shop", Some("8.4"))]);
+        let mut left: Vec<String> = fs::read_dir(&run)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "Caddyfile",
+                "frankenphp-site-shop.d",
+                "octane-site-shop.Caddyfile",
+                "php-8.4-fpm.conf",
+                "php-8.4-site-shop-fpm.conf",
+                "php-8.4-site-shop.d",
+                "site-gone.sock",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_extension_changed_elsewhere_restarts_php() {
+        let _env = lock(&ENV_LOCK);
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        phpext::tests::fake_php("8.4", "8.4.23");
+        fs::write(php_dir("8.4").join(PHP_SERVER), "").unwrap();
+        phpext::tests::fake_so("8.4", "8.4.23", "apcu");
+        phpext::tests::fake_so("8.4", "8.4.23", "pcov");
+        let app = dir.path().join("shop");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("index.php"), "").unwrap();
+        let mut cfg = Config {
+            php: Some("8.4".into()),
+            ..Default::default()
+        };
+        cfg.links.insert("shop".into(), app);
+        // As `Server::start` leaves them.
+        let served = |cfg: &Config| {
+            state_dirs().unwrap();
+            let run = home().join("run");
+            fs::write(run.join("Caddyfile"), caddyfile(cfg, &sites(cfg))).unwrap();
+            fs::write(run.join("php-masters"), php_masters(cfg, &sites(cfg))).unwrap();
+        };
+        served(&cfg);
+        assert!(!needs_restart(&cfg));
+        // `anvil php ext add apcu`: same Caddyfile, other PHP-FPM arguments.
+        cfg.php_ext.insert("8.4".into(), vec!["apcu".into()]);
+        assert!(needs_restart(&cfg));
+        served(&cfg);
+        // `anvil app ext shop add pcov` with apcu its own already: its own master's.
+        cfg.sites.entry("shop".into()).or_default().ext = Some(vec!["apcu".into()]);
+        served(&cfg);
+        cfg.sites.get_mut("shop").unwrap().ext = Some(vec!["apcu".into(), "pcov".into()]);
+        assert!(needs_restart(&cfg));
+    }
+
+    #[test]
+    fn a_worktree_turns_off_an_extension_its_app_has() {
+        let root = crate::worktrees::tests::tmp("ext");
+        let shop = root.join("sites/shop");
+        app_repo(&shop);
+        add_worktree(&shop, &root.join("x"), "x");
+        let _env = lock(&ENV_LOCK);
+        let home_dir = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home_dir.path()) };
+        phpext::tests::fake_php("8.4", "8.4.23");
+        fs::write(php_dir("8.4").join(PHP_SERVER), "").unwrap();
+        phpext::tests::fake_so("8.4", "8.4.23", "xdebug");
+        phpext::tests::fake_so("8.4", "8.4.23", "apcu");
+        let mut cfg = Config {
+            php: Some("8.4".into()),
+            ..Default::default()
+        };
+        cfg.paths.push(root.join("sites"));
+        cfg.sites.entry("shop".into()).or_default().ext = Some(vec!["xdebug".into()]);
+        save(&cfg).unwrap();
+        let ext = |cfg: &Config, n: &str| sites(cfg).into_iter().find(|s| s.name == n).unwrap().ext;
+        assert_eq!(ext(&cfg, "shop--x"), ["xdebug"], "unset: its app's");
+
+        // Off for the worktree: a list of its own, kept empty; its app keeps xdebug.
+        let cfg = phpext::remove_site("shop--x", "xdebug").unwrap();
+        assert_eq!(cfg.sites["shop--x"].ext, Some(vec![]));
+        assert!(ext(&cfg, "shop--x").is_empty());
+        assert_eq!(ext(&cfg, "shop"), ["xdebug"]);
+        let text = fs::read_to_string(home().join("config.toml")).unwrap();
+        assert!(text.contains("ext = []"), "{text}");
+        assert_eq!(ext(&load().unwrap(), "shop--x"), Vec::<String>::new());
+
+        // On again: its own list; the app's last one off leaves nothing stored.
+        let cfg = phpext::add_site("shop--x", "apcu").unwrap();
+        assert_eq!(ext(&cfg, "shop--x"), ["apcu"]);
+        let cfg = phpext::remove_site("shop", "xdebug").unwrap();
+        assert_eq!(cfg.sites["shop"].ext, None);
+        assert_eq!(ext(&cfg, "shop--x"), ["apcu"]);
+        // An older config's list reads as the site's own.
+        let old: Config = toml::from_str("[sites.shop]\next = [\"xdebug\"]\n").unwrap();
+        assert_eq!(old.sites["shop"].ext, Some(vec!["xdebug".into()]));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -3660,7 +3864,7 @@ mod tests {
         cfg.links.insert("shop".into(), app.clone());
         cfg.links.insert("alias".into(), app.clone());
         cfg.links.insert("blog".into(), dir.path().into());
-        cfg.sites.entry("shop".into()).or_default().ext = vec!["xdebug".into()];
+        cfg.sites.entry("shop".into()).or_default().ext = Some(vec!["xdebug".into()]);
         let all = sites(&cfg);
         let master = |n: &str| all.iter().find(|s| s.name == n).unwrap().own_master;
         assert!(master("shop") && master("alias"), "same folder, same rule");
@@ -3714,6 +3918,8 @@ mod tests {
 
     #[test]
     fn fpm_gives_a_worktree_its_own_pool_with_env() {
+        // Its socket's path is in ANVIL_HOME.
+        let _env = lock(&ENV_LOCK);
         let (cfg, wt) = crate::worktrees::tests::worktree_site(
             "fpm",
             "DB_CONNECTION=mysql\nDB_DATABASE=shop\n",
@@ -3898,7 +4104,7 @@ mod tests {
         let out = caddyfile(&cfg, std::slice::from_ref(&app));
         let sock = fpm_socket(&app).unwrap();
         let block = format!(
-            "\nshop.test {{\n\troot * \"{path}\"\n\tencode\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors 502 {{\n\t\tphp_fastcgi unix/{}\n\t\tfile_server {{\n\t\t\thide .*\n\t\t\tstatus 200\n\t\t}}\n\t}}\n}}\n",
+            "\nshop.test {{\n\troot * \"{path}\"\n\tencode\n\t@hidden path */.*\n\treverse_proxy 127.0.0.1:{port}\n\thandle_errors 502 {{\n\t\tphp_fastcgi unix/{}\n\t\tfile_server @hidden {{\n\t\t\thide *\n\t\t}}\n\t\tfile_server {{\n\t\t\tstatus 200\n\t\t}}\n\t}}\n}}\n",
             sock.display()
         );
         assert!(out.contains(&block), "{out}");
@@ -3923,6 +4129,37 @@ mod tests {
     }
 
     #[test]
+    fn a_web_root_in_a_dot_folder_hides_only_dotfiles_under_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let public = dir.path().join(".output/public");
+        fs::create_dir_all(&public).unwrap();
+        let mut s = site("shop", dir.path().to_str().unwrap(), None);
+        s.kind = "static".into();
+        s.root = public.clone();
+        s.root_custom = Some(".output/public".into());
+        let out = caddyfile(&Config::default(), &[s]);
+        let block = format!(
+            "\troot * \"{}\"\n\tencode\n\t@hidden path */.*\n\tfile_server @hidden {{\n\t\thide *\n\t}}\n\tfile_server\n}}",
+            public.display()
+        );
+        assert!(out.contains(&block), "{out}");
+        // Caddy takes it, when this machine has Anvil's Caddy (CI has none).
+        let bin = PathBuf::from(std::env::var("HOME").unwrap()).join(".anvil/bin/caddy");
+        if bin.exists() {
+            fs::write(dir.path().join("Caddyfile"), &out).unwrap();
+            let adapt = crate::platform::command(&bin)
+                .args(["adapt", "--adapter", "caddyfile", "--config"])
+                .arg(dir.path().join("Caddyfile"))
+                .env("XDG_DATA_HOME", dir.path())
+                .env("XDG_CONFIG_HOME", dir.path())
+                .output()
+                .unwrap();
+            let err = String::from_utf8_lossy(&adapt.stderr);
+            assert!(adapt.status.success(), "{err}");
+        }
+    }
+
+    #[test]
     fn caddyfile_routes_php_sites_to_their_socket() {
         let cfg = Config::default();
         let sites = [
@@ -3932,7 +4169,16 @@ mod tests {
         let out = caddyfile(&cfg, &sites);
         assert!(out.contains("https_port 8443"));
         assert!(out.contains("default_bind 127.0.0.1 [::1]"));
-        assert_eq!(out.matches("hide .*").count(), 2);
+        assert_eq!(out.matches("@hidden path */.*").count(), 2);
+        assert_eq!(
+            out.matches("file_server @hidden {\n\t\thide *\n\t}\n\tfile_server\n}")
+                .count(),
+            2
+        );
+        assert!(
+            !out.contains("hide .*"),
+            "a dot in the root's own path hid every file"
+        );
         assert!(out.contains("\nshop.test {\n\troot * \"/s/shop/public\""));
         // HTTPS sites send their HTTP address on with a redirect the browser doesn't keep.
         assert!(out.contains("\nhttp://shop.test {\n\tredir https://{host}"));

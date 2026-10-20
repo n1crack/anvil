@@ -11,11 +11,15 @@ Until 1.0.0, minor versions may contain breaking changes.
 ### Added
 
 - Laravel Octane: an app with `laravel/octane` gets an `octane` process
-  (RoadRunner), left out of Dev start, on a private port of its own. While it
-  runs, the app's address is served by Octane; when it stops or crashes,
+  (RoadRunner), left out of Dev start, on a private port of its own (no two
+  apps share one, and none is among the ports macOS gives outgoing
+  connections). While it runs, the app's address is served by Octane, also
+  when laravel/octane was added while Anvil ran; when it stops or crashes,
   PHP-FPM serves the next request, never an error page. Anvil downloads
   RoadRunner 2025.1.15 once into its own folder (checked against its
-  SHA-256) and never writes `rr` or `.rr.yaml` into the project. A worktree's
+  SHA-256) and never writes `rr` or `.rr.yaml` into the project; Disk lists
+  the downloads as cleanable, and a newer pinned version replaces the old
+  one. A worktree's
   Octane uses its own port and database. It runs two workers, not one per
   core (140 MB instead of 455 MB on a 12-core Mac); edit the command for more.
   FrankenPHP (`OCTANE_SERVER=frankenphp`) too: Anvil downloads FrankenPHP
@@ -38,7 +42,8 @@ Until 1.0.0, minor versions may contain breaking changes.
   the project (`web`, `dist`, `.`) in the app's Settings, or `anvil app root
   <site> [<dir>]` (`--reset` goes back to `public/` when present). A worktree
   serves the same folder of its own checkout. A web root that's gone shows a
-  page saying so, never the project folder.
+  page saying so, never the project folder. One in a dot folder
+  (`.output/public`) is served too; dotfiles inside it stay hidden.
 - PHP 8.1 to 8.4 get OPcache: Anvil builds it from php.net's source of the
   same version on your Mac (checked against php.net's checksum; needs the Xcode
   command line tools), and every version serves with OPcache tuned for
@@ -51,17 +56,25 @@ Until 1.0.0, minor versions may contain breaking changes.
   against the PHP you run (checked against checksums pinned in Anvil; needs
   the Xcode command line tools), and the web, the terminal's `php` and an
   app's processes load the same ones, as does a PHP those start (queue
-  workers, `npm run dev` → `php artisan`, composer scripts). Xdebug starts only when a request
+  workers, `npm run dev` → `php artisan`, composer scripts), but not one in
+  another project started from there. Xdebug starts only when a request
   asks for it (`xdebug.start_with_request=trigger`). Off keeps the build, so
-  on again is instant; a new patch release of PHP builds them again.
+  on again is instant; a new patch release of PHP builds them again, and so
+  does moving an app to another version. One that is on without a build (it
+  failed) shows as not built, in Settings, `anvil php ext list` and `anvil
+  project`, not as on. `anvil php ext add|remove` restarts PHP-FPM in the open
+  app.
 - PHP extensions for one app: the same switches in the app's Settings tab, or
   `anvil app ext <site> add|remove <ext>`, e.g. Xdebug for the app you debug
   only. That app, and any other address of the same folder, gets a PHP-FPM of
-  its own; its terminal `php` and processes load the same extensions.
+  its own, with its own `xdebug.*` and `opcache.*` php.ini values; its
+  terminal `php` and processes load the same extensions. A worktree has its
+  app's until one is changed for it; from then on it has its own, so one its
+  app has can be off for it.
 - A project's `.anvil.toml` can ask for PHP extensions: `extensions =
-  ["xdebug"]`. One not on for the app or its PHP version shows in the
-  Overview's Project line with Add, which turns it on for that app (building
-  it first if needed); `anvil project --apply` does the same. A name Anvil
+  ["xdebug"]`. One not on (or not built) for the app or its PHP version shows
+  in the Overview's Project line with Add, which turns it on for that app
+  (building it first if needed); `anvil project --apply` does the same. A name Anvil
   doesn't offer is reported, like an unknown version.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service
   start|stop <id>` ask the running app to do it, so the change shows there at
@@ -92,6 +105,10 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Fixed
 
+- An app whose folder is inside a folder starting with a dot (`~/.sites/shop`)
+  no longer answers 404 for its files (CSS, images, a static site's every
+  page): only files and folders starting with a dot inside its web root
+  (`.env`, `.git`) are hidden, as intended.
 - A .NET app no longer offers a version to pin, which did nothing: dotnet
   picks the SDK from the project's `global.json`. `anvil app runtime` refuses a
   .NET version.

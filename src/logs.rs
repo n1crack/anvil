@@ -949,6 +949,7 @@ mod tests {
             php_pinned: false,
             ext: vec![],
             own_master: false,
+            octane_ports: None,
             ini: Default::default(),
             linked: false,
             parked_in: None,

@@ -139,7 +139,26 @@ fn install(url: &str, sum: &str, dir: &Path, zip: bool) -> Result<PathBuf> {
         anyhow::ensure!(d.join("rr").is_file(), "{url} has no rr in it");
         Ok(std::fs::write(d.join("rr.yaml"), "")?)
     })?;
+    drop_others(dir);
     Ok(rr)
+}
+
+/// The server's other versions beside `dir`, pinned by an older Anvil: never run again.
+/// FrankenPHP's `data` folder stays.
+fn drop_others(dir: &Path) {
+    let (Some(parent), Some(mine)) = (dir.parent(), dir.file_name()) else {
+        return;
+    };
+    for e in std::fs::read_dir(parent).into_iter().flatten().flatten() {
+        let name = e.file_name();
+        if name != mine
+            && name
+                .to_string_lossy()
+                .starts_with(|c: char| c.is_ascii_digit())
+        {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
 }
 
 /// The FrankenPHP binary at `url` as `dir/frankenphp`, once it matches `sum` and runs the
@@ -165,6 +184,7 @@ fn install_frankenphp(url: &str, sum: &str, dir: &Path) -> Result<PathBuf> {
         );
         Ok(())
     })?;
+    drop_others(dir);
     Ok(bin)
 }
 
@@ -613,7 +633,7 @@ mod tests {
         let ini = scan_ini(&crate::apps::process_env(&s, &queue, &cfg).unwrap());
         assert!(ini.contains(&format!("extension={apcu}\n")), "{ini}");
         assert!(!ini.contains("swoole"), "{ini}");
-        let fpm = crate::phpext::php_args_with(&cfg, "8.4", &s.ext);
+        let fpm = crate::phpext::php_args_with(&cfg, "8.4", Some(&s));
         assert!(!fpm.iter().any(|a| a.contains("swoole")), "{fpm:?}");
         let cli = crate::phpext::cli_args(&cfg, "8.4", Some(&s));
         assert!(!cli.iter().any(|a| a.contains("swoole")), "{cli:?}");
@@ -736,9 +756,15 @@ mod tests {
             .next()
             .unwrap()
             .to_string();
+        // A version an older Anvil pinned goes once this one is in; other folders stay.
+        let old = home.path().join("octane/roadrunner/2024.3.0");
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(home.path().join("octane/roadrunner/data")).unwrap();
         let rr = install(&url, &sum, &dir, false).unwrap();
         assert_eq!(rr, dir.join("rr"));
         assert!(rr.is_file());
+        assert!(!old.exists());
+        assert!(home.path().join("octane/roadrunner/data").exists());
         // Octane's own .rr.yaml would land in the project: Anvil's empty one is used instead.
         assert!(dir.join("rr.yaml").is_file());
         // Once there, it isn't fetched again.

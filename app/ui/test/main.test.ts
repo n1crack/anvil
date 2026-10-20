@@ -197,6 +197,29 @@ describe("app extensions", () => {
       delete w.mockExtError;
     }
   });
+
+  test("app_ext_not_built: one on without a build for the app's PHP shows off, Not built; on builds it", async () => {
+    const shop = w.mockSnap.sites.find((s: any) => s.name === "shop");
+    w.mockSnap.php_ext = { "8.4": ["apcu"] };
+    w.mockSnap.php_ext_built = { "8.4": [] };
+    shop.ext = ["xdebug"];
+    try {
+      await wait(550);
+      w.refresh();
+      await wait(80);
+      await select("shop");
+      const [xdebug, , apcu] = exts();
+      expect(xdebug).toMatchObject({ on: false, held: false, text: "xdebugNot built" });
+      expect(apcu).toMatchObject({ on: false, held: true, text: "apcuNot built" });
+      flip("xdebug");
+      await wait(10);
+      expect(calls("app_ext").at(-1)![1]).toEqual({ site: "shop", name: "xdebug", on: true });
+    } finally {
+      w.mockSnap.php_ext = {};
+      w.mockSnap.php_ext_built = {};
+      shop.ext = [];
+    }
+  });
 });
 
 describe("sidebar", () => {

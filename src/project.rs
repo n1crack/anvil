@@ -225,8 +225,11 @@ pub fn needs(cfg: &Config, site: &Site) -> Vec<Need> {
         .filter_map(|id| Some((services::kind_of(cfg, id).ok()?, services::version(cfg, id))))
         .collect();
     let mut exts = site.ext.clone();
-    if let Some(v) = &site.php {
+    if let Some(v) = site.php.as_deref().filter(|_| !f.extensions.is_empty()) {
         exts.extend(cfg.php_ext.get(v).into_iter().flatten().cloned());
+        // On without a build for the installed PHP loads nothing: not met (Add builds it).
+        let built = crate::phpext::built_names(v);
+        exts.retain(|e| built.contains(&e.as_str()));
     }
     needs_in(
         &f,
@@ -335,6 +338,29 @@ mod tests {
         // On for the app or for its PHP version: both count once applied.
         let n = needs_in(&f, (None, None), &[], &[], &[], &s(&["apcu", "xdebug"]));
         assert!(n.iter().all(|n| n.met && !n.missing()));
+    }
+
+    #[test]
+    fn an_extension_on_without_a_build_is_not_met() {
+        let (dir, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let _env = crate::lock(&crate::ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        fs::write(
+            dir.path().join(".anvil.toml"),
+            "extensions = [\"xdebug\"]\n",
+        )
+        .unwrap();
+        let mut s = crate::tests::site("shop", dir.path().to_str().unwrap(), Some("8.4"));
+        s.path = dir.path().into();
+        s.ext = vec!["xdebug".into()];
+        let cfg = Config::default();
+        // PHP 8.4.24 installed since the build for 8.4.23: on, but nothing loads.
+        crate::phpext::tests::fake_php("8.4", "8.4.24");
+        crate::phpext::tests::fake_so("8.4", "8.4.23", "xdebug");
+        assert!(needs(&cfg, &s)[0].missing());
+        crate::phpext::tests::fake_so("8.4", "8.4.24", "xdebug");
+        assert!(needs(&cfg, &s)[0].met);
     }
 
     #[test]

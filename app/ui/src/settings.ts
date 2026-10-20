@@ -674,18 +674,21 @@ function phpParts(v: Settings["php"][number]) {
 }
 
 /** "Extensions" and a switch per catalog extension, on for every app on the version.
- * One being built says so on its label and holds its switch. */
+ * One being built says so on its label and holds its switch; one on without a build for
+ * this PHP (a build that failed, a PHP installed since) shows off, "Not built": on builds it. */
 function extensionsLine(v: Settings["php"][number]) {
   const line = Object.assign(document.createElement("div"), { className: "ver-exts" });
   line.append(Object.assign(document.createElement("span"), { className: "ver-exts-label", textContent: "Extensions" }));
   for (const e of v.extensions) {
     const building = e.building || installing.has(`ext@${v.version}@${e.name}`);
+    const unbuilt = e.on && !e.built && !building;
     const label = Object.assign(document.createElement("label"), { className: "ver-ext" });
-    const input = Object.assign(document.createElement("input"), { type: "checkbox", checked: e.on, disabled: building });
+    const input = Object.assign(document.createElement("input"), { type: "checkbox", checked: e.on && !unbuilt, disabled: building });
     input.setAttribute("role", "switch");
     input.onchange = () => setExtension(v.version, e.name, input.checked);
     label.append(input, Object.assign(document.createElement("span"), { className: "ver-ext-name", textContent: e.name }));
     if (building) label.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Building…" }));
+    if (unbuilt) label.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Not built" }));
     line.append(label);
   }
   return line;

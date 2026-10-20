@@ -993,8 +993,9 @@ mod tests {
                 );
             }
         }
-        // start_app, process_run, command_run, start_process, process_settings, CLI start.
-        assert_eq!(calls, 6, "a start path was added or the scan lost one");
+        // start_app, command_run, start_process (process_run's and process_settings' too),
+        // CLI start.
+        assert_eq!(calls, 4, "a start path was added or the scan lost one");
     }
 
     #[test]
@@ -1275,6 +1276,7 @@ mod tests {
             php_pinned: false,
             ext: vec![],
             own_master: false,
+            octane_ports: None,
             ini: Default::default(),
             linked: false,
             parked_in: None,

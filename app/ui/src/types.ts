@@ -71,6 +71,8 @@ export interface Snapshot {
   php_ext_catalog: string[];
   /** Extensions on for every app on a version, by version. */
   php_ext: Record<string, string[]>;
+  /** The extensions built for each version that has some on; one on without a build loads nothing. */
+  php_ext_built: Record<string, string[]>;
 }
 
 export type DbChoice = "copy" | "empty";
@@ -270,7 +272,7 @@ export interface Settings {
   editors: string[];
   php: { version: string; installed: boolean; default: boolean; pinned_by: string[]; opcache: "builtin" | "ready" | "missing"; opcache_building: boolean;
     /** The catalog, each on or off for every app on the version. */
-    extensions: { name: string; on: boolean; building: boolean }[] }[];
+    extensions: { name: string; on: boolean; built: boolean; building: boolean }[] }[];
   ini: Record<string, string>;
   terminal: string | null;
   terminals: string[];
