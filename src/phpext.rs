@@ -1,7 +1,7 @@
 //! PHP extensions from PECL (xdebug, pcov, apcu, igbinary, msgpack), built on this Mac
 //! with phpize against the source tree OPcache configured for the same exact version.
 
-use crate::opcache::{install_so, installed_full, source_tree, tools_error};
+use crate::opcache::{install_so, installed_full, tools_error};
 use crate::{Config, fetch_tgz, home, php_dir, run};
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
@@ -111,17 +111,8 @@ pub fn built(minor: &str, name: &str) -> bool {
 pub fn build(minor: &str, name: &str) -> Result<()> {
     let ext = find(name)?;
     let _held = build_lock(minor, name, name)?;
-    let (full, src) = source_tree(minor)?;
+    let (full, stage) = crate::opcache::stage(minor)?;
     let bin = tools()?;
-    let stage = src.join("stage");
-    let staged = stage.join(".anvil-staged");
-    if !staged.exists() {
-        run(Command::new("make")
-            .args(["-s", "install-headers", "install-build", "install-programs"])
-            .current_dir(&src))
-        .map_err(|e| tools_error("PHP's headers", e))?;
-        fs::write(&staged, "")?;
-    }
     println!("Building {name} {} for PHP {full}…", ext.version);
     let dir = home()
         .join("build")
