@@ -82,6 +82,9 @@ export interface Snapshot {
   tunnel: boolean;
   /** Shared apps' tunnels, by app; `note` says what links the app builds point to. */
   shares: Record<string, Share>;
+  /** Settings › Plugins › Database viewer while it's on: why it isn't served, and each
+   * app's database it opens, as the Overview names it. */
+  db_viewer: { problem: string | null; apps: Record<string, string> } | null;
 }
 
 export type Share = ({ state: "starting" } | { state: "ready"; url: string } | { state: "failed"; error: string }) & {
@@ -314,6 +317,10 @@ export interface Settings {
   mail_catcher: boolean;
   mail_port: number;
   mail_error: string | null;
+  /** Settings › Plugins › Database viewer, where it answers, and why it isn't served. */
+  db_viewer: boolean;
+  db_viewer_host: string;
+  db_viewer_problem: string | null;
   /** Settings › Worktrees: each preset as it applies. */
   worktree_presets: { id: string; name: string; kinds: string[]; hooks: Hooks; edited: boolean }[];
   login: boolean;

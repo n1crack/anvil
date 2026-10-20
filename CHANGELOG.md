@@ -10,6 +10,17 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Database viewer (Settings › Plugins, off by default): Adminer 6.1.2 at
+  `http(s)://db.<tld>`, served by the default PHP. Turning it on downloads the
+  single-file build (418 KB) into `~/.anvil/adminer/6.1.2/`, checked against its
+  pinned SHA-256 (older versions are removed; cleanable in Disk). Browse on each
+  MySQL/PostgreSQL service, on each of its databases, and on an app's Overview
+  Database line opens it logged in, with no password, to Anvil's own services
+  on 127.0.0.1 and to SQLite files inside the apps' folders only; nothing else
+  logs in without a password, and an Open link from another site's page does not
+  log in. No version check or other request to adminer.org. An app called `db`
+  keeps `db.<tld>`, and Settings says the viewer isn't served then.
+  `anvil db open <service|app> [database]` prints the address.
 - Tunnel (Settings › Plugins, off by default): an app's Overview gets a Public
   address line. Share, after a confirm, opens a Cloudflare quick tunnel (no
   account) to the app through Caddy with the app's own host, HTTPS apps over

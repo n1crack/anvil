@@ -603,6 +603,7 @@ export function render() {
   $("#mcp-line").hidden = !s.mcp;
   $("#tunnel").checked = s.tunnel;
   renderMailCatcher();
+  renderDbViewer();
   renderPresets();
   // .localhost works without setup; another suffix needs the resolver step once.
   const tld = $("#tld");
@@ -822,6 +823,37 @@ $("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.c
 $("#mcp").onchange = (e) => call("set_mcp", { on: e.target.checked });
 $("#tunnel").onchange = (e) => call("set_tunnel", { on: e.target.checked });
 $("#mail-catcher").onchange = (e) => call("set_mail_catcher", { on: e.target.checked });
+
+/** Settings › Plugins › Database viewer: turning it on downloads Adminer first, said in
+ * its own line; a failure shows there and leaves it off. */
+let dbViewerBusy = "";
+let dbViewerFail = "";
+$("#db-viewer").onchange = async (e) => {
+  const on = e.target.checked;
+  dbViewerBusy = on ? "Downloading Adminer…" : "Turning off…";
+  dbViewerFail = "";
+  renderDbViewer();
+  try {
+    s = await invoke("set_db_viewer", { on });
+  } catch (err) {
+    dbViewerFail = String(err);
+  }
+  dbViewerBusy = "";
+  render();
+};
+function renderDbViewer() {
+  const sw = $("#db-viewer");
+  sw.checked = dbViewerBusy ? sw.checked : s.db_viewer;
+  sw.disabled = !!dbViewerBusy;
+  $(".db-tld").textContent = s.tld;
+  const line = $("#db-viewer-line");
+  line.hidden = !s.db_viewer && !dbViewerBusy;
+  $("span", line).textContent = dbViewerBusy || "Opens at";
+  $("code", line).textContent = dbViewerBusy ? "" : s.db_viewer_host;
+  const why = dbViewerFail || (s.db_viewer && s.db_viewer_problem) || "";
+  $("#db-viewer-error").textContent = why;
+  $("#db-viewer-error").hidden = !why;
+}
 
 /** Settings › Plugins › Mail catcher: where it listens, why it can't, and the inbox of
  * mail from no app, shown once there is some. */

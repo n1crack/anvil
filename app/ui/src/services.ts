@@ -62,6 +62,12 @@ window.renderSiteServices = (s, root) => {
     };
     box.append(chip);
   }
+  // The Overview's Database line, with the Database viewer on: what Browse opens. A
+  // worktree's own Database line has its Browse (app.ts).
+  const dbRow = $(".db-row", root);
+  const db = snap?.db_viewer?.apps[s.name];
+  dbRow.hidden = !db || !!s.worktree_of || !browsable();
+  if (!dbRow.hidden) $("dd", dbRow).replaceChildren(el("span", null, db), " ", browseButton(s.name));
   // The Overview's Mail line: the mail catcher's for an app it catches, else only for an
   // app whose .env sends to an Anvil Mailpit.
   const row = $(".mail-row", root);
@@ -86,6 +92,28 @@ window.renderSiteServices = (s, root) => {
 };
 
 window.loadServices = () => serviceCall("services");
+
+/** Browse: open a service (at `database`) or an app's database in the Database viewer,
+ * logged in. A failure says why beside the button. */
+export function browseButton(name: string, database?: string, cls = "inline-action") {
+  const b = el("button", cls || null, "Browse");
+  b.title = `Open in the Database viewer at db.${snap.tld}`;
+  b.onclick = async () => {
+    if (b.nextElementSibling?.classList.contains("browse-error")) b.nextElementSibling.remove();
+    b.disabled = true;
+    try {
+      await invoke("db_open", { name, database: database ?? null });
+    } catch (e) {
+      b.after(el("span", "error browse-error", ` ${String(e)}`));
+    } finally {
+      b.disabled = false;
+    }
+  };
+  return b;
+}
+
+/** Browse is offered while the viewer is on and served. */
+const browsable = () => !!snap?.db_viewer && !snap.db_viewer.problem;
 
 export function renderModes() {
   for (const b of document.querySelectorAll<HTMLElement>(".modes [role=tab]")) {
@@ -337,6 +365,8 @@ export function renderService() {
     }
   }
   renderContents(svc, root);
+  if (browsable() && (svc.kind === "mysql" || svc.kind === "postgres"))
+    $(".svc-contents-head", root).append(browseButton(svc.id));
   $(".svc-remove", root).onclick = () => removeService(svc);
 }
 
@@ -691,6 +721,7 @@ function drawContents(svc, root, c) {
           "danger hover-only",
         ),
       ];
+      if (browsable()) buttons.push(browseButton(svc.id, name, ""));
       if (svc.clients[0]) buttons.push(act("Open", () => openClient(svc, svc.clients[0], name)));
       line(name, bytes(size), ...buttons);
     }
@@ -772,6 +803,8 @@ function drawContents(svc, root, c) {
 }
 
 late.services = () => services;
+late.browseButton = browseButton;
+late.browsable = browsable;
 late.renderServiceList = renderServiceList;
 late.selectService = selectService;
 late.serviceKeys = serviceKeys;

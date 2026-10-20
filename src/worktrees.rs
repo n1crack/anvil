@@ -598,7 +598,7 @@ fn decoded(s: &str, query: bool) -> String {
 }
 
 /// `s` percent-encoded for a URL: all but letters, digits and `-._~`.
-fn encoded(s: &str) -> String {
+pub(crate) fn encoded(s: &str) -> String {
     s.bytes()
         .map(|c| match c {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
@@ -730,7 +730,7 @@ pub fn main_db(cfg: &Config, site: &Site) -> MainDb {
 }
 
 /// `main_db` for the main checkout `main` and a worktree at `wt`.
-fn main_db_at(cfg: &Config, main: &Path, wt: &Path) -> MainDb {
+pub(crate) fn main_db_at(cfg: &Config, main: &Path, wt: &Path) -> MainDb {
     use crate::resources::{is_local, url_host, url_port};
     let env = crate::resources::dotenv(main);
     let get = |k: &str| env.get(k).map(String::as_str).filter(|v| !v.is_empty());

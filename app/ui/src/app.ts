@@ -1556,6 +1556,8 @@ function worktreeLines(s, root) {
           ? `copy of ${v.main_database ?? main}`
           : "empty";
     const dd = el("dd", null, `${v.database} (${how})`);
+    // The Database viewer opens it once it's there.
+    if (late.browsable() && snap.db_viewer?.apps[s.name] && !v.pending && !v.preparing) dd.append(" ", late.browseButton(s.name));
     if (v.preparing) dd.append(el("div", "muted", v.preparing));
     else if (v.pending) {
       const b = el("button", "inline-action", preparing.has(s.name) ? "Preparing…" : "Prepare database");

@@ -135,6 +135,11 @@ enum Cmd {
     Start,
     /// Serve Anvil to AI agents (MCP, stdio)
     Mcp,
+    /// The Database viewer (Adminer at db.<tld>, Settings › Plugins)
+    Db {
+        #[command(subcommand)]
+        cmd: DbCmd,
+    },
     /// Serve a site over HTTPS, its http:// address redirecting there; with --off,
     /// HTTP only. New sites get HTTP unless `https_default = true` in config.toml
     Https {
@@ -294,6 +299,17 @@ enum WorktreeCmd {
         /// Don't ask before deleting what git doesn't keep (its SQLite files, an edited .env)
         #[arg(long)]
         yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DbCmd {
+    /// Print the address that opens a MySQL or PostgreSQL service (at one of its
+    /// databases), or an app's database, logged in
+    Open {
+        /// A service or an app
+        name: String,
+        database: Option<String>,
     },
 }
 
@@ -2082,6 +2098,12 @@ fn run() -> Result<()> {
                 &mut client,
             )?
         }
+        Cmd::Db {
+            cmd: DbCmd::Open { name, database },
+        } => println!(
+            "{}",
+            anvil::dbviewer::url(&cfg, &name, database.as_deref())?
+        ),
         Cmd::Uninstall { yes } => anvil::uninstall::uninstall(&cfg, config_ok, yes)?,
     }
     Ok(())

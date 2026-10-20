@@ -114,6 +114,16 @@ struct Snapshot {
     tunnel: bool,
     /// Shared apps' tunnels, by app.
     shares: std::collections::BTreeMap<String, ShareView>,
+    /// Settings › Plugins › Database viewer, while it's on.
+    db_viewer: Option<DbViewer>,
+}
+
+/// What Browse buttons need: why the viewer isn't served, and each app's database it opens.
+#[derive(Serialize)]
+struct DbViewer {
+    problem: Option<String>,
+    /// By app: its database as the Overview names it (`dbviewer::label`).
+    apps: std::collections::BTreeMap<String, String>,
 }
 
 /// An app's tunnel on its Overview.
@@ -454,6 +464,16 @@ fn snapshot(app: &App) -> Res<Snapshot> {
                 })
                 .collect()
         },
+        db_viewer: cfg.db_viewer.then(|| DbViewer {
+            problem: anvil::dbviewer::problem(&cfg, &sites),
+            apps: sites
+                .iter()
+                .filter_map(|s| {
+                    let t = anvil::dbviewer::target(&cfg, s)?;
+                    Some((s.name.clone(), anvil::dbviewer::label(s, &t)))
+                })
+                .collect(),
+        }),
         sites,
         hidden: anvil::hidden_sites(&cfg),
         php_default: cfg.php.clone(),
@@ -2971,6 +2991,15 @@ async fn service_data(
     .map_err(err)
 }
 
+/// Browse: a service (at one of its databases) or an app's database in the Database
+/// viewer, logged in. Its first use downloads Adminer.
+#[tauri::command(async)]
+fn db_open(name: String, database: Option<String>) -> Res<()> {
+    let cfg = anvil::load().map_err(err)?;
+    let url = anvil::dbviewer::url(&cfg, &name, database.as_deref()).map_err(err)?;
+    anvil::run(&mut anvil::platform::open(url)).map_err(err)
+}
+
 /// Open a service (or one of its databases) in an installed database app.
 #[tauri::command(async)]
 fn open_in_client(id: String, client: String, database: Option<String>) -> Res<()> {
@@ -3118,6 +3147,10 @@ struct Settings {
     mail_catcher: bool,
     mail_port: u16,
     mail_error: Option<String>,
+    /// Settings › Plugins › Database viewer, where it answers, and why it isn't served.
+    db_viewer: bool,
+    db_viewer_host: String,
+    db_viewer_problem: Option<String>,
     /// Settings › Worktrees: each preset as it applies.
     worktree_presets: Vec<PresetView>,
     login: bool,
@@ -3237,6 +3270,8 @@ fn settings(handle: AppHandle) -> Res<Settings> {
     let cfg = anvil::load().map_err(err)?;
     let installed = anvil::installed_php();
     let fwd = anvil::ports_forwarded(&cfg);
+    let db_viewer_host = anvil::dbviewer::host(&cfg);
+    let db_viewer_problem = anvil::dbviewer::problem(&cfg, &anvil::sites(&cfg));
     let worktree_presets = anvil::worktrees::PRESETS
         .iter()
         .map(|(id, name, kinds)| PresetView {
@@ -3288,6 +3323,9 @@ fn settings(handle: AppHandle) -> Res<Settings> {
             .mail_catcher
             .then(|| mail_error(&handle.state::<App>()))
             .flatten(),
+        db_viewer: cfg.db_viewer,
+        db_viewer_host,
+        db_viewer_problem,
         worktree_presets,
         hidden: cfg.hidden.clone(),
         paths: cfg.paths,
@@ -3509,6 +3547,23 @@ fn set_mail_catcher(handle: AppHandle, on: bool) -> Res<Settings> {
         &handle,
         |cfg| {
             cfg.mail_catcher = on;
+            Ok(())
+        },
+        true,
+    )
+}
+
+/// Settings › Plugins › Database viewer: on downloads Adminer first (a failure leaves it
+/// off), then the web server restarts to serve db.<tld> or stop serving it.
+#[tauri::command(async)]
+fn set_db_viewer(handle: AppHandle, on: bool) -> Res<Settings> {
+    if on {
+        anvil::dbviewer::ensure().map_err(err)?;
+    }
+    apply(
+        &handle,
+        |cfg| {
+            cfg.db_viewer = on;
             Ok(())
         },
         true,
@@ -4333,6 +4388,7 @@ fn main() {
             share_start,
             share_stop,
             set_mail_catcher,
+            set_db_viewer,
             set_mail_caught,
             mail_list,
             mail_read,
@@ -4349,6 +4405,7 @@ fn main() {
             service_contents,
             service_data,
             open_in_client,
+            db_open,
             service_run,
             set_service_tags,
             set_service_apps,

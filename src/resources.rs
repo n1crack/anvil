@@ -1135,6 +1135,13 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
         "Downloaded again when you share an app",
     ));
     entries.push((
+        "Database viewer (Adminer)".into(),
+        crate::dbviewer::root(),
+        "Cache",
+        Safety::Safe,
+        "Downloaded again when the Database viewer opens or Anvil starts",
+    ));
+    entries.push((
         "Logs".into(),
         h.join("log"),
         "Logs",
@@ -1197,6 +1204,7 @@ pub fn clean_anvil(path: &str) -> Result<u64> {
         h.join("build"),
         h.join("octane"),
         h.join("tunnel"),
+        crate::dbviewer::root(),
         crate::mail::root(),
         crate::phpext::tools_dir(),
     ]
@@ -1531,11 +1539,15 @@ mod tests {
         let inbox = dir.path().join("mail/shop");
         std::fs::create_dir_all(&inbox).unwrap();
         std::fs::write(inbox.join("1-0.eml"), vec![1u8; 5_000]).unwrap();
+        let adminer = dir.path().join("adminer/6.1.2");
+        std::fs::create_dir_all(&adminer).unwrap();
+        std::fs::write(adminer.join("adminer.php"), vec![1u8; 5_000]).unwrap();
         let (_, items) = anvil_disk();
         for (label, gone) in [
             ("Build tools", &tools),
             ("Octane servers", &rr),
             ("Tunnel (cloudflared)", &cf),
+            ("Database viewer (Adminer)", &adminer),
             ("Caught mail", &inbox),
         ] {
             let item = items.iter().find(|i| i.label == label).unwrap();

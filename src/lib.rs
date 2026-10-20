@@ -7,6 +7,7 @@ pub mod compose;
 pub mod control;
 pub mod create;
 pub mod databases;
+pub mod dbviewer;
 pub mod dns;
 pub mod git;
 pub mod logs;
@@ -134,6 +135,9 @@ pub struct Config {
     /// Stored only when on.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub mail_catcher: bool,
+    /// Settings › Plugins › Database viewer (`dbviewer`): Adminer at db.<tld>. Stored only when on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub db_viewer: bool,
     /// The catcher's SMTP port; unset is `mail::DEFAULT_PORT`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mail_port: Option<u16>,
@@ -248,6 +252,7 @@ impl Default for Config {
             mcp: false,
             tunnel: false,
             mail_catcher: false,
+            db_viewer: false,
             mail_port: None,
             php_ext: BTreeMap::new(),
         }
@@ -1413,7 +1418,7 @@ fn caddy_cmd() -> Command {
 
 /// A path as the Caddyfile holds it: Windows' backslashes as slashes, which Caddy takes
 /// and which can't escape the quotes around it.
-fn caddy_path(p: &Path) -> String {
+pub(crate) fn caddy_path(p: &Path) -> String {
     let s = p.display().to_string();
     if cfg!(windows) {
         s.replace('\\', "/")
@@ -1909,7 +1914,36 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             s += &format!("\n{n} {{\n\tredir {to}{{uri}} 308\n}}\n");
         }
     }
+    // Settings › Plugins › Database viewer: last, so an app with its address keeps it.
+    if let Some(v) = dbviewer::php(cfg)
+        && claim(&dbviewer::host(cfg))
+    {
+        s += &dbviewer::caddy_block(cfg, &version_upstream(&v));
+    }
     s
+}
+
+/// Where a PHP version's shared pool takes requests: its socket, or Windows' php-cgi ports.
+fn version_upstream(v: &str) -> String {
+    let pool = format!("php-{v}");
+    if cfg!(windows) {
+        let ports: Vec<_> = cgi_ports(&pool).map(|p| format!("127.0.0.1:{p}")).collect();
+        ports.join(" ")
+    } else {
+        format!(
+            "unix/{}",
+            home().join("run").join(format!("{pool}.sock")).display()
+        )
+    }
+}
+
+/// The PHP versions that run: the apps', and the Database viewer's.
+fn php_versions(cfg: &Config, sites: &[Site]) -> BTreeSet<String> {
+    sites
+        .iter()
+        .filter_map(|s| s.php.clone())
+        .chain(dbviewer::php(cfg))
+        .collect()
 }
 
 /// What a site's file server never serves: a file whose path under the web root has a
@@ -2016,7 +2050,7 @@ pub fn needs_restart(cfg: &Config) -> bool {
 /// What each PHP master starts with (`phpext::php_args_with`), a line each: the
 /// version's, then each app's own.
 fn php_masters(cfg: &Config, sites: &[Site]) -> String {
-    let versions: BTreeSet<_> = sites.iter().filter_map(|s| s.php.clone()).collect();
+    let versions = php_versions(cfg, sites);
     let mut out = String::new();
     for v in &versions {
         out += &format!(
@@ -2696,7 +2730,7 @@ impl Server {
         for site in sites.iter().filter(|s| apps::is_php(&s.kind)) {
             apps::clear_vite_hot(&site.path);
         }
-        let versions: BTreeSet<_> = sites.iter().filter_map(|s| s.php.clone()).collect();
+        let versions = php_versions(cfg, &sites);
         for v in &versions {
             if !php_dir(v).join(PHP_SERVER).exists() {
                 bail!("PHP {v} is used but not installed — run `anvil php install {v}`");
@@ -2777,6 +2811,14 @@ impl Server {
             .collect();
         fs::write(pid_file(), pids.join("\n"))?;
 
+        // Adminer again after an upgrade pinned another version or its folder was cleaned;
+        // the web server runs without it.
+        if cfg.db_viewer {
+            if let Err(e) = dbviewer::ensure() {
+                eprintln!("Anvil: the Database viewer couldn't download Adminer: {e:#}");
+            }
+            let _ = dbviewer::write_allowed(cfg, &sites);
+        }
         // The web server runs without it: the error shows in Settings and the Mail tab.
         if cfg.mail_catcher {
             let apps = sites.iter().map(|s| s.name.clone()).collect();
@@ -4308,6 +4350,30 @@ mod tests {
             "\tphp_fastcgi unix/{}\n\tfile_server",
             sock.display()
         )));
+    }
+
+    #[test]
+    fn the_database_viewer_is_served_by_the_default_php_unless_an_app_has_its_address() {
+        let shop = site("shop", "/s/shop", Some("8.3"));
+        let mut cfg = Config {
+            php: Some("8.4".into()),
+            ..Config::default()
+        };
+        assert!(!caddyfile(&cfg, std::slice::from_ref(&shop)).contains("db.test"));
+        assert!(!php_masters(&cfg, std::slice::from_ref(&shop)).contains("PHP 8.4"));
+        cfg.db_viewer = true;
+        let out = caddyfile(&cfg, std::slice::from_ref(&shop));
+        let sock = home().join("run/php-8.4.sock");
+        assert!(
+            out.contains("\nhttp://db.test, https://db.test {\n"),
+            "{out}"
+        );
+        assert!(out.contains(&format!("\tphp_fastcgi unix/{}\n}}\n", sock.display())));
+        // Its PHP master runs though no app uses that version.
+        assert!(php_masters(&cfg, std::slice::from_ref(&shop)).contains("PHP 8.4: "));
+        let out = caddyfile(&cfg, &[shop, site("db", "/s/db", Some("8.4"))]);
+        assert!(out.contains("\ndb.test {\n"), "{out}");
+        assert!(!out.contains("http://db.test, https://db.test"));
     }
 
     #[test]
