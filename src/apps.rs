@@ -851,6 +851,9 @@ pub(crate) fn process_env(
         if site.secure {
             env.push(("OCTANE_HTTPS".into(), "true".into()));
         }
+        if server == crate::octane::Server::FrankenPhp {
+            crate::octane::frankenphp_env(cfg, site, &mut env)?;
+        }
     }
     env.push((
         "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),

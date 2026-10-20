@@ -18,6 +18,13 @@ Until 1.0.0, minor versions may contain breaking changes.
   SHA-256) and never writes `rr` or `.rr.yaml` into the project. A worktree's
   Octane uses its own port and database. It runs two workers, not one per
   core (140 MB instead of 455 MB on a 12-core Mac); edit the command for more.
+  FrankenPHP (`OCTANE_SERVER=frankenphp`) too: Anvil downloads FrankenPHP
+  1.13.1 (177 MB, checked against its SHA-256) once the row first starts. It
+  has PHP 8.5 inside, so an app on another version is told so on its row and
+  PHP-FPM keeps serving it. It listens on 127.0.0.1 only, gets the app's
+  php.ini values, and keeps its own extensions: the ones Anvil builds can't
+  load into it. Octane itself copies `public/frankenphp-worker.php` into the
+  project, as `octane:install` does.
 - A web root of your own for an app Anvil serves (PHP, static): a folder inside
   the project (`web`, `dist`, `.`) in the app's Settings, or `anvil app root
   <site> [<dir>]` (`--reset` goes back to `public/` when present). A worktree

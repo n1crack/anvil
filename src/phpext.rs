@@ -437,14 +437,14 @@ pub fn ini_args(ini: &BTreeMap<String, String>, minor: &str, names: &[String]) -
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::ENV_LOCK;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
     /// A `php` in a temp ANVIL_HOME that says it is `full`.
-    fn fake_php(minor: &str, full: &str) {
+    pub(crate) fn fake_php(minor: &str, full: &str) {
         let dir = php_dir(minor);
         fs::create_dir_all(&dir).unwrap();
         let php = dir.join("php");
@@ -452,7 +452,7 @@ mod tests {
         fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    fn fake_so(minor: &str, full: &str, name: &str) -> String {
+    pub(crate) fn fake_so(minor: &str, full: &str, name: &str) -> String {
         let so = so_path(minor, full, name);
         fs::create_dir_all(so.parent().unwrap()).unwrap();
         fs::write(&so, "").unwrap();
