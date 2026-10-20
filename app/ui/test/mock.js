@@ -1114,6 +1114,9 @@ const mockHandle = (cmd, a) => {
       if (window.mockOpcacheError) throw window.mockOpcacheError;
       (window.mockOpcache ??= {})[a.version] = "ready";
       return mockHandle("settings");
+    case "php_opcache_remove":
+      (window.mockOpcache ??= {})[a.version] = "missing";
+      return mockHandle("settings");
     case "app_ext": {
       if (window.mockExtError) throw window.mockExtError;
       const s = mockSnap.sites.find((x) => x.name === a.site);

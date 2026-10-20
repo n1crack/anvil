@@ -87,7 +87,7 @@ function versionRow(
   busy: boolean,
   blocked: boolean,
   act: { install: () => void; uninstall: () => void; makeDefault?: () => void; note?: string },
-  extra?: { slot: HTMLElement; error?: HTMLElement; below?: HTMLElement },
+  extra?: { slot?: HTMLElement; end?: HTMLElement; error?: HTMLElement; below?: HTMLElement },
 ) {
   const row = document.createElement("div");
   row.className = `row ver${v.installed ? "" : " missing"}${v.default ? " is-default" : ""}`;
@@ -95,7 +95,7 @@ function versionRow(
   name.className = "ver-name";
   name.innerHTML = `<span class="ver-mark">${v.default ? CHECK : ""}</span><span class="ver-label"></span>`;
   $(".ver-label", name).textContent = label;
-  if (extra) name.append(extra.slot);
+  if (extra?.slot) name.append(extra.slot);
   if (v.default) name.append(Object.assign(document.createElement("span"), { className: "ver-default", textContent: "Default" }));
   const pinned = v.installed && v.pinned_by?.length ? v.pinned_by.join(", ") : "";
   if (pinned)
@@ -124,7 +124,9 @@ function versionRow(
     };
     idle();
   }
-  row.append(name, actions);
+  // The row's own control (PHP's Extensions) at the far end, after the actions: it stays
+  // in one place whether they show or not.
+  row.append(name, actions, ...(extra?.end ? [extra.end] : []));
   if (extra?.below) row.append(extra.below);
   if (extra?.error) {
     row.classList.add("has-error");
@@ -669,35 +671,41 @@ const extErrors = new Map<string, string>(); // version -> why its last extensio
 
 const extsOpen = new Set<string>(); // PHP versions whose extension list is open
 
-/** After "PHP 8.x", in a fixed slot so Default and Pinned by stay aligned: "Extensions 2/6",
- * which opens the version's list below the row (OPcache first, then the catalog's). After
- * a failed build, the reason under the row, with the tools when they are missing. */
+/** An installed version's "Extensions 2/6 ›" at the row's far end; it slides the version's
+ * list open under the row (OPcache first, then the catalog's). After a failed build, the
+ * reason under the row, with the tools when they are missing. */
 function phpParts(v: Settings["php"][number]) {
-  const slot = Object.assign(document.createElement("span"), { className: "ver-opcache" });
+  let end: HTMLElement | undefined;
   let below: HTMLElement | undefined;
   if (v.installed) {
-    const open = extsOpen.has(v.version);
     const on = v.extensions.filter((e) => e.on && e.built).length + (v.opcache === "missing" ? 0 : 1);
     const busy = v.opcache_building || installing.has(`opcache@${v.version}`) || v.extensions.some((e) => e.building || installing.has(`ext@${v.version}@${e.name}`));
     const t = Object.assign(document.createElement("button"), { type: "button", className: "ext-toggle" });
-    t.setAttribute("aria-expanded", String(open));
     t.innerHTML = `<span></span><span class="chevron" aria-hidden="true">›</span>`;
     t.firstElementChild!.textContent = `Extensions ${on}/${v.extensions.length + 1}`;
     if (busy) t.prepend(Object.assign(document.createElement("span"), { className: "spin-dot" }));
-    t.onclick = () => {
-      if (open) extsOpen.delete(v.version);
-      else extsOpen.add(v.version);
-      render();
+    below = Object.assign(document.createElement("div"), { className: "ext-fold" });
+    below.append(extensionsList(v));
+    const set = (open: boolean) => {
+      t.setAttribute("aria-expanded", String(open));
+      below!.classList.toggle("open", open);
     };
-    slot.append(t);
-    if (open) below = extensionsList(v);
+    set(extsOpen.has(v.version));
+    // Opened and closed in place, not redrawn, so it slides.
+    t.onclick = () => {
+      const open = !extsOpen.has(v.version);
+      if (open) extsOpen.add(v.version);
+      else extsOpen.delete(v.version);
+      set(open);
+    };
+    end = t;
   }
   const reason = opcacheErrors.get(v.version) ?? extErrors.get(v.version);
-  if (!reason) return { slot, below };
+  if (!reason) return { end, below };
   const error = Object.assign(document.createElement("div"), { className: "ver-error" });
   error.append(Object.assign(document.createElement("span"), { textContent: reason }));
   if (reason.includes("xcode-select --install")) error.append(button("Install command line tools", () => invoke("xcode_tools_install")));
-  return { slot, error, below };
+  return { end, error, below };
 }
 
 /** A version's extensions, one line each. OPcache is built once for the version and then
@@ -718,7 +726,17 @@ function extensionsList(v: Settings["php"][number]) {
         textAct("Build", () => confirmInRow(opEnd, `Build OPcache for PHP ${v.version}? It takes a few minutes.`, "Build", () => addOpcache(v.version), idle)),
       );
     idle();
-  } else opEnd.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "On" }));
+  } else if (v.opcache === "ready") {
+    // Built by Anvil: removable, asked first since building it again takes minutes.
+    const idle = () =>
+      opEnd.replaceChildren(
+        Object.assign(document.createElement("span"), { className: "muted", textContent: "On" }),
+        textAct("Remove", () =>
+          confirmInRow(opEnd, `Remove OPcache from PHP ${v.version}? Building it again takes minutes.`, "Remove", () => removeOpcache(v.version), idle),
+        ),
+      );
+    idle();
+  } else opEnd.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Built in" }));
   op.append(opName, opEnd);
   list.append(op);
   for (const e of v.extensions) {
@@ -768,6 +786,16 @@ async function addOpcache(version: string) {
     opcacheErrors.set(version, String(e));
   }
   installing.delete(key);
+  render();
+}
+
+async function removeOpcache(version: string) {
+  opcacheErrors.delete(version);
+  try {
+    s = (await invoke("php_opcache_remove", { version })) ?? s;
+  } catch (e) {
+    opcacheErrors.set(version, String(e));
+  }
   render();
 }
 

@@ -43,6 +43,15 @@ pub fn state(minor: &str) -> State {
     }
 }
 
+/// Remove a built OPcache: PHP-FPM runs without it from its next start. Building it again
+/// takes minutes. A PHP that ships it (8.5, Windows) keeps it.
+pub fn remove(minor: &str) -> Result<()> {
+    if state(minor) != State::Ready {
+        bail!("PHP {minor} has no OPcache of Anvil's to remove");
+    }
+    Ok(std::fs::remove_file(so_path(minor))?)
+}
+
 /// PHP-FPM's `-d` arguments: the extension when built, then the dev settings the user
 /// hasn't set in `ini` (the php.ini overrides of the master's apps: global, or with one
 /// app's own over them), then theirs.
@@ -343,6 +352,13 @@ mod tests {
         assert!(!args.iter().any(|a| a.starts_with("zend_extension")));
         assert!(args.contains(&"opcache.enable=1".into()));
         assert_eq!(state("8.5"), State::BuiltIn);
+
+        // Removed: back to Missing, no zend_extension; one PHP ships can't be removed.
+        remove("8.4").unwrap();
+        assert_eq!(state("8.4"), State::Missing);
+        assert!(fpm_args(&cfg.ini, "8.4").is_empty());
+        assert!(remove("8.4").is_err());
+        assert!(remove("8.5").is_err());
     }
 
     #[test]

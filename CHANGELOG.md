@@ -27,7 +27,7 @@ contain breaking changes.
 ### Changed
 
 - Settings: the sidebar is grouped (app, Languages, Plugins), and a plugin that is on gets its own page.
-- Settings › PHP: each version's extensions, OPcache included, in a list behind "Extensions n/6"; building OPcache asks first.
+- Settings › PHP: each version's extensions, OPcache included, slide open from "Extensions n/6"; OPcache can be built or removed, after a confirm.
 - Settings: Make default and Uninstall are quiet text actions; Uninstall asks in the row.
 - Switches show a muted green when on.
 - Sidebar: worktrees fold under their app; a lock shows HTTP or HTTPS.
@@ -39,6 +39,8 @@ contain breaking changes.
 
 ### Fixed
 
+- Tunnel: a shared app whose HTTPS is turned on keeps working at its public address.
+- An address no app has answers "No app at …" (404) instead of an empty page.
 - Apps inside a dot folder (`~/.sites/shop`) returned 404 for their files.
 - CPU and memory were missing under locales with decimal commas.
 - Dev processes left by a killed Anvil kept their ports.

@@ -138,7 +138,7 @@ describe("versions", () => {
     if (toggle(v)!.getAttribute("aria-expanded") !== "true") toggle(v)!.click();
     await wait(10);
   }
-  const lines = (v: string) => [...phpRow(v).querySelectorAll<HTMLElement>(".ext-line")];
+  const lines = (v: string) => [...phpRow(v).querySelectorAll<HTMLElement>(".ext-fold.open .ext-line")];
   const line = (v: string, name: string) => lines(v).find((l) => l.querySelector(".ext-name")?.textContent === name)!;
   const exts = (v: string) =>
     lines(v)
@@ -159,7 +159,11 @@ describe("versions", () => {
       expect(lines("8.5").length).toBe(0);
       await openExts("8.5");
       expect(lines("8.5").map((l) => l.querySelector(".ext-name")!.textContent)).toEqual(["OPcache", "xdebug", "pcov", "apcu", "igbinary", "msgpack"]);
-      expect(line("8.5", "OPcache").textContent).toBe("OPcacheOn");
+      expect(line("8.5", "OPcache").textContent).toBe("OPcacheBuilt in");
+      // The list slides open in place: no redraw.
+      expect(phpRow("8.5").querySelector(".ext-fold")!.classList.contains("open")).toBe(true);
+      await openExts("8.4");
+      expect(line("8.4", "OPcache").textContent).toBe("OPcacheOnRemove");
       await openExts("8.3");
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheNot builtBuild");
     }));
@@ -190,8 +194,15 @@ describe("versions", () => {
       expect(w.mockCalls.at(-1)).toEqual(["php_opcache", { version: "8.3" }]);
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheBuilding… a few minutes");
       await wait(150);
-      expect(line("8.3", "OPcache").textContent).toBe("OPcacheOn");
+      expect(line("8.3", "OPcache").textContent).toBe("OPcacheOnRemove");
       expect(toggle("8.3")!.textContent).toBe("Extensions 1/6›");
+      // Remove asks in the row too, then it's Not built again.
+      (line("8.3", "OPcache").querySelector(".text-act") as HTMLElement).click();
+      expect(line("8.3", "OPcache").textContent).toBe("OPcacheRemove OPcache from PHP 8.3? Building it again takes minutes.CancelRemove");
+      (line("8.3", "OPcache").querySelector(".text-act.danger") as HTMLElement).click();
+      await wait(30);
+      expect(w.mockCalls.at(-1)).toEqual(["php_opcache_remove", { version: "8.3" }]);
+      expect(line("8.3", "OPcache").textContent).toBe("OPcacheNot builtBuild");
       expect($$('[role="alert"]:not([hidden]), .toast').length).toBe(0);
     }));
 

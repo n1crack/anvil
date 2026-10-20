@@ -1429,6 +1429,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 /* PHP: "Extensions 2/6 ›" after the version opens its list under the row. */
 .ext-toggle {
   display: inline-flex;
+  margin-left: 14px;
   align-items: center;
   gap: 5px;
   height: 22px;
@@ -1443,7 +1444,12 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .ext-toggle:hover { color: var(--text); }
 .ext-toggle .chevron { display: inline-block; transition: transform 0.2s ease; }
 .ext-toggle[aria-expanded="true"] .chevron { transform: rotate(90deg); }
-.ext-list { display: grid; flex-basis: 100%; margin: 6px 0 4px 24px; border-top: 1px solid var(--line); }
+/* The list slides open: a grid row from 0 to its height. */
+.ext-fold { display: grid; flex-basis: 100%; grid-template-rows: 0fr; transition: grid-template-rows 0.22s ease; }
+.ext-fold.open { grid-template-rows: 1fr; }
+.ext-fold > .ext-list { min-height: 0; overflow: hidden; }
+.ext-list { display: grid; margin-left: 24px; }
+.ext-fold.open > .ext-list { margin-top: 6px; border-top: 1px solid var(--line); }
 .ext-line { display: flex; align-items: center; justify-content: space-between; min-height: 32px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .ext-line:last-child { border-bottom: 0; }
 .ext-end { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; }

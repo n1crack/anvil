@@ -3825,6 +3825,25 @@ async fn php_install(handle: AppHandle, version: String) -> Res<Settings> {
     settings(handle)
 }
 
+/// Removes the OPcache Anvil built for `version`, then restarts PHP-FPM without it.
+#[tauri::command]
+async fn php_opcache_remove(handle: AppHandle, version: String) -> Res<Settings> {
+    let h = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Res<()> {
+        anvil::opcache::remove(&version).map_err(err)?;
+        let cfg = anvil::load().map_err(err)?;
+        let app = h.state::<App>();
+        if running(&app) {
+            start(&app, &cfg);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    changed(&handle);
+    settings(handle)
+}
+
 /// Versions whose OPcache is being built: a second click (or window) doesn't start another.
 static OPCACHE_BUILDS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -4417,6 +4436,7 @@ fn main() {
             set_ini,
             php_install,
             php_opcache,
+            php_opcache_remove,
             php_ext,
             app_ext,
             xcode_tools_install,
