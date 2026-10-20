@@ -10,6 +10,13 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Laravel Octane: an app with `laravel/octane` gets an `octane` process
+  (RoadRunner), left out of Dev start, on a private port of its own. While it
+  runs, the app's address is served by Octane; when it stops or crashes,
+  PHP-FPM serves the next request, never an error page. Anvil downloads
+  RoadRunner 2025.1.15 once into its own folder (checked against its
+  SHA-256) and never writes `rr` or `.rr.yaml` into the project. A worktree's
+  Octane uses its own port and database.
 - A web root of your own for an app Anvil serves (PHP, static): a folder inside
   the project (`web`, `dist`, `.`) in the app's Settings, or `anvil app root
   <site> [<dir>]` (`--reset` goes back to `public/` when present). A worktree
