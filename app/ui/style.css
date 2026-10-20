@@ -301,16 +301,7 @@ button, select, input { font: inherit; color: inherit; }
   left: 27.5px;
   border-left: 1px solid var(--edge);
 }
-.item.child.last::after { bottom: 50%; }
-.item.child.no-line::after { display: none; }
-
-/* An alias under its app (or a worktree's under the worktree): a link mark on the line, the
-   address where the names start; no rule between them. */
-.item.alias-item { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }
-.item.alias-item::before { display: none; }
-.item.alias-item .name { font-size: 12px; }
-.alias-icon { z-index: 1; display: grid; place-items: center; justify-self: center; width: 18px; height: 18px; border-radius: 5px; background: var(--card); color: var(--muted); }
-.item.alias-item.deep { padding-left: 56px; grid-template-columns: 18px 1fr; gap: 8px; }
+.kids > div > .item.child:last-child::after { bottom: 50%; }
 .item.child .mark-box { z-index: 1; width: 24px; height: 24px; }
 
 .item.child .name { font-weight: 400; color: var(--muted); }

@@ -320,21 +320,6 @@ function aliasesOf(s) {
   return main === s ? same.filter((k) => k !== s) : [];
 }
 
-const LINK = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>`;
-
-/** One of an app's (or a worktree's) other addresses, under it; it opens that app. `deep`: a
- * worktree's, under the worktree. `line`: the line joining the worktrees runs past it. */
-function aliasRow(a, of, deep, line) {
-  const b = el("button", `item child alias-item${deep ? " deep" : ""}${line ? "" : deep ? " no-line" : " last"}`);
-  b.dataset.alias = a.host;
-  b.title = `${a.host} opens ${of.worktree_of ? `this worktree of ${of.worktree_of}` : of.name}`;
-  const icon = el("span", "alias-icon");
-  icon.innerHTML = LINK;
-  b.append(icon, el("span", "name", a.host.replace(new RegExp(`\\.${snap.tld}$`), "")));
-  b.onclick = () => select(of.name);
-  return b;
-}
-
 export function row(s, { child = false, kids = 0, path = true, kind: showKind = true } = {}) {
   const b = document.createElement("button");
   b.className = child ? "item child" : "item";
@@ -551,7 +536,7 @@ function renderList() {
   }
 
   // Worktrees nest under their app, linked or parked. Another name linked to an app's folder
-  // is an alias: named under the app's name, not a row of its own.
+  // is an alias: its app's header lists it, it's no row of its own.
   const alias = new Set(snap.sites.filter((s) => !s.worktree_of).flatMap((s) => aliasesOf(s).map((a) => a.name)));
   const apps = new Set(snap.sites.filter((s) => !s.worktree_of && !alias.has(s.name)).map((s) => s.name));
   // A worktree whose app is gone stands alone, in its folder's section else Linked.
@@ -588,21 +573,12 @@ function renderList() {
       const shownKids = kids.filter((k) => parentHit || hit(k));
       if (!parentHit && !shownKids.length) continue;
       rows.push(row(s, { kids: kids.length, path, kind }));
-      // Under the app: its aliases, then its worktrees, each with the aliases derived for it.
-      const own = withChildren && parentHit ? aliasesOf(s) : [];
-      if (own.length || shownKids.length) {
+      if (shownKids.length) {
         const inner = document.createElement("div");
-        inner.append(...own.map((a, i) => aliasRow(a, s, false, i < own.length - 1 || shownKids.length > 0)));
-        shownKids.forEach((k, i) => {
-          const more = i < shownKids.length - 1;
-          const r = row(k, { child: true });
-          if (!more) r.classList.add("last");
-          inner.append(r, ...aliasesOf(k).map((a) => aliasRow(a, k, true, more)));
-        });
-        // Always rendered so folding can slide; while searching, matches stay open. Only
-        // worktrees fold: an app without them shows its aliases always.
+        inner.append(...shownKids.map((k) => row(k, { child: true })));
+        // Always rendered so folding can slide; while searching, matches stay open.
         const wrap = document.createElement("div");
-        wrap.className = q || !shownKids.length || !collapsed.has(s.name) ? "kids" : "kids closed";
+        wrap.className = q || !collapsed.has(s.name) ? "kids" : "kids closed";
         wrap.append(inner);
         rows.push(wrap);
       }

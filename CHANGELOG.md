@@ -199,12 +199,11 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Changed
 
-- Sidebar: under an app, its aliases (other names linked to its folder), then
-  its worktrees, each with the aliases derived for it, joined by a line; an
-  alias opens its app. A worktree has a branch mark with the same run badge as
-  an app. A linked app nests these too, and its aliases are no longer rows of
-  their own. Aliases are added to the app only: its worktrees get theirs from
-  it, so Add Alias is gone from a worktree's menu and refused for one.
+- Sidebar: a worktree has a branch mark with the same run badge as an app,
+  under its app's mark on a line joining them. A linked app's worktrees nest
+  under it too, and its aliases are no longer rows of their own (its header
+  lists them). Aliases are added to the app only: its worktrees get theirs
+  from it, so Add Alias is gone from a worktree's menu and refused for one.
 - `anvil start` refuses while the Anvil app runs, which already serves your
   apps.
 - Removing a worktree names the files git doesn't keep that go with its

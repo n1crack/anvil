@@ -2606,22 +2606,11 @@ describe("sidebar worktrees", () => {
     await refresh();
   });
 
-  test("an app's aliases, then its worktrees each with its derived aliases, nest under it", () => {
-    // An alias isn't an app row: it's named under its app and opens it.
+  test("aliases leave the list; worktrees nest under their app with a branch mark", () => {
+    // An alias is no row: its app's header lists it.
     expect($(`#list [data-name="admin.shop"]`)).toBeNull();
-    const under = [...$(`#list [data-name="shop"]`).nextElementSibling!.querySelectorAll<HTMLElement>(".item")];
-    expect(under.map((r) => (r.classList.contains("alias-item") ? `@${r.querySelector(".name")!.textContent}` : r.dataset.name))).toEqual([
-      "@admin.shop",
-      "@api.shop",
-      "shop--agent-1a2b",
-      "@admin--agent-1a2b",
-      "shop--feature-login",
-      "@admin--feature-login",
-    ]);
-    expect(under.filter((r) => r.classList.contains("deep")).length).toBe(2);
-    (under[0] as HTMLElement).click();
-    expect($(`#list [data-name="shop"]`).getAttribute("aria-current")).toBe("true");
-    const kids = $$("#list .kids .item.child:not(.alias-item)");
+    expect($$("#list .kids .item").map((r) => r.dataset.name)).toEqual(["shop--agent-1a2b", "shop--feature-login"]);
+    const kids = $$("#list .kids .item.child");
     expect(kids.map((k) => k.querySelector(".name")!.textContent)).toEqual(["agent/1a2b", "feature/login"]);
     // A branch mark with the app's run badge.
     expect(kids.map((k) => !!k.querySelector(".mark-box .run-badge.on"))).toEqual([false, true]);
@@ -2647,7 +2636,7 @@ describe("sidebar worktrees", () => {
     document.querySelector(".pop")?.remove();
   });
 
-  test("a linked app keeps its worktrees and its alias under it, not as rows of their own", async () => {
+  test("a linked app keeps its worktrees under it, and its alias is no row of its own", async () => {
     const before = w.mockSnap.sites;
     const p = "/Users/x/Code/api";
     w.mockSnap.sites = [
@@ -2660,8 +2649,7 @@ describe("sidebar worktrees", () => {
       await refresh();
       expect($(`#list [data-name="backend"]`)).toBeNull();
       const kids = $(`#list [data-name="api"]`).nextElementSibling!;
-      expect([...kids.querySelectorAll(".alias-item .name")].map((n) => n.textContent)).toEqual(["backend", "backend--x"]);
-      expect(kids.querySelector(`[data-name="api--x"]`)!.classList.contains("child")).toBe(true);
+      expect([...kids.querySelectorAll<HTMLElement>(".item")].map((r) => r.dataset.name)).toEqual(["api--x"]);
       await select("api");
       expect($("#site .alias-chip").textContent).toBe("+1");
     } finally {
