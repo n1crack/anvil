@@ -505,7 +505,7 @@ fn running_in(home: &Path, name: &str) -> bool {
     })
 }
 
-/// Stop what a crashed Anvil left running: every app and process whose pid file's
+/// Stop what a crashed Anvil left running: every app, process and tunnel whose pid file's
 /// owner is gone (see `kill_orphans`). Run once at startup, before `clear_stale_logs`.
 pub fn kill_all_orphans() {
     orphans_in(&home());
@@ -517,7 +517,8 @@ fn orphans_in(home: &Path) {
     };
     for f in dir.flatten() {
         let name = f.file_name().to_string_lossy().into_owned();
-        if name.starts_with("app-") && name.ends_with(".pids") {
+        // tunnel-<site>: a shared app's cloudflared (`tunnel`).
+        if (name.starts_with("app-") || name.starts_with("tunnel-")) && name.ends_with(".pids") {
             kill_orphans(&f.path(), true);
         }
     }
@@ -1446,7 +1447,7 @@ mod tests {
                 .spawn()
                 .unwrap()
         };
-        let (mut orphan, mut stranger) = (sleep(), sleep());
+        let (mut orphan, mut stranger, mut tunnel) = (sleep(), sleep(), sleep());
         let at = crate::started(orphan.id()).unwrap();
         let file = |key, pid, at: &str| {
             fs::write(pid_in(&home, key), format!("{}\n{pid} {at}", gone.id())).unwrap()
@@ -1454,9 +1455,20 @@ mod tests {
         file("shop", orphan.id(), &at);
         // Same pid file shape, but the pid now names a process started another time.
         file("shop@queue", stranger.id(), "Mon Jan  1 00:00:00 2001");
+        // A shared app's cloudflared (`tunnel`).
+        fs::write(
+            home.join("run/tunnel-shop.pids"),
+            format!(
+                "{}\n{} {}",
+                gone.id(),
+                tunnel.id(),
+                crate::started(tunnel.id()).unwrap()
+            ),
+        )
+        .unwrap();
         orphans_in(&home);
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while orphan.try_wait().unwrap().is_none() {
+        while orphan.try_wait().unwrap().is_none() || tunnel.try_wait().unwrap().is_none() {
             assert!(
                 std::time::Instant::now() < deadline,
                 "the orphan still runs"

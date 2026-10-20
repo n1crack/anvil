@@ -388,6 +388,17 @@ describe("plugins", () => {
     await wait();
     expect($("#mcp-line").hidden).toBe(true);
   });
+
+  test("Tunnel is off until switched on", async () => {
+    await open("plugins");
+    const box = $("#tunnel") as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    await wait();
+    expect(w.mockCalls.at(-1)).toEqual(["set_tunnel", { on: true }]);
+    expect(box.checked).toBe(true);
+  });
 });
 
 describe("worktrees", () => {

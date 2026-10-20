@@ -7,6 +7,7 @@ import "./git";
 import "./logs";
 import "./requests";
 import "./services";
+import "./share";
 import "./packages";
 import "./processes";
 import "./dev";

@@ -1295,6 +1295,7 @@ export function renderSite() {
   window.renderGit?.(s);
   window.renderProcesses?.(s);
   window.renderSiteServices?.(s, root);
+  window.renderShare?.(s, root);
   window.renderPackages?.(s, root);
   if (mayHaveWorktrees(s)) renderHooks(s, root);
 }

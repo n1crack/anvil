@@ -75,6 +75,8 @@ window.mockSnap = {
   php_ext_catalog: ["xdebug", "pcov", "apcu", "igbinary", "msgpack"],
   php_ext: {},
   php_ext_built: {},
+  tunnel: false,
+  shares: {},
   mail: { shop: "mailpit" },
   editor: "Zed",
   git_client: null,
@@ -925,9 +927,13 @@ const mockHandle = (cmd, a) => {
     case "set_mcp":
       window.mockMcp = a.on;
       return mockHandle("settings", {});
+    case "set_tunnel":
+      window.mockTunnel = a.on;
+      return mockHandle("settings", {});
     case "settings":
       return {
         mcp: window.mockMcp ?? false,
+        tunnel: window.mockTunnel ?? false,
         paths: ["/Users/x/Sites"],
         hidden: ["old-blog"],
         tld: "test",
@@ -1049,6 +1055,17 @@ const mockHandle = (cmd, a) => {
       return null;
     case "storage_last":
       return window.mockStorageLast ?? null;
+    case "share_start":
+      if (window.mockShareFail) throw window.mockShareFail;
+      mockSnap.shares[a.site] = {
+        state: "ready",
+        url: "https://quiet-river.trycloudflare.com",
+        note: `Links the app builds still point to ${a.site}.test: trust the proxy with ->trustProxies(at: '*') in bootstrap/app.php`,
+      };
+      return mockSnap;
+    case "share_stop":
+      delete mockSnap.shares[a.site];
+      return mockSnap;
     case "clean_all_safe":
       return [162529280, []];
     case "agent_activity":

@@ -1887,6 +1887,76 @@ describe("mail", () => {
   });
 });
 
+describe("share", () => {
+  const row = () => $('[data-panel="overview"] .share-row');
+  const state = async () => (await import("../src/app")).call("state");
+  test("off in Settings › Plugins: no Share line", async () => {
+    await select("shop");
+    expect(row().hidden).toBe(true);
+  });
+
+  test("Share asks first, then shows the public address with Copy and Stop, and the app's note", async () => {
+    w.mockSnap.tunnel = true;
+    try {
+      await state();
+      await select("notes"); // a folder has no address
+      expect(row().hidden).toBe(true);
+      await select("shop");
+      expect(row().hidden).toBe(false);
+      expect(row().querySelector("dd")!.textContent).toBe("Share…");
+      (row().querySelector("button") as HTMLButtonElement).click();
+      // Nothing is public before the confirm.
+      expect(calls("share_start").length).toBe(0);
+      const pop = $(".pop-confirm");
+      expect(pop.textContent).toContain("Anyone with the address can open shop");
+      expect(pop.textContent).toContain("changes every time");
+      (pop.querySelector("button.primary") as HTMLButtonElement).click();
+      await wait(40);
+      expect(calls("share_start").at(-1)![1]).toEqual({ site: "shop" });
+      const dd = row().querySelector("dd")!;
+      expect(dd.querySelector("a")!.textContent).toBe("https://quiet-river.trycloudflare.com");
+      expect([...dd.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Copy", "Stop"]);
+      expect(dd.querySelector(".share-note")!.textContent).toContain("shop.test");
+      (dd.querySelector("a") as HTMLElement).click();
+      expect(calls("open_url").at(-1)![1]).toEqual({ url: "https://quiet-river.trycloudflare.com" });
+      ([...dd.querySelectorAll("button")].at(-1) as HTMLButtonElement).click();
+      await wait(40);
+      expect(calls("share_stop").at(-1)![1]).toEqual({ site: "shop" });
+      expect(row().querySelector("dd")!.textContent).toBe("Share…");
+    } finally {
+      w.mockSnap.tunnel = false;
+      await state();
+    }
+  });
+
+  test("a tunnel that couldn't open says why on its line, not in the banner", async () => {
+    w.mockSnap.tunnel = true;
+    w.mockShareFail = "Anvil's web server isn't running";
+    try {
+      await state();
+      await select("shop");
+      (row().querySelector("button") as HTMLButtonElement).click();
+      ($(".pop-confirm button.primary") as HTMLButtonElement).click();
+      await wait(40);
+      expect(row().querySelector(".share-error")!.textContent).toBe("Anvil's web server isn't running");
+      expect($("#error").hidden).toBe(true);
+      // Starting, then failed later: the backend's reason on the same line.
+      w.mockShareFail = null;
+      w.mockSnap.shares = { shop: { state: "failed", error: "Couldn't reach Cloudflare", note: null } };
+      await state();
+      expect(row().querySelector(".share-error")!.textContent).toBe("Couldn't reach Cloudflare");
+      w.mockSnap.shares = { shop: { state: "starting", note: null } };
+      await state();
+      expect(row().querySelector("dd")!.textContent).toContain("Opening…");
+    } finally {
+      w.mockSnap.tunnel = false;
+      w.mockShareFail = null;
+      w.mockSnap.shares = {};
+      await state();
+    }
+  });
+});
+
 describe("run settings", () => {
   test("a .NET app has no version picker: dotnet picks the SDK from global.json", async () => {
     w.mockSnap.sites.push(w.mockSite("api", "dotnet", { runtime_version: "10.0" }));

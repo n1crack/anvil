@@ -24,6 +24,7 @@ pub mod runtimes;
 pub mod services;
 pub mod shims;
 pub mod style;
+pub mod tunnel;
 pub mod uninstall;
 pub mod validate;
 pub mod worktrees;
@@ -125,6 +126,9 @@ pub struct Config {
     /// Settings › Plugins › Agents (MCP): `anvil mcp` serves AI agents. Stored only when on.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub mcp: bool,
+    /// Settings › Plugins › Tunnel: an app's Overview offers Share (`tunnel`). Stored only when on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub tunnel: bool,
     /// Settings › PHP › Extensions: catalog extensions (`phpext::CATALOG`) loaded for
     /// every app on a version, by minor version. Stored only when there are some.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -231,6 +235,7 @@ impl Default for Config {
             worktree_presets: BTreeMap::new(),
             worktrees: BTreeMap::new(),
             mcp: false,
+            tunnel: false,
             php_ext: BTreeMap::new(),
         }
     }
@@ -1674,7 +1679,9 @@ pub fn set_site_ini(cfg: &mut Config, site: &str, key: &str, value: Option<&str>
 
 pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
     let mut s = format!(
-        "{{\n\tdefault_bind 127.0.0.1 [::1]\n\thttp_port {}\n\thttps_port {}\n\tadmin off\n\tlocal_certs\n\tskip_install_trust\n\tauto_https disable_redirects\n}}\n",
+        // trusted_proxies: what comes from this computer keeps its X-Forwarded-*, so an app
+        // shared through a tunnel (`tunnel`) learns the public host it is reached at.
+        "{{\n\tdefault_bind 127.0.0.1 [::1]\n\thttp_port {}\n\thttps_port {}\n\tadmin off\n\tlocal_certs\n\tskip_install_trust\n\tauto_https disable_redirects\n\tservers {{\n\t\ttrusted_proxies static 127.0.0.1/32 ::1/128\n\t}}\n}}\n",
         cfg.http_port, cfg.https_port
     );
     // A secure site's HTTP addresses redirect; 302, so turning HTTPS off isn't
@@ -4300,6 +4307,10 @@ mod tests {
         let out = caddyfile(&cfg, &sites);
         assert!(out.contains("https_port 8443"));
         assert!(out.contains("default_bind 127.0.0.1 [::1]"));
+        // A tunnel (cloudflared, on this computer) says the public host the app should link to.
+        assert!(
+            out.contains("\tservers {\n\t\ttrusted_proxies static 127.0.0.1/32 ::1/128\n\t}\n")
+        );
         assert_eq!(out.matches("@hidden path */.*").count(), 2);
         assert_eq!(
             out.matches("file_server @hidden {\n\t\thide *\n\t}\n\tfile_server\n}")

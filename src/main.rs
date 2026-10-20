@@ -431,6 +431,8 @@ enum AppCmd {
     },
     /// The inbox address of the Anvil Mailpit the app's .env sends mail to
     Mail { site: String },
+    /// Share the app at a temporary public address (a Cloudflare quick tunnel) until Ctrl-C
+    Share { site: String },
     /// The latest requests Caddy served for the app, oldest first: time, method, status,
     /// duration, size and path. Static assets (Vite's, Next's, maps) only with --assets
     Requests {
@@ -965,6 +967,49 @@ fn print_request(r: &requests::Request, host: &str) {
         if own { String::new() } else { dim(&r.host) },
         r.uri
     );
+}
+
+/// `anvil app share`: a quick tunnel to the app until Ctrl-C or cloudflared ends.
+fn share(cfg: &Config, site: &str) -> Result<()> {
+    use tunnel::State;
+    if !cfg.tunnel {
+        bail!("{}", tunnel::TURNED_OFF);
+    }
+    let s = sites(cfg)
+        .into_iter()
+        .find(|s| s.name == site_name(site))
+        .with_context(|| format!("No app named {site}"))?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stop = tx.clone();
+    ctrlc::set_handler(move || {
+        let _ = stop.send(());
+    })?;
+    eprintln!("{}", dim("Opening a tunnel…"));
+    let mut shares = tunnel::Shares::default();
+    shares.start(cfg, &s, move || {
+        let _ = tx.send(());
+    })?;
+    let _ = rx.recv();
+    match shares.states().remove(&s.name) {
+        Some(State::Ready { url }) => {
+            println!("{}", cyan(&url));
+            if let Some(note) = tunnel::note(&s) {
+                eprintln!("{}", yellow(note));
+            }
+            eprintln!("{}", dim(tunnel::LIMITS));
+            eprintln!("{}", dim("Ctrl-C stops it."));
+        }
+        Some(State::Failed { error }) => bail!(error),
+        _ => return Ok(()), // Ctrl-C while it opened; dropping `shares` stops it
+    }
+    loop {
+        if rx.recv_timeout(std::time::Duration::from_secs(1)).is_ok() {
+            return Ok(());
+        }
+        if let Some(State::Failed { error }) = shares.states().remove(&s.name) {
+            bail!(error);
+        }
+    }
 }
 
 fn run_in_app(site: String, process: Option<String>, action: &str) -> Result<()> {
@@ -1519,6 +1564,7 @@ fn run() -> Result<()> {
             AppCmd::Start { site, process } => run_in_app(site, process, "start")?,
             AppCmd::Stop { site, process } => run_in_app(site, process, "stop")?,
             AppCmd::Restart { site, process } => run_in_app(site, process, "restart")?,
+            AppCmd::Share { site } => share(&cfg, &site)?,
             AppCmd::Mail { site } => {
                 let s = sites(&cfg)
                     .into_iter()
