@@ -303,13 +303,36 @@ export function markBox(m, badge) {
   return box;
 }
 
-/** An app's aliases: the other names linked to its folder. The app is the parked one, else the
- * first by name, as Anvil picks it; an alias has none. A worktree's are derived from them. */
+/** The names linked to one folder: the app is the parked one, else the first by name, as
+ * Anvil picks it; the others are its aliases. */
+function sameFolder(s) {
+  const same = snap.sites.filter((k) => !k.worktree_of && k.path === s.path);
+  return { main: same.find((k) => !k.linked) ?? same.sort((a, b) => a.name.localeCompare(b.name))[0], same };
+}
+
+/** The app itself, not a worktree nor an alias: only it takes aliases; its worktrees get theirs from it. */
+const isMain = (s) => !s.worktree_of && sameFolder(s).main === s;
+
+/** An app's aliases; a worktree's are derived from its app's (`admin--x`). An alias has none. */
 function aliasesOf(s) {
   if (s.worktree_of) return s.aliases.map((host) => ({ host, secure: s.secure }));
-  const same = snap.sites.filter((k) => !k.worktree_of && k.path === s.path);
-  const main = same.find((k) => !k.linked) ?? same.sort((a, b) => a.name.localeCompare(b.name))[0];
+  const { main, same } = sameFolder(s);
   return main === s ? same.filter((k) => k !== s) : [];
+}
+
+const LINK = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>`;
+
+/** One of an app's (or a worktree's) other addresses, under it; it opens that app. `deep`: a
+ * worktree's, under the worktree. `line`: the line joining the worktrees runs past it. */
+function aliasRow(a, of, deep, line) {
+  const b = el("button", `item child alias-item${deep ? " deep" : ""}${line ? "" : deep ? " no-line" : " last"}`);
+  b.dataset.alias = a.host;
+  b.title = `${a.host} opens ${of.worktree_of ? `this worktree of ${of.worktree_of}` : of.name}`;
+  const icon = el("span", "alias-icon");
+  icon.innerHTML = LINK;
+  b.append(icon, el("span", "name", a.host.replace(new RegExp(`\\.${snap.tld}$`), "")));
+  b.onclick = () => select(of.name);
+  return b;
 }
 
 export function row(s, { child = false, kids = 0, path = true, kind: showKind = true } = {}) {
@@ -318,11 +341,13 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   if (s.hiddenApp) b.classList.add("hidden-app");
   b.dataset.name = s.name;
   b.setAttribute("aria-current", String(s.name === selected));
-  if (child) {
-    // A worktree: green while it runs, hollow when stopped.
-    const run = ["running", "starting"].includes(snap.app_states[s.name]);
-    b.append(el("span", `dot${run ? " on" : ""}`));
-  }
+  // A worktree: a branch mark, with the same run badge as an app's.
+  const childMark = () => {
+    const m = el("span", "mark");
+    m.innerHTML = BRANCH;
+    const state = snap.app_states[s.name];
+    return markBox(m, state && { running: "on", starting: "warm", crashed: "bad" }[state]);
+  };
   const text = document.createElement("span");
   text.className = "text";
   text.innerHTML = `<span class="name"></span><span class="sub"></span>`;
@@ -344,13 +369,6 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
     lock.innerHTML = LOCK;
     lock.title = "HTTPS";
     $(".name", text).append(lock);
-  }
-  // Its other addresses as a count; the header lists them.
-  const aliases = s.hiddenApp ? [] : aliasesOf(s);
-  if (aliases.length) {
-    const more = el("span", "alias-count", `+${aliases.length}`);
-    more.title = aliases.map((a) => a.host).join("\n");
-    $(".name", text).append(more);
   }
   // In a folder's section the path only repeats the heading; linked apps and groups keep it.
   if (path && !child) $(".sub", text).textContent = tilde(s.path) + (s.path.includes("\\") ? "\\" : "/");
@@ -390,7 +408,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
     };
   }
   end.append(d);
-  if (child) b.append(text, end);
+  if (child) b.append(childMark(), text, end);
   else {
     const state = s.hiddenApp ? undefined : snap.app_states[s.name];
     // Green while anything of the app runs, amber while its server starts, red after a crash.
@@ -533,7 +551,7 @@ function renderList() {
   }
 
   // Worktrees nest under their app, linked or parked. Another name linked to an app's folder
-  // is an alias: a count on the app's row, listed in its header, not a row of its own.
+  // is an alias: named under the app's name, not a row of its own.
   const alias = new Set(snap.sites.filter((s) => !s.worktree_of).flatMap((s) => aliasesOf(s).map((a) => a.name)));
   const apps = new Set(snap.sites.filter((s) => !s.worktree_of && !alias.has(s.name)).map((s) => s.name));
   // A worktree whose app is gone stands alone, in its folder's section else Linked.
@@ -570,12 +588,21 @@ function renderList() {
       const shownKids = kids.filter((k) => parentHit || hit(k));
       if (!parentHit && !shownKids.length) continue;
       rows.push(row(s, { kids: kids.length, path, kind }));
-      if (shownKids.length) {
-        // Always rendered so folding can slide; while searching, matches stay open.
-        const wrap = document.createElement("div");
-        wrap.className = q || !collapsed.has(s.name) ? "kids" : "kids closed";
+      // Under the app: its aliases, then its worktrees, each with the aliases derived for it.
+      const own = withChildren && parentHit ? aliasesOf(s) : [];
+      if (own.length || shownKids.length) {
         const inner = document.createElement("div");
-        inner.append(...shownKids.map((k) => row(k, { child: true })));
+        inner.append(...own.map((a, i) => aliasRow(a, s, false, i < own.length - 1 || shownKids.length > 0)));
+        shownKids.forEach((k, i) => {
+          const more = i < shownKids.length - 1;
+          const r = row(k, { child: true });
+          if (!more) r.classList.add("last");
+          inner.append(r, ...aliasesOf(k).map((a) => aliasRow(a, k, true, more)));
+        });
+        // Always rendered so folding can slide; while searching, matches stay open. Only
+        // worktrees fold: an app without them shows its aliases always.
+        const wrap = document.createElement("div");
+        wrap.className = q || !shownKids.length || !collapsed.has(s.name) ? "kids" : "kids closed";
         wrap.append(inner);
         rows.push(wrap);
       }
@@ -665,8 +692,8 @@ async function siteMenu(s) {
   if (serves(s)) {
     items.push(await M.CheckMenuItem.new({ text: "Use HTTPS", checked: s.secure, action: () => setSecure(s) }), await sep());
   }
+  if (isMain(s)) items.push(await M.MenuItem.new({ text: "Add Alias…", action: () => addAlias(s) }));
   if (!s.linked) {
-    items.push(await M.MenuItem.new({ text: "Add Alias…", action: () => addAlias(s) }));
     const groupItems = await Promise.all(
       groups.map((g) =>
         M.CheckMenuItem.new({

@@ -282,12 +282,15 @@ button, select, input { font: inherit; color: inherit; }
 .kids.closed,
 .fold.closed { grid-template-rows: 0fr; }
 
-/* A worktree: the branch where its app's name starts, its run dot under the app's mark on a
-   line that joins the worktrees to their app. */
+/* A worktree: a small branch mark centred under its app's mark, on a line that joins them;
+   its branch where the app's name starts. */
 .item.child {
-  --indent: 44px;
-  grid-template-columns: 1fr auto;
-  min-height: 34px;
+  --indent: 4px;
+  grid-template-columns: 24px 1fr auto;
+  gap: 16px;
+  min-height: 36px;
+  padding-top: 5px;
+  padding-bottom: 5px;
 }
 .item.child::before { left: 56px; }
 .item.child::after {
@@ -298,15 +301,22 @@ button, select, input { font: inherit; color: inherit; }
   left: 27.5px;
   border-left: 1px solid var(--edge);
 }
-.kids > div > .item.child:last-child::after { bottom: 50%; }
+.item.child.last::after { bottom: 50%; }
+.item.child.no-line::after { display: none; }
+
+/* An alias under its app (or a worktree's under the worktree): a link mark on the line, the
+   address where the names start; no rule between them. */
+.item.alias-item { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }
+.item.alias-item::before { display: none; }
+.item.alias-item .name { font-size: 12px; }
+.alias-icon { z-index: 1; display: grid; place-items: center; justify-self: center; width: 18px; height: 18px; border-radius: 5px; background: var(--card); color: var(--muted); }
+.item.alias-item.deep { padding-left: 56px; grid-template-columns: 18px 1fr; gap: 8px; }
+.item.child .mark-box { z-index: 1; width: 24px; height: 24px; }
 
 .item.child .name { font-weight: 400; color: var(--muted); }
 .item.child[aria-current="true"] .name,
 .item.child:hover .name { color: var(--text); }
-.item.child > .dot { position: absolute; z-index: 1; left: 24px; top: calc(50% - 4px); }
 
-/* An app's other addresses, as a count after its name. */
-.alias-count { margin-left: 6px; color: var(--muted); font-size: 11px; font-weight: 400; }
 .item.compact { min-height: 40px; padding-top: 4px; padding-bottom: 4px; }
 
 .item:hover { background: var(--steel-hover); }
@@ -325,10 +335,9 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 .item.child .mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  font-size: 11px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
 }
 
 .item .mark img {

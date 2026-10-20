@@ -2606,16 +2606,25 @@ describe("sidebar worktrees", () => {
     await refresh();
   });
 
-  test("aliases leave the list; worktrees nest under their app with a dot and the branch", () => {
-    expect($$("#list .alias").length).toBe(0);
+  test("an app's aliases, then its worktrees each with its derived aliases, nest under it", () => {
+    // An alias isn't an app row: it's named under its app and opens it.
     expect($(`#list [data-name="admin.shop"]`)).toBeNull();
-    const kids = $$("#list .kids .item.child");
-    expect(kids.map((k) => k.querySelector(".name")!.firstChild!.textContent)).toEqual(["agent/1a2b", "feature/login"]);
-    // Their app's and their own other addresses as a count, the hosts on hover.
-    expect($(`#list [data-name="shop"] .alias-count`).textContent).toBe("+2");
-    expect($(`#list [data-name="shop"] .alias-count`).title).toBe("admin.shop.test\napi.shop.test");
-    expect(kids.map((k) => k.querySelector(".alias-count")?.textContent)).toEqual(["+1", "+1"]);
-    expect(kids.map((k) => k.querySelector(".dot")!.classList.contains("on"))).toEqual([false, true]);
+    const under = [...$(`#list [data-name="shop"]`).nextElementSibling!.querySelectorAll<HTMLElement>(".item")];
+    expect(under.map((r) => (r.classList.contains("alias-item") ? `@${r.querySelector(".name")!.textContent}` : r.dataset.name))).toEqual([
+      "@admin.shop",
+      "@api.shop",
+      "shop--agent-1a2b",
+      "@admin--agent-1a2b",
+      "shop--feature-login",
+      "@admin--feature-login",
+    ]);
+    expect(under.filter((r) => r.classList.contains("deep")).length).toBe(2);
+    (under[0] as HTMLElement).click();
+    expect($(`#list [data-name="shop"]`).getAttribute("aria-current")).toBe("true");
+    const kids = $$("#list .kids .item.child:not(.alias-item)");
+    expect(kids.map((k) => k.querySelector(".name")!.textContent)).toEqual(["agent/1a2b", "feature/login"]);
+    // A branch mark with the app's run badge.
+    expect(kids.map((k) => !!k.querySelector(".mark-box .run-badge.on"))).toEqual([false, true]);
     const disc = $(`#list [data-name="shop"] .disclosure`);
     expect(disc.querySelector("svg")).toBeTruthy();
     expect(disc.querySelector(".count")!.textContent).toBe("2");
@@ -2638,7 +2647,7 @@ describe("sidebar worktrees", () => {
     document.querySelector(".pop")?.remove();
   });
 
-  test("a linked app keeps its worktrees under it and its alias as a count, not a row", async () => {
+  test("a linked app keeps its worktrees and its alias under it, not as rows of their own", async () => {
     const before = w.mockSnap.sites;
     const p = "/Users/x/Code/api";
     w.mockSnap.sites = [
@@ -2650,10 +2659,9 @@ describe("sidebar worktrees", () => {
     try {
       await refresh();
       expect($(`#list [data-name="backend"]`)).toBeNull();
-      expect($(`#list [data-name="api"] .alias-count`).textContent).toBe("+1");
-      const kid = $(`#list [data-name="api--x"]`);
-      expect(kid.classList.contains("child")).toBe(true);
-      expect(kid.closest(".kids")!.previousElementSibling!.getAttribute("data-name")).toBe("api");
+      const kids = $(`#list [data-name="api"]`).nextElementSibling!;
+      expect([...kids.querySelectorAll(".alias-item .name")].map((n) => n.textContent)).toEqual(["backend", "backend--x"]);
+      expect(kids.querySelector(`[data-name="api--x"]`)!.classList.contains("child")).toBe(true);
       await select("api");
       expect($("#site .alias-chip").textContent).toBe("+1");
     } finally {

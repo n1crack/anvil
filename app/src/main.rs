@@ -2378,8 +2378,13 @@ fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
 
 #[tauri::command(async)]
 fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) -> Res<Snapshot> {
-    let path = find_site(&site)?.path;
-    let (cfg, _) = edit(|c| anvil::link(c, &alias, path))?;
+    let s = find_site(&site)?;
+    if let Some(main) = s.worktree_of {
+        return Err(format!(
+            "Add the alias to {main}: its worktrees get theirs from it"
+        ));
+    }
+    let (cfg, _) = edit(|c| anvil::link(c, &alias, s.path))?;
     sites_changed(&handle, &app, &cfg);
     snapshot(&app)
 }
