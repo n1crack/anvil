@@ -122,14 +122,6 @@ pub fn log_file(name: &str) -> PathBuf {
     home().join("log").join(format!("create-{name}.log"))
 }
 
-/// Whether `git` runs here (Windows comes without it).
-fn git_installed() -> bool {
-    crate::platform::command("git")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// A template's choices, by option key: `{"kit": "livewire", "git": "on"}`.
 pub type Options = BTreeMap<String, String>;
 
@@ -241,7 +233,7 @@ pub fn options(kind: &str, cfg: &Config) -> Vec<Opt> {
         v.extend(versions("node", "Node", runtimes::installed("node"), None));
     }
     let mut git = on_off("git", "Git");
-    if !git_installed() {
+    if !crate::git_installed() {
         git.default = "off".into();
     }
     v.push(git);
@@ -648,7 +640,7 @@ fn build(
             )?;
         }
     }
-    if on(opts, "git") && !git_installed() {
+    if on(opts, "git") && !crate::git_installed() {
         // Windows comes without Git: the app is made all the same.
         writeln!(&*log, "Git isn't installed: no repository made")?;
     } else if on(opts, "git") {

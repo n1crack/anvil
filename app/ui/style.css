@@ -1019,12 +1019,20 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-out:focus-visible { outline-offset: -2px; }
 /* The keys, one muted line under the output; gone when the pane is too narrow for it. */
 .dev-keys { flex: none; margin: 0; padding: 3px 14px 4px; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #8d959f; font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; }
-.dev-keys-short { display: none; }
+.dev-keys { position: relative; }
+.dev-keys-short { display: none; height: auto; padding: 0 4px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; }
+.dev-keys-short:hover, .dev-keys-short[aria-expanded="true"] { background: rgba(255, 255, 255, 0.08); color: #c9d1d9; }
 @container (max-width: 460px) {
-  .dev-keys { text-align: right; cursor: help; }
+  .dev-keys { text-align: right; }
   .dev-keys-full { display: none; }
   .dev-keys-short { display: inline; }
 }
+/* ⌨ Keys' card: above the line, at the pane's right, in the console's colors. */
+.dev-keys-card { position: absolute; right: 10px; bottom: calc(100% + 6px); z-index: 5; display: grid; grid-template-columns: auto auto; gap: 4px 12px; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: #1b1f24; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); text-align: left; }
+.dev-keys-card[hidden] { display: none; }
+/* Key caps in the console's colors: the app's kbd is drawn for the light pages. */
+.dev-keys-card kbd { min-width: 22px; padding: 0 6px; border: 1px solid rgba(255, 255, 255, 0.18); border-bottom-width: 2px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); color: #e6edf3; font: 600 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-align: center; }
+.dev-keys-card span { align-self: center; }
 .dev-head .console-title { flex: none; }
 .dev-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .dev-pane.is-empty .dev-head-start { display: none; }
@@ -1047,12 +1055,25 @@ button.proc-name:hover { text-decoration: underline; }
 
 /* Run ▾: the app's scripts, each with its script muted. */
 .dev-run-menu { display: flex; flex-direction: column; min-width: 180px; max-width: 320px; max-height: 360px; padding: 4px; overflow-y: auto; }
-/* Where the scripts come from: the file's name in small bold monospace over its scripts,
- * which sit a little in; a line between the sources. */
-.dev-run-group { padding: 6px 8px 3px; color: var(--muted); font: 600 10.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+/* Where the scripts come from: the file's name in its color (.pc4 Node, .pc3 Composer),
+ * not something to click; a line between the sources; each script below carries Run's
+ * >_ so it reads as a command. */
+.dev-run-group { padding: 4px 8px 2px; color: var(--pc, var(--muted)); font: 600 10.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 .dev-run-group:not(:first-child) { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
-.dev-run-group ~ .dev-run-item { padding-left: 16px; }
-.dev-run-item { display: flex; align-items: baseline; gap: 12px; padding: 5px 8px; border: 0; border-radius: var(--radius-s); background: none; color: var(--text); font-size: 12px; text-align: left; }
+.dev-run-item::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  background: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l-3.5 3.5M7.5 12h6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l-3.5 3.5M7.5 12h6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.dev-run-item:hover::before, .dev-run-item:focus-visible::before { background: var(--text); }
+.dev-run-item { position: relative; display: flex; align-items: baseline; gap: 12px; padding: 5px 8px 5px 28px; border: 0; border-radius: var(--radius-s); background: none; color: var(--text); font-size: 12px; text-align: left; }
 .dev-run-item:hover, .dev-run-item:focus-visible { background: var(--selected); outline: none; }
 .dev-run-name { flex: none; }
 

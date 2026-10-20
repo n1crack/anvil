@@ -45,6 +45,22 @@ describe("setup", () => {
     expect(calls("setup_fix").map(([, a]) => a.step)).toEqual(["all", "trust"]);
     expect($("#setup").hidden).toBe(true);
   });
+
+  test("Install Git where Anvil can install it (git false), and nowhere else", async () => {
+    w.mockSetup.git = false;
+    (w as any).refresh();
+    await wait(80);
+    expect($$("#setup button").map((b) => b.textContent)).toEqual(["Install Git"]);
+    w.mockDelay = { setup_fix: 60 };
+    ($$("#setup button")[0] as HTMLElement).click();
+    await wait(10);
+    expect($("#setup button").textContent).toBe("Installing Git…");
+    w.mockSetup.git = true;
+    await wait(120);
+    w.mockDelay = {};
+    expect(calls("setup_fix").at(-1)![1]).toEqual({ step: "git" });
+    expect($("#setup").hidden).toBe(true);
+  });
 });
 
 describe("sidebar menu", () => {
@@ -465,6 +481,10 @@ describe("dev", () => {
   test("Run ▾ lists the one-off scripts only, and runs one after a confirm", async () => {
     $(".dev-cmds .dev-run").click();
     const names = $$(".dev-run-menu .dev-run-name").map((n) => n.textContent);
+    // Each source titled, even alone, in its color: package.json Node's green.
+    const groups = $$(".dev-run-menu .dev-run-group");
+    expect(groups.map((g) => g.textContent)).toEqual([...new Set(w.mockOv.vuefinder.commands.map((c) => c.source))]);
+    expect(groups.find((g) => g.textContent === "package.json")?.classList.contains("pc4")).toBe(true);
     expect(names).toEqual(w.mockOv.vuefinder.commands.map((c) => c.name));
     expect(names).not.toContain("docs:dev");
     const build = $$(".dev-run-item").find((b) => b.querySelector(".dev-run-name")!.textContent === "build")!;
@@ -594,9 +614,15 @@ describe("dev", () => {
         .map(([, a]) => [a.name, a.action]);
     const list = $(".dev-list");
     const out = $(".dev-out");
-    // The line, and on hover when the pane is too narrow for it (⌨ Keys).
+    // The line, and when the pane is too narrow for it ⌨ Keys, which opens them as a card.
     expect($(".dev-keys .dev-keys-full").textContent).toBe("↑↓ select · s start · x stop · r restart · q stop all · c clear");
-    expect($(".dev-keys").getAttribute("title")).toBe($(".dev-keys .dev-keys-full").textContent);
+    const card = $(".dev-keys-card") as HTMLElement;
+    expect(card.hidden).toBe(true);
+    ($(".dev-keys-short") as HTMLElement).click();
+    expect(card.hidden).toBe(false);
+    expect($$(".dev-keys-card kbd").map((k) => k.textContent)).toEqual(["↑↓", "s", "x", "r", "q", "c"]);
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(card.hidden).toBe(true);
     expect(out.tabIndex).toBe(0);
     $('.tabs [data-tab="overview"]').click();
     devTab().click();

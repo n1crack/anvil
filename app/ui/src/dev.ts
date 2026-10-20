@@ -262,8 +262,10 @@ function runMenu(name: string, btn: HTMLElement) {
   const pop = el("div", "dev-run-menu");
   pop.setAttribute("role", "menu");
   const sources = [...new Set(cmds.map((c) => c.source))];
+  // Every source titled, in its own color: Node's green, Composer's orange.
+  const tone = { "package.json": "pc4", "composer.json": "pc3" };
   for (const src of sources) {
-    if (sources.length > 1) pop.append(el("div", "dev-run-group", src));
+    pop.append(el("div", `dev-run-group ${tone[src] ?? "pc1"}`, src));
     for (const c of cmds.filter((c) => c.source === src)) {
       const b = el("button", "dev-run-item");
       b.setAttribute("role", "menuitem");

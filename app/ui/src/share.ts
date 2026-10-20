@@ -51,8 +51,7 @@ window.renderShare = (s, root) => {
     return dd.replaceChildren(...parts);
   }
   const b = el("button", "inline-action", "Share…");
-  b.onclick = () =>
-    confirmPop(b, `Anyone with the address can open ${s.name} while it is shared. ${LIMITS}`, "Share", () => share(s.name));
+  b.onclick = () => confirmPop(b, `Anyone with the address can open ${s.name} while it is shared. ${LIMITS}`, "Share", () => share(s.name));
   const why = t?.state === "failed" ? t.error : failed.get(s.name);
   dd.replaceChildren(b, ...(why ? [el("small", "share-error", why)] : []));
 };

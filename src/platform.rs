@@ -559,6 +559,75 @@ pub fn process_table() -> Vec<(u32, u32, u64, f32, String)> {
     out
 }
 
+/// Windows: add to this process's PATH what the user's and the machine's PATH (the
+/// registry) gained since it started, so a program just installed is found without a
+/// restart. Elsewhere nothing changes.
+pub fn refresh_path() {
+    #[cfg(windows)]
+    {
+        let read = |key: &str| {
+            let out = command("reg")
+                .args(["query", key, "/v", "Path"])
+                .output()
+                .ok()?;
+            let text = String::from_utf8_lossy(&out.stdout).into_owned();
+            text.lines()
+                .find_map(|l| l.trim_start().strip_prefix("Path"))
+                .and_then(|l| l.split_once("REG_"))
+                .and_then(|(_, r)| r.split_once(char::is_whitespace))
+                .map(|(_, v)| v.trim().to_string())
+        };
+        // %SystemRoot% and the like, as REG_EXPAND_SZ holds them.
+        let expand = |dir: &str| {
+            let mut out = String::new();
+            let mut parts = dir.split('%');
+            out.push_str(parts.next().unwrap_or_default());
+            let mut var = true;
+            for p in parts {
+                if var {
+                    match std::env::var(p) {
+                        Ok(v) if !p.is_empty() => out.push_str(&v),
+                        _ => {
+                            out.push('%');
+                            out.push_str(p);
+                            out.push('%');
+                        }
+                    }
+                } else {
+                    out.push_str(p);
+                }
+                var = !var;
+            }
+            out
+        };
+        let mut path = std::env::var("PATH").unwrap_or_default();
+        let have = |path: &str, dir: &str| {
+            path.split(';').any(|d| {
+                d.trim_end_matches('\\')
+                    .eq_ignore_ascii_case(dir.trim_end_matches('\\'))
+            })
+        };
+        for key in [
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+            r"HKCU\Environment",
+        ] {
+            for dir in read(key)
+                .unwrap_or_default()
+                .split(';')
+                .filter(|d| !d.is_empty())
+            {
+                let dir = expand(dir);
+                if !have(&path, &dir) {
+                    path = format!("{path};{dir}");
+                }
+            }
+        }
+        // SAFETY: the app sets PATH like this at start too, before its threads read it;
+        // here a setup step does it, and a reader sees the old or the new value.
+        unsafe { std::env::set_var("PATH", path) };
+    }
+}
+
 /// Whether this Windows can make Dev Drives (Windows 11 22H2, build 22621, and later).
 pub fn dev_drive_supported() -> bool {
     #[cfg(windows)]

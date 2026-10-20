@@ -42,11 +42,37 @@ export function streamPane(o: {
   const term = termOut("console-out dev-out");
   const empty = el("div", "dev-empty");
   term.out.tabIndex = 0;
-  // The keys (see main.onkeydown), said once; a narrow pane shows ⌨ Keys, and the line on hover.
-  const keys = "↑↓ select · s start · x stop · r restart · q stop all · c clear";
+  // The keys (see main.onkeydown), said once; a narrow pane shows ⌨ Keys, which opens
+  // them as a small card (again, outside or Esc closes it).
+  const KEYS: [string, string][] = [
+    ["↑↓", "select"],
+    ["s", "start"],
+    ["x", "stop"],
+    ["r", "restart"],
+    ["q", "stop all"],
+    ["c", "clear"],
+  ];
   const keysHint = el("p", "dev-keys");
-  keysHint.append(el("span", "dev-keys-full", keys), el("span", "dev-keys-short", "⌨ Keys"));
-  keysHint.title = keys;
+  const keysBtn = el("button", "dev-keys-short", "⌨ Keys");
+  keysBtn.setAttribute("aria-expanded", "false");
+  const card = el("div", "dev-keys-card");
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", "Keys");
+  card.hidden = true;
+  for (const [k, what] of KEYS) card.append(el("kbd", null, k), el("span", null, what));
+  const toggle = (open = card.hidden) => {
+    card.hidden = !open;
+    keysBtn.setAttribute("aria-expanded", String(open));
+  };
+  keysBtn.onclick = (e) => {
+    e.stopPropagation();
+    toggle();
+  };
+  document.addEventListener("mousedown", (e) => {
+    if (!card.hidden && !card.contains(e.target as Node) && e.target !== keysBtn) toggle(false);
+  });
+  card.addEventListener("keydown", (e) => e.key === "Escape" && toggle(false));
+  keysHint.append(el("span", "dev-keys-full", KEYS.map(([k, w]) => `${k} ${w}`).join(" · ")), keysBtn, card);
   pane.append(head, term.out, empty, keysHint);
   main.append(list, listSplitter(main, o.widthKey, o.minWidth), pane);
   box.append(bar, main);
