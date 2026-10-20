@@ -1321,6 +1321,10 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-size: 12px;
 }
 
+/* The same switches in an app's Settings tab, lined up with the other fields. */
+.app-exts .ver-exts { padding: 4px 0; }
+.app-exts .ver-error { padding: 2px 0 0; }
+
 .ver .actions-inline { min-height: 26px; }
 
 .ver .on-hover { visibility: hidden; }

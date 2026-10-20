@@ -70,7 +70,8 @@ pub fn install(home: &Path) -> Result<()> {
 }
 
 /// The site whose folder holds `cwd`, the innermost when folders nest. Links
-/// are resolved: macOS reaches /var through /private/var.
+/// are resolved: macOS reaches /var through /private/var. Of several sites on one folder
+/// (an alias), one with extensions of its own, so the terminal loads what its web does.
 pub fn site_for<'a>(sites: &'a [Site], cwd: &Path) -> Option<&'a Site> {
     let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     let cwd = real(cwd);
@@ -78,7 +79,7 @@ pub fn site_for<'a>(sites: &'a [Site], cwd: &Path) -> Option<&'a Site> {
         .iter()
         .map(|s| (s, real(&s.path)))
         .filter(|(_, p)| cwd.starts_with(p))
-        .max_by_key(|(_, p)| p.components().count())
+        .max_by_key(|(s, p)| (p.components().count(), !s.ext.is_empty()))
         .map(|(s, _)| s)
 }
 
@@ -232,7 +233,7 @@ fn resolve_for(
             let php = php_dir.join("php");
             // What PHP-FPM loads (OPcache, the version's extensions), so CLI and web agree,
             // also in a PHP this one starts (`phpext::scan_env`).
-            let scan = crate::phpext::scan_env(cfg, &v)?;
+            let scan = crate::phpext::scan_env(cfg, &v, site)?;
             if tool == "php" {
                 return Ok((php, vec![], scan.into_iter().collect()));
             }

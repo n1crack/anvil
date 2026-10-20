@@ -78,6 +78,10 @@ struct Snapshot {
     worktrees: std::collections::BTreeMap<String, WorktreeView>,
     /// Database copies of worktrees that are gone (never dropped on their own).
     leftovers: Vec<anvil::worktrees::Leftover>,
+    /// The extensions Anvil can add (`phpext::CATALOG`), for an app's Settings tab.
+    php_ext_catalog: Vec<&'static str>,
+    /// Extensions on for every app on a version (Settings › PHP), by version.
+    php_ext: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// What a worktree's Overview says about it.
@@ -377,6 +381,8 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         hidden: anvil::hidden_sites(&cfg),
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
+        php_ext_catalog: anvil::phpext::CATALOG.iter().map(|e| e.name).collect(),
+        php_ext: cfg.php_ext.clone(),
         editor: cfg.editor.clone(),
         terminal: cfg.terminal.clone(),
         git_client: git_client(&cfg).map(|c| app_label(&c)),
@@ -3415,35 +3421,44 @@ async fn php_opcache(handle: AppHandle, version: String) -> Res<Settings> {
 /// `phpext::build`'s lock file.
 static EXT_BUILDS: Mutex<Vec<(String, &'static str)>> = Mutex::new(Vec::new());
 
+/// `turn_on` (`phpext::add` or `add_site`) for `name` on `version`, marked in
+/// `EXT_BUILDS` while it builds: a second click or window is refused meanwhile.
+fn ext_on(
+    version: &str,
+    name: &str,
+    turn_on: impl FnOnce(&'static str) -> anyhow::Result<Config>,
+) -> Res<Config> {
+    let ext = anvil::phpext::CATALOG
+        .iter()
+        .find(|e| e.name == name)
+        .ok_or_else(|| format!("{name} is not in Anvil's catalog"))?;
+    let key = (version.to_string(), ext.name);
+    let building = !anvil::phpext::built(version, ext.name);
+    if building {
+        let mut list = anvil::lock(&EXT_BUILDS);
+        if list.contains(&key) {
+            return Err(format!("{name} for PHP {version} is already being built"));
+        }
+        list.push(key.clone());
+    }
+    let added = turn_on(ext.name);
+    if building {
+        anvil::lock(&EXT_BUILDS).retain(|k| *k != key);
+    }
+    added.map_err(err)
+}
+
 /// Turns a catalog extension on (building it first unless built for this patch release)
 /// or off (its build is kept) for every app on `version`, then restarts PHP-FPM.
 #[tauri::command]
 async fn php_ext(handle: AppHandle, version: String, name: String, on: bool) -> Res<Settings> {
     let h = handle.clone();
     tauri::async_runtime::spawn_blocking(move || -> Res<()> {
-        let ext = anvil::phpext::CATALOG
-            .iter()
-            .find(|e| e.name == name)
-            .ok_or_else(|| format!("{name} is not in Anvil's catalog"))?;
-        let key = (version.clone(), ext.name);
         let cfg = if on {
-            let building = !anvil::phpext::built(&version, ext.name);
-            if building {
-                let mut list = anvil::lock(&EXT_BUILDS);
-                if list.contains(&key) {
-                    return Err(format!("{name} for PHP {version} is already being built"));
-                }
-                list.push(key.clone());
-            }
-            let added = anvil::phpext::add(&version, ext.name);
-            if building {
-                anvil::lock(&EXT_BUILDS).retain(|k| *k != key);
-            }
-            added
+            ext_on(&version, &name, |n| anvil::phpext::add(&version, n))?
         } else {
-            anvil::phpext::remove(&version, ext.name)
-        }
-        .map_err(err)?;
+            anvil::phpext::remove(&version, &name).map_err(err)?
+        };
         let app = h.state::<App>();
         if running(&app) {
             start(&app, &cfg);
@@ -3454,6 +3469,32 @@ async fn php_ext(handle: AppHandle, version: String, name: String, on: bool) -> 
     .map_err(|e| e.to_string())??;
     changed(&handle);
     settings(handle)
+}
+
+/// The same for one app only (its Settings tab): it then has a PHP-FPM of its own.
+#[tauri::command]
+async fn app_ext(handle: AppHandle, site: String, name: String, on: bool) -> Res<Snapshot> {
+    let h = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Res<()> {
+        let cfg = if on {
+            let s = site_in(&anvil::load().map_err(err)?, &site)?;
+            let version = s
+                .php
+                .ok_or_else(|| format!("{site} runs on no PHP of Anvil's"))?;
+            ext_on(&version, &name, |n| anvil::phpext::add_site(&site, n))?
+        } else {
+            anvil::phpext::remove_site(&site, &name).map_err(err)?
+        };
+        let app = h.state::<App>();
+        if running(&app) {
+            start(&app, &cfg);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    changed(&handle);
+    snapshot(&handle.state::<App>())
 }
 
 /// Opens Apple's installer for the Xcode Command Line Tools, which OPcache builds with.
@@ -3922,6 +3963,7 @@ fn main() {
             php_install,
             php_opcache,
             php_ext,
+            app_ext,
             xcode_tools_install,
             php_uninstall,
             set_terminal,
@@ -4253,6 +4295,8 @@ mod tests {
             root_detected: ".".into(),
             php: None,
             php_pinned: false,
+            ext: vec![],
+            own_master: false,
             ini: Default::default(),
             linked: false,
             parked_in: None,

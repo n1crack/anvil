@@ -944,6 +944,8 @@ mod tests {
             root_detected: ".".into(),
             php: None,
             php_pinned: false,
+            ext: vec![],
+            own_master: false,
             ini: Default::default(),
             linked: false,
             parked_in: None,

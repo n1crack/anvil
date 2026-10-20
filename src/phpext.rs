@@ -200,6 +200,44 @@ pub fn remove(minor: &str, name: &str) -> Result<Config> {
     Ok(cfg)
 }
 
+/// Turn `name` on for one app only (a PHP-FPM master of its own: `mark_own_masters`),
+/// building it first for the app's PHP unless built; the saved config.
+pub fn add_site(site: &str, name: &str) -> Result<Config> {
+    find(name)?;
+    let site = crate::site_name(site);
+    let s = crate::sites(&crate::load()?)
+        .into_iter()
+        .find(|s| s.name == site)
+        .with_context(|| format!("No site named {site}"))?;
+    let minor = s
+        .php
+        .with_context(|| format!("{site} runs on no PHP of Anvil's"))?;
+    if !built(&minor, name) {
+        build(&minor, name)?;
+    }
+    let (cfg, ()) = crate::update(|c| {
+        let names = &mut c.sites.entry(site.clone()).or_default().ext;
+        if !names.iter().any(|n| n == name) {
+            names.push(name.into());
+        }
+        Ok(())
+    })?;
+    Ok(cfg)
+}
+
+/// Turn one app's own `name` off; its `.so` stays.
+pub fn remove_site(site: &str, name: &str) -> Result<Config> {
+    find(name)?;
+    let site = crate::site_name(site);
+    let (cfg, ()) = crate::update(|c| {
+        if let Some(s) = c.sites.get_mut(&site) {
+            s.ext.retain(|n| n != name);
+        }
+        Ok(())
+    })?;
+    Ok(cfg)
+}
+
 /// Whether `name` is on for PHP `minor`.
 pub fn on(cfg: &Config, minor: &str, name: &str) -> bool {
     cfg.php_ext
@@ -211,9 +249,20 @@ pub fn on(cfg: &Config, minor: &str, name: &str) -> bool {
 /// app processes): OPcache first, as it must load before Xdebug, then the extensions
 /// turned on for the version.
 pub fn php_args(cfg: &Config, minor: &str) -> Vec<String> {
+    php_args_with(cfg, minor, &[])
+}
+
+/// `php_args` with one app's own extensions (`Site::ext`) too, each loaded once.
+pub fn php_args_with(cfg: &Config, minor: &str, own: &[String]) -> Vec<String> {
     let mut args = crate::opcache::fpm_args(cfg, minor);
-    if let Some(names) = cfg.php_ext.get(minor).filter(|n| !n.is_empty()) {
-        args.extend(ini_args(&cfg.ini, minor, names));
+    let mut names = cfg.php_ext.get(minor).cloned().unwrap_or_default();
+    for n in own {
+        if !names.contains(n) {
+            names.push(n.clone());
+        }
+    }
+    if !names.is_empty() {
+        args.extend(ini_args(&cfg.ini, minor, &names));
     }
     args
 }
@@ -223,8 +272,21 @@ pub fn php_args(cfg: &Config, minor: &str) -> Vec<String> {
 /// those start in turn (PHP_BINARY: queue:listen's workers; `npm run dev` → `php
 /// artisan`; composer scripts) loads the same. Never with the `-d`s too: loaded twice
 /// warns. `None` when there is nothing to load.
-pub fn scan_env(cfg: &Config, minor: &str) -> Result<Option<(String, String)>> {
-    scan_env_in(&php_dir(minor).join("conf.d"), &php_args(cfg, minor))
+/// An app with extensions of its own (`site`) gets a folder of its own in `run`.
+pub fn scan_env(
+    cfg: &Config,
+    minor: &str,
+    site: Option<&crate::Site>,
+) -> Result<Option<(String, String)>> {
+    match site.filter(|s| !s.ext.is_empty()) {
+        Some(s) => {
+            let dir = home()
+                .join("run")
+                .join(format!("php-{minor}-{}.d", crate::pool(s)));
+            scan_env_in(&dir, &php_args_with(cfg, minor, &s.ext))
+        }
+        None => scan_env_in(&php_dir(minor).join("conf.d"), &php_args(cfg, minor)),
+    }
 }
 
 /// `args` (`-d` pairs) as `dir/anvil.ini`, rewritten only when it differs, and the

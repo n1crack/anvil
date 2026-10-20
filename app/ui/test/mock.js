@@ -12,6 +12,8 @@ const mockSite = (name, kind, extra = {}) => ({
   php: kind === "laravel" ? "8.4" : null,
   php_pinned: false,
   ini: {},
+  ext: [],
+  own_master: false,
   linked: false,
   parked_in: "/Users/x/Sites",
   modified: 0,
@@ -44,6 +46,8 @@ window.mockSnap = {
   http_port: 80,
   php_default: "8.4",
   php_installed: ["8.4"],
+  php_ext_catalog: ["xdebug", "pcov", "apcu", "igbinary", "msgpack"],
+  php_ext: {},
   editor: "Zed",
   git_client: null,
   groups: {},
@@ -989,6 +993,13 @@ const mockHandle = (cmd, a) => {
       if (window.mockOpcacheError) throw window.mockOpcacheError;
       (window.mockOpcache ??= {})[a.version] = "ready";
       return mockHandle("settings");
+    case "app_ext": {
+      if (window.mockExtError) throw window.mockExtError;
+      const s = mockSnap.sites.find((x) => x.name === a.site);
+      s.ext = a.on ? [...s.ext.filter((n) => n !== a.name), a.name] : s.ext.filter((n) => n !== a.name);
+      s.own_master = s.ext.length > 0;
+      return mockSnap;
+    }
     case "php_ext": {
       if (window.mockExtError) throw window.mockExtError;
       const on = ((window.mockExt ??= {})[a.version] ??= []).filter((n) => n !== a.name);

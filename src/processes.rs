@@ -1058,7 +1058,7 @@ pub fn env(cfg: &crate::Config, site: &Site, test: bool) -> anyhow::Result<Vec<(
     }
     if let Some(v) = &site.php {
         path = crate::prepend_path(&crate::php_dir(v), &path);
-        env.extend(crate::phpext::scan_env(cfg, v)?);
+        env.extend(crate::phpext::scan_env(cfg, v, Some(site))?);
     }
     env.push(("PATH".into(), path));
     env.extend(crate::worktrees::checked_env(cfg, site, test)?);
@@ -1240,6 +1240,8 @@ mod tests {
             root_detected: ".".into(),
             php: Some("8.4".into()),
             php_pinned: false,
+            ext: vec![],
+            own_master: false,
             ini: Default::default(),
             linked: false,
             parked_in: None,
@@ -1899,6 +1901,78 @@ echo '{DEV_JSON}'
         let (_, args, e) = shim(&cfg, "composer");
         assert_eq!(args.len(), 1, "only the phar: {args:?}");
         assert_eq!(scan(&e), want);
+    }
+
+    #[test]
+    fn app_processes_get_site_ext_args() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&crate::ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let php = crate::php_dir("8.4").join("php");
+        fs::create_dir_all(php.parent().unwrap()).unwrap();
+        fs::write(&php, "#!/bin/sh\nprintf 8.4.23\n").unwrap();
+        fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(php.with_file_name("php-fpm"), "").unwrap();
+        let so = |name: &str| {
+            let so = crate::phpext::so_path("8.4", "8.4.23", name);
+            fs::create_dir_all(so.parent().unwrap()).unwrap();
+            fs::write(&so, "").unwrap();
+            so.display().to_string()
+        };
+        let (apcu, xdebug) = (so("apcu"), so("xdebug"));
+        let app = dir.path().join("shop");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("artisan"), "").unwrap();
+        let mut cfg = crate::Config::default();
+        cfg.links.insert("shop".into(), app.clone());
+        // An alias of the same folder, listed after it: the shim still picks the app's own.
+        cfg.links.insert("zz".into(), app.clone());
+        cfg.php = Some("8.4".into());
+        // On for 8.4 and for the app: loaded once.
+        cfg.php_ext
+            .insert("8.4".into(), vec!["apcu".into(), "xdebug".into()]);
+        cfg.sites.entry("shop".into()).or_default().ext = vec!["xdebug".into()];
+        let s = crate::sites(&cfg)
+            .into_iter()
+            .find(|s| s.name == "shop")
+            .unwrap();
+        assert!(s.own_master);
+        let own = dir.path().join("run/php-8.4-site-shop.d");
+        let scan = |env: Vec<(String, String)>| {
+            env.into_iter()
+                .find(|(k, _)| k == "PHP_INI_SCAN_DIR")
+                .map(|(_, v)| v)
+        };
+        let want = Some(format!("{}:", own.display()));
+        assert_eq!(scan(env(&cfg, &s, false).unwrap()), want, "app processes");
+        let ini = fs::read_to_string(own.join("anvil.ini")).unwrap();
+        assert_eq!(ini.matches("xdebug.so").count(), 1, "{ini}");
+        assert!(
+            ini.starts_with(&format!("zend_extension={xdebug}\n")),
+            "{ini}"
+        );
+        assert!(ini.contains(&format!("\nextension={apcu}\n")), "{ini}");
+        assert!(ini.contains("xdebug.mode=debug\n"));
+        // The terminal's php in the app's folder: the same.
+        let (_, args, e) = crate::shims::resolve_with("php", &app, &cfg, false).unwrap();
+        assert!(args.is_empty());
+        assert_eq!(scan(e), want);
+        // Elsewhere: the version's folder, without the app's own.
+        cfg.php_ext.remove("8.4");
+        let (_, _, e) = crate::shims::resolve_with("php", dir.path(), &cfg, false).unwrap();
+        assert_eq!(scan(e), None, "8.4 has nothing of its own now");
+        let s = crate::sites(&cfg)
+            .into_iter()
+            .find(|s| s.name == "shop")
+            .unwrap();
+        env(&cfg, &s, false).unwrap();
+        let ini = fs::read_to_string(own.join("anvil.ini")).unwrap();
+        assert_eq!(
+            ini.lines().next(),
+            Some(format!("zend_extension={xdebug}").as_str())
+        );
     }
 
     #[test]

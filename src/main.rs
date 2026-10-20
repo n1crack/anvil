@@ -380,6 +380,14 @@ enum AppCmd {
         #[arg(long, conflicts_with = "dir")]
         reset: bool,
     },
+    /// Turn an extension on or off for this app only, which then gets a PHP-FPM of its own
+    /// (xdebug, pcov, apcu, igbinary, msgpack)
+    Ext {
+        site: String,
+        #[arg(value_enum)]
+        action: ExtAction,
+        name: String,
+    },
     /// Set a php.ini value for the app, or clear it by leaving out the value
     Ini {
         site: String,
@@ -440,6 +448,12 @@ enum PhpCmd {
         #[command(subcommand)]
         cmd: ExtCmd,
     },
+}
+
+#[derive(clap::ValueEnum, Clone)]
+enum ExtAction {
+    Add,
+    Remove,
 }
 
 #[derive(Subcommand)]
@@ -1332,6 +1346,19 @@ fn run() -> Result<()> {
             }
             AppCmd::Root { site, dir, .. } => {
                 edit(&mut cfg, |c| set_site_root(c, &site, dir.as_deref()))?
+            }
+            AppCmd::Ext { site, action, name } => {
+                match action {
+                    ExtAction::Add => drop(phpext::add_site(&site, &name)?),
+                    ExtAction::Remove => drop(phpext::remove_site(&site, &name)?),
+                }
+                control::notify_changed();
+                println!(
+                    "{}",
+                    commands(
+                        "Restart Anvil to use it: `anvil start`, or Stop and Start in the app."
+                    )
+                );
             }
             AppCmd::Ini { site, key, value } => {
                 edit(&mut cfg, |c| set_site_ini(c, &site, &key, value.as_deref()))?

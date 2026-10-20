@@ -14,6 +14,10 @@ export interface Site {
   php: string | null;
   php_pinned: boolean;
   ini: Record<string, string>;
+  /** Its own extensions, on top of its version's. */
+  ext: string[];
+  /** Served by a PHP-FPM master of its own. */
+  own_master: boolean;
   linked: boolean;
   parked_in: string | null;
   modified: number;
@@ -63,6 +67,10 @@ export interface Snapshot {
   worktrees: Record<string, WorktreeView>;
   /** Database copies of worktrees that are gone; never deleted on their own. */
   leftovers: Leftover[];
+  /** The extensions Anvil can add. */
+  php_ext_catalog: string[];
+  /** Extensions on for every app on a version, by version. */
+  php_ext: Record<string, string[]>;
 }
 
 export type DbChoice = "copy" | "empty";

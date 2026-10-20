@@ -139,6 +139,66 @@ describe("web root", () => {
   });
 });
 
+describe("app extensions", () => {
+  const exts = () =>
+    $$('[data-panel="settings"] .app-exts .ver-ext').map((l) => {
+      const input = l.querySelector("input") as HTMLInputElement;
+      return { name: l.querySelector(".ver-ext-name")?.textContent, on: input.checked, held: input.disabled, text: l.textContent };
+    });
+  const flip = (name: string) =>
+    ($$('[data-panel="settings"] .app-exts .ver-ext').find((l) => l.textContent?.startsWith(name))!.querySelector("input") as HTMLInputElement).click();
+
+  test("app_tab_extensions: the catalog as switches for this app; the version's held on; Building… and errors inline", async () => {
+    w.mockSnap.php_ext = { "8.4": ["apcu"] };
+    w.mockDelay = { app_ext: 100 };
+    try {
+      await wait(550); // refresh reads the state again only half a second after the last read
+      w.refresh();
+      await wait(80);
+      await select("shop");
+      expect($('[data-panel="settings"] .app-exts-row dt').textContent).toBe("PHP extensions");
+      expect(exts().map((e) => [e.name, e.on, e.held])).toEqual([
+        ["xdebug", false, false],
+        ["pcov", false, false],
+        ["apcu", true, true],
+        ["igbinary", false, false],
+        ["msgpack", false, false],
+      ]);
+      flip("xdebug");
+      await wait(10);
+      expect(calls("app_ext").at(-1)![1]).toEqual({ site: "shop", name: "xdebug", on: true });
+      expect(exts()[0]).toMatchObject({ text: "xdebugBuilding…", held: true });
+      await wait(150);
+      expect(exts()[0]).toMatchObject({ on: true, held: false, text: "xdebug" });
+      expect(w.mockSnap.sites.find((s: any) => s.name === "shop").ext).toEqual(["xdebug"]);
+
+      delete w.mockDelay.app_ext;
+      w.mockExtError = "Building pcov failed — it needs the Xcode Command Line Tools: xcode-select --install";
+      flip("pcov");
+      await wait(80);
+      const error = $('[data-panel="settings"] .app-ext-error');
+      expect(error.textContent).toContain("xcode-select --install");
+      expect([...error.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Install command line tools"]);
+      expect(exts()[1].on).toBe(false);
+      expect($$('[role="alert"]:not([hidden]), .toast:not([hidden])').length).toBe(0);
+      delete w.mockExtError;
+
+      flip("xdebug");
+      await wait(80);
+      expect(calls("app_ext").at(-1)![1]).toEqual({ site: "shop", name: "xdebug", on: false });
+      expect($('[data-panel="settings"] .app-ext-error')).toBeNull();
+
+      // No PHP of Anvil's: no line.
+      await select("vuefinder");
+      expect($('[data-panel="settings"] .app-exts-row')).toBeNull();
+    } finally {
+      w.mockSnap.php_ext = {};
+      w.mockDelay = {};
+      delete w.mockExtError;
+    }
+  });
+});
+
 describe("sidebar", () => {
   test("an app's dot: green while anything of it runs, amber while starting, red after a crash", async () => {
     w.mockSnap.app_states = { shop: "running", vuefinder: "starting", notes: "crashed" };

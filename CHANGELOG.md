@@ -30,6 +30,10 @@ Until 1.0.0, minor versions may contain breaking changes.
   workers, `npm run dev` → `php artisan`, composer scripts). Xdebug starts only when a request
   asks for it (`xdebug.start_with_request=trigger`). Off keeps the build, so
   on again is instant; a new patch release of PHP builds them again.
+- PHP extensions for one app: the same switches in the app's Settings tab, or
+  `anvil app ext <site> add|remove <ext>`, e.g. Xdebug for the app you debug
+  only. That app, and any other address of the same folder, gets a PHP-FPM of
+  its own; its terminal `php` and processes load the same extensions.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service
   start|stop <id>` ask the running app to do it, so the change shows there at
   once, and print each process's state (`api: running`). Without the app open

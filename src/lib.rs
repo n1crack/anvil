@@ -132,6 +132,9 @@ pub struct SiteConfig {
     /// php.ini overrides for this site only, e.g. memory_limit = "1G".
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ini: BTreeMap<String, String>,
+    /// Catalog extensions for this site only (`phpext::CATALOG`), over its version's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ext: Vec<String>,
     /// Overrides the detected kind (see `apps::KINDS`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
@@ -246,6 +249,10 @@ pub struct Site {
     pub php_pinned: bool,
     /// php.ini overrides; a site with overrides gets its own PHP-FPM pool.
     pub ini: BTreeMap<String, String>,
+    /// Its own extensions (`SiteConfig::ext`), on top of its version's.
+    pub ext: Vec<String>,
+    /// Served by a PHP-FPM master of its own (`mark_own_masters`).
+    pub own_master: bool,
     pub linked: bool,
     /// The parked directory this site comes from (`None` for linked sites).
     pub parked_in: Option<PathBuf>,
@@ -576,7 +583,26 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     }
     sites.sort_by(|a, b| a.name.cmp(&b.name));
     apps::assign_ports(cfg, &mut sites);
+    mark_own_masters(&mut sites);
     sites
+}
+
+/// A site with extensions of its own gets a PHP-FPM master of its own, and so does every
+/// site on the same folder: two masters' pools never run the same files (one OPcache per
+/// master), and a zend extension such as Xdebug can be one app's only.
+fn mark_own_masters(sites: &mut [Site]) {
+    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let paths: BTreeSet<PathBuf> = sites
+        .iter()
+        .filter(|s| !s.ext.is_empty())
+        .map(|s| real(&s.path))
+        .collect();
+    if paths.is_empty() {
+        return;
+    }
+    for s in sites.iter_mut() {
+        s.own_master = paths.contains(&real(&s.path));
+    }
 }
 
 /// A worktree's settings, field by field its own else its app's: a pin of either beats the
@@ -596,6 +622,11 @@ fn worktree_settings(cfg: &Config, main: &str, name: &str) -> SiteConfig {
             .filter(|s| !s.ini.is_empty())
             .or(m)
             .map(|s| s.ini.clone())
+            .unwrap_or_default(),
+        ext: o
+            .filter(|s| !s.ext.is_empty())
+            .or(m)
+            .map(|s| s.ext.clone())
             .unwrap_or_default(),
         port: o.and_then(|s| s.port),
         autostart: false,
@@ -626,6 +657,7 @@ fn site_at(
     };
     let pinned = own.and_then(|s| s.php.clone());
     let ini = own.map(|s| s.ini.clone()).unwrap_or_default();
+    let ext = own.map(|s| s.ext.clone()).unwrap_or_default();
     let detected = apps::detect(&path);
     let kind = own
         .and_then(|s| s.kind.clone())
@@ -666,6 +698,8 @@ fn site_at(
             .unwrap_or(cfg.https_default == Some(true)),
         modified,
         ini,
+        ext,
+        own_master: false,
         php_pinned: pin_set && php.is_some(),
         php,
         kind_detected: detected.into(),
@@ -1163,9 +1197,10 @@ pub(crate) fn pool(site: &Site) -> String {
     format!("site-{}", site.name.replace('.', "_"))
 }
 
-/// A site with php.ini overrides, or a worktree (its `env[]` lines), gets a pool of its own.
+/// A site with php.ini overrides, or a worktree (its `env[]` lines), gets a pool of its own;
+/// one with a master of its own too.
 pub(crate) fn own_pool(site: &Site) -> bool {
-    !site.ini.is_empty() || site.worktree_of.is_some()
+    !site.ini.is_empty() || site.worktree_of.is_some() || site.own_master
 }
 
 /// The socket a site's PHP requests go to: its own pool, or the version's shared pool.
@@ -1191,43 +1226,67 @@ fn fpm_socket(site: &Site) -> Option<PathBuf> {
     Some(sock)
 }
 
-/// PHP-FPM config for one version: the shared pool plus one pool per customised site.
+/// PHP-FPM config for one version: the shared pool plus one pool per customised site,
+/// except the sites with a master of their own (`fpm_site_conf`).
 fn fpm_conf(cfg: &Config, v: &str, sites: &[Site]) -> String {
-    let global = &cfg.ini;
-    let pool_conf = |name: &str, sock: &Path, max: u8| {
-        format!(
-            "\n[{name}]\nlisten = {}\npm = ondemand\npm.max_children = {max}\ncatch_workers_output = yes\nclear_env = no\n",
-            sock.display()
-        )
-    };
-    let mut s = format!(
-        "[global]\nerror_log = {}\ndaemonize = no\n",
-        php_fpm_log(v).display()
-    );
-    let values = |ini: &BTreeMap<String, String>| -> String {
-        ini.iter()
-            .map(|(k, val)| format!("php_value[{k}] = {val}\n"))
-            .collect()
-    };
-    s += &pool_conf("www", &home().join("run").join(format!("php-{v}.sock")), 16);
-    s += &values(global);
+    let mut s = fpm_global(v);
+    s += &fpm_pool("www", &home().join("run").join(format!("php-{v}.sock")), 16);
+    s += &php_values(&cfg.ini);
     for site in sites
         .iter()
-        .filter(|s| s.php.as_deref() == Some(v) && own_pool(s))
+        .filter(|s| s.php.as_deref() == Some(v) && own_pool(s) && !s.own_master)
     {
-        // A worktree Anvil can't separate from main gets no pool (Caddy shows why).
-        let Ok(env) = worktrees::web_env(cfg, site) else {
-            continue;
-        };
-        s += &pool_conf(&pool(site), &fpm_socket(site).unwrap(), 8);
-        let mut ini = global.clone();
-        ini.extend(site.ini.clone());
-        s += &values(&ini);
-        // Quoted: URLs hold `?`, `=`, `&`. One bad line would stop every pool; `env`
-        // already refuses a database value that isn't safe, so only a shared one is left out.
-        for (k, val) in env.iter().filter(|(k, v)| worktrees::fpm_safe(k, v)) {
-            s += &format!("env[{k}] = \"{val}\"\n");
-        }
+        s += &site_pool(cfg, site);
+    }
+    s
+}
+
+/// PHP-FPM config of a site's own master: its pool only; `None` when it gets no pool.
+fn fpm_site_conf(cfg: &Config, v: &str, site: &Site) -> Option<String> {
+    Some(fpm_global(v) + &Some(site_pool(cfg, site)).filter(|p| !p.is_empty())?)
+}
+
+/// Where a site's own master's config goes.
+fn fpm_site_conf_file(v: &str, site: &Site) -> PathBuf {
+    home()
+        .join("run")
+        .join(format!("php-{v}-{}-fpm.conf", pool(site)))
+}
+
+fn fpm_global(v: &str) -> String {
+    format!(
+        "[global]\nerror_log = {}\ndaemonize = no\n",
+        php_fpm_log(v).display()
+    )
+}
+
+fn fpm_pool(name: &str, sock: &Path, max: u8) -> String {
+    format!(
+        "\n[{name}]\nlisten = {}\npm = ondemand\npm.max_children = {max}\ncatch_workers_output = yes\nclear_env = no\n",
+        sock.display()
+    )
+}
+
+fn php_values(ini: &BTreeMap<String, String>) -> String {
+    ini.iter()
+        .map(|(k, val)| format!("php_value[{k}] = {val}\n"))
+        .collect()
+}
+
+/// A site's own pool, with the version's and its own php.ini values and a worktree's
+/// `env[]` lines; nothing for a worktree Anvil can't separate from main (Caddy shows why).
+fn site_pool(cfg: &Config, site: &Site) -> String {
+    let Ok(env) = worktrees::web_env(cfg, site) else {
+        return String::new();
+    };
+    let mut s = fpm_pool(&pool(site), &fpm_socket(site).unwrap(), 8);
+    let mut ini = cfg.ini.clone();
+    ini.extend(site.ini.clone());
+    s += &php_values(&ini);
+    // Quoted: URLs hold `?`, `=`, `&`. One bad line would stop every pool; `env`
+    // already refuses a database value that isn't safe, so only a shared one is left out.
+    for (k, val) in env.iter().filter(|(k, v)| worktrees::fpm_safe(k, v)) {
+        s += &format!("env[{k}] = \"{val}\"\n");
     }
     s
 }
@@ -2109,17 +2168,31 @@ impl Server {
             let _ = fs::remove_file(home().join("run").join(format!("php-{v}.sock")));
             let conf = home().join("run").join(format!("php-{v}-fpm.conf"));
             fs::write(&conf, fpm_conf(cfg, v, &sites))?;
-            server.labels.push(format!("PHP {v} FPM"));
-            server.children.push(
+            // Started here, not by a PHP: `-d`s, no scan dir (`phpext::scan_env`).
+            let fpm = |conf: &Path, ext: &[String]| {
                 Command::new(php_dir(v).join("php-fpm"))
                     .arg("-y")
-                    .arg(&conf)
+                    .arg(conf)
                     .arg("-c")
                     .arg(php_dir(v).join("php.ini"))
-                    .args(phpext::php_args(cfg, v))
+                    .args(phpext::php_args_with(cfg, v, ext))
                     .spawn()
-                    .with_context(|| format!("failed to start PHP {v}"))?,
-            );
+                    .with_context(|| format!("failed to start PHP {v}"))
+            };
+            server.labels.push(format!("PHP {v} FPM"));
+            server.children.push(fpm(&conf, &[])?);
+            for site in sites
+                .iter()
+                .filter(|s| s.own_master && s.php.as_deref() == Some(v))
+            {
+                let Some(text) = fpm_site_conf(cfg, v, site) else {
+                    continue;
+                };
+                let conf = fpm_site_conf_file(v, site);
+                fs::write(&conf, text)?;
+                server.labels.push(format!("PHP {v} FPM ({})", site.name));
+                server.children.push(fpm(&conf, &site.ext)?);
+            }
         }
 
         let file = home().join("run").join("Caddyfile");
@@ -2418,6 +2491,8 @@ mod tests {
             root_detected: ".".into(),
             php: php.map(Into::into),
             php_pinned: false,
+            ext: vec![],
+            own_master: false,
             ini: BTreeMap::new(),
             linked: false,
             parked_in: None,
@@ -3138,6 +3213,70 @@ mod tests {
         assert!(hidden_sites(&cfg).is_empty());
         assert!(sites(&cfg).iter().any(|s| s.name == "shop"));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn own_master_for_every_site_on_that_path() {
+        let _env = lock(&ENV_LOCK);
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let app = dir.path().join("shop");
+        fs::create_dir_all(&app).unwrap();
+        let mut cfg = Config::default();
+        cfg.links.insert("shop".into(), app.clone());
+        cfg.links.insert("alias".into(), app.clone());
+        cfg.links.insert("blog".into(), dir.path().into());
+        cfg.sites.entry("shop".into()).or_default().ext = vec!["xdebug".into()];
+        let all = sites(&cfg);
+        let master = |n: &str| all.iter().find(|s| s.name == n).unwrap().own_master;
+        assert!(master("shop") && master("alias"), "same folder, same rule");
+        assert!(!master("blog"));
+
+        // Neither is in the version's master; each has one of its own.
+        let mut sites = [
+            site("shop", "/s/shop", Some("8.4")),
+            site("alias", "/s/shop", Some("8.4")),
+            site("blog", "/s/blog", Some("8.4")),
+        ];
+        sites[0].ext = vec!["xdebug".into()];
+        mark_own_masters(&mut sites);
+        assert!(sites[1].own_master && !sites[2].own_master);
+        let conf = fpm_conf(&cfg, "8.4", &sites);
+        assert!(conf.contains("[www]"));
+        assert!(
+            !conf.contains("[site-shop]") && !conf.contains("[site-alias]"),
+            "{conf}"
+        );
+        let sock = fpm_socket(&sites[1]).unwrap();
+        assert!(sock.ends_with("site-alias.sock"), "{sock:?}");
+    }
+
+    #[test]
+    fn site_conf_has_only_its_pool() {
+        let _env = lock(&ENV_LOCK);
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let mut cfg = Config::default();
+        cfg.ini.insert("memory_limit".into(), "1G".into());
+        let mut shop = site("shop", "/s/shop", Some("8.4"));
+        shop.ext = vec!["xdebug".into()];
+        shop.ini.insert("display_errors".into(), "On".into());
+        let mut sites = [shop, site("blog", "/s/blog", Some("8.4"))];
+        mark_own_masters(&mut sites);
+        let conf = fpm_site_conf(&cfg, "8.4", &sites[0]).unwrap();
+        assert_eq!(conf.matches("\n[").count(), 1, "one pool: {conf}");
+        assert!(conf.starts_with("[global]\n"));
+        assert!(conf.contains("\n[site-shop]\n"));
+        assert!(conf.contains(&format!(
+            "listen = {}",
+            fpm_socket(&sites[0]).unwrap().display()
+        )));
+        assert!(conf.contains("php_value[memory_limit] = 1G"));
+        assert!(conf.contains("php_value[display_errors] = On"));
+        assert!(!conf.contains("[www]") && !conf.contains("[site-blog]"));
+        assert!(fpm_site_conf_file("8.4", &sites[0]).ends_with("run/php-8.4-site-shop-fpm.conf"));
     }
 
     #[test]

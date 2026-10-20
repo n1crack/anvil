@@ -1241,6 +1241,8 @@ export function renderSite() {
   php.onchange = () => call("set_php", { site: s.name, version: php.value || null });
 
   if (!process && serves(s)) webRoot(s, root);
+  if (!process && s.php) appExtensions(s, root);
+  else root.querySelector(".app-exts-row")?.remove();
 
   // Per-app php.ini overrides; placeholders show what applies without one.
   const base = { memory_limit: "512M", upload_max_filesize: "100M", max_execution_time: "120" };
@@ -1287,6 +1289,60 @@ export function renderSite() {
 }
 
 const rootErrors = new Map<string, [string, string]>(); // app -> [what was typed, why refused]
+const appExtErrors = new Map<string, string>(); // app -> why its last extension change failed
+const appExtBuilding = new Set<string>(); // `<app>@<extension>` being turned on (maybe built)
+
+/** The Settings tab's PHP extensions: the catalog as switches, as in Settings › PHP, for
+ * this app only. One on for every app on its version shows on and held, saying where. */
+function appExtensions(s, root) {
+  const cell = $(".app-exts", root);
+  cell.replaceChildren();
+  const line = el("div", "ver-exts app-ext-list");
+  const shared = snap.php_ext?.[s.php] ?? [];
+  for (const name of snap.php_ext_catalog ?? []) {
+    const forAll = shared.includes(name);
+    const building = appExtBuilding.has(`${s.name}@${name}`);
+    const label = el("label", "ver-ext");
+    const input = Object.assign(document.createElement("input"), {
+      type: "checkbox",
+      checked: forAll || s.ext.includes(name),
+      disabled: forAll || building,
+    });
+    input.setAttribute("role", "switch");
+    input.onchange = () => setAppExt(s.name, name, input.checked);
+    if (forAll) label.title = `On for every app on PHP ${s.php} (Settings › PHP)`;
+    label.append(input, el("span", "ver-ext-name", name));
+    if (building) label.append(el("span", "muted", "Building…"));
+    line.append(label);
+  }
+  cell.append(line);
+  const why = appExtErrors.get(s.name);
+  if (!why) return;
+  const error = el("div", "ver-error app-ext-error");
+  error.append(el("span", null, why));
+  if (why.includes("xcode-select --install")) {
+    const tools = el("button", "inline-action", "Install command line tools");
+    tools.onclick = () => invoke("xcode_tools_install");
+    error.append(tools);
+  }
+  cell.append(error);
+}
+
+/** On builds it first unless built for the app's PHP, then the web server restarts. */
+async function setAppExt(site: string, name: string, on: boolean) {
+  const key = `${site}@${name}`;
+  if (appExtBuilding.has(key)) return;
+  if (on) appExtBuilding.add(key);
+  appExtErrors.delete(site);
+  render();
+  try {
+    await askSnap("app_ext", { site, name, on });
+  } catch (e) {
+    appExtErrors.set(site, String(e));
+  }
+  appExtBuilding.delete(key);
+  render();
+}
 
 /** The Settings tab's Web root: a folder inside the project, the detected one as the
  * placeholder, Reset when set; a refusal stays under the field with what was typed. */
