@@ -1804,9 +1804,15 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             continue;
         }
         if let (true, Some(port)) = (apps::runs_process(&site.kind), site.port) {
+            // The browser bridge: its collector and script, and page loads through Anvil.
+            let bridge = |port: u16| match browser::on(site) {
+                true => browser::site_lines(&site.name) + &browser::doc_route(port),
+                false => String::new(),
+            };
             s += &format!(
-                "\n{}\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
+                "\n{}{}\treverse_proxy 127.0.0.1:{port}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
                 open(site, &names),
+                bridge(port),
                 not_running_page(&site.name),
             );
             if site.secure {
@@ -1825,8 +1831,9 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
                     continue;
                 }
                 s += &format!(
-                    "\n{}\treverse_proxy 127.0.0.1:{}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
+                    "\n{}{}\treverse_proxy 127.0.0.1:{}\n\thandle_errors {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{}` 502\n\t}}\n}}\n",
                     open(site, &names),
+                    bridge(row.port),
                     row.port,
                     not_running_page(&names[0]),
                 );
@@ -1911,6 +1918,11 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         // Octane's row while it runs; PHP-FPM when it doesn't answer (stopped, crashed).
         // A file served for an error keeps the error's status unless told otherwise.
         if let Some(port) = processes::octane_row(cfg, site).and_then(|p| p.port) {
+            // The browser bridge: Octane's pages through Anvil's proxy, which leaves a
+            // stopped Octane's unanswered, so PHP-FPM and its prepend take them.
+            if browser::on(site) {
+                s += &browser::doc_route(port);
+            }
             s += &format!("\treverse_proxy 127.0.0.1:{port}\n\thandle_errors 502 {{\n");
             if let Some(fpm) = &fpm {
                 s += &format!("\t\t{fpm}");
@@ -2746,6 +2758,8 @@ pub struct Server {
     mail: Option<mail::Listener>,
     /// Why the mail catcher isn't listening though it's on (its port is taken).
     pub mail_error: Option<String>,
+    /// The browser bridge's proxy, while an app it serves has the switch on.
+    browser: Option<browser::proxy::Proxy>,
 }
 
 impl Server {
@@ -2781,6 +2795,7 @@ impl Server {
             labels: vec![],
             mail: None,
             mail_error: None,
+            browser: None,
         };
         for v in versions.iter().filter(|_| cfg!(windows)) {
             server.start_cgi(cfg, v, &sites)?;
@@ -2825,6 +2840,14 @@ impl Server {
             home().join("run").join("php-masters"),
             php_masters(cfg, &sites),
         )?;
+        // Listening before Caddy takes the first page load. Without it those apps' pages
+        // get Caddy's 502 handling; the rest of the web server runs.
+        if browser::proxied(cfg, &sites) {
+            match browser::proxy::Proxy::start() {
+                Ok(p) => server.browser = Some(p),
+                Err(e) => eprintln!("Anvil: the browser bridge can't listen: {e}"),
+            }
+        }
         let file = home().join("run").join("Caddyfile");
         fs::write(&file, caddyfile(cfg, &sites))?;
         let log = fs::File::create(caddy_log())?;
@@ -2987,6 +3010,7 @@ impl Server {
     pub fn take_all(&mut self) -> Vec<Stopping> {
         self.labels.clear();
         self.mail = None;
+        self.browser = None;
         let mut files = vec![pid_file()];
         self.children
             .drain(..)
@@ -3159,6 +3183,7 @@ mod tests {
             labels: vec!["PHP 8.4 FPM".into(), "Caddy".into()],
             mail: None,
             mail_error: None,
+            browser: None,
         };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let why = loop {
@@ -4356,6 +4381,8 @@ mod tests {
     #[test]
     fn caddy_falls_back_to_fpm() {
         let dir = tempfile::tempdir().unwrap();
+        // PHP-FPM's socket is in Anvil's home, which other tests change.
+        let _env = lock(&ENV_LOCK);
         let path = dir.path().to_str().unwrap();
         fs::write(
             dir.path().join("composer.json"),
@@ -4513,6 +4540,95 @@ mod tests {
                 .arg(dir.path().join("Caddyfile"))
                 .env("XDG_DATA_HOME", dir.path())
                 .env("XDG_CONFIG_HOME", dir.path())
+                .output()
+                .unwrap();
+            let err = String::from_utf8_lossy(&adapt.stderr);
+            assert!(adapt.status.success(), "{err}");
+        }
+    }
+
+    /// A dev server, its server rows and Octane: page loads go through Anvil's proxy
+    /// (with the app's port in a header), the rest straight to the app.
+    #[test]
+    fn the_browser_bridge_sends_only_page_loads_of_proxied_apps_through_anvil() {
+        let home = tempfile::tempdir().unwrap();
+        // The proxy's socket is in Anvil's home, which other tests change.
+        let _env = lock(&ENV_LOCK);
+        let cfg = Config::default();
+        let (dir, mut vf) = vite_rows_site("bridge", "vuefinder");
+        let row = processes::server_rows(&cfg, &vf)[0].port;
+        let oct = tempfile::tempdir().unwrap();
+        fs::write(
+            oct.path().join("composer.json"),
+            r#"{"require": {"laravel/octane": "^2.22"}}"#,
+        )
+        .unwrap();
+        let mut shop = site("shop", oct.path().to_str().unwrap(), Some("8.4"));
+        shop.kind = "laravel".into();
+        let octane = processes::octane_row(&cfg, &shop).unwrap().port.unwrap();
+        let mut plain = site("plain", "/s/plain", None);
+        plain.kind = "static".into();
+        plain.browser = true;
+        let off = super::caddyfile(&cfg, &[vf.clone(), shop.clone(), plain.clone()]);
+        assert!(
+            !off.contains("anvil_doc") && !off.contains("__anvil"),
+            "{off}"
+        );
+        assert!(!browser::proxied(
+            &cfg,
+            &[vf.clone(), shop.clone(), plain.clone()]
+        ));
+        assert!(!browser::proxied(&cfg, std::slice::from_ref(&plain)));
+
+        vf.browser = true;
+        shop.browser = true;
+        let sites = [vf, shop, plain];
+        assert!(browser::proxied(&cfg, &sites));
+        let out = caddyfile(&cfg, &sites);
+        let addr = browser::proxy::address();
+        let route = |port: u16| {
+            format!(
+                "\t@anvil_doc {{\n\t\tmethod GET POST\n\t\theader_regexp Accept ^text/html\n\t\tnot header Upgrade *\n\t\tnot header Sec-Fetch-Dest empty\n\t}}\n\treverse_proxy @anvil_doc \"{addr}\" {{\n\t\theader_up X-Anvil-Upstream 127.0.0.1:{port}\n\t}}\n\treverse_proxy 127.0.0.1:{port}\n"
+            )
+        };
+        let block = |host: &str| {
+            let at = out.find(&format!("\n{host}")).unwrap();
+            let end = out[at + 1..].find("\n}\n").unwrap();
+            out[at..at + end].to_string()
+        };
+        for (host, port) in [
+            ("vuefinder.test", 41002),
+            ("vuefinder--docs.test", row),
+            ("shop.test", octane),
+        ] {
+            let b = block(host);
+            assert!(b.contains(&route(port)), "{host}: {b}");
+            // The collector first, and into the app's own log.
+            assert!(b.contains("\t\tlog_name anvil_browser_"), "{b}");
+            assert!(b.find("/__anvil/e").unwrap() < b.find("@anvil_doc").unwrap());
+        }
+        assert!(block("vuefinder--docs.test").contains("log_name anvil_browser_vuefinder\n"));
+        // Octane stopped: PHP-FPM gets the page, and its prepend adds the script.
+        let shop = block("shop.test");
+        let fallback = &shop[shop.find("handle_errors 502").unwrap()..];
+        assert!(fallback.contains("env ANVIL_INJECT \"1\""), "{fallback}");
+        assert!(out.contains("\tlog anvil_browser_vuefinder {\n"));
+        assert!(!out.contains("anvil_browser_plain"));
+        fs::remove_dir_all(dir).unwrap();
+
+        // Caddy takes it, when this machine has Anvil's Caddy (CI has none).
+        let bin = PathBuf::from(std::env::var("HOME").unwrap()).join(".anvil/bin/caddy");
+        if bin.exists() {
+            fs::write(
+                home.path().join("Caddyfile"),
+                super::caddyfile(&cfg, &sites),
+            )
+            .unwrap();
+            let adapt = crate::platform::command(&bin)
+                .args(["adapt", "--adapter", "caddyfile", "--config"])
+                .arg(home.path().join("Caddyfile"))
+                .env("XDG_DATA_HOME", home.path())
+                .env("XDG_CONFIG_HOME", home.path())
                 .output()
                 .unwrap();
             let err = String::from_utf8_lossy(&adapt.stderr);

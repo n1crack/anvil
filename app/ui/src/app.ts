@@ -1129,13 +1129,14 @@ function drawHttps(s) {
 const bridgeSeen = new Map<string, { at: number; st: { errors: number; since: number | null; blocked: boolean } }>();
 const HM = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-/** The Settings tab's "Browser errors" switch (PHP apps), the note when the app's CSP
- * keeps the script out, and the Overview's Browser line while it's on. */
+/** The Settings tab's "Browser errors" switch (PHP apps and dev servers, as
+ * `browser::on`), the note when the app's CSP keeps the script out, and the Overview's
+ * Browser line while it's on. */
 function browserBridge(s, root) {
   const row = $(".browser-row", root);
   const line = $('[data-panel="overview"] .browser-line', root);
   if (!row) return;
-  if (!PHP_KINDS.has(s.kind) || !s.php) {
+  if (!(PHP_KINDS.has(s.kind) && s.php) && !(PROCESS_KINDS.has(s.kind) && s.port)) {
     row.remove();
     return;
   }

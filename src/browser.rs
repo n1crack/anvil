@@ -4,7 +4,9 @@
 //! `prepend.php` to its requests (pool-wide `auto_prepend_file`; the app's site block
 //! sets `ANVIL_INJECT` so only it acts); for that app's page loads it loads `inject.php`,
 //! which puts `/__anvil/a.js` before `</head>`. PHP without OPcache compiles the prepend
-//! on every request, so it stays a few lines.
+//! on every request, so it stays a few lines. An app with a server of its own (a dev
+//! server, a server row, Octane) gets the same tag from `proxy`, which Caddy sends only
+//! its page loads to (`doc_route`).
 //! The script sends batches of events with `sendBeacon` to `/__anvil/e?p=<page>&d=<JSON>`
 //! on the page's own origin; Caddy answers 204 and writes the request line, without
 //! headers or addresses, to `log/browser/<app>.log` (rolled at 1 MiB, one older copy,
@@ -15,6 +17,8 @@ use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+pub mod proxy;
 
 const A_JS: &str = include_str!("browser/a.js");
 const PREPEND: &str = include_str!("browser/prepend.php");
@@ -46,15 +50,50 @@ pub fn file(site: &str) -> PathBuf {
         .join(format!("{site}.log"))
 }
 
-/// The bridge is on for this app: its switch, and PHP serves it (phase 2: no dev servers,
-/// no static sites).
+/// The bridge is on for this app: its switch, and PHP serves it or Caddy passes it on to
+/// a server of its own (a dev server; Octane, `doc_route`). Static sites stay out.
 pub fn on(site: &Site) -> bool {
-    site.browser && apps::is_php(&site.kind) && site.php.is_some()
+    site.browser && (php(site) || (apps::runs_process(&site.kind) && site.port.is_some()))
 }
 
-/// Any app's bridge is on: PHP's pools then get the prepend. Off for all, nothing changes.
+fn php(site: &Site) -> bool {
+    apps::is_php(&site.kind) && site.php.is_some()
+}
+
+/// Any app's bridge is on: Anvil writes the script for Caddy to serve. Off for all,
+/// nothing changes.
 pub fn any(sites: &[Site]) -> bool {
     sites.iter().any(on)
+}
+
+/// An app with its bridge on is passed on to a server of its own (`doc_route`): the
+/// proxy then runs, with the web server.
+pub fn proxied(cfg: &crate::Config, sites: &[Site]) -> bool {
+    sites.iter().filter(|s| on(s)).any(|s| {
+        apps::runs_process(&s.kind)
+            || crate::processes::octane_row(cfg, s)
+                .and_then(|p| p.port)
+                .is_some()
+    })
+}
+
+/// The script tag in a page, as `inject.php` puts it in.
+pub fn tag() -> String {
+    format!("<script src=\"/__anvil/a.js?v={}\"></script>", version())
+}
+
+/// A site block's lines that send its page loads (a GET or POST asking for HTML first;
+/// not a websocket or a `fetch`) to Anvil's proxy, which asks the app at `port`. They
+/// go before the block's own `reverse_proxy` to that port, which takes the rest.
+pub fn doc_route(port: u16) -> String {
+    let addr = proxy::address();
+    if addr.contains(['"', '\\', '\n', '\r']) {
+        return String::new();
+    }
+    format!(
+        "\t@anvil_doc {{\n\t\tmethod GET POST\n\t\theader_regexp Accept ^text/html\n\t\tnot header Upgrade *\n\t\tnot header Sec-Fetch-Dest empty\n\t}}\n\treverse_proxy @anvil_doc \"{addr}\" {{\n\t\theader_up {} 127.0.0.1:{port}\n\t}}\n",
+        proxy::UPSTREAM
+    )
 }
 
 /// Turn an app's switch on or off. A worktree keeps its own choice; an app's off is unset.
@@ -63,8 +102,11 @@ pub fn set(cfg: &mut crate::Config, site: &str, on: bool) -> Result<()> {
     let Some(s) = crate::sites(cfg).into_iter().find(|s| s.name == name) else {
         anyhow::bail!("No site named {site}");
     };
-    if on && !apps::is_php(&s.kind) {
-        anyhow::bail!("Browser errors works for PHP apps for now; {name} isn't one");
+    if on && !apps::is_php(&s.kind) && !apps::runs_process(&s.kind) {
+        anyhow::bail!(
+            "Browser errors works for PHP apps and dev servers; {name} is a {} app",
+            apps::label(&s.kind)
+        );
     }
     let worktree = s.worktree_of.is_some();
     cfg.sites.entry(name).or_default().browser = (on || worktree).then_some(on);
@@ -96,7 +138,7 @@ pub fn pool_ini(
     sites: &[Site],
     mut ini: BTreeMap<String, String>,
 ) -> (BTreeMap<String, String>, Option<String>) {
-    if !any(sites) {
+    if !sites.iter().any(|s| s.browser && php(s)) {
         return (ini, None);
     }
     let theirs = ini
@@ -564,18 +606,51 @@ mod tests {
     }
 
     #[test]
-    fn the_bridge_is_for_php_apps_only() {
+    fn the_bridge_is_for_php_apps_and_dev_servers_not_static_sites() {
         let mut s = crate::tests::site("shop", "/s/shop", Some("8.4"));
         s.browser = true;
-        for (kind, yes) in [
-            ("laravel", true),
-            ("php", true),
-            ("static", false),
-            ("vite", false),
+        for (kind, port, yes) in [
+            ("laravel", None, true),
+            ("php", None, true),
+            ("static", None, false),
+            ("compose", Some(3000), false),
+            ("vite", Some(5173), true),
+            ("next", Some(3000), true),
+            ("django", Some(8000), true),
+            // A dev server Anvil has no port for isn't behind Caddy.
+            ("vite", None, false),
         ] {
             s.kind = kind.into();
+            s.port = port;
             assert_eq!(on(&s), yes, "{kind}");
         }
+        // Only PHP's own apps put the prepend into PHP's pools.
+        s.kind = "vite".into();
+        s.port = Some(5173);
+        assert_eq!(pool_ini(&[s], BTreeMap::new()).0, BTreeMap::new());
+    }
+
+    #[test]
+    fn the_switch_turns_on_for_a_dev_server_but_not_a_static_site() {
+        let _g = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = crate::Config::default();
+        for (name, file, body) in [
+            ("web", "package.json", r#"{"scripts":{"dev":"vite"}}"#),
+            ("plain", "index.html", ""),
+        ] {
+            let p = dir.path().join(name);
+            std::fs::create_dir_all(&p).unwrap();
+            std::fs::write(p.join(file), body).unwrap();
+            crate::link(&mut cfg, name, p).unwrap();
+        }
+        set(&mut cfg, "web", true).unwrap();
+        assert_eq!(cfg.sites["web"].browser, Some(true));
+        let err = set(&mut cfg, "plain", true).unwrap_err().to_string();
+        assert!(err.contains("plain"), "{err}");
     }
 
     #[test]
@@ -603,7 +678,8 @@ mod tests {
         write_files().unwrap();
         assert_eq!(std::fs::read_to_string(prepend_file()).unwrap(), PREPEND);
         let php = std::fs::read_to_string(dir().join("inject.php")).unwrap();
-        assert!(php.contains(&format!("/__anvil/a.js?v={}", version())));
+        // The proxy puts in the same tag.
+        assert!(php.contains(&tag()), "{php}");
         assert!(!php.contains("__VERSION__"));
         assert_eq!(std::fs::read_to_string(dir().join("a.js")).unwrap(), A_JS);
         assert!(home.path().join("log/browser").is_dir());

@@ -371,7 +371,7 @@ fn browser(cfg: &Config, args: &Value) -> Result<Value> {
     let s = site(cfg, args)?;
     if !crate::browser::on(&s) {
         bail!(
-            "{}'s Browser errors switch is off: the user turns it on in the app's Settings tab, or with `anvil app browser {} --on`. It works for PHP apps for now",
+            "{}'s Browser errors switch is off: the user turns it on in the app's Settings tab, or with `anvil app browser {} --on`. It works for PHP apps and apps with a dev server, not static sites",
             s.name,
             s.name
         );

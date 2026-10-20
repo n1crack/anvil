@@ -1530,6 +1530,8 @@ mod tests {
 
     #[test]
     fn s3_gateway_listens_locally_with_its_console_and_env() {
+        // Its binary's path is in Anvil's home, which other tests change.
+        let _env = crate::lock(&crate::ENV_LOCK);
         let mut cfg = Config::default();
         let id = insert(&mut cfg, "versitygw", Some("files"), Some(17070), None).unwrap();
         assert_eq!(version(&cfg, &id), "1.9.0");

@@ -480,7 +480,7 @@ enum AppCmd {
     },
     /// Errors on the app's pages from your browser (JS errors, rejections, console errors,
     /// failed requests, CSP), grouped, oldest first, while its Browser errors switch is on;
-    /// --on and --off turn it on (PHP apps) and off
+    /// --on and --off turn it on (PHP apps and dev servers) and off
     Browser {
         site: String,
         /// How many groups

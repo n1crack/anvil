@@ -21,7 +21,7 @@ Until 1.0.0, minor versions may contain breaking changes.
   log in. No version check or other request to adminer.org. An app called `db`
   keeps `db.<tld>`, and Settings says the viewer isn't served then.
   `anvil db open <service|app> [database]` prints the address.
-- Browser errors, a switch per PHP app in its Settings tab (off by default;
+- Browser errors, a switch per app in its Settings tab (off by default;
   `anvil app browser <app> --on`): the app's pages, in any browser you open them
   in, send their JavaScript errors with stack frames, unhandled rejections,
   console.error and warn (with where they were called), failed fetch/XHR and
@@ -44,7 +44,16 @@ Until 1.0.0, minor versions may contain breaking changes.
   MCP `browser` tool returns them grouped by kind, message and place (count,
   first and last seen, page, top frames) with the latest page loads and a
   cursor, marked as untrusted, and `check` adds the new browser errors since
-  its cursor.
+  its cursor. Apps with a server of their own (Vite, Next.js, Nuxt and other
+  dev servers, an app's other dev servers at `<app>--<row>`, Octane) get the
+  same script from a small proxy inside Anvil (a socket in `~/.anvil/run`; a
+  loopback port on Windows), which runs with the web server while one of them
+  has the switch on: Caddy sends it only their page loads (GET or POST asking
+  for HTML, not websockets or `fetch`), the app is asked uncompressed and its
+  page streams on with the script put in, status, headers and cookies as they
+  were; assets, HMR and API calls go straight to the app as before. A stopped
+  app still shows "not running", and a stopped Octane still falls back to
+  PHP-FPM. Static sites don't have the switch.
 - Tunnel (Settings › Plugins, off by default): an app's Overview gets a Public
   address line. Share, after a confirm, opens a Cloudflare quick tunnel (no
   account) to the app through Caddy with the app's own host, HTTPS apps over

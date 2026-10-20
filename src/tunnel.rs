@@ -518,11 +518,10 @@ mod tests {
     #[test]
     fn refuses_while_the_web_server_is_down() {
         let (dir, _env) = fake("exec sleep 30");
-        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = free.local_addr().unwrap().port();
-        drop(free);
+        // Nothing listens on port 1. A port bound and let go can be another test's a
+        // moment later, so it isn't one that surely doesn't answer.
         let cfg = Config {
-            http_port: port,
+            http_port: 1,
             ..Config::default()
         };
         let err = Shares::default()

@@ -2730,9 +2730,13 @@ describe("browser errors", () => {
   const box = () => $("#app-browser") as HTMLInputElement;
   const line = () => $('[data-panel="overview"] .browser-line');
 
-  test("a PHP app's Settings has the switch, off; a dev server's has none", async () => {
+  test("a PHP app's and a dev server's Settings have the switch, off; a Compose app's and a folder's none", async () => {
+    for (const name of ["stack", "notes"]) {
+      await select(name);
+      expect($("#app-browser")).toBeNull();
+    }
     await select("vuefinder");
-    expect($("#app-browser")).toBeNull();
+    expect(box().checked).toBe(false);
     await select("shop");
     expect(box().checked).toBe(false);
     expect(line().hidden).toBe(true);
