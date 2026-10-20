@@ -1207,35 +1207,38 @@ function aliasPop(anchor, sites) {
   const close = popAt(anchor, pop, buttons[0], "left");
 }
 
-/** Overview › Aliases: the app's other addresses, each removable after a confirm, and Add.
- * A worktree's are derived from its app's: listed, changed on the app. */
+/** Overview › Aliases: a group of its own under the app's lines, one row per address with
+ * Open, and the app's with Remove (after a confirm) and Add Alias. A worktree's are derived
+ * from its app's: listed with Open, changed on the app. */
 function aliasesLine(s, root) {
-  const row = $(".aliases-row", root);
-  const dd = $("dd", row);
-  dd.replaceChildren();
-  const main = isMain(s);
+  const box = $(".aliases", root);
   const list = aliasesOf(s);
-  row.hidden = !serves(s) || (!main && !list.length);
-  if (row.hidden) return;
-  const host = (a) => a.host.replace(new RegExp(`\\.${snap.tld}$`), "");
-  for (const a of list) {
-    const chip = el("span", "alias-tag");
-    chip.append(el("span", "ask-addr", host(a)));
+  const main = isMain(s);
+  box.hidden = !serves(s) || (!main && !list.length);
+  if (box.hidden) return;
+  $(".aliases-from", box).textContent = main ? "" : `from ${s.worktree_of}`;
+  const add = $(".aliases-add", box);
+  add.hidden = !main;
+  add.onclick = () => addAlias(s);
+  const rows = list.map((a) => {
+    const row = el("div", "row");
+    const dt = el("dt");
+    dt.append(el("span", "ask-addr", url(a).replace(/^https?:\/\//, "")));
+    const dd = el("dd", "res-cells");
+    const open = el("button", "inline-action", "Open");
+    open.onclick = () => invoke("open_url", { url: url(a) }).catch((e) => showError(String(e)));
+    dd.append(open);
     if (main) {
-      const x = el("button", "alias-x", "×");
-      x.title = `Remove ${a.host}`;
-      x.setAttribute("aria-label", x.title);
-      x.onclick = () =>
-        late.confirmPop(x, `Remove ${a.host}? The folder stays.`, "Remove", () => call("remove_site", { site: a.name }));
-      chip.append(x);
+      const remove = el("button", "inline-action", "Remove");
+      remove.onclick = () =>
+        late.confirmPop(remove, `Remove ${a.host}? The folder stays.`, "Remove", () => call("remove_site", { site: a.name }));
+      dd.append(remove);
     }
-    dd.append(chip);
-  }
-  if (main) {
-    const add = el("button", "inline-action", list.length ? "Add…" : "Add an alias…");
-    add.onclick = () => addAlias(s);
-    dd.append(add);
-  } else dd.append(el("span", "muted", `from ${s.worktree_of}`));
+    row.append(dt, dd);
+    return row;
+  });
+  if (!rows.length) rows.push(el("p", "muted aliases-none", "None yet: another address for this app, e.g. admin." + s.host));
+  $("dl", box).replaceChildren(...rows);
 }
 
 /** A small bubble under `anchor`, right-aligned with it (or left). Esc or a click elsewhere

@@ -3299,9 +3299,9 @@ html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui
 /* An address in a sheet's hint: brighter than the words around it, and selectable. */
 .ask-addr { white-space: nowrap; color: var(--text); font-family: ui-monospace, "SF Mono", Menlo, monospace; -webkit-user-select: text; user-select: text; cursor: text; }
 
-/* Overview › Aliases: one tag per address, the app's with a quiet × to remove it. */
-.aliases-row dd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.alias-tag { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px 0 8px; border: 1px solid var(--edge); border-radius: 11px; font-size: 12px; }
-.alias-tag:not(:has(.alias-x)) { padding-right: 8px; }
-.alias-x { width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 13px; line-height: 1; }
-.alias-x:hover { background: color-mix(in srgb, var(--text) 12%, transparent); color: var(--text); }
+/* Overview › Aliases: its own group, a heading with Add Alias, a row per address. */
+.aliases-head { display: flex; align-items: center; gap: 8px; margin: 20px 0 8px; }
+.aliases-head .res-sub { margin: 0; }
+.aliases-head .aliases-add { margin-left: auto; }
+.aliases-from { font-size: 12px; }
+.aliases-none { margin: 0; padding: 10px 14px; font-size: 12px; }
