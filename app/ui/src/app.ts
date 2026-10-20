@@ -41,6 +41,16 @@ function lockOf(secure: boolean) {
   return lock;
 }
 
+const FOLDER_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
+const STACK_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.75 14.25 5 8 8.25 1.75 5z"/><path d="m1.75 8 6.25 3.25L14.25 8M1.75 11 8 14.25 14.25 11"/></svg>`;
+/** In a lock's place for what Anvil doesn't serve: a grey folder, or a stack for Compose. */
+function unservedOf(s) {
+  const icon = el("span", "lock none");
+  icon.innerHTML = s.kind === "compose" ? STACK_ICON : FOLDER_ICON;
+  icon.title = s.kind === "compose" ? "Docker Compose: no address of Anvil's" : "A folder: not served";
+  return icon;
+}
+
 let snapAt = 0; // when the last snapshot arrived
 let snapAsked = 0; // numbers each request for a snapshot…
 let snapShown = 0; // …and this one's is in `snap`
@@ -361,6 +371,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
     busy.title = s.secure ? "Turning off HTTPS…" : "Turning on HTTPS…";
     $(".name", text).append(busy);
   } else $(".name", text).prepend(lockOf(s.secure));
+  if (!s.hiddenApp && !serves(s)) $(".name", text).prepend(unservedOf(s));
   // In a folder's section the path only repeats the heading; linked apps and groups keep it.
   if (path && !child) $(".sub", text).textContent = tilde(s.path) + (s.path.includes("\\") ? "\\" : "/");
   else $(".sub", text).remove();
@@ -1107,7 +1118,9 @@ export function drawMeta() {
     parts.push(addr);
   }
   if (s.worktree_of) parts.push(appLink("worktree of ", s.worktree_of));
-  parts.push(el("span", null, kindLabel(s.kind)));
+  const kind = el("span", "addr", kindLabel(s.kind));
+  if (!serves(s)) kind.prepend(unservedOf(s));
+  parts.push(kind);
   const secs = touchedOf(s, () => selected === s.name && drawMeta());
   if (secs) {
     const d = new Date(secs * 1000);

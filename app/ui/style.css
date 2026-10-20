@@ -24,6 +24,10 @@
   --ok: #34c759;
   --ok-text: #5fd47e;
 
+  /* An address's lock: muted green for HTTPS, muted red for HTTP; quiet beside the name. */
+  --lock-on: #6aa97a;
+  --lock-off: #c47a72;
+
   /* Starting: amber. */
   --amber: var(--heat-white);
   --amber-text: var(--heat-white);
@@ -70,6 +74,8 @@
     --danger: #c42127;
     --ok: #1f9d3e;
     --ok-text: #157030;
+    --lock-on: #4e8a5d;
+    --lock-off: #b0675e;
     --amber: #b87400;
     --amber-text: #8f5600;
 
@@ -395,8 +401,9 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 /* Before an address or an app's name: green closed lock for HTTPS, red open one for HTTP. */
-.lock.on { color: var(--ok); }
-.lock.off { color: var(--danger); }
+.lock.on { color: var(--lock-on); }
+.lock.off { color: var(--lock-off); }
+.lock.none { color: var(--cold); }
 .item .name .lock {
   display: inline-flex;
   margin-right: 5px;

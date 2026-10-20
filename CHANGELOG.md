@@ -209,7 +209,9 @@ Until 1.0.0, minor versions may contain breaking changes.
 ### Changed
 
 - Addresses carry a lock before them everywhere (sidebar, header, Aliases, the
-  address list): green and closed for HTTPS, red and open for plain HTTP.
+  address list): a muted green closed one for HTTPS, a muted red open one for
+  plain HTTP, in their own tones for light and dark. A folder or Compose
+  project, which has no address, shows a grey folder or stack there instead.
 - A worktree's header shows a branch for its mark and "worktree of <app>"
   linking to the app; its Overview drops the separate "Worktree of" line, and
   its Aliases end with "Added and removed on <app>".

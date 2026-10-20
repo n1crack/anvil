@@ -885,9 +885,9 @@ describe("containers", () => {
 });
 
 describe("audit fixes", () => {
-  test("a folder shows no lock nor 'Runs on', even with an old HTTPS flag", async () => {
+  test("a folder shows no lock, only its grey folder, nor 'Runs on', even with an old HTTPS flag", async () => {
     await select("notes");
-    expect($('#list [data-name="notes"] .lock')).toBeNull();
+    expect($('#list [data-name="notes"] .lock:not(.none)')).toBeNull();
     expect($(`#list [data-name="vuefinder"] .lock`)).not.toBeNull();
     expect($('[data-field="runtime"]')).toBeNull();
     expect($('[data-field="path"]').textContent).toBe("~/Sites/notes");
@@ -2683,6 +2683,11 @@ describe("sidebar worktrees", () => {
     $("#site .alias-chip").click();
     expect($$(".alias-pop .alias-url").map((e) => e.textContent)).toContain("admin--feature-login.test");
     document.querySelector(".pop")?.remove();
+  });
+
+  test("a folder or Compose project shows a grey folder or stack where an address's lock goes", async () => {
+    expect($(`#list [data-name="notes"] .name .lock`)!.className).toBe("lock none");
+    expect($(`#list [data-name="stack"] .name .lock`)!.className).toBe("lock none");
   });
 
   test("Logs and Packages are hidden while there's nothing in them", async () => {
