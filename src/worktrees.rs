@@ -1471,6 +1471,24 @@ pub fn run_env(cfg: &Config, site: &Site, test: bool) -> Result<Vec<(String, Str
         }
     };
     let has = |env: &[(String, String)], key: &str| env.iter().any(|(k, _)| k == key);
+    // Only test runs read `.env.testing`, ones Anvil doesn't tell apart too (`composer test`):
+    // its URL Anvil doesn't set gets the worktree's own database, which wins over it there.
+    // Not one the user took out to share main's database: that stays refused.
+    for v in vars.iter().filter(|v| {
+        v.from == ".env.testing" && v.key.ends_with("URL") && keys.contains_key(v.key) && mains(v)
+    }) {
+        if !has(&env, v.key) {
+            let main = main_of(&site.path).ok_or("its main checkout wasn't found")?;
+            let url =
+                with_db(&v.value, &own_db(cfg, site), &main, &site.path).ok_or_else(|| {
+                    format!(
+                        "{}'s {} uses a kind of database Anvil can't rewrite",
+                        v.from, v.key
+                    )
+                })?;
+            env.push((v.key.into(), url));
+        }
+    }
     if let Some(v) = vars
         .iter()
         .find(|v| mains(v) && (v.forced || !has(&env, v.key)))
@@ -3794,13 +3812,16 @@ pub(crate) mod tests {
                             let Some(dbs) = db_of(k, v) else { continue };
                             // A relative SQLite name resolves inside the worktree.
                             assert!(!dbs.iter().any(|db| is_mains(db)), "{k}={v}: {case}");
-                            // Not a test run (or one misdetected): only ever its own.
+                            // Not a test run (or one misdetected): only ever its own; a URL
+                            // only `.env.testing` names, set to the worktree's own database.
                             if !test && variant == "preset" {
-                                assert_eq!(
-                                    Some(v),
-                                    get(&own, k).map(String::from).as_ref(),
-                                    "{case}"
-                                );
+                                match get(&own, k) {
+                                    Some(o) => assert_eq!(v, o, "{case}"),
+                                    None => assert!(
+                                        file == ".env.testing" && dbs == ["shop_feature_x"],
+                                        "{k}={v}: {case}"
+                                    ),
+                                }
                             }
                         }
                     }
@@ -4396,9 +4417,22 @@ pub(crate) mod tests {
             Some("mysql://root@127.0.0.1/shop_feature_x")
         );
         assert_eq!(get(&env, "DB_DATABASE"), Some("shop_feature_x"));
-        // Not a test run: `.env.testing` isn't read, and its DB_URL (main's test database) would
-        // win in a test run Anvil doesn't tell apart (`composer test`): still refused.
-        assert!(checked_env(&cfg, &site, false).is_err());
+        // Not a test run: `.env.testing` isn't read, but its DB_URL (main's test database) would
+        // win in a test run Anvil doesn't tell apart (`composer test`): set to the worktree's own.
+        let env = checked_env(&cfg, &site, false).unwrap();
+        assert_eq!(
+            get(&env, "DB_URL"),
+            Some("mysql://root@127.0.0.1/shop_feature_x")
+        );
+        assert_eq!(get(&env, "DB_DATABASE"), Some("shop_feature_x"));
+        // One Anvil can't rewrite: refused.
+        let other = "DB_URL=mongodb://root@127.0.0.1/shop_testing\n";
+        fs::write(main.join(".env.testing"), other).unwrap();
+        fs::write(site.path.join(".env.testing"), other).unwrap();
+        assert_eq!(
+            run_env(&cfg, &site, false).unwrap_err(),
+            ".env.testing's DB_URL uses a kind of database Anvil can't rewrite"
+        );
     }
 
     #[test]
