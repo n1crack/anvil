@@ -100,6 +100,9 @@ Until 1.0.0, minor versions may contain breaking changes.
   processes (queue workers, Octane's RoadRunner workers, artisan) and `php`
   and `composer` in a terminal, not only PHP-FPM: `memory_limit` is
   the same on the web and in the CLI. The CLI keeps PHP's own no time limit.
+- `anvil app start` and `anvil service start` wait for a start that downloads
+  first (FrankenPHP, 177 MB) and print how it went, instead of "Anvil didn't
+  answer" after 5 seconds.
 
 ## [0.1.0] - 2026-10-19
 

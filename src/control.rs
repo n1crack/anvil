@@ -81,6 +81,16 @@ fn answer(conn: UnixStream, h: &Handler) {
     }
 }
 
+/// How long the app may take to answer `method`. Starting an app's processes or a
+/// service can download first (FrankenPHP is 177 MB, a PHP version, an image) and the
+/// app answers once they run, so those wait; anything else answers at once.
+fn answer_within(method: &str) -> Duration {
+    match method {
+        "run" | "service" => Duration::from_secs(15 * 60),
+        _ => Duration::from_secs(5),
+    }
+}
+
 /// Asks the running app. `Ok(None)` when no app listens.
 pub fn request(method: &str, params: Value, client: &str) -> Result<Option<Value>> {
     let p = checked_path()?;
@@ -91,7 +101,7 @@ pub fn request(method: &str, params: Value, client: &str) -> Result<Option<Value
         }
         Err(e) => bail!("couldn't reach Anvil at {}: {e}", p.display()),
     };
-    conn.set_read_timeout(Some(Duration::from_secs(5)))?;
+    conn.set_read_timeout(Some(answer_within(method)))?;
     conn.set_write_timeout(Some(Duration::from_secs(5)))?;
     let req = Request {
         id: 1,
@@ -232,5 +242,21 @@ mod tests {
         let e = request("slow", json!({}), "t").unwrap_err();
         assert!(e.to_string().contains("Anvil didn't answer"), "{e}");
         assert!(t.elapsed() < Duration::from_secs(6));
+    }
+
+    /// A first Octane start downloads its server: `run` waits for the app's answer.
+    #[test]
+    fn a_start_waits_longer() {
+        let _h = home(0);
+        serving(|_| {
+            std::thread::sleep(Duration::from_secs(6));
+            Ok(json!("started"))
+        });
+        assert_eq!(
+            request("run", json!({}), "t").unwrap(),
+            Some(json!("started"))
+        );
+        assert_eq!(answer_within("service"), answer_within("run"));
+        assert_eq!(answer_within("apps"), Duration::from_secs(5));
     }
 }
