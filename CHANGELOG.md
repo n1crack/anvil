@@ -10,46 +10,10 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
-- Worktree hooks: what a new worktree of an app gets is yours to set. The
-  files copied from the app (`.env` for Laravel, or what `.worktreeinclude`
-  lists), "Copy the database too", the env keys set per worktree (`{db}`,
-  `{url}`, `{prefix}`, `{port}`, `{name}`), the keys checked against the
-  app's, and commands offered once it is made (`composer install`, `npm ci`,
-  `php artisan migrate` for Laravel), run only when you say Run. Anvil ships a
-  preset per framework, editable in Settings › Worktrees with Reset to
-  default; an app changes any of it in its Settings tab, and a project can
-  share its own in `.anvil.toml`'s `[worktree]`. The keys go into everything
-  Anvil starts and into the env files it reads (`.env`, `.env.local`,
-  `.env.development`, `.env.development.local`, and Symfony's
-  `.env.<APP_ENV>` and `.env.<APP_ENV>.local`; never `.env.example`,
-  `.env.testing` or `.env.test`) when Anvil copies them; a worktree whose env
-  file still has the app's value for a checked key says so on its Overview,
-  with "Rewrite with the hooks", which changes only those lines. A database
-  named in a URL's query (`?database=`, `?dbname=`, `?db=`), percent-encoded
-  or not, becomes the worktree's too. Symfony's `.env.dist` is read when there
-  is no `.env`, never written. A Symfony app with composer.json's
-  `extra.runtime.dotenv_overload` on or `extra.runtime.dotenv_path` set runs
-  nothing in a worktree, since Anvil's keys couldn't win, and its
-  `bin/phpunit` counts as a test run. A Laravel test run reads `.env.testing`
-  too. Taking the database keys out of an app's own settings shares the app's
-  database; a `.anvil.toml` or a preset that leaves them out still gets them.
-  A database key left empty, or one whose placeholder has no value, stops the
-  worktree instead, and tests always get the worktree's own. `anvil worktree hooks` prints an app's hooks, where each
-  comes from, and any mistake in them.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service
   start|stop <id>` ask the running app to do it, so the change shows there at
   once, and print each process's state (`api: running`). Without the app open
   they say so and exit with 1.
-
-### Changed
-
-- New Worktree, Add Alias, New Group and Edit Address open as a sheet, like
-  New application, with their errors in it.
-- A new worktree gets an empty database of its own unless "Copy the database
-  too" is on (Settings › Worktrees, a preset or the app); it was a copy
-  before. Existing configs start with it off too: turn it on to keep copying.
-  `anvil worktree add --copy-db` replaces `--db copy|empty`, and the Overview
-  no longer switches a worktree's database before it is made.
 
 ## [0.1.0] - 2026-10-19
 
@@ -131,18 +95,55 @@ Apple Silicon. It comes as a desktop app that carries the `anvil` CLI.
   --no-git --https`; `anvil new --help` lists which templates each applies to).
 - Git worktrees run side by side. Each worktree of an app appears under it in
   the sidebar and answers at `<app>--<name>.test`, with its own processes and
-  its own database: a copy of the app's or an empty one, picked when you create
-  it (`--db copy|empty`); Settings › Database for new worktrees sets the
-  default, also for worktrees made outside Anvil. Its Redis and cache keys get
-  their own prefix. Tests use the database their test config names (`:memory:`
-  too) unless that is the app's; a worktree whose test config would reach the
-  app's database is stopped until it names one of its own. A database Anvil
-  didn't make is only used after "Use existing" (`anvil worktree use-db`).
-  Removing a worktree stops its processes and drops its database only when you
-  ask; databases left behind by worktrees that are gone are listed with Delete
-  and Keep. A worktree made outside Anvil gets offers to copy the app's `.env`
-  and install its packages. Create and remove them in the app (right-click, or
-  the Git tab) or with `anvil worktree list|add|remove`.
+  its own database: an empty one, or a copy of the app's when "Copy the
+  database too" is on as you create it (`anvil worktree add --copy-db`). It
+  starts off unless Settings › Worktrees, a preset or the app turns it on,
+  also for worktrees made outside Anvil; an empty one never gets the app's
+  SQLite file, whatever the copied files list. Its address shows why it isn't
+  served until its database is made: start it in Anvil. A database name that
+  could also be another app's worktree's ends in a short hash. Its Redis and
+  cache keys get their own prefix. Tests use the database their test config
+  names (`:memory:` too) unless that is the app's; a worktree whose test
+  config would reach the app's database is stopped until it names one of its
+  own. A database Anvil didn't make is only used after "Use existing" (`anvil
+  worktree use-db`). Removing a worktree in the app stops its processes;
+  `anvil worktree remove` asks you to stop it in Anvil first. Either drops its
+  database only when you ask; databases left behind by worktrees that are gone
+  are listed with Delete and Keep. A worktree made outside Anvil gets offers to
+  copy the app's `.env` and install its packages. Create and remove them in
+  the app (right-click, or the Git tab; New Worktree opens as a sheet, like
+  New application) or with `anvil worktree list|add|remove`. An alias can't
+  have worktrees of its own.
+- Worktree hooks: what a new worktree of an app gets is yours to set. The
+  files copied from the app (`.env` for Laravel, or what `.worktreeinclude`
+  lists), "Copy the database too", the env keys set per worktree (`{db}`,
+  `{url}`, `{prefix}`, `{port}`, `{name}`), the keys checked against the
+  app's, and commands offered once it is made (`composer install`, `npm ci`,
+  `php artisan migrate` for Laravel), run only when you say Run. Anvil ships a
+  preset per framework, editable in Settings › Worktrees with Reset to
+  default; an app changes any of it in its Settings tab, and a project can
+  share its own in `.anvil.toml`'s `[worktree]`. The keys go into everything
+  Anvil starts and into the env files it reads (`.env`, `.env.local`,
+  `.env.development`, `.env.development.local`, and Symfony's
+  `.env.<APP_ENV>` and `.env.<APP_ENV>.local`; never `.env.example`,
+  `.env.testing` or `.env.test`) when Anvil copies them; a worktree whose env
+  file still has the app's value for a checked key says so on its Overview,
+  with "Rewrite with the hooks", which changes only those lines. A database
+  named in a URL's query (`?database=`, `?dbname=`, `?db=`), percent-encoded
+  or not, becomes the worktree's too. Symfony's `.env.dist` is read when there
+  is no `.env`, never written. A Symfony app with composer.json's
+  `extra.runtime.dotenv_overload` on or `extra.runtime.dotenv_path` set runs
+  nothing in a worktree, since Anvil's keys couldn't win, and its
+  `bin/phpunit` counts as a test run. A Laravel test run reads `.env.testing`
+  too, and a DB_URL only `.env.testing` names points at the worktree's
+  database. Taking the database keys out of an app's own settings shares the
+  app's database; a `.anvil.toml` or a preset that leaves them out still gets
+  them. A database key left empty, or one whose placeholder has no value,
+  stops the worktree instead, and tests always get the worktree's own. So does
+  a key named like a database that the hooks don't set (`POSTGRES_DB`,
+  `DB_NAME`, a second connection's `DB_LEGACY_DATABASE`) while it still has
+  the app's value: give it one in the hooks' keys. `anvil worktree hooks`
+  prints an app's hooks, where each comes from, and any mistake in them.
 - Disk usage per application split into safe, rebuildable and keep, with
   clean-up that never touches your code or data (`anvil usage`, `anvil clean`).
 - Log retention: Anvil's own logs stay under 5 MB. Settings › Storage › "Trim
