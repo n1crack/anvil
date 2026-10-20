@@ -1,0 +1,408 @@
+//! "Did my change work?": what changed in an app's processes and logs since a
+//! cursor the caller holds. Each call reads only the bytes after the cursor's
+//! offsets, so its cost follows what's new, not the size of the logs.
+
+use crate::{Site, apps, logs};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+/// Where the last `check` stopped: when, and how far each log source was read.
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+pub struct Cursor {
+    pub at: u64,
+    /// By source id (`logs::LogSource::id`).
+    pub offsets: BTreeMap<String, u64>,
+}
+
+/// One of the app's processes as the caller (the running app) knows it.
+pub struct ProcState {
+    /// `<site>`, `<site>@<process>` or `<site>#<script>`: its log file is `apps::log_file(key)`.
+    pub key: String,
+    pub label: String,
+    pub state: String,
+    /// Exit code and when (Unix seconds), when it ended on its own.
+    pub exit: Option<(i32, u64)>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct Exited {
+    pub label: String,
+    pub code: i32,
+    /// At most `LAST_LINES`, oldest first.
+    pub last_lines: Vec<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CheckEntry {
+    /// Source id, as `logs` takes it.
+    pub source: String,
+    pub level: String,
+    pub time: Option<String>,
+    pub message: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct Check {
+    pub summary: String,
+    pub exited: Vec<Exited>,
+    /// Sources whose file got shorter than the cursor's offset: read again from the start.
+    pub restarted: Vec<String>,
+    /// Errors and warnings, at most `MAX_ENTRIES`, newest last.
+    pub entries: Vec<CheckEntry>,
+    pub cursor: Cursor,
+}
+
+const MAX_ENTRIES: usize = 50;
+const LAST_LINES: usize = 20;
+/// The last lines of an exited process come from this much of its log's end.
+const LAST_BYTES: u64 = 16 * 1024;
+
+pub fn check(site: &Site, procs: &[ProcState], since: Option<&Cursor>, now: u64) -> Check {
+    let mut cursor = Cursor {
+        at: now,
+        offsets: BTreeMap::new(),
+    };
+    let mut restarted = Vec::new();
+    let mut entries = Vec::new();
+    // (label, errors, warnings) per source with any.
+    let mut counts: Vec<(String, usize, usize)> = Vec::new();
+    for src in logs::sources(site) {
+        cursor.offsets.insert(src.id.clone(), src.bytes);
+        let Some(since) = since else { continue };
+        // A source that's new since the cursor is new from its first byte.
+        let mut from = since.offsets.get(&src.id).copied().unwrap_or(0);
+        if from > src.bytes {
+            restarted.push(src.id.clone());
+            from = 0;
+        }
+        if from == src.bytes {
+            continue;
+        }
+        let Ok(page) = logs::tail(std::path::Path::new(&src.path), from) else {
+            continue;
+        };
+        // The file may have grown since `sources` looked; the next call starts where this read ended.
+        cursor.offsets.insert(src.id.clone(), page.end_offset);
+        let (mut errors, mut warnings) = (0, 0);
+        // `tail` gives newest first.
+        for e in page.entries.into_iter().rev() {
+            let level = match logs::group(&e.level) {
+                "error" => {
+                    errors += 1;
+                    "error"
+                }
+                "warning" => {
+                    warnings += 1;
+                    "warning"
+                }
+                _ => continue,
+            };
+            entries.push(CheckEntry {
+                source: src.id.clone(),
+                level: level.into(),
+                time: e.time,
+                message: e.message,
+            });
+        }
+        if errors + warnings > 0 {
+            counts.push((src.label, errors, warnings));
+        }
+    }
+    // ponytail: newest last within each source, not merged by time across sources.
+    if entries.len() > MAX_ENTRIES {
+        entries.drain(..entries.len() - MAX_ENTRIES);
+    }
+    let exited: Vec<Exited> = procs
+        .iter()
+        .filter_map(|p| {
+            let (code, at) = p.exit?;
+            since.is_none_or(|c| at > c.at).then(|| Exited {
+                label: p.label.clone(),
+                code,
+                last_lines: last_lines(&apps::log_file(&p.key)),
+            })
+        })
+        .collect();
+
+    let running = procs.iter().filter(|p| p.state == "running").count();
+    let state = format!("{running} of {} running", procs.len());
+    let mut parts: Vec<String> = exited
+        .iter()
+        .map(|e| format!("{} exited ({})", e.label, e.code))
+        .collect();
+    let summary = match since {
+        None => {
+            parts.push(state);
+            parts.join(", ")
+        }
+        Some(c) => {
+            for (label, errors, warnings) in &counts {
+                let mut n = Vec::new();
+                if *errors > 0 {
+                    n.push(plural(*errors, "error"));
+                }
+                if *warnings > 0 {
+                    n.push(plural(*warnings, "warning"));
+                }
+                parts.push(format!("{} in {label}", n.join(" and ")));
+            }
+            if parts.is_empty() {
+                format!("No errors since {}, {state}", clock(c.at))
+            } else {
+                format!("{} since {}", parts.join(", "), clock(c.at))
+            }
+        }
+    };
+    Check {
+        summary,
+        exited,
+        restarted,
+        entries,
+        cursor,
+    }
+}
+
+fn plural(n: usize, word: &str) -> String {
+    format!("{n} {word}{}", if n == 1 { "" } else { "s" })
+}
+
+/// The newest non-empty lines of a log, escape codes removed, from its end only.
+fn last_lines(path: &std::path::Path) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return vec![];
+    };
+    let len = f.metadata().map_or(0, |m| m.len());
+    let start = len.saturating_sub(LAST_BYTES);
+    if f.seek(SeekFrom::Start(start)).is_err() {
+        return vec![];
+    }
+    let mut buf = Vec::new();
+    let _ = f.read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf);
+    // A read that starts mid-file starts mid-line: drop that partial line.
+    let text = if start > 0 {
+        text.split_once('\n').map_or("", |(_, t)| t)
+    } else {
+        &text
+    };
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(logs::strip_ansi)
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    lines.drain(..lines.len().saturating_sub(LAST_LINES));
+    lines
+}
+
+/// `HH:MM` in local time.
+fn clock(at: u64) -> String {
+    let t = at as nix::libc::time_t;
+    // SAFETY: `localtime_r` only writes into `tm`, which lives on this stack.
+    let mut tm: nix::libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { nix::libc::localtime_r(&t, &mut tm) }.is_null() {
+        return String::from("--:--");
+    }
+    format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// ANVIL_HOME and a Laravel app in a fresh /tmp dir, removed on drop.
+    struct Env(
+        PathBuf,
+        Site,
+        #[allow(dead_code)] std::sync::MutexGuard<'static, ()>,
+    );
+    impl Drop for Env {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn env() -> Env {
+        static N: AtomicU32 = AtomicU32::new(0);
+        let guard = crate::lock(&crate::ENV_LOCK);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir = PathBuf::from(format!("/tmp/anvil-chk-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let app = dir.join("shop");
+        std::fs::create_dir_all(app.join("storage/logs")).unwrap();
+        std::fs::create_dir_all(dir.join("home/log")).unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.join("home")) };
+        let site = Site {
+            name: "shop".into(),
+            host: String::new(),
+            secure: false,
+            path: app.clone(),
+            root: app,
+            php: None,
+            php_pinned: false,
+            ini: Default::default(),
+            linked: false,
+            parked_in: None,
+            modified: 0,
+            kind: "laravel".into(),
+            kind_detected: "laravel".into(),
+            command: None,
+            command_custom: false,
+            port: None,
+            autostart: false,
+            runtime_version: None,
+            runtime_pinned: false,
+            worktree_of: None,
+            branch: None,
+            aliases: vec![],
+        };
+        Env(dir, site, guard)
+    }
+    fn log(e: &Env) -> PathBuf {
+        e.1.path.join("storage/logs/laravel.log")
+    }
+    fn append(path: &std::path::Path, text: &str) {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap()
+            .write_all(text.as_bytes())
+            .unwrap();
+    }
+    fn proc(label: &str, state: &str, exit: Option<(i32, u64)>) -> ProcState {
+        ProcState {
+            key: format!("shop@{label}"),
+            label: label.into(),
+            state: state.into(),
+            exit,
+        }
+    }
+
+    #[test]
+    fn first_call_gives_state_and_cursor() {
+        let e = env();
+        append(&log(&e), "[2026-10-19 14:00:00] local.ERROR: old\n");
+        let procs = [proc("api", "running", None), proc("vite", "running", None)];
+        let c = check(&e.1, &procs, None, 1000);
+        assert_eq!(c.summary, "2 of 2 running");
+        assert!(c.entries.is_empty());
+        assert_eq!(c.cursor.at, 1000);
+        let len = std::fs::metadata(log(&e)).unwrap().len();
+        assert_eq!(c.cursor.offsets.get("laravel.log"), Some(&len));
+    }
+
+    #[test]
+    fn new_error_lines_are_reported() {
+        let e = env();
+        append(&log(&e), "[2026-10-19 14:00:00] local.ERROR: old\n");
+        let first = check(&e.1, &[], None, 1000);
+        append(
+            &log(&e),
+            "[2026-10-19 14:03:00] local.ERROR: Call to undefined method\n",
+        );
+        let c = check(&e.1, &[], Some(&first.cursor), 1100);
+        assert_eq!(c.entries.len(), 1);
+        assert_eq!(c.entries[0].message, "Call to undefined method");
+        assert_eq!(c.entries[0].level, "error");
+        assert_eq!(c.entries[0].source, "laravel.log");
+        assert!(
+            c.summary.starts_with("1 error in laravel.log since "),
+            "{}",
+            c.summary
+        );
+        // Nothing new after that.
+        let again = check(&e.1, &[], Some(&c.cursor), 1200);
+        assert!(again.entries.is_empty());
+        assert!(
+            again.summary.starts_with("No errors since "),
+            "{}",
+            again.summary
+        );
+    }
+
+    #[test]
+    fn info_lines_are_not_reported() {
+        let e = env();
+        append(&log(&e), "");
+        let first = check(&e.1, &[], None, 1000);
+        append(&log(&e), "[2026-10-19 14:03:00] local.INFO: fine\n");
+        append(&log(&e), "[2026-10-19 14:03:01] local.WARNING: slow\n");
+        let c = check(&e.1, &[], Some(&first.cursor), 1100);
+        assert_eq!(c.entries.len(), 1);
+        assert_eq!(c.entries[0].level, "warning");
+    }
+
+    #[test]
+    fn truncated_log_reads_from_start() {
+        let e = env();
+        let body = "[2026-10-19 14:05:00] local.ERROR: after restart\n";
+        let info = "[2026-10-19 14:05:01] local.INFO: ";
+        let body = format!(
+            "{body}{info}{}\n",
+            "x".repeat(120 - body.len() - info.len() - 1)
+        );
+        std::fs::write(log(&e), &body).unwrap();
+        assert_eq!(body.len(), 120);
+        let since = Cursor {
+            at: 1000,
+            offsets: [("laravel.log".to_string(), 500)].into(),
+        };
+        let c = check(&e.1, &[], Some(&since), 1100);
+        assert_eq!(c.restarted, ["laravel.log"]);
+        assert_eq!(c.entries.len(), 1);
+        assert_eq!(c.entries[0].message, "after restart");
+        assert_eq!(c.cursor.offsets.get("laravel.log"), Some(&120));
+    }
+
+    #[test]
+    fn exit_after_cursor_is_reported() {
+        let e = env();
+        append(
+            &apps::log_file("shop@api"),
+            "booting\n\x1b[31mboom\x1b[0m\n",
+        );
+        let since = Cursor {
+            at: 1000,
+            offsets: Default::default(),
+        };
+        let procs = [
+            proc("api", "crashed", Some((1, 1050))),
+            proc("old", "crashed", Some((2, 900))),
+            proc("vite", "running", None),
+        ];
+        let c = check(&e.1, &procs, Some(&since), 1100);
+        assert_eq!(c.exited.len(), 1);
+        assert_eq!(c.exited[0].label, "api");
+        assert_eq!(c.exited[0].code, 1);
+        assert_eq!(c.exited[0].last_lines, ["booting", "boom"]);
+        assert!(
+            c.summary.starts_with("api exited (1) since "),
+            "{}",
+            c.summary
+        );
+    }
+
+    #[test]
+    fn entries_are_capped_at_50() {
+        let e = env();
+        append(&log(&e), "");
+        let first = check(&e.1, &[], None, 1000);
+        let text: String = (0..80)
+            .map(|i| format!("[2026-10-19 14:03:00] local.ERROR: e{i}\n"))
+            .collect();
+        append(&log(&e), &text);
+        let c = check(&e.1, &[], Some(&first.cursor), 1100);
+        assert_eq!(c.entries.len(), 50);
+        assert_eq!(c.entries[49].message, "e79");
+        assert_eq!(c.entries[0].message, "e30");
+        assert!(
+            c.summary.starts_with("80 errors in laravel.log"),
+            "{}",
+            c.summary
+        );
+    }
+}

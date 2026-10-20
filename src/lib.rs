@@ -2,6 +2,7 @@
 //! Shared by the `anvil` CLI and the desktop app.
 
 pub mod apps;
+pub mod check;
 pub mod compose;
 pub mod control;
 pub mod create;
