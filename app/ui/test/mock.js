@@ -887,9 +887,10 @@ const mockHandle = (cmd, a) => {
         editors: ["Zed", "Visual Studio Code"],
         php: ["8.5", "8.4", "8.3", "8.2", "8.1"].map((version) => ({
           version,
-          installed: version === "8.5" || version === "8.4",
+          installed: (window.mockPhpInstalled ?? ["8.5", "8.4"]).includes(version),
           default: version === "8.4",
           pinned_by: window.mockPhpPins?.[version] ?? [],
+          opcache: version === "8.5" ? "builtin" : (window.mockOpcache?.[version] ?? (version === "8.4" ? "ready" : "missing")),
         })),
         ini: { memory_limit: "512M", upload_max_filesize: "64M" },
         terminal: "Terminal",
@@ -967,6 +968,10 @@ const mockHandle = (cmd, a) => {
           anvil: true,
         },
       ];
+    case "php_opcache":
+      if (window.mockOpcacheError) throw window.mockOpcacheError;
+      (window.mockOpcache ??= {})[a.version] = "ready";
+      return mockHandle("settings");
     case "package_manager_install":
     case "package_manager_uninstall":
       if (window.mockPmError) throw window.mockPmError;

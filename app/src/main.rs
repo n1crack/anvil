@@ -2867,6 +2867,7 @@ struct PhpVersion {
     default: bool,
     /// Apps pinned to it: it can't be uninstalled until they are unpinned.
     pinned_by: Vec<String>,
+    opcache: anvil::opcache::State,
 }
 
 #[derive(Serialize)]
@@ -3028,6 +3029,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                 installed: installed.iter().any(|i| i == v),
                 default: cfg.php.as_deref() == Some(*v),
                 pinned_by: anvil::pinned_to(&cfg, "php", v),
+                opcache: anvil::opcache::state(v),
             })
             .collect(),
         editors: installed_apps(&EDITORS),
@@ -3329,6 +3331,46 @@ async fn php_install(handle: AppHandle, version: String) -> Res<Settings> {
     .map_err(err)?;
     changed(&handle);
     settings(handle)
+}
+
+/// Versions whose OPcache is being built: a second click (or window) doesn't start another.
+static OPCACHE_BUILDS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Builds OPcache for an installed 8.1–8.4 (minutes), then restarts PHP-FPM to load it.
+#[tauri::command]
+async fn php_opcache(handle: AppHandle, version: String) -> Res<Settings> {
+    let h = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Res<()> {
+        if !anvil::installed_php().contains(&version) {
+            return Err(format!("PHP {version} is not installed"));
+        }
+        {
+            let mut building = anvil::lock(&OPCACHE_BUILDS);
+            if building.contains(&version) {
+                return Err(format!("OPcache for PHP {version} is already being added"));
+            }
+            building.push(version.clone());
+        }
+        let built = anvil::opcache::build(&version);
+        anvil::lock(&OPCACHE_BUILDS).retain(|v| *v != version);
+        built.map_err(err)?;
+        let cfg = anvil::load().map_err(err)?;
+        let app = h.state::<App>();
+        if running(&app) {
+            start(&app, &cfg);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    changed(&handle);
+    settings(handle)
+}
+
+/// Opens Apple's installer for the Xcode Command Line Tools, which OPcache builds with.
+#[tauri::command(async)]
+fn xcode_tools_install() -> Res<()> {
+    anvil::run(Command::new("xcode-select").arg("--install")).map_err(err)
 }
 
 #[tauri::command(async)]
@@ -3787,6 +3829,8 @@ fn main() {
             set_default_php,
             set_ini,
             php_install,
+            php_opcache,
+            xcode_tools_install,
             php_uninstall,
             set_terminal,
             set_git_client,

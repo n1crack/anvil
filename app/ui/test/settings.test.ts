@@ -111,6 +111,66 @@ describe("versions", () => {
     await wait(150);
   });
 
+  const phpRow = (v: string) => $$("#versions .ver").find((r) => r.querySelector(".ver-label")?.textContent === `PHP ${v}`)!;
+  const buttons = (r: HTMLElement) => [...r.querySelectorAll("button")].map((b) => b.textContent);
+  async function withOpcache83(run: () => Promise<void>) {
+    w.mockPhpInstalled = ["8.5", "8.4", "8.3"];
+    w.mockOpcache = {};
+    w.refresh();
+    try {
+      await open("php");
+      await run();
+    } finally {
+      delete w.mockPhpInstalled;
+      delete w.mockOpcache;
+      delete w.mockOpcacheError;
+      delete w.mockDelay.php_opcache;
+      w.refresh();
+      await open("php");
+    }
+  }
+
+  test("row_shows_opcache_state: OPcache on built-in and ready versions, Add OPcache on a missing one", () =>
+    withOpcache83(async () => {
+      expect(phpRow("8.5").querySelector(".ver-opcache")?.textContent).toBe("OPcache");
+      expect(phpRow("8.4").querySelector(".ver-opcache")?.textContent).toBe("OPcache");
+      expect(buttons(phpRow("8.5"))).not.toContain("Add OPcache");
+      const r83 = phpRow("8.3");
+      expect(r83.querySelector(".ver-opcache")?.textContent).toBe("Add OPcache");
+      expect(r83.querySelector(".ver-opcache button")).not.toBeNull();
+      // Not installed: nothing about OPcache.
+      expect(phpRow("8.2").querySelector(".ver-opcache")?.textContent).toBe("");
+    }));
+
+  test("add_opcache_is_inline: Adding OPcache… on the row until it resolves, then OPcache", () =>
+    withOpcache83(async () => {
+      w.mockDelay.php_opcache = 100;
+      (phpRow("8.3").querySelector(".ver-opcache button") as HTMLButtonElement).click();
+      await wait(10);
+      expect(w.mockCalls.at(-1)).toEqual(["php_opcache", { version: "8.3" }]);
+      expect(phpRow("8.3").querySelector(".ver-opcache")?.textContent).toBe("Adding OPcache…");
+      expect(phpRow("8.3").querySelector(".spin-dot")).not.toBeNull();
+      expect(buttons(phpRow("8.3"))).not.toContain("Add OPcache");
+      await wait(150);
+      expect(phpRow("8.3").querySelector(".ver-opcache")?.textContent).toBe("OPcache");
+      expect($$('[role="alert"]:not([hidden]), .toast').length).toBe(0);
+    }));
+
+  test("row_offers_the_tools: a build without the command line tools says so on the row and offers them", () =>
+    withOpcache83(async () => {
+      w.mockOpcacheError = "Building OPcache failed — OPcache needs the Xcode Command Line Tools: xcode-select --install";
+      (phpRow("8.3").querySelector(".ver-opcache button") as HTMLButtonElement).click();
+      await wait(30);
+      const r = phpRow("8.3");
+      expect(r.querySelector(".ver-error")?.textContent).toContain("xcode-select --install");
+      expect($$('[role="alert"]:not([hidden])').length).toBe(0);
+      const tools = [...r.querySelectorAll("button")].find((b) => b.textContent === "Install command line tools")!;
+      expect(tools).toBeDefined();
+      tools.click();
+      await wait(10);
+      expect(w.mockCalls.at(-1)).toEqual(["xcode_tools_install", undefined]);
+    }));
+
   test("Node.js: every version the backend offers, installed ones without a made-up default", async () => {
     await open("node");
     const rows = $$("#node .ver");

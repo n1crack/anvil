@@ -13,8 +13,9 @@ Until 1.0.0, minor versions may contain breaking changes.
 - PHP 8.1 to 8.4 get OPcache: Anvil builds it from php.net's source of the
   same version on your Mac (checked against php.net's checksum; needs the Xcode
   command line tools), and every version serves with OPcache tuned for
-  development, so a saved file shows on the next request. `anvil php opcache
-  <version>` adds it to a PHP installed before.
+  development, so a saved file shows on the next request. Add OPcache in
+  Settings › PHP, or `anvil php opcache <version>`, adds it to a PHP installed
+  before.
 - `anvil app start|stop|restart <site> [<process>]` and `anvil service
   start|stop <id>` ask the running app to do it, so the change shows there at
   once, and print each process's state (`api: running`). Without the app open

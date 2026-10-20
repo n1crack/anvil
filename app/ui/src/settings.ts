@@ -85,6 +85,7 @@ function versionRow(
   busy: boolean,
   blocked: boolean,
   act: { install: () => void; uninstall: () => void; makeDefault?: () => void },
+  extra?: { slot: HTMLElement; error?: HTMLElement },
 ) {
   const row = document.createElement("div");
   row.className = `row ver${v.installed ? "" : " missing"}${v.default ? " is-default" : ""}`;
@@ -92,6 +93,7 @@ function versionRow(
   name.className = "ver-name";
   name.innerHTML = `<span class="ver-mark">${v.default ? CHECK : ""}</span><span class="ver-label"></span>`;
   $(".ver-label", name).textContent = label;
+  if (extra) name.append(extra.slot);
   if (v.default) name.append(Object.assign(document.createElement("span"), { className: "ver-default", textContent: "Default" }));
   const pinned = v.installed && v.pinned_by?.length ? v.pinned_by.join(", ") : "";
   if (pinned)
@@ -120,6 +122,10 @@ function versionRow(
     }
   }
   row.append(name, actions);
+  if (extra?.error) {
+    row.classList.add("has-error");
+    row.append(extra.error);
+  }
   return row;
 }
 
@@ -631,13 +637,51 @@ export function render() {
           );
           if (ok) call("php_uninstall", { version: v.version });
         },
-      }),
+      }, opcacheParts(v)),
     ),
   );
 
   for (const input of document.querySelectorAll<HTMLInputElement>("[data-ini]")) {
     if (document.activeElement !== input) input.value = s.ini[input.dataset.ini ?? ""] ?? "";
   }
+}
+
+const opcacheErrors = new Map<string, string>();
+
+/** OPcache's fixed slot after "PHP 8.x" (so Default and Pinned by stay aligned) and,
+ * after a failed build, the reason under the row, with the tools when they are missing. */
+function opcacheParts(v: Settings["php"][number]) {
+  const slot = Object.assign(document.createElement("span"), { className: "ver-opcache" });
+  if (installing.has(`opcache@${v.version}`)) {
+    slot.innerHTML = `<span class="spin-dot"></span><span class="muted">Adding OPcache…</span>`;
+  } else if (v.installed && v.opcache === "missing") {
+    slot.append(button("Add OPcache", () => addOpcache(v.version)));
+  } else if (v.installed) {
+    slot.textContent = "OPcache";
+  }
+  const reason = opcacheErrors.get(v.version);
+  if (!reason) return { slot };
+  const error = Object.assign(document.createElement("div"), { className: "ver-error" });
+  error.append(Object.assign(document.createElement("span"), { textContent: reason }));
+  if (reason.includes("xcode-select --install"))
+    error.append(button("Install command line tools", () => invoke("xcode_tools_install")));
+  return { slot, error };
+}
+
+/** The build takes minutes; the row says so meanwhile and holds a second click. */
+async function addOpcache(version: string) {
+  const key = `opcache@${version}`;
+  if (installing.has(key)) return;
+  installing.add(key);
+  opcacheErrors.delete(version);
+  render();
+  try {
+    s = (await invoke("php_opcache", { version })) ?? s;
+  } catch (e) {
+    opcacheErrors.set(version, String(e));
+  }
+  installing.delete(key);
+  render();
 }
 
 /* ---------- Worktrees ---------- */

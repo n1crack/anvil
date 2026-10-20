@@ -1266,6 +1266,32 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-size: 12px;
 }
 
+/* PHP: OPcache in a fixed slot after the version, so Default and Pinned by stay aligned. */
+.ver-opcache {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 136px;
+  margin-left: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ver-opcache + .ver-default,
+.ver-opcache + .ver-pinned { margin-left: 0; }
+
+.page .row.ver.has-error { flex-wrap: wrap; }
+
+.ver-error {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  gap: 8px;
+  padding-left: 24px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .ver .actions-inline { min-height: 26px; }
 
 .ver .on-hover { visibility: hidden; }
