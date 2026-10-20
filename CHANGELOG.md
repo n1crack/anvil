@@ -58,8 +58,11 @@ Apple Silicon. It comes as a desktop app that carries the `anvil` CLI.
   settings gets its own PHP-FPM pool.
 - Node.js, Go, Rust, .NET and Python toolchains installed into `~/.anvil`, with
   their package and build caches kept there too. Node.js follows `.nvmrc` or
-  `.node-version`, and every app can be pinned to an installed version. Python
-  apps run through uv with the project's own Python and `.venv`.
+  `.node-version`, .NET the project's `global.json`, and a Node.js, Go or
+  Python app can be pinned to an installed version. Python apps run through uv
+  with the Python the project asks for (`.python-version`, `requires-python`);
+  their environment lives in `~/.anvil/cache/uv-venvs/<app>`, so a project's
+  own `.venv` is left alone.
 - Applications with their own dev server run on a private port behind the
   proxy and also answer at `<name>.localhost`. Extra package.json dev servers
   get their own address, `<app>--<script>.test`. Next.js apps open at
@@ -197,8 +200,8 @@ Apple Silicon. It comes as a desktop app that carries the `anvil` CLI.
   version or an Anvil cache only accepts what is actually installed.
 - Downloads are checked against the checksum their source publishes before
   they are unpacked or run (Node, Go, Caddy, PostgreSQL, MySQL, Redis,
-  Mailpit, Composer, rustup); PHP builds and the .NET installer publish none
-  and rely on HTTPS. A failed reinstall keeps the working version.
+  Mailpit, Composer, rustup, and the .NET SDK against the SHA-512 in
+  Microsoft's release list); PHP builds publish none and rely on HTTPS. A failed reinstall keeps the working version.
 - The config file is written atomically, so the app and the CLI never read a
   half-written one.
 - Git runs with `core.fsmonitor` disabled, so a repository can't make Anvil
