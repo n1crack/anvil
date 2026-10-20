@@ -19,7 +19,7 @@ It comes as a desktop app and a CLI.
 
 ## Install
 
-Anvil runs on macOS on Apple Silicon. Install it with [Homebrew](https://brew.sh):
+### macOS (Apple Silicon)
 
 ```sh
 brew install --cask n1crack/anvil/anvil   # the app, which carries the anvil CLI
@@ -28,14 +28,9 @@ brew install n1crack/anvil/anvil          # or only the CLI
 
 Pick one: both put `anvil` on PATH. The app is also on the [releases page](https://github.com/n1crack/anvil/releases), and updates itself.
 
-Or build it from source with [Rust](https://rustup.rs):
+### Linux and Windows
 
-```sh
-git clone https://github.com/n1crack/anvil && cd anvil
-cargo install --path .
-```
-
-That installs the CLI. To build the desktop app as well, see [The desktop app](https://anvil.tr/docs/getting-started#the-desktop-app-optional).
+In development.
 
 ## Quick start
 
@@ -51,6 +46,17 @@ Open `http://<folder>.test`. For HTTPS, `anvil https <folder>`, and `anvil setup
 ## Documentation
 
 Getting started, guides, the CLI reference and configuration are at [anvil.tr/docs](https://anvil.tr/docs). See also the [Changelog](CHANGELOG.md).
+
+## Build from source
+
+With [Rust](https://rustup.rs):
+
+```sh
+git clone https://github.com/n1crack/anvil && cd anvil
+cargo install --path .
+```
+
+That installs the CLI. To build the desktop app as well, see [Build from source](https://anvil.tr/docs/getting-started#build-from-source).
 
 ## Contributing
 
