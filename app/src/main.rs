@@ -2405,6 +2405,12 @@ fn add_alias(handle: AppHandle, app: State<App>, site: String, alias: String) ->
 /// Set once at setup: what `prepare` tells the window through while a copy runs.
 static HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
+/// The app's branches, local and remote: New worktree checks those out and makes any other.
+#[tauri::command(async)]
+fn worktree_branches(site: String) -> Res<Vec<String>> {
+    Ok(anvil::worktrees::branches(&find_site(&site)?.path))
+}
+
 /// What New Worktree offers for a worktree of the app `site`: "Copy the database too", and
 /// the commands to offer once it's made.
 #[tauri::command(async)]
@@ -4373,6 +4379,7 @@ fn main() {
             unhide_site,
             worktree_add,
             worktree_new_db,
+            worktree_branches,
             worktree_remove,
             worktree_losses,
             worktree_after_create,

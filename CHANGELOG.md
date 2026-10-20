@@ -219,8 +219,9 @@ Until 1.0.0, minor versions may contain breaking changes.
   manager counting the packages concerned, with only those inside: installed →
   latest (major called out), or an advisory's severity, title (opens it), CVE
   and affected versions.
-- Sidebar: an app's worktrees sit on a band a tone darker, each with a branch
-  mark carrying the same run badge as an app. The header's address list opens
+- Sidebar: an app's worktrees hang off a line from its mark on a band a tone
+  darker: a bare branch glyph (green running, amber starting, red crashed),
+  no mark of their own, the branch in smaller type. The header's address list opens
   under its "+N", a tone darker, one row per address without its scheme (a
   lock for HTTPS); the whole row opens it. A linked app's worktrees nest
   under it too, and its aliases are no longer rows of their own (its header
@@ -241,6 +242,10 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ### Fixed
 
+- New worktree: a branch that doesn't exist yet is made from the app's current
+  one instead of failing with git's "invalid reference"; the "New branch" box
+  is gone and the hint says "Existing branch" or "New branch" before the
+  address, which is brighter and selectable. The CLI and agents get the same.
 - The Processes window and an app's Resources tab show CPU and memory when
   Anvil was started from a terminal whose language writes decimal commas
   (Turkish); they showed nothing measured.

@@ -326,12 +326,14 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   if (s.hiddenApp) b.classList.add("hidden-app");
   b.dataset.name = s.name;
   b.setAttribute("aria-current", String(s.name === selected));
-  // A worktree: a branch mark, with the same run badge as an app's.
+  // A worktree: a bare branch glyph on the tree line, no mark of its own (that's an app's);
+  // green while it runs, amber while it starts, red after a crash.
   const childMark = () => {
-    const m = el("span", "mark");
-    m.innerHTML = BRANCH;
     const state = snap.app_states[s.name];
-    return markBox(m, state && { running: "on", starting: "warm", crashed: "bad" }[state]);
+    const m = el("span", `wt-glyph ${{ running: "on", starting: "warm", crashed: "bad" }[state] ?? ""}`);
+    m.innerHTML = BRANCH;
+    m.title = { running: "Running", starting: "Starting", crashed: "A process crashed" }[state] ?? "Stopped";
+    return m;
   };
   const text = document.createElement("span");
   text.className = "text";
@@ -724,7 +726,7 @@ export type Ask = {
   placeholder?: string;
   value?: string;
   /** What the text will make, under the field. */
-  preview?: (v: string) => string;
+  preview?: (v: string) => string | Node;
   /** Checkboxes under the field, each with a line about it. */
   checks?: { label: string; checked?: boolean; note?: string }[];
   body?: Node;
@@ -764,7 +766,7 @@ export function ask(o: Ask): Promise<{ value: string; checked: boolean[] } | nul
   ok.textContent = o.ok;
   error.textContent = o.error ?? "";
   error.hidden = !o.error;
-  const show = () => (hint.textContent = o.preview ? o.preview(input.value.trim()) : "");
+  const show = () => hint.replaceChildren(o.preview ? o.preview(input.value.trim()) : "");
   input.oninput = show;
   show();
   dlg.showModal();
@@ -828,29 +830,41 @@ const afterErrors = new Map<string, string>(); // the last run's failure, across
  * app's hooks set it (only when main's database can be copied). Once it's made, its hooks'
  * after-create commands are offered in a second sheet and run only on Run. */
 async function newWorktree(s) {
-  const db = await invoke("worktree_new_db", { site: s.name }).catch(() => null);
+  const [db, branches] = await Promise.all([
+    invoke("worktree_new_db", { site: s.name }).catch(() => null),
+    invoke<string[]>("worktree_branches", { site: s.name }).catch(() => [] as string[]),
+  ]);
   const copyable = !!db?.main_database && db.can_copy;
   let made: string | null = null;
+  // An existing branch is checked out, any other name made from the app's current branch:
+  // the preview says which, so there's nothing to tick.
   const answer = await ask({
     title: `New worktree of ${s.name}`,
     field: "Branch",
     placeholder: "feature/login",
-    preview: (v) => `Its address: ${s.name}--${(v || "feature/login").toLowerCase().replace(/[^a-z0-9.-]/g, "-")}.${snap.tld}`,
-    checks: [
-      { label: "New branch, from the app’s current one" },
-      ...(copyable
-        ? [
-            {
-              label: "Copy the database too",
-              checked: db.copy,
-              note: `Off: an empty database of its own. On: a copy of ${db.main_database}.`,
-            },
-          ]
-        : []),
-    ],
+    preview: (v) => {
+      const b = v.trim();
+      // The address stands out from the word before it, and can be selected.
+      const line = document.createDocumentFragment();
+      line.append(
+        b ? (branches.includes(b) ? "Existing branch · " : "New branch · ") : "",
+        el("span", "ask-addr", `${s.name}--${(b || "feature/login").toLowerCase().replace(/[^a-z0-9.-]/g, "-")}.${snap.tld}`),
+      );
+      return line;
+    },
+    checks: copyable
+      ? [
+          {
+            label: "Copy the database too",
+            checked: db.copy,
+            note: `Off: an empty database of its own. On: a copy of ${db.main_database}.`,
+          },
+        ]
+      : [],
     ok: "Create",
-    submit: async (branch, [isNew, copy]) => {
-      await callOrThrow("worktree_add", { site: s.name, branch, new: isNew, copyDb: copyable ? copy : null });
+    submit: async (raw, [copy]) => {
+      const branch = raw.trim();
+      await callOrThrow("worktree_add", { site: s.name, branch, new: !branches.includes(branch), copyDb: copyable ? copy : null });
       made = snap.sites.find((x) => x.worktree_of === s.name && x.branch === branch)?.name ?? null;
     },
   });

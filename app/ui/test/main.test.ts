@@ -2382,7 +2382,7 @@ describe("worktrees", () => {
     await wait(80);
   };
 
-  test("New Worktree… is a sheet: the branch, new or not, Copy the database too as the hooks set it", async () => {
+  test("New Worktree… is a sheet: the branch, said to be existing or new, Copy the database too as the hooks set it", async () => {
     w.mockNewDb = { can_copy: true, copy: true, main_database: "shop" };
     try {
       await openNew();
@@ -2390,17 +2390,18 @@ describe("worktrees", () => {
       expect($("#ask").classList.contains("sheet")).toBe(true);
       expect($("#ask-label").textContent).toBe("New worktree of shop");
       expect($("#ask-ok").textContent).toBe("Create");
-      expect($$("#ask-checks label").map((l) => l.textContent!.trim())).toEqual([
-        "New branch, from the app’s current one",
-        "Copy the database too",
-      ]);
-      expect(checks().map((c) => c.checked)).toEqual([false, true]);
+      // No "New branch" box: a name that isn't a branch yet is made.
+      expect($$("#ask-checks label").map((l) => l.textContent!.trim())).toEqual(["Copy the database too"]);
+      expect(checks().map((c) => c.checked)).toEqual([true]);
       const input = $("#ask-input") as HTMLInputElement;
       input.value = "feature/login";
       input.dispatchEvent(new Event("input"));
-      expect($("#ask-hint").textContent).toBe("Its address: shop--feature-login.test");
-      checks()[0].checked = true;
-      checks()[1].checked = false;
+      expect($("#ask-hint").textContent).toBe("Existing branch · shop--feature-login.test");
+      input.value = "feature-a";
+      input.dispatchEvent(new Event("input"));
+      expect($("#ask-hint").textContent).toBe("New branch · shop--feature-a.test");
+      input.value = "feature/login";
+      checks()[0].checked = false;
       // Refused: said in the sheet, which stays open.
       w.mockAddFail = "/Users/x/Sites/shop--feature-login already exists";
       await submit();
@@ -2409,7 +2410,7 @@ describe("worktrees", () => {
       expect($("#ask-error").textContent).toContain("already exists");
       delete w.mockAddFail;
       await submit();
-      expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "feature/login", new: true, copyDb: false });
+      expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "feature/login", new: false, copyDb: false });
       expect(sheetOpen()).toBe(false);
     } finally {
       delete w.mockNewDb;
@@ -2422,14 +2423,14 @@ describe("worktrees", () => {
     try {
       w.mockNewDb = { can_copy: false, copy: false, main_database: "shop" };
       await openNew();
-      expect(checks().length).toBe(1);
+      expect(checks().length).toBe(0);
       $("#ask-cancel").click();
       w.mockNewDb = { can_copy: true, copy: false, main_database: null };
       await openNew();
-      expect(checks().length).toBe(1);
+      expect(checks().length).toBe(0);
       ($("#ask-input") as HTMLInputElement).value = "x";
       await submit();
-      expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "x", new: false, copyDb: null });
+      expect(calls("worktree_add").at(-1)![1]).toEqual({ site: "shop", branch: "x", new: true, copyDb: null });
     } finally {
       delete w.mockNewDb;
       w.mockSnap.sites = w.mockSnap.sites.filter((x) => x.name !== "shop--x");
@@ -2655,8 +2656,9 @@ describe("sidebar worktrees", () => {
     expect($$("#list .kids .item").map((r) => r.dataset.name)).toEqual(["shop--agent-1a2b", "shop--feature-login"]);
     const kids = $$("#list .kids .item.child");
     expect(kids.map((k) => k.querySelector(".name")!.textContent)).toEqual(["agent/1a2b", "feature/login"]);
-    // A branch mark with the app's run badge.
-    expect(kids.map((k) => !!k.querySelector(".mark-box .run-badge.on"))).toEqual([false, true]);
+    // A bare branch glyph, no mark of an app's; green while it runs.
+    expect(kids.map((k) => !!k.querySelector(".mark"))).toEqual([false, false]);
+    expect(kids.map((k) => k.querySelector(".wt-glyph")!.classList.contains("on"))).toEqual([false, true]);
     const disc = $(`#list [data-name="shop"] .disclosure`);
     expect(disc.querySelector("svg")).toBeTruthy();
     expect(disc.querySelector(".count")!.textContent).toBe("2");

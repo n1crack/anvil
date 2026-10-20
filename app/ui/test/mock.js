@@ -739,6 +739,8 @@ const mockHandle = (cmd, a) => {
     case "worktree_remove":
       if (window.mockRemoveFail && !a.force) throw window.mockRemoveFail;
       return mockSnap;
+    case "worktree_branches":
+      return window.mockBranches ?? ["main", "feature/login"];
     case "worktree_new_db":
       return window.mockNewDb ?? { can_copy: true, copy: false, main_database: "shop" };
     case "worktree_prepare":

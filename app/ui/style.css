@@ -286,21 +286,40 @@ button, select, input { font: inherit; color: inherit; }
 .kids.closed,
 .fold.closed { grid-template-rows: 0fr; }
 
-/* A worktree: a small branch mark centred under its app's mark, its branch where the app's
-   name starts; an app's worktrees sit on a band a tone darker than the list. */
+/* A worktree: a branch on its app's tree, not an app. A line runs down from the app's mark
+   and turns into each worktree's branch glyph; its name starts where the app's does, smaller,
+   on a band a tone darker, with no rule between worktrees. */
 .kids > div { background: var(--kids-bg); }
 .item.child {
-  --indent: 4px;
-  grid-template-columns: 24px 1fr auto;
-  gap: 16px;
-  min-height: 36px;
-  padding-top: 5px;
-  padding-bottom: 5px;
+  --indent: 24px;
+  grid-template-columns: 14px 1fr auto;
+  gap: 6px;
+  min-height: 30px;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
-.item.child::before { left: 56px; }
-.item.child .mark-box { z-index: 1; width: 24px; height: 24px; }
+.item.child::before {
+  top: 50%;
+  left: 27.5px;
+  width: 7px;
+  border-top: 1px solid var(--edge);
+}
+.item.child::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 27.5px;
+  border-left: 1px solid var(--edge);
+}
+.kids > div > .item.child:last-child::after { bottom: 50%; }
+.rows > .kids .item.child:first-child::before { display: block; }
+.wt-glyph { display: grid; place-items: center; color: var(--muted); }
+.wt-glyph.on { color: var(--ok); }
+.wt-glyph.warm { color: var(--amber); }
+.wt-glyph.bad { color: var(--danger); }
 
-.item.child .name { font-weight: 400; color: var(--muted); }
+.item.child .name { font-size: 12px; font-weight: 400; color: var(--muted); }
 .item.child[aria-current="true"] .name,
 .item.child:hover .name { color: var(--text); }
 
@@ -3276,3 +3295,6 @@ html.windows { --titlebar: 12px; }
 html.windows .detail .titlebar,
 html.windows header.titlebar { height: 52px; }
 html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+
+/* An address in a sheet's hint: brighter than the words around it, and selectable. */
+.ask-addr { white-space: nowrap; color: var(--text); font-family: ui-monospace, "SF Mono", Menlo, monospace; -webkit-user-select: text; user-select: text; cursor: text; }

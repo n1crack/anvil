@@ -852,6 +852,39 @@ pub struct NewDb {
     pub main_database: Option<String>,
 }
 
+/// The app's branches, local ones then its remotes' (without the remote's name), each once:
+/// what New worktree checks out rather than makes.
+pub fn branches(dir: &Path) -> Vec<String> {
+    let refs = crate::git::run(
+        dir,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+    )
+    .unwrap_or_default();
+    let mut out: Vec<String> = vec![];
+    for r in refs.lines() {
+        let name = match r.strip_prefix("refs/heads/") {
+            Some(b) => b,
+            // refs/remotes/<remote>/<branch>; the remote's HEAD isn't a branch.
+            None => match r
+                .strip_prefix("refs/remotes/")
+                .and_then(|x| x.split_once('/'))
+            {
+                Some((_, b)) if b != "HEAD" => b,
+                _ => continue,
+            },
+        };
+        if !out.iter().any(|o| o == name) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
 pub fn new_db(cfg: &Config, app: &Site) -> NewDb {
     let found = main_db_at(cfg, &app.path, &app.path);
     let can_copy = found.choices().contains(&DbChoice::Copy);
@@ -1661,6 +1694,8 @@ pub fn add(
     if folder.exists() {
         anyhow::bail!("{} already exists", folder.display());
     }
+    // A branch that isn't there, here or on a remote, is made from the app's current one.
+    let new_branch = new_branch || !branches(&app.path).iter().any(|b| b == branch);
     let o = std::ffi::OsStr::new;
     let mut args = vec![o("worktree"), o("add")];
     if new_branch {
@@ -3435,6 +3470,25 @@ pub(crate) mod tests {
         );
         let e = add(&cfg, &app, "old", false, None).unwrap_err().to_string();
         assert!(e.contains("already exists"), "{e}");
+        // A branch that isn't there is made from the app's current one, not "invalid reference".
+        let (folder, _) = add(&cfg, &app, "feature-a", false, None).unwrap();
+        assert!(branches(&shop).contains(&"feature-a".to_string()));
+        assert!(folder.ends_with("shop--feature-a"));
+    }
+
+    #[test]
+    fn branches_are_local_then_remote_each_once() {
+        let (main, _) = repo("branches");
+        // A remote with `main` and `remote-only`: refs as `git fetch` writes them.
+        let head = crate::git::run(&main, &["rev-parse", "HEAD"]).unwrap();
+        for r in [
+            "refs/remotes/origin/main",
+            "refs/remotes/origin/remote-only",
+            "refs/remotes/origin/HEAD",
+        ] {
+            git(&main, &["update-ref", r, head.trim()]);
+        }
+        assert_eq!(branches(&main), ["main", "x", "remote-only"]);
     }
 
     #[test]
