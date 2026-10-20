@@ -69,8 +69,9 @@ for (const [id, name, note] of LANGS) {
       "beforeend",
       `<h2>Package managers</h2><div id="pms" class="group pms"><div class="row"><span class="muted">Looking…</span></div></div>` +
         `<p class="hint note">Anvil starts a detected Node app with npm install (when node_modules is missing) and npm run, using the npm bundled with the app’s Node.js. ` +
-        `An app’s PATH is that Node.js (shown here for the newest), then pnpm, yarn and bun installed here (~/.anvil/runtimes), then the PATH Anvil started with plus your login shell’s. ` +
-        `Install uses Anvil’s npm for pnpm and yarn, and bun’s official release checked against its published SHA-256. Your terminal is left alone.</p>`,
+        `An app’s PATH is that Node.js (shown here for the newest), then yarn and bun installed here (~/.anvil/runtimes), then the PATH Anvil started with plus your login shell’s, then Anvil’s pnpm: a pnpm of yours comes first. ` +
+        `pnpm is its standalone build, pinned and checked against its SHA-256; Anvil fetches it the first time an app needs pnpm and finds none. ` +
+        `Install uses Anvil’s npm for yarn, and bun’s official release checked against its published SHA-256. Your terminal is left alone.</p>`,
     );
   }
   $("#storage").before(page);
@@ -401,6 +402,69 @@ function drawAnvilItem(list, i, withNote) {
   }
   row.append(info, actions);
   list.append(row);
+}
+
+/* pnpm's store: shared by every pnpm project on this Mac, so it stays where pnpm keeps
+ * it and is never deleted whole; Prune drops what no project uses, confirmed in the row. */
+let pnpmState: { busy?: string; note?: string; error?: boolean; asking?: boolean } = {};
+
+async function loadPnpmStore() {
+  const box = $("#pnpm-store");
+  const st = await invoke("pnpm_store").catch(() => null);
+  if (!st) return box.replaceChildren();
+  const head = document.createElement("h2");
+  head.className = "storage-group";
+  head.append("pnpm store", Object.assign(document.createElement("span"), { textContent: bytes(st.bytes) }));
+  const row = document.createElement("div");
+  row.className = "row";
+  const info = document.createElement("span");
+  info.append(
+    Object.assign(document.createElement("span"), { textContent: tilde(st.path) }),
+    Object.assign(document.createElement("small"), {
+      textContent: pnpmState.note ?? "Packages every pnpm project shares; Prune removes the ones no project uses",
+      className: pnpmState.error ? "bad" : "",
+    }),
+  );
+  const actions = document.createElement("span");
+  actions.className = "actions-inline";
+  if (pnpmState.busy) {
+    actions.innerHTML = `<span class="spin-dot"></span><span class="muted"></span>`;
+    $(".muted", actions).textContent = pnpmState.busy;
+  } else if (pnpmState.asking) {
+    actions.append(
+      Object.assign(document.createElement("span"), { className: "muted", textContent: "Prune the store?" }),
+      button("Cancel", () => {
+        pnpmState = {};
+        loadPnpmStore();
+      }),
+      button("Prune", prunePnpm),
+    );
+  } else {
+    actions.append(
+      Object.assign(document.createElement("span"), { className: "size", textContent: bytes(st.bytes) }),
+      button("Prune…", () => {
+        pnpmState = { asking: true };
+        loadPnpmStore();
+      }),
+    );
+  }
+  const list = document.createElement("div");
+  list.className = "group";
+  row.append(info, actions);
+  list.append(row);
+  box.replaceChildren(head, list);
+}
+
+async function prunePnpm() {
+  pnpmState = { busy: "Pruning…" };
+  loadPnpmStore();
+  try {
+    const freed = await invoke("pnpm_prune");
+    pnpmState = { note: freed ? `Pruned: about ${bytes(freed)} freed` : "Pruned: nothing to free" };
+  } catch (e) {
+    pnpmState = { note: String(e), error: true };
+  }
+  loadPnpmStore();
 }
 
 /* Application sizes: the last measurement shows at once, and a new one fills
@@ -1204,6 +1268,7 @@ for (const b of document.querySelectorAll<HTMLElement>("[data-page]")) {
     if (b.dataset.page === "performance") loadPerformance();
     if (b.dataset.page === "storage") {
       loadAnvilStorage();
+      loadPnpmStore();
       loadAppSizes();
     }
   };

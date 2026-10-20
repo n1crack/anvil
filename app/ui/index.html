@@ -143,6 +143,15 @@
             <small>Serve at https:// with a trusted local certificate; http:// redirects there</small>
           </dd>
         </div>
+        <div class="row row-top shared-row">
+          <dt><label for="app-shared">Shared dependencies</label></dt>
+          <dd class="https-cell">
+            <input id="app-shared" type="checkbox" role="switch">
+            <span class="securing" hidden><span class="spin-dot"></span><span class="securing-text">Reinstalling…</span></span>
+            <small>pnpm links node_modules into its store instead of copying it there: an install takes a moment and next to no space</small>
+            <small class="shared-note" hidden></small>
+          </dd>
+        </div>
         <div class="row row-top serves-only browser-row">
           <dt><label for="app-browser">Browser errors</label></dt>
           <dd class="https-cell">

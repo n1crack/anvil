@@ -33,6 +33,8 @@ export interface Site {
   browser: boolean;
   /** The Packages tab's badges; null is the detected ones. */
   packages_pinned: string[] | null;
+  /** A pnpm app's "Shared dependencies" in effect; null without pnpm-lock.yaml. */
+  shared_deps: boolean | null;
   /** For a git worktree of another app: that app's name. */
   worktree_of: string | null;
   /** A worktree's branch; null when detached. */

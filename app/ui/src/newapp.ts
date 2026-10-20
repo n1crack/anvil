@@ -98,7 +98,7 @@ let opts: Opt[] = [];
 let chosen: Record<string, string> = {};
 const toggle = (o: Opt) => o.choices.length === 2 && o.choices[0][0] === "on" && o.choices[1][0] === "off";
 
-/** The current choices in a line: "Livewire · SQLite · npm · PHP 8.4 · Git". */
+/** The current choices in a line: "Livewire · SQLite · pnpm · PHP 8.4 · Git". */
 export const summary = () =>
   opts
     .map((o) => (toggle(o) ? (chosen[o.key] === "on" ? o.label : null) : o.choices.find((c) => c[0] === chosen[o.key])?.[1]))

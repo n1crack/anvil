@@ -1,4 +1,5 @@
 import { $, ago, call, el, invoke, popAt, renderMain, seg, selected, showError, snap } from "./app";
+import { late } from "./late";
 
 /* Packages tab: the app's key packages as badges (pinned per app, the detected ones by
  * default), then Check outdated and Check security. What a check finds shows as a notice
@@ -90,6 +91,24 @@ async function checkAudit(name, eco) {
   if (selected === name) drawPackages(name);
 }
 
+// site name -> how its "Switch to pnpm" went
+const switched = new Map<string, { ok: boolean; text: string }>();
+
+async function switchToPnpm(name) {
+  busy.add(`${name}:pnpm`);
+  switched.delete(name);
+  drawPackages(name);
+  try {
+    const lock = await invoke("switch_to_pnpm", { site: name });
+    switched.set(name, { ok: true, text: `Switched to pnpm: ${lock} is gone and node_modules was installed again. Test the app.` });
+  } catch (e) {
+    switched.set(name, { ok: false, text: String(e) });
+  }
+  busy.delete(`${name}:pnpm`);
+  const s = snap.sites.find((x) => x.name === name);
+  if (s && selected === name) window.renderPackages(s);
+}
+
 /** The manager's name for a section: Composer, or pnpm/npm/yarn/bun for npm packages. */
 const managerLabel = (e) => (e.id === "npm" && e.manager ? e.manager.split(" ")[0] : e.label);
 
@@ -134,7 +153,25 @@ export function drawPackages(name) {
     security.onclick = () => audited.forEach((e) => checkAudit(name, e.id));
     bar.append(security);
   }
+  // An npm or yarn app can move to pnpm, only when asked.
+  const js = p.ecosystems.find((e) => e.id === "npm");
+  const lock = js?.lock === "package-lock.json" || js?.lock === "yarn.lock" ? js.lock : null;
+  if (lock) {
+    const going = busy.has(`${name}:pnpm`);
+    const b = el("button", "inline-action pkg-switch", going ? "Switching…" : "Switch to pnpm");
+    b.disabled = going;
+    b.onclick = () =>
+      late.confirmPop(
+        b,
+        `Replace ${lock} with pnpm-lock.yaml and install node_modules again with pnpm? Test the app afterwards.`,
+        "Switch",
+        () => switchToPnpm(name),
+      );
+    bar.append(b);
+  }
   body.append(bar);
+  const sw = switched.get(name);
+  if (sw) body.append(el("p", sw.ok ? "muted pkg-checked" : "pkg-error", sw.text));
 
   const errors = [up?.error, ...audited.map((e) => audits[e.id]?.error)].filter(Boolean);
   if (errors.length) {

@@ -1198,6 +1198,55 @@ function browserBridge(s, root) {
     .catch(() => {});
 }
 
+// Apps whose node_modules are being installed again, and how the last one went.
+const reinstalling = new Set<string>();
+const reinstalled = new Map<string, { ok: boolean; text: string }>();
+
+/** The Settings tab's "Shared dependencies" (pnpm apps only): a switch confirmed first,
+ * since it installs node_modules again; Next.js keeps it off. */
+function sharedDeps(s, root) {
+  const row = $(".shared-row", root);
+  if (!row) return;
+  if (s.shared_deps === null) {
+    row.remove();
+    return;
+  }
+  const box = $("#app-shared", row);
+  const busy = reinstalling.has(s.name);
+  const next = s.kind === "next";
+  box.checked = s.shared_deps;
+  box.disabled = busy || next;
+  $(".securing", row).hidden = !busy;
+  const note = $(".shared-note", row);
+  const last = reinstalled.get(s.name);
+  const text = next ? "Off for Next.js: Turbopack doesn’t compile dependencies outside the project" : busy ? "" : (last?.text ?? "");
+  note.hidden = !text;
+  note.textContent = text;
+  note.classList.toggle("error", !next && last?.ok === false);
+  box.onchange = () => {
+    const on = box.checked;
+    box.checked = !on; // stays as it is until confirmed
+    late.confirmPop(
+      box,
+      on ? "Install node_modules again as links into pnpm’s store?" : "Install node_modules again as the app’s own copy?",
+      "Reinstall",
+      async () => {
+        reinstalling.add(s.name);
+        reinstalled.delete(s.name);
+        if (selected === s.name) sharedDeps(s, root);
+        try {
+          await invoke("set_shared_deps", { site: s.name, on });
+          reinstalled.set(s.name, { ok: true, text: "Installed again; restart a running dev server so it picks up the new node_modules" });
+        } catch (e) {
+          reinstalled.set(s.name, { ok: false, text: String(e) });
+        }
+        reinstalling.delete(s.name);
+        call("state");
+      },
+    );
+  };
+}
+
 /** Every address of an app, each with its own Open. */
 function aliasPop(anchor, sites) {
   const pop = el("div", "alias-pop");
@@ -1469,6 +1518,7 @@ export function renderSite() {
 
   if (!process && serves(s)) webRoot(s, root);
   browserBridge(s, root);
+  sharedDeps(s, root);
   if (!process && s.php) appExtensions(s, root);
   else root.querySelector(".app-exts-row")?.remove();
 
