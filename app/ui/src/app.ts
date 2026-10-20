@@ -2299,12 +2299,19 @@ setInterval(async () => {
   if (s && PROCESS_KINDS.has(s.kind) && $(".run-box", root)) renderRunState(s, root);
 }, 1500);
 
+/** Focus a sidebar row, scrolling only when it is out of view. */
+export function focusRow(row: HTMLElement | null) {
+  row?.focus({ preventScroll: true });
+  row?.scrollIntoView?.({ block: "nearest" });
+}
+
 export function select(name) {
   selected = name;
   localStorage.setItem("selected", name);
   renderList();
   renderSite();
-  $(`.item[data-name="${CSS.escape(name)}"]`)?.focus({ preventScroll: false });
+  // Scrolled only as far as needed (keys moving past the edge): focus alone centres it.
+  focusRow($(`.item[data-name="${CSS.escape(name)}"]`));
 }
 
 /** Open the selected app (or `site`) in the browser, Finder, a terminal or the editor. */

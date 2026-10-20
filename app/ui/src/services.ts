@@ -8,6 +8,7 @@ import {
   filter,
   filterNote,
   filterOf,
+  focusRow,
   invoke,
   markBox,
   mode,
@@ -184,7 +185,8 @@ export function selectService(id) {
   localStorage.setItem("service", id);
   renderServiceList();
   renderService();
-  $(`.item[data-name="${CSS.escape(id)}"]`)?.focus();
+  // Scrolled only as far as needed (keys moving past the edge): focus alone centres it.
+  focusRow($(`.item[data-name="${CSS.escape(id)}"]`));
 }
 
 export function serviceKeys(e) {
