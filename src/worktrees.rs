@@ -1653,17 +1653,18 @@ pub fn add(
         args.push(o(branch));
     }
     crate::git::run(&app.path, &args)?;
-    let copied = copy_in(&app.path, &folder, &hooks(cfg, app).copy)?;
-    // Not worked out (a URL Anvil can't rewrite): the copy stays as made, and nothing of the
-    // worktree runs until it is (`checked_env`).
-    if let Some(site) = site_at(cfg, &folder) {
-        let _ = write_keys(cfg, &site, &copied);
-    }
     let db = if copy {
         DbChoice::Copy
     } else {
         DbChoice::Empty
     };
+    let leave = left_out(cfg, &app.path, &folder, db);
+    let copied = copy_in(&app.path, &folder, &hooks(cfg, app).copy, leave.as_deref())?;
+    // Not worked out (a URL Anvil can't rewrite): the copy stays as made, and nothing of the
+    // worktree runs until it is (`checked_env`).
+    if let Some(site) = site_at(cfg, &folder) {
+        let _ = write_keys(cfg, &site, &copied);
+    }
     Ok((folder, db))
 }
 
@@ -1715,13 +1716,22 @@ fn star(pattern: &str, name: &str) -> bool {
 }
 
 /// Copy `list`'s entries (`expand`) from `main` into `wt`, folders whole, never over what is
-/// there: what was copied, relative.
-fn copy_in(main: &Path, wt: &Path, list: &[String]) -> anyhow::Result<Vec<PathBuf>> {
-    fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+/// there: what was copied, relative. `leave`, a file of main's, is never copied (its SQLite
+/// database when the worktree's is to be empty).
+fn copy_in(
+    main: &Path,
+    wt: &Path,
+    list: &[String],
+    leave: Option<&Path>,
+) -> anyhow::Result<Vec<PathBuf>> {
+    fn copy_all(from: &Path, to: &Path, leave: Option<&PathBuf>) -> std::io::Result<()> {
+        if leave == Some(&real_file(from)) {
+            return Ok(());
+        }
         if from.is_dir() {
             fs::create_dir_all(to)?;
             for e in fs::read_dir(from)?.flatten() {
-                copy_all(&e.path(), &to.join(e.file_name()))?;
+                copy_all(&e.path(), &to.join(e.file_name()), leave)?;
             }
         } else if !to.exists() {
             if let Some(dir) = to.parent() {
@@ -1731,14 +1741,23 @@ fn copy_in(main: &Path, wt: &Path, list: &[String]) -> anyhow::Result<Vec<PathBu
         }
         Ok(())
     }
+    let leave = leave.map(real_file);
     let todo: Vec<PathBuf> = expand(main, list)
         .into_iter()
-        .filter(|f| !wt.join(f).exists())
+        .filter(|f| !wt.join(f).exists() && leave != Some(real_file(&main.join(f))))
         .collect();
     for f in &todo {
-        copy_all(&main.join(f), &wt.join(f))?;
+        copy_all(&main.join(f), &wt.join(f), leave.as_ref())?;
     }
     Ok(todo)
+}
+
+/// Main's SQLite file when the worktree's database is to be `choice` Empty: `copy_in` leaves it out.
+fn left_out(cfg: &Config, main: &Path, wt: &Path, choice: DbChoice) -> Option<PathBuf> {
+    match main_db_at(cfg, main, wt) {
+        MainDb::Sqlite { from, .. } if choice == DbChoice::Empty => Some(from),
+        _ => None,
+    }
 }
 
 /// The env files at the project's root that `env` reads as the processes' env, in Next.js'
@@ -2080,7 +2099,8 @@ pub fn missing(cfg: &Config, site: &Site) -> Missing {
 pub fn copy_files(cfg: &Config, site: &Site) -> anyhow::Result<()> {
     let main =
         main_of(&site.path).ok_or_else(|| anyhow::anyhow!("{} isn't a git worktree", site.name))?;
-    let copied = copy_in(&main, &site.path, &hooks(cfg, site).copy)?;
+    let leave = left_out(cfg, &main, &site.path, choice(cfg, site));
+    let copied = copy_in(&main, &site.path, &hooks(cfg, site).copy, leave.as_deref())?;
     if copied.is_empty() {
         anyhow::bail!("{} has every file its hooks copy", site.name);
     }
@@ -3866,6 +3886,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_empty_choice_leaves_main_s_sqlite_file_out_of_the_copy() {
+        let (mut cfg, app) = parked_app("add-sqlite", "DB_CONNECTION=sqlite\n");
+        fs::create_dir(app.path.join("database")).unwrap();
+        fs::write(app.path.join("database/database.sqlite"), "main's data").unwrap();
+        fs::write(app.path.join("database/seed.sqlite"), "seed").unwrap();
+        cfg.sites.entry("shop".into()).or_default().worktree.copy =
+            Some(vec![".env".into(), "database/*.sqlite".into()]);
+        let (folder, choice) = add(&cfg, &app, "empty", true, Some(false)).unwrap();
+        assert!(!folder.join("database/database.sqlite").exists());
+        assert!(folder.join("database/seed.sqlite").exists());
+        set_db_at(&mut cfg, &folder, choice).unwrap();
+        let site = site_at(&cfg, &folder).unwrap();
+        assert!(
+            pending(&cfg, &site).is_some(),
+            "an empty one is still to make"
+        );
+        // The same for the files a worktree gets later.
+        fs::remove_dir_all(folder.join("database")).unwrap();
+        copy_files(&cfg, &site).unwrap();
+        assert!(!folder.join("database/database.sqlite").exists());
+        // Copy chosen: the hooks may bring it.
+        let (folder, _) = add(&cfg, &app, "copy", true, Some(true)).unwrap();
+        assert!(folder.join("database/database.sqlite").exists());
+    }
+
+    #[test]
     fn add_refuses_an_alias_and_a_worktree() {
         let (mut cfg, app) = parked_app("add-alias", "APP_NAME=Shop\n");
         cfg.links.insert("admin".into(), app.path.clone());
@@ -4153,7 +4199,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let list = worktreeinclude(&main).unwrap();
-        let copied = copy_in(&main, &wt, &list).unwrap();
+        let copied = copy_in(&main, &wt, &list, None).unwrap();
         let shown: Vec<_> = copied.iter().map(|p| p.display().to_string()).collect();
         assert_eq!(shown, [".env", ".envrc", "config/local"]);
         assert_eq!(
@@ -4161,7 +4207,7 @@ pub(crate) mod tests {
             "{}"
         );
         assert_eq!(fs::read_to_string(wt.join(".env.local")).unwrap(), "mine");
-        assert!(copy_in(&main, &wt, &list).unwrap().is_empty());
+        assert!(copy_in(&main, &wt, &list, None).unwrap().is_empty());
         assert!(star("a*b*c", "aXbYc") && !star("a*b*c", "aXc") && star(".env*", ".env"));
     }
 
