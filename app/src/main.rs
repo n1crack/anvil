@@ -3383,6 +3383,47 @@ fn set_login(handle: AppHandle, on: bool) -> Res<Settings> {
     settings(handle)
 }
 
+/// A folder on Settings › Performance (Windows) and whether it is on a Dev Drive.
+#[derive(Serialize)]
+struct PerfFolder {
+    name: String,
+    path: String,
+    dev_drive: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct Performance {
+    /// Defender's real-time protection: "on", "off", "passive", or unknown.
+    defender: Option<&'static str>,
+    dev_drive_supported: bool,
+    folders: Vec<PerfFolder>,
+}
+
+/// What makes file-heavy work slow on Windows, read only: Defender's state, and which of
+/// Anvil's and the apps' folders sit on a Dev Drive. Anvil changes neither.
+#[tauri::command(async)]
+fn performance() -> Res<Performance> {
+    let cfg = anvil::load().map_err(err)?;
+    let folder = |name: String, path: &std::path::Path| PerfFolder {
+        name,
+        path: path.display().to_string(),
+        dev_drive: anvil::platform::on_dev_drive(path),
+    };
+    let home = anvil::home();
+    let mut folders = vec![folder("Anvil".into(), &home)];
+    folders.extend(
+        anvil::sites(&cfg)
+            .iter()
+            .filter(|s| s.worktree_of.is_none())
+            .map(|s| folder(s.name.clone(), &s.path)),
+    );
+    Ok(Performance {
+        defender: anvil::platform::defender(),
+        dev_drive_supported: anvil::platform::dev_drive_supported(),
+        folders,
+    })
+}
+
 #[tauri::command(async)]
 fn open_config_dir() -> Res<()> {
     anvil::run(&mut anvil::platform::open(anvil::home())).map_err(err)
@@ -3964,6 +4005,7 @@ fn main() {
         .manage(App::default())
         .invoke_handler(tauri::generate_handler![
             state,
+            performance,
             activity,
             agent_activity,
             activity_log,
@@ -4091,6 +4133,14 @@ fn main() {
         ])
         .setup(|app| {
             let _ = HANDLE.set(app.handle().clone());
+            // Windows keeps a window started by another program (the installer's Finish)
+            // behind the one in front; on top for a moment brings it forward.
+            #[cfg(windows)]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_always_on_top(true);
+                let _ = w.set_focus();
+                let _ = w.set_always_on_top(false);
+            }
             // SIGTERM (a logout, `kill`), SIGINT and SIGHUP quit as Quit does, stopping
             // everything: by default they end Anvil at once and its dev processes run on
             // with no Anvil that knows them.

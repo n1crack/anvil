@@ -1,5 +1,5 @@
 // The libraries compiled into Anvil, for Settings › About › Credits: the Rust crates
-// the CLI and the app link (normal dependencies, macOS targets; not build or dev
+// the CLI and the app link (normal dependencies, macOS and Windows targets; not build or dev
 // ones) and the npm packages the UI ships (`--prod`). Writes public/credits.json
 // (name, version, license, link) and public/THIRD_PARTY_NOTICES.txt (each crate's
 // license files as published), both bundled with the UI. Run by `pnpm build`.
@@ -16,7 +16,7 @@ const run = (cmd, args, cwd) =>
 const meta = JSON.parse(
   run(
     "cargo",
-    ["metadata", "--format-version=1", "--locked", "--filter-platform=aarch64-apple-darwin", "--filter-platform=x86_64-apple-darwin"],
+    ["metadata", "--format-version=1", "--locked", "--filter-platform=aarch64-apple-darwin", "--filter-platform=x86_64-apple-darwin", "--filter-platform=x86_64-pc-windows-msvc"],
     join(ui, "..", ".."),
   ),
 );

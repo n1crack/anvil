@@ -86,6 +86,24 @@ pub fn shell(script_in: &str, tag: Option<&str>) -> Command {
     }
 }
 
+/// One word for a `shell` command line, whatever it holds: sh's `'…'`, or on Windows
+/// `"…"` (cmd has no single quotes), left bare when it needs no quotes.
+pub fn shell_quote(word: &str) -> String {
+    if cfg!(windows) {
+        let plain = !word.is_empty()
+            && word
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_.:/\\@+=,".contains(c));
+        if plain {
+            word.to_string()
+        } else {
+            format!("\"{}\"", word.replace('"', "\"\""))
+        }
+    } else {
+        crate::shims::sh_quote(word)
+    }
+}
+
 /// `shell` as a program and its arguments.
 pub fn shell_args(script: &str) -> (PathBuf, Vec<String>) {
     if cfg!(windows) {
@@ -539,6 +557,123 @@ pub fn process_table() -> Vec<(u32, u32, u64, f32, String)> {
         CloseHandle(snap);
     }
     out
+}
+
+/// Microsoft Defender's real-time protection: "on", "off", "passive" (another antivirus
+/// runs; Defender only scans on demand), or `None` when Defender can't be asked. Windows only.
+pub fn defender() -> Option<&'static str> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let out = command("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$s = Get-MpComputerStatus; \"$($s.AMRunningMode)|$($s.RealTimeProtectionEnabled)\"",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let (mode, on) = text.trim().split_once('|')?;
+    Some(match (mode, on) {
+        (m, _) if m.contains("Passive") || m.contains("Not running") => "passive",
+        (_, "True") => "on",
+        _ => "off",
+    })
+}
+
+/// Whether this Windows can make Dev Drives (Windows 11 22H2, build 22621, and later).
+pub fn dev_drive_supported() -> bool {
+    #[cfg(windows)]
+    {
+        let out = command("cmd.exe").args(["/D", "/C", "ver"]).output();
+        // `Microsoft Windows [Version 10.0.26100.6584]`
+        out.ok()
+            .and_then(|o| {
+                let t = String::from_utf8_lossy(&o.stdout).into_owned();
+                let v = t
+                    .split("Version")
+                    .nth(1)?
+                    .trim()
+                    .trim_end_matches(']')
+                    .to_string();
+                v.split('.').nth(2)?.parse::<u32>().ok()
+            })
+            .is_some_and(|build| build >= 22621)
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Whether `path` is on a Dev Drive, where Defender scans without holding up the
+/// programs reading files; `None` when it can't be told (or not on Windows). Asked of the
+/// volume itself, so it doesn't depend on Windows' language as `fsutil`'s text would.
+pub fn on_dev_drive(path: &Path) -> Option<bool> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
+            FILE_SHARE_WRITE, GetVolumePathNameW, OPEN_EXISTING,
+        };
+        use windows_sys::Win32::System::IO::DeviceIoControl;
+        use windows_sys::Win32::System::Ioctl::{
+            FILE_FS_PERSISTENT_VOLUME_INFORMATION, FSCTL_QUERY_PERSISTENT_VOLUME_STATE,
+            PERSISTENT_VOLUME_STATE_DEV_VOLUME,
+        };
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        let mut root = [0u16; 512];
+        // SAFETY: plain Win32 calls; every buffer is sized as passed and outlives the call,
+        // and the handle is closed here.
+        unsafe {
+            if GetVolumePathNameW(wide.as_ptr(), root.as_mut_ptr(), root.len() as u32) == 0 {
+                return None;
+            }
+            let h = CreateFileW(
+                root.as_ptr(),
+                0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS,
+                std::ptr::null_mut(),
+            );
+            if h == INVALID_HANDLE_VALUE {
+                return None;
+            }
+            let ask = FILE_FS_PERSISTENT_VOLUME_INFORMATION {
+                FlagMask: PERSISTENT_VOLUME_STATE_DEV_VOLUME,
+                Version: 1,
+                ..Default::default()
+            };
+            let mut got = FILE_FS_PERSISTENT_VOLUME_INFORMATION::default();
+            let mut len = 0u32;
+            let size = size_of::<FILE_FS_PERSISTENT_VOLUME_INFORMATION>() as u32;
+            let ok = DeviceIoControl(
+                h,
+                FSCTL_QUERY_PERSISTENT_VOLUME_STATE,
+                (&ask as *const FILE_FS_PERSISTENT_VOLUME_INFORMATION).cast(),
+                size,
+                (&mut got as *mut FILE_FS_PERSISTENT_VOLUME_INFORMATION).cast(),
+                size,
+                &mut len,
+                std::ptr::null_mut(),
+            ) != 0;
+            CloseHandle(h);
+            // NTFS doesn't know the question: not a Dev Drive (they are ReFS).
+            Some(ok && got.VolumeFlags & PERSISTENT_VOLUME_STATE_DEV_VOLUME != 0)
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        None
+    }
 }
 
 /// The account's home folder when the environment names none.

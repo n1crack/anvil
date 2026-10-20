@@ -1224,6 +1224,7 @@ impl Services {
     pub fn take(&mut self, id: &str) -> Option<Stopping> {
         let child = self.children.remove(id)?;
         Some(Stopping {
+            dir: None,
             child,
             pid_files: vec![pid_file(id), legacy_pid_file(id)],
         })

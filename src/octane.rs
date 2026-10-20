@@ -342,7 +342,7 @@ pub fn command(site: &Site, server: Server, port: u16, admin: Option<u16>) -> Re
             }
             c += &format!(
                 " --rr-config={}",
-                crate::shims::sh_quote(&config.display().to_string())
+                crate::platform::shell_quote(&config.display().to_string())
             );
             Ok(c)
         }
@@ -358,7 +358,7 @@ pub fn command(site: &Site, server: Server, port: u16, admin: Option<u16>) -> Re
             }
             c += &format!(
                 " --caddyfile={}",
-                crate::shims::sh_quote(&caddyfile(site).display().to_string())
+                crate::platform::shell_quote(&caddyfile(site).display().to_string())
             );
             Ok(c)
         }
@@ -523,7 +523,7 @@ mod tests {
             command(&s, Server::FrankenPhp, 49001, Some(49002)).unwrap(),
             format!(
                 "php artisan octane:start --server=frankenphp --host=127.0.0.1 --port=49001 --workers=2 --admin-port=49002 --caddyfile={}",
-                crate::shims::sh_quote(&file.display().to_string())
+                crate::platform::shell_quote(&file.display().to_string())
             )
         );
         let mut cfg = crate::Config::default();

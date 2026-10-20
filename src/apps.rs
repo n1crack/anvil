@@ -202,6 +202,35 @@ fn runs_package_script(command: &str) -> bool {
 /// `command`, first installing node_modules with the lockfile's manager when it
 /// runs a package script and they are missing, so the install shows in its log.
 /// It stops if the install fails, so its error is the last thing in the log.
+/// Remove `public/hot` once the dev server it names is gone. Laravel's Vite plugin writes
+/// it on start and removes it when told to stop; one that ended any other way (crashed,
+/// or ended on Windows, which can't tell a windowless process to stop) leaves it, and
+/// pages then load their CSS and JS from nothing, ignoring `npm run build`'s.
+pub fn clear_vite_hot(dir: &Path) {
+    let hot = dir.join("public").join("hot");
+    let Ok(url) = fs::read_to_string(&hot) else {
+        return;
+    };
+    // `http://[::1]:5173`, `http://localhost:5173`, `http://127.0.0.1:5173`.
+    let rest = url.trim().split_once("://").map_or("", |(_, r)| r);
+    let Some((host, port)) = rest.trim_end_matches('/').rsplit_once(':') else {
+        return;
+    };
+    let Ok(port) = port.parse::<u16>() else {
+        return;
+    };
+    if !matches!(host, "localhost" | "127.0.0.1" | "[::1]") {
+        return;
+    }
+    let answers = |ip: std::net::IpAddr| {
+        let addr = std::net::SocketAddr::new(ip, port);
+        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(250)).is_ok()
+    };
+    if !answers([127, 0, 0, 1].into()) && !answers(std::net::Ipv6Addr::LOCALHOST.into()) {
+        let _ = fs::remove_file(hot);
+    }
+}
+
 pub fn with_js_install(dir: &Path, command: &str) -> String {
     if !runs_package_script(command) || !dir.join("package.json").exists() {
         return command.to_string();
@@ -576,6 +605,9 @@ impl Apps {
             });
         if let Some(code) = ended {
             self.children.remove(name);
+            if let Some(dir) = self.dirs.get(name) {
+                clear_vite_hot(dir);
+            }
             let at = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
@@ -778,11 +810,12 @@ impl Apps {
         self.processes.remove(name);
         self.once.remove(name);
         self.exits.remove(name);
-        self.dirs.remove(name);
+        let dir = self.dirs.remove(name);
         let child = self.children.remove(name)?;
         Some(Stopping {
             child,
             pid_files: vec![pid_in(&self.home, name)],
+            dir,
         })
     }
 
@@ -909,6 +942,29 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn vite_hot_goes_only_when_its_server_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let hot = dir.path().join("public/hot");
+        fs::create_dir_all(hot.parent().unwrap()).unwrap();
+        // A server that answers keeps it.
+        let live = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = live.local_addr().unwrap().port();
+        fs::write(&hot, format!("http://localhost:{port}")).unwrap();
+        clear_vite_hot(dir.path());
+        assert!(hot.exists());
+        // Gone: removed. Port 1 (tcpmux) has no listener, and no parallel test takes it
+        // the way one could take `port` once it is free.
+        drop(live);
+        fs::write(&hot, "http://[::1]:1").unwrap();
+        clear_vite_hot(dir.path());
+        assert!(!hot.exists());
+        // Not this machine's: left alone.
+        fs::write(&hot, "http://vite.example:5173").unwrap();
+        clear_vite_hot(dir.path());
+        assert!(hot.exists());
+    }
 
     /// Every Start, process and script of an app, in the CLI and the app, makes a
     /// worktree's own database first (`worktrees::prepare_site`, outside the Apps lock).

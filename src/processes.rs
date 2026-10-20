@@ -883,7 +883,7 @@ pub fn one_off_scripts(site: &Site) -> Vec<Script> {
         .map(|name| Script {
             id: ids[&name].clone(),
             text: texts.get(&name).cloned().unwrap_or_default(),
-            run: format!("npm run {}", crate::shims::sh_quote(&name)),
+            run: format!("npm run {}", crate::platform::shell_quote(&name)),
             source: "package.json",
             name,
         })
@@ -924,9 +924,9 @@ pub fn one_off_scripts(site: &Site) -> Vec<Script> {
             id,
             run: format!(
                 "{} {} run-script {}",
-                crate::shims::sh_quote(&php.display().to_string()),
-                crate::shims::sh_quote(&phar.display().to_string()),
-                crate::shims::sh_quote(name)
+                crate::platform::shell_quote(&php.display().to_string()),
+                crate::platform::shell_quote(&phar.display().to_string()),
+                crate::platform::shell_quote(name)
             ),
             text,
             source: "composer.json",
@@ -2358,14 +2358,14 @@ echo '{DEV_JSON}'
             format!(
                 "php artisan octane:start --server=roadrunner --host=127.0.0.1 --port={port} --workers=2 --rpc-port={} --rr-config={}",
                 octane_ports(&cfg, &s).1,
-                crate::shims::sh_quote(&rr.join("rr.yaml").display().to_string())
+                crate::platform::shell_quote(&rr.join("rr.yaml").display().to_string())
             )
         );
         // The project's own .rr.yaml is used where it has one.
         fs::write(dir.join(".rr.yaml"), "version: '3'\n").unwrap();
         assert!(octane(&cfg).unwrap().command.ends_with(&format!(
             "--rr-config={}",
-            crate::shims::sh_quote(&dir.join(".rr.yaml").display().to_string())
+            crate::platform::shell_quote(&dir.join(".rr.yaml").display().to_string())
         )));
         // Dev start turned on sticks, though it isn't the row's default.
         let change = |manual, hidden| ProcessChange {

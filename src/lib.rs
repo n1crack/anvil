@@ -2498,6 +2498,9 @@ pub struct Stopping {
     child: Child,
     /// Removed once it has stopped, if they still name it (`remove_pid_file`).
     pid_files: Vec<PathBuf>,
+    /// The app's folder: what its dev server leaves there is cleared once it has stopped
+    /// (`apps::clear_vite_hot`).
+    pub(crate) dir: Option<PathBuf>,
 }
 
 impl Stopping {
@@ -2509,13 +2512,22 @@ impl Stopping {
 /// Stop them all at once against one shared deadline (`terminate_all`), then remove
 /// their pid files.
 pub fn stop_all(list: Vec<Stopping>, grace: std::time::Duration) {
-    let (mut children, files): (Vec<Child>, Vec<Vec<PathBuf>>) =
-        list.into_iter().map(|s| (s.child, s.pid_files)).unzip();
+    let mut dirs = vec![];
+    let (mut children, files): (Vec<Child>, Vec<Vec<PathBuf>>) = list
+        .into_iter()
+        .map(|s| {
+            dirs.extend(s.dir);
+            (s.child, s.pid_files)
+        })
+        .unzip();
     terminate_all(&mut children, grace);
     for (c, files) in children.iter().zip(files) {
         for f in files {
             remove_pid_file(&f, c.id());
         }
+    }
+    for d in dirs {
+        apps::clear_vite_hot(&d);
     }
 }
 
@@ -2571,6 +2583,10 @@ impl Server {
         }
         ensure_caddy()?;
         let sites = sites(cfg);
+        // A dev server that ended with an earlier Anvil may have left its address behind.
+        for site in sites.iter().filter(|s| apps::is_php(&s.kind)) {
+            apps::clear_vite_hot(&site.path);
+        }
         let versions: BTreeSet<_> = sites.iter().filter_map(|s| s.php.clone()).collect();
         for v in &versions {
             if !php_dir(v).join(PHP_SERVER).exists() {
@@ -2773,6 +2789,7 @@ impl Server {
             .drain(..)
             .map(|child| Stopping {
                 child,
+                dir: None,
                 pid_files: std::mem::take(&mut files),
             })
             .collect()

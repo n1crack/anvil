@@ -2100,6 +2100,9 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+  /* A spinner says something is still working: it keeps turning, slower. Windows turns
+   * this on with Settings › Accessibility › Animation effects off, common in VMs. */
+  .spin-dot { animation: spin 1.4s linear infinite !important; }
 }
 
 /* ---------- Applications | Services switch and service details ---------- */
@@ -3083,6 +3086,9 @@ body.activity {
 .field small:empty { display: none; }
 
 /* ---------- Windows ---------- */
+
+/* Settings › Performance: Defender and Dev Drive are Windows' own. */
+html:not(.windows) .windows-only { display: none; }
 
 /* The system's title bar sits above the page: no room for traffic lights, and the
  * sidebar shows Mica rather than vibrancy. */
