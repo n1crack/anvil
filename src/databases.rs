@@ -82,6 +82,8 @@ fn client(cfg: &Config, id: &str, query: &str) -> Result<String> {
             .args(["-v", "ON_ERROR_STOP=1", "-c", query]);
             c
         }
+        // Garnet, Windows' Redis, has no redis-cli: the protocol is simple enough to speak.
+        "redis" if cfg!(windows) => return resp(&p, query),
         "redis" => {
             let mut c = crate::platform::command(bin.join("redis-cli"));
             c.args(["-h", "127.0.0.1", "-p", &p])
@@ -99,6 +101,40 @@ fn client(cfg: &Config, id: &str, query: &str) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// One Redis command over RESP, its reply as redis-cli prints it (a bulk or simple string,
+/// an integer); an error reply becomes an error.
+fn resp(port: &str, query: &str) -> Result<String> {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let addr = format!("127.0.0.1:{port}");
+    let mut conn =
+        std::net::TcpStream::connect(&addr).with_context(|| format!("couldn't reach {addr}"))?;
+    conn.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut req = format!("*{}\r\n", words.len());
+    for w in &words {
+        req += &format!("${}\r\n{w}\r\n", w.len());
+    }
+    conn.write_all(req.as_bytes())?;
+    let mut r = BufReader::new(conn);
+    let mut line = String::new();
+    r.read_line(&mut line)?;
+    let (kind, rest) = line.trim_end().split_at(line.trim_end().len().min(1));
+    match kind {
+        "+" | ":" => Ok(format!("{rest}\n")),
+        "-" => bail!("{rest}"),
+        "$" => {
+            let Ok(n) = rest.parse::<usize>() else {
+                return Ok(String::new());
+            };
+            let mut body = vec![0; n + 2];
+            r.read_exact(&mut body)?;
+            body.truncate(n);
+            Ok(String::from_utf8_lossy(&body).into_owned())
+        }
+        _ => bail!("unexpected reply from {addr}"),
+    }
 }
 
 /// What a running service holds. Mailpit is asked over its HTTP API.

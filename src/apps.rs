@@ -753,7 +753,7 @@ impl Apps {
         let at = crate::started(child.id()).unwrap_or_default();
         fs::write(
             pid_in(&self.home, key),
-            format!("{}\n{} {at}", std::process::id(), child.id()).trim_end(),
+            format!("{}\n{} {at}", crate::owner_line(), child.id()).trim_end(),
         )?;
         self.exits.remove(key);
         self.dirs.insert(key.to_string(), dir.to_path_buf());

@@ -25,6 +25,8 @@ pub fn versions(kind: &str) -> &'static [&'static str] {
     match kind {
         "mysql" => &["9.7.2", "8.4.11", "8.0.46"],
         "postgres" => &["18.6.0", "17.11.0", "16.15.0", "15.19.0", "14.24.0"],
+        // Windows: Microsoft's Garnet, which speaks Redis's protocol; Redis has no Windows build.
+        "redis" if cfg!(windows) => &[GARNET_VERSION],
         "redis" => &["8.10.2", "7.4.11", "7.2.16"],
         "versitygw" => &["1.9.0"],
         // SILO's own version number; its release is RELEASE.2026-10-18T00-00-00Z.
@@ -32,6 +34,10 @@ pub fn versions(kind: &str) -> &'static [&'static str] {
         _ => &["1.31.6"],
     }
 }
+
+/// Garnet, Anvil's Redis on Windows, and the .NET runtime it runs on.
+const GARNET_VERSION: &str = "2.2.3";
+const GARNET_DOTNET: &str = "10.0";
 
 /// The license a service's program comes under, shown before it is installed.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -56,6 +62,11 @@ pub fn license(kind: &str, version: &str) -> License {
             "PostgreSQL",
             "the PostgreSQL License",
             "https://www.postgresql.org/about/licence/",
+        ),
+        "redis" if cfg!(windows) => (
+            "Garnet-MIT",
+            "the MIT License (Microsoft Garnet)",
+            "https://github.com/microsoft/garnet/blob/main/LICENSE",
         ),
         "redis" if version.starts_with("7.2") => (
             "BSD-3-Clause",
@@ -146,7 +157,7 @@ pub fn require_license(cfg: &mut Config, kind: &str, version: &str, accept: bool
 /// SHA-256 of each MySQL download, pinned: MySQL only publishes MD5, which
 /// catches a broken download but not a forged one. Taken from files whose MD5
 /// matched the published one. Add a row for every version offered above.
-const MYSQL_SHA256: [(&str, &str, &str); 6] = [
+const MYSQL_SHA256: [(&str, &str, &str); 9] = [
     (
         "9.7.2",
         "arm64",
@@ -176,6 +187,21 @@ const MYSQL_SHA256: [(&str, &str, &str); 6] = [
         "8.0.46",
         "x86_64",
         "8590bc6c3203fe17f51f757dc9132fb755d1b73cbdad9d12a67f85025a3c3b8f",
+    ),
+    (
+        "9.7.2",
+        "winx64",
+        "5592ea38e53edd67f5baa68303e7fcf2f0a40fc08978fdb4a7b0c38d12baea17",
+    ),
+    (
+        "8.4.11",
+        "winx64",
+        "a492371d687d2bab088b0062581144a0044b8964baefdf4faa579292b423d25c",
+    ),
+    (
+        "8.0.46",
+        "winx64",
+        "28e9eda019d88eff4478d811ea2110b83f02a3966be157fe91cc55def3ab0d4d",
     ),
 ];
 
@@ -242,6 +268,7 @@ pub fn name(id: &str) -> &'static str {
     match id {
         "mysql" => "MySQL",
         "postgres" => "PostgreSQL",
+        "redis" if cfg!(windows) => "Redis (Garnet)",
         "redis" => "Redis",
         "versitygw" => "Versity S3 Gateway",
         "silo" => "SILO (MinIO fork)",
@@ -380,13 +407,15 @@ pub fn data(id: &str) -> PathBuf {
 
 fn binary(kind: &str, version: &str) -> PathBuf {
     let d = dir(kind, version);
+    let exe = crate::platform::exe;
     match kind {
-        "mysql" => d.join("bin/mysqld"),
-        "postgres" => d.join("bin/postgres"),
+        "mysql" => d.join("bin").join(exe("mysqld")),
+        "postgres" => d.join("bin").join(exe("postgres")),
+        "redis" if cfg!(windows) => d.join("garnet").join("GarnetServer.exe"),
         "redis" => d.join("bin/redis-server"),
-        "versitygw" => d.join("versitygw"),
-        "silo" => d.join("silo"),
-        _ => d.join("mailpit"),
+        "versitygw" => d.join(exe("versitygw")),
+        "silo" => d.join(exe("silo")),
+        _ => d.join(exe("mailpit")),
     }
 }
 
@@ -605,16 +634,29 @@ pub fn install(id: &str, version: &str) -> Result<()> {
     let (_, caddy_plat) = platform()?;
     let mac = caddy_plat.starts_with("mac");
     let arm = caddy_plat.ends_with("arm64");
+    let windows = cfg!(windows);
+    // Windows downloads are zips; Windows' tar reads them (`fetch_tgz`).
+    let archive = if windows { "zip" } else { "tar.gz" };
     replace_dir(&dir(id, version), |d| {
         match id {
             "mysql" => {
-                // ponytail: macOS builds only; Linux uses the glibc .tar.xz with the Linux port.
-                if !mac {
+                // ponytail: macOS and Windows builds only; Linux uses the glibc .tar.xz with the Linux port.
+                if !mac && !windows {
                     bail!("MySQL install is macOS-only for now");
                 }
-                let arch = if arm { "arm64" } else { "x86_64" };
+                let arch = if windows {
+                    "winx64"
+                } else if arm {
+                    "arm64"
+                } else {
+                    "x86_64"
+                };
                 let minor = version.rsplit_once('.').map_or(version, |m| m.0);
-                let file = format!("mysql-{version}-macos15-{arch}.tar.gz");
+                let file = if windows {
+                    format!("mysql-{version}-winx64.zip")
+                } else {
+                    format!("mysql-{version}-macos15-{arch}.tar.gz")
+                };
                 let url = format!("https://cdn.mysql.com/Downloads/MySQL-{minor}/{file}");
                 let sum = MYSQL_SHA256
                     .iter()
@@ -625,30 +667,44 @@ pub fn install(id: &str, version: &str) -> Result<()> {
             }
             "postgres" => {
                 let target = match (mac, arm) {
+                    _ if windows => "x86_64-pc-windows-msvc",
                     (true, true) => "aarch64-apple-darwin",
                     (true, false) => "x86_64-apple-darwin",
                     (false, true) => "aarch64-unknown-linux-gnu",
                     (false, false) => "x86_64-unknown-linux-gnu",
                 };
-                let file = format!("postgresql-{version}-{target}.tar.gz");
+                let file = format!("postgresql-{version}-{target}.{archive}");
                 let url = format!(
                     "https://github.com/theseus-rs/postgresql-binaries/releases/download/{version}/{file}"
                 );
                 let sum = published_sum(&format!("{url}.sha256"), &file)?;
                 fetch_tgz(&url, d, true, Some(&sum))
             }
+            "redis" if windows => install_garnet(d, version),
             "redis" => build_redis(d, version),
             "versitygw" => {
-                let os = if mac { "Darwin" } else { "Linux" };
+                let os = if windows {
+                    "Windows"
+                } else if mac {
+                    "Darwin"
+                } else {
+                    "Linux"
+                };
                 let arch = if arm { "arm64" } else { "x86_64" };
-                let file = format!("versitygw_v{version}_{os}_{arch}.tar.gz");
+                let file = format!("versitygw_v{version}_{os}_{arch}.{archive}");
                 let base =
                     format!("https://github.com/versity/versitygw/releases/download/v{version}");
                 let sum = published_sum(&format!("{base}/checksums.txt"), &file)?;
                 fetch_tgz(&format!("{base}/{file}"), d, true, Some(&sum))
             }
             "silo" => {
-                let os = if mac { "darwin" } else { "linux" };
+                let os = if windows {
+                    "windows"
+                } else if mac {
+                    "darwin"
+                } else {
+                    "linux"
+                };
                 let arch = if arm { "arm64" } else { "amd64" };
                 let file = format!("silo_{version}.0.0_{os}_{arch}.tar.gz");
                 let base = format!(
@@ -660,9 +716,15 @@ pub fn install(id: &str, version: &str) -> Result<()> {
                 fetch_tgz(&format!("{base}/{file}"), d, false, Some(&sum))
             }
             _ => {
-                let os = if mac { "darwin" } else { "linux" };
+                let os = if windows {
+                    "windows"
+                } else if mac {
+                    "darwin"
+                } else {
+                    "linux"
+                };
                 let arch = if arm { "arm64" } else { "amd64" };
-                let file = format!("mailpit-{os}-{arch}.tar.gz");
+                let file = format!("mailpit-{os}-{arch}.{archive}");
                 let sum = github_digest("axllent/mailpit", &format!("v{version}"), &file)?;
                 fetch_tgz(
                     &format!(
@@ -702,6 +764,66 @@ fn github_digest(repo: &str, tag: &str, file: &str) -> Result<String> {
         .and_then(|a| a["digest"].as_str()?.strip_prefix("sha256:"))
         .map(String::from)
         .with_context(|| format!("GitHub lists no checksum for {file}"))
+}
+
+/// Windows' Redis: Garnet's release for x64 in `<prefix>/garnet`, and the .NET runtime it
+/// needs (it ships without one) in `<prefix>/dotnet`, from Microsoft's release list with
+/// its SHA-512. Garnet's own file is checked against GitHub's digest.
+fn install_garnet(prefix: &Path, version: &str) -> Result<()> {
+    let file = "win-x64-based-readytorun.zip";
+    let sum = github_digest("microsoft/garnet", &format!("v{version}"), file)?;
+    let tmp = prefix.join("garnet.unpack");
+    fetch_tgz(
+        &format!("https://github.com/microsoft/garnet/releases/download/v{version}/{file}"),
+        &tmp,
+        false,
+        Some(&sum),
+    )?;
+    // The server sits in a folder named for its .NET version (net10.0).
+    let server = walk_find(&tmp, "GarnetServer.exe")
+        .with_context(|| format!("{file} has no GarnetServer.exe"))?;
+    fs::rename(server.parent().context("no folder")?, prefix.join("garnet"))?;
+    let _ = fs::remove_dir_all(&tmp);
+
+    let meta: serde_json::Value = serde_json::from_str(&fetch_text(&format!(
+        "https://builds.dotnet.microsoft.com/dotnet/release-metadata/{GARNET_DOTNET}/releases.json"
+    ))?)?;
+    let latest = meta["latest-runtime"]
+        .as_str()
+        .context("no .NET runtime release")?;
+    let runtime = meta["releases"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|r| r["runtime"]["version"] == latest)
+        .and_then(|r| r["runtime"]["files"].as_array())
+        .into_iter()
+        .flatten()
+        .find(|f| f["name"] == "dotnet-runtime-win-x64.zip")
+        .context("no .NET runtime for Windows x64")?;
+    let (url, hash) = (
+        runtime["url"].as_str().unwrap_or_default(),
+        runtime["hash"].as_str().unwrap_or_default(),
+    );
+    if !url.starts_with("https://builds.dotnet.microsoft.com/") || hash.len() != 128 {
+        bail!(".NET's release list names an unexpected download");
+    }
+    fetch_tgz(url, &prefix.join("dotnet"), false, Some(hash))
+}
+
+/// The first file named `name` under `dir`, depth first.
+fn walk_find(dir: &Path, name: &str) -> Option<PathBuf> {
+    for e in fs::read_dir(dir).ok()?.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            if let Some(f) = walk_find(&p, name) {
+                return Some(f);
+            }
+        } else if p.file_name().is_some_and(|n| n == name) {
+            return Some(p);
+        }
+    }
+    None
 }
 
 /// Redis publishes no macOS binaries, so build it (needs the Xcode command line tools).
@@ -913,6 +1035,15 @@ fn command(cfg: &Config, id: &str) -> Command {
                 .args(["-p", &port, "-c", "listen_addresses=127.0.0.1", "-k"])
                 .arg(&run_dir);
         }
+        "redis" if cfg!(windows) => {
+            // Garnet: the .NET runtime beside it; snapshots in the data folder, read back
+            // at start, as Redis's dump.rdb is.
+            c.env("DOTNET_ROOT", d.join("dotnet"))
+                .env("DOTNET_ROOT_X64", d.join("dotnet"))
+                .args(["--port", &port, "--bind", "127.0.0.1", "--checkpointdir"])
+                .arg(&data)
+                .arg("--recover");
+        }
         "redis" => {
             c.args(["--port", &port, "--bind", "127.0.0.1", "--dir"])
                 .arg(&data);
@@ -973,7 +1104,11 @@ pub fn runs_somewhere(id: &str) -> bool {
 fn pid_alive(file: &Path) -> bool {
     fs::read_to_string(file)
         .ok()
-        .and_then(|t| t.lines().nth(1).map(|p| crate::alive(p.trim())))
+        // `pid` or `pid started`.
+        .and_then(|t| {
+            let line = t.lines().nth(1)?;
+            Some(crate::alive(line.split(' ').next()?.trim()))
+        })
         .unwrap_or(false)
 }
 
@@ -1207,7 +1342,13 @@ pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
     }
     fs::write(
         pid_file(id),
-        format!("{}\n{}", std::process::id(), child.id()),
+        format!(
+            "{}\n{} {}",
+            crate::owner_line(),
+            child.id(),
+            crate::started(child.id()).unwrap_or_default()
+        )
+        .trim_end(),
     )?;
     Ok(child)
 }

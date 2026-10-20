@@ -921,7 +921,8 @@ pub(crate) fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T>
 }
 
 /// The digest for `file` in a checksums listing: the hex word on the line naming
-/// it, or the only word of a file that holds just a digest.
+/// it, or on the line after when that line has none (certutil's `SHA256 hash of <file>:`),
+/// or the only word of a file that holds just a digest.
 pub(crate) fn sum_in(text: &str, file: &str) -> Option<String> {
     let hex =
         |w: &&str| matches!(w.len(), 32 | 64 | 128) && w.bytes().all(|b| b.is_ascii_hexdigit());
@@ -929,15 +930,19 @@ pub(crate) fn sum_in(text: &str, file: &str) -> Option<String> {
     if let [w] = words[..] {
         return Some(w).filter(hex).map(String::from);
     }
-    text.lines()
-        .map(|l| l.split_whitespace().collect::<Vec<_>>())
-        .find(|ws| {
-            ws.iter()
-                .any(|w| w.trim_start_matches(['*', '.', '/']) == file)
-        })?
-        .into_iter()
-        .find(hex)
-        .map(String::from)
+    let lines: Vec<Vec<&str>> = text
+        .lines()
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+    let at = lines.iter().position(|ws| {
+        ws.iter()
+            .any(|w| w.trim_start_matches(['*', '.', '/']).trim_end_matches(':') == file)
+    })?;
+    lines[at]
+        .iter()
+        .find(|w| hex(w))
+        .or_else(|| lines.get(at + 1)?.iter().find(|w| hex(w)))
+        .map(|w| w.to_string())
 }
 
 /// Fetch a published checksums file and pick the digest for `file` from it.
@@ -2300,7 +2305,7 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
         return;
     };
     let mut pids = file.lines();
-    if pids.next().is_none_or(alive) {
+    if pids.next().is_none_or(owner_alive) {
         return;
     }
     // Every pid file is `<home>/run/<name>`.
@@ -2327,7 +2332,13 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
             continue;
         };
         let same = if alive(pid) {
-            at.is_some_and(|at| started(n).as_deref() == Some(at)) || named(n)
+            match at {
+                // Windows reuses pids at once, and `named` there is only the program's
+                // path (any of Anvil's PHPs or servers): a start time, recorded to the
+                // 100 ns, is the one sure sign.
+                Some(at) if cfg!(windows) => started(n).as_deref() == Some(at),
+                _ => at.is_some_and(|at| started(n).as_deref() == Some(at)) || named(n),
+            }
         } else {
             group && running(n)
         };
@@ -2343,6 +2354,29 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
         platform::kill(p, group);
     }
     let _ = fs::remove_file(pid_file);
+}
+
+/// A pid file's first line: this Anvil's pid and start time (`kill_orphans`).
+pub(crate) fn owner_line() -> String {
+    let me = std::process::id();
+    format!("{me} {}", started(me).unwrap_or_default())
+        .trim_end()
+        .to_string()
+}
+
+/// Whether the Anvil a pid file's first line names still runs: its pid, and its start
+/// time when recorded, as a reused pid (Windows hands them out again at once) has another.
+fn owner_alive(line: &str) -> bool {
+    let (pid, at) = line
+        .split_once(' ')
+        .map_or((line, None), |(p, at)| (p, Some(at)));
+    alive(pid)
+        && at.is_none_or(|at| {
+            pid.parse()
+                .ok()
+                .and_then(started)
+                .is_none_or(|now| now == at)
+        })
 }
 
 /// Whether something listens on this Mac's `port`.
@@ -2522,9 +2556,14 @@ impl Server {
                 .spawn()?,
         );
 
-        let pids: Vec<String> = std::iter::once(std::process::id())
-            .chain(server.pids().into_iter().map(|(_, p)| p))
-            .map(|p| p.to_string())
+        // Each child with its start time, so a later Anvil never mistakes another
+        // process that got the pid for one of these (`kill_orphans`).
+        let pids: Vec<String> = std::iter::once(owner_line())
+            .chain(server.pids().into_iter().map(|(_, p)| {
+                format!("{p} {}", started(p).unwrap_or_default())
+                    .trim_end()
+                    .to_string()
+            }))
             .collect();
         fs::write(pid_file(), pids.join("\n"))?;
 
@@ -3504,6 +3543,14 @@ mod tests {
         );
         assert_eq!(sum_in(&redis, "redis-8.10.2.tar.gz").unwrap(), h);
         assert_eq!(sum_in("<html>not found</html>", "composer.phar"), None);
+        // certutil's form, as theseus-rs publishes it for Windows.
+        let win = format!(
+            "SHA256 hash of postgresql-18.6.0-x86_64-pc-windows-msvc.zip:\r\n{h}\r\nCertUtil: -hashfile command completed successfully.\r\n"
+        );
+        assert_eq!(
+            sum_in(&win, "postgresql-18.6.0-x86_64-pc-windows-msvc.zip").unwrap(),
+            h
+        );
     }
 
     #[test]
