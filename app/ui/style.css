@@ -1037,9 +1037,10 @@ button.proc-name:hover { text-decoration: underline; }
 
 /* Run ▾: the app's scripts, each with its script muted. */
 .dev-run-menu { display: flex; flex-direction: column; min-width: 180px; max-width: 320px; max-height: 360px; padding: 4px; overflow-y: auto; }
-/* Where the scripts come from: a label on a faint band, not something to click; each
- * script below it carries Run's >_ so it reads as a command. */
-.dev-run-group { margin: 0 0 2px; padding: 4px 8px; border-radius: var(--radius-s); background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--muted); font: 600 10.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+/* Where the scripts come from: a label on a band in the source's color (.pc4 Node,
+ * .pc3 Composer), not something to click; each script below it carries Run's >_ so it
+ * reads as a command. */
+.dev-run-group { margin: 0 0 2px; padding: 4px 8px; border-radius: var(--radius-s); background: color-mix(in srgb, var(--pc, var(--muted)) 14%, transparent); color: var(--pc, var(--muted)); font: 600 10.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 .dev-run-group:not(:first-child) { margin-top: 6px; }
 .dev-run-item::before {
   content: "";

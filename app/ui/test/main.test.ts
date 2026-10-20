@@ -465,6 +465,10 @@ describe("dev", () => {
   test("Run ▾ lists the one-off scripts only, and runs one after a confirm", async () => {
     $(".dev-cmds .dev-run").click();
     const names = $$(".dev-run-menu .dev-run-name").map((n) => n.textContent);
+    // Each source titled, even alone, in its color: package.json Node's green.
+    const groups = $$(".dev-run-menu .dev-run-group");
+    expect(groups.map((g) => g.textContent)).toEqual([...new Set(w.mockOv.vuefinder.commands.map((c) => c.source))]);
+    expect(groups.find((g) => g.textContent === "package.json")?.classList.contains("pc4")).toBe(true);
     expect(names).toEqual(w.mockOv.vuefinder.commands.map((c) => c.name));
     expect(names).not.toContain("docs:dev");
     const build = $$(".dev-run-item").find((b) => b.querySelector(".dev-run-name")!.textContent === "build")!;
