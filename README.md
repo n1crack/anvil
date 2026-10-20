@@ -7,7 +7,7 @@
 **Your tools. Your rules.**
 
 A local development environment for web projects.<br>
-Free and open source. Runs on macOS; Linux and Windows are in development.
+Free and open source, in beta. Runs on macOS; Linux and Windows are in development.
 
 </div>
 
@@ -36,7 +36,7 @@ Everything runs natively and lives in `~/.anvil`; your system packages stay unto
 
 ### macOS
 
-Available with the first release; until then, [build from source](#build-from-source). With [Homebrew](https://brew.sh), add Anvil's tap once:
+With [Homebrew](https://brew.sh), add Anvil's tap once:
 
 ```sh
 brew tap n1crack/anvil

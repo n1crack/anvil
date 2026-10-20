@@ -158,4 +158,4 @@ jobs:
           flags=""
           case "$VERSION" in *-*) flags="--prerelease" ;; esac
           gh release create "$TAG" dist/* --draft $flags --verify-tag \
-            --title "Anvil $VERSION" --notes-file notes.md
+            --title "Anvil $VERSION (beta)" --notes-file notes.md
