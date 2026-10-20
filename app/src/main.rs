@@ -2186,14 +2186,6 @@ fn worktree_add(
 ) -> Res<Snapshot> {
     let mut cfg = anvil::load().map_err(err)?;
     let main = site_in(&cfg, &site)?;
-    // A linked app may have worktrees; an alias (a link to another app's folder) is that app.
-    let alias = main.linked
-        && anvil::sites(&cfg)
-            .iter()
-            .any(|o| o.name != main.name && !o.linked && same_folder(&o.path, &main.path));
-    if main.worktree_of.is_some() || alias {
-        return Err(format!("{site} isn't an app's own folder"));
-    }
     let (folder, choice) =
         anvil::worktrees::add(&cfg, &main, &branch, new, copy_db).map_err(err)?;
     // Before anything of it runs: its first use makes the database chosen.
@@ -2335,11 +2327,6 @@ fn worktree_prepare(handle: AppHandle, app: State<App>, site: String) -> Res<Sna
     changed(&handle);
     made.map_err(err)?;
     snapshot(&app)
-}
-
-fn same_folder(a: &std::path::Path, b: &std::path::Path) -> bool {
-    let real = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    real(a) == real(b)
 }
 
 /// "Use existing <db>": the worktree takes the database that is there already (`worktrees::adopt`).

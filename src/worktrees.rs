@@ -1613,6 +1613,15 @@ pub fn add(
     new_branch: bool,
     copy_db: Option<bool>,
 ) -> anyhow::Result<(PathBuf, DbChoice)> {
+    // A linked app may have worktrees; an alias (a link to another app's folder) is that app.
+    let real = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let alias = app.linked
+        && crate::sites(cfg)
+            .iter()
+            .any(|o| o.name != app.name && !o.linked && real(&o.path) == real(&app.path));
+    if app.worktree_of.is_some() || alias {
+        anyhow::bail!("{} isn't an app's own folder", app.name);
+    }
     let offer = new_db(cfg, app);
     let copy = copy_db.unwrap_or(offer.copy);
     if copy && !offer.can_copy {
@@ -3854,6 +3863,20 @@ pub(crate) mod tests {
         // No database settings: nothing to choose.
         let (cfg, app) = parked_app("add-none", "APP_NAME=Shop\n");
         assert!(new_db(&cfg, &app).main_database.is_none());
+    }
+
+    #[test]
+    fn add_refuses_an_alias_and_a_worktree() {
+        let (mut cfg, app) = parked_app("add-alias", "APP_NAME=Shop\n");
+        cfg.links.insert("admin".into(), app.path.clone());
+        let all = crate::sites(&cfg);
+        let alias = all.iter().find(|s| s.name == "admin").unwrap();
+        let e = add(&cfg, alias, "b", true, None).unwrap_err();
+        assert_eq!(e.to_string(), "admin isn't an app's own folder");
+        let mut wt = app.clone();
+        wt.worktree_of = Some("shop".into());
+        assert!(add(&cfg, &wt, "b", true, None).is_err());
+        assert!(!app.path.with_file_name("admin--b").exists());
     }
 
     #[test]
