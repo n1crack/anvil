@@ -1,5 +1,5 @@
 //! Anvil core: configuration, sites, runtimes and the server supervisor.
-//! Shared by the `anvil` CLI and the macOS app.
+//! Shared by the `anvil` CLI and the desktop app.
 
 pub mod apps;
 pub mod compose;

@@ -3,7 +3,7 @@ name = "anvil"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "A native development environment for macOS."
+description = "A local development environment: local domains, HTTPS, runtimes and services per project."
 
 [dependencies]
 anyhow = "1.0.104"

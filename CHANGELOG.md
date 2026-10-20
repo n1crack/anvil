@@ -49,8 +49,8 @@ Until 1.0.0, minor versions may contain breaking changes.
 
 ## [0.1.0] - 2026-10-19
 
-The first public release of Anvil, a macOS development environment. It comes as
-a native macOS app that carries the `anvil` CLI.
+The first public release of Anvil, a local development environment, for macOS on
+Apple Silicon. It comes as a desktop app that carries the `anvil` CLI.
 
 ### Added
 
@@ -153,7 +153,7 @@ a native macOS app that carries the `anvil` CLI.
   security" runs the package manager's own audit (`composer audit`, or `npm`,
   `pnpm`, `yarn` or `bun audit`) and lists each advisory with its fix
   (`anvil packages --audit`).
-- Native macOS app with a menu bar icon: applications and services side by
+- A desktop app with a menu bar icon: applications and services side by
   side, an application panel with Overview, Git, Dev or Containers, Logs,
   Packages, Resources and Settings tabs, a Settings window (General, a page per
   language, Storage, Shortcuts, About), keyboard shortcuts, launch at login and

@@ -6,16 +6,16 @@
 
 **Your tools. Your rules.**
 
-A native development environment for macOS.<br>
-Free and open source.
+A local development environment for web projects.<br>
+Free and open source. Runs on macOS (Apple Silicon); Linux and Windows are in development.
 
 </div>
 
 ---
 
-Anvil turns the folders on your Mac into running applications at local domains like `myapp.test`. PHP, Node.js, Go, Rust, .NET, Python, MySQL, PostgreSQL, Redis, Mailpit and S3 storage (Versity S3 Gateway or SILO) run natively, isolated in `~/.anvil`, without touching your system packages. If a project brings its own Docker Compose file, Anvil shows and controls its containers too. The few system changes it makes are ones you approve, and `anvil uninstall` removes them.
+Anvil turns the folders on your computer into running applications at local domains like `myapp.test`. PHP, Node.js, Go, Rust, .NET, Python, MySQL, PostgreSQL, Redis, Mailpit and S3 storage (Versity S3 Gateway or SILO) run natively, isolated in `~/.anvil`, without touching your system packages. If a project brings its own Docker Compose file, Anvil shows and controls its containers too. The few system changes it makes are ones you approve, and `anvil uninstall` removes them.
 
-It comes as a native macOS app and a CLI.
+It comes as a desktop app and a CLI.
 
 ## Install
 
@@ -35,7 +35,7 @@ git clone https://github.com/n1crack/anvil && cd anvil
 cargo install --path .
 ```
 
-That installs the CLI. To build the macOS app as well, see [The macOS app](https://anvil.tr/docs/getting-started#the-macos-app-optional).
+That installs the CLI. To build the desktop app as well, see [The desktop app](https://anvil.tr/docs/getting-started#the-macos-app-optional).
 
 ## Quick start
 

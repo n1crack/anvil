@@ -9,7 +9,7 @@ You need macOS, [Rust](https://rustup.rs) (stable), the Xcode command line
 tools, and [pnpm](https://pnpm.io) for the app's UI.
 
 ```sh
-cargo build --workspace          # the anvil CLI and the macOS app
+cargo build --workspace          # the anvil CLI and the desktop app
 cargo run -q -- --help           # run the CLI from the source tree
 ```
 
