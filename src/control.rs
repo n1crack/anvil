@@ -100,8 +100,10 @@ pub fn request(method: &str, params: Value, client: &str) -> Result<Option<Value
         }
         Err(e) => bail!("couldn't reach Anvil at {}: {e}", p.display()),
     };
-    conn.set_read_timeout(Some(answer_within(method)))?;
-    conn.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let quick = Duration::from_secs(5);
+    let within = answer_within(method);
+    conn.set_read_timeout(Some(quick.min(within)))?;
+    conn.set_write_timeout(Some(quick))?;
     let req = Request {
         id: 1,
         method: method.into(),
@@ -110,13 +112,27 @@ pub fn request(method: &str, params: Value, client: &str) -> Result<Option<Value
     };
     writeln!(conn, "{}", serde_json::to_string(&req)?)?;
     let mut line = String::new();
-    match BufReader::new(conn).read_line(&mut line) {
-        Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
-            bail!("Anvil didn't answer")
+    let mut reader = BufReader::new(conn);
+    let mut waited = false;
+    loop {
+        match reader.read_line(&mut line) {
+            // A long start: say so once, then wait out the rest quietly.
+            Err(e)
+                if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut)
+                    && !waited
+                    && within > quick =>
+            {
+                waited = true;
+                eprintln!("Anvil is still on it (a first start can download first)…");
+                reader.get_ref().set_read_timeout(Some(within - quick))?;
+            }
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                bail!("Anvil didn't answer")
+            }
+            Err(e) => bail!("couldn't read Anvil's answer: {e}"),
+            Ok(0) => bail!("Anvil closed the connection"),
+            Ok(_) => break,
         }
-        Err(e) => bail!("couldn't read Anvil's answer: {e}"),
-        Ok(0) => bail!("Anvil closed the connection"),
-        Ok(_) => {}
     }
     let mut reply: Value = serde_json::from_str(&line)?;
     if let Some(e) = reply.get("error") {

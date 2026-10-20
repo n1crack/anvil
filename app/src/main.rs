@@ -384,7 +384,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         hidden: anvil::hidden_sites(&cfg),
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
-        php_ext_catalog: anvil::phpext::CATALOG.iter().map(|e| e.name).collect(),
+        php_ext_catalog: anvil::phpext::offered().map(|e| e.name).collect(),
         php_ext: cfg.php_ext.clone(),
         editor: cfg.editor.clone(),
         terminal: cfg.terminal.clone(),
@@ -3086,8 +3086,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                 pinned_by: anvil::pinned_to(&cfg, "php", v),
                 opcache: anvil::opcache::state(v),
                 opcache_building: anvil::lock(&OPCACHE_BUILDS).iter().any(|b| b == v),
-                extensions: anvil::phpext::CATALOG
-                    .iter()
+                extensions: anvil::phpext::offered()
                     .map(|e| PhpExt {
                         name: e.name,
                         on: anvil::phpext::on(&cfg, v, e.name),
@@ -3442,8 +3441,7 @@ fn ext_on(
     name: &str,
     turn_on: impl FnOnce(&'static str) -> anyhow::Result<Config>,
 ) -> Res<Config> {
-    let ext = anvil::phpext::CATALOG
-        .iter()
+    let ext = anvil::phpext::offered()
         .find(|e| e.name == name)
         .ok_or_else(|| format!("{name} is not in Anvil's catalog"))?;
     let key = (version.to_string(), ext.name);

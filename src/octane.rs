@@ -96,9 +96,7 @@ pub fn ensure(server: Server) -> Result<PathBuf> {
             );
             return install_frankenphp(&url, sum, &dir(server));
         }
-        Server::Swoole => {
-            bail!("Anvil runs Octane with RoadRunner or FrankenPHP for now, not swoole")
-        }
+        Server::Swoole => bail!("Swoole is built for the app's PHP, not downloaded"),
     }
     let (arch, sum, zip) = match crate::platform()?.1 {
         "mac_arm64" => ("darwin-arm64", RR_ARM64, false),
@@ -206,7 +204,7 @@ fn builtin() -> Result<Vec<String>> {
         Ok(t) => t,
         Err(_) => {
             let data = home().join("octane/frankenphp/data");
-            let out = std::process::Command::new(d.join("frankenphp"))
+            let out = crate::platform::command(d.join("frankenphp"))
                 .args(["php-cli", "-n", "-r"])
                 .arg(r#"echo implode(",", array_merge(get_loaded_extensions(), get_loaded_extensions(true)));"#)
                 .env("XDG_CONFIG_HOME", &data)
@@ -344,10 +342,49 @@ pub fn command(site: &Site, server: Server, port: u16, admin: Option<u16>) -> Re
             );
             Ok(c)
         }
+        // Two workers, one task worker: Octane reads `--task-workers=0` as one per core
+        // (17 processes, 533 MB on a 12-core Mac, against 6 and 200 MB).
         Server::Swoole => {
-            bail!("Anvil runs Octane with RoadRunner or FrankenPHP for now, not swoole")
+            match site.php.as_deref() {
+                None => {
+                    bail!("Swoole is built for Anvil's PHP; this app runs on none of its versions")
+                }
+                // Swoole 6 doesn't build for 8.1 ("require PHP version 8.2 or later").
+                Some(v @ "8.1") => bail!("Swoole needs PHP 8.2 or later; this app is on {v}"),
+                Some(_) => {}
+            }
+            Ok(c + " --task-workers=1")
         }
     }
+}
+
+/// Swoole's environment over an app process's: the app's usual `PHP_INI_SCAN_DIR` lines
+/// and Swoole's, in a folder of the Octane row's own. `-d` wouldn't do: Octane starts its
+/// server as a PHP of its own, which only the scan dir reaches. Never PHP-FPM's or any
+/// other process's.
+pub(crate) fn swoole_env(
+    cfg: &crate::Config,
+    site: &Site,
+    env: &mut Vec<(String, String)>,
+) -> Result<()> {
+    let Some(minor) = site.php.as_deref() else {
+        return Ok(());
+    };
+    let full = crate::opcache::installed_full(minor)?;
+    let mut args = crate::phpext::cli_args(cfg, minor, Some(site));
+    args.extend([
+        "-d".into(),
+        format!(
+            "extension={}",
+            crate::phpext::so_path(minor, &full, "swoole").display()
+        ),
+    ]);
+    env.retain(|(k, _)| k != "PHP_INI_SCAN_DIR");
+    let dir = home()
+        .join("run")
+        .join(format!("swoole-{}.d", crate::pool(site)));
+    env.extend(crate::phpext::scan_env_in(&dir, &args)?);
+    Ok(())
 }
 
 /// Before the Octane row `p` of `site` starts: the reason it can't, or its server's
@@ -360,8 +397,16 @@ pub fn prepare(site: &Site, p: &crate::processes::Process) -> Result<()> {
         return Ok(());
     };
     command(site, server, p.port.unwrap_or_default(), None)?;
-    if server == Server::FrankenPhp {
-        write_caddyfile(site)?;
+    match (server, site.php.as_deref()) {
+        (Server::FrankenPhp, _) => write_caddyfile(site)?,
+        // Built on this Mac for the app's PHP, the first time (about a minute).
+        (Server::Swoole, Some(minor)) => {
+            if !crate::phpext::built(minor, "swoole") {
+                crate::phpext::build(minor, "swoole")?;
+            }
+            return Ok(());
+        }
+        _ => {}
     }
     ensure(server).map(|_| ())
 }
@@ -517,6 +562,77 @@ mod tests {
         assert_eq!(get("XDG_DATA_HOME"), Some(data));
         let path = get("PATH").unwrap();
         assert!(path.starts_with(&format!("{}:", dir(Server::FrankenPhp).display())));
+        unsafe { std::env::remove_var("ANVIL_HOME") };
+    }
+
+    #[test]
+    fn swoole_only_on_octane_process() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        let app = tempfile::tempdir().unwrap();
+        let mut s = frankenphp_app(app.path(), "8.4");
+        fs::write(app.path().join(".env"), "OCTANE_SERVER=swoole\n").unwrap();
+        crate::phpext::tests::fake_php("8.4", "8.4.23");
+        let swoole = crate::phpext::tests::fake_so("8.4", "8.4.23", "swoole");
+        let apcu = crate::phpext::tests::fake_so("8.4", "8.4.23", "apcu");
+        let mut cfg = crate::Config::default();
+        cfg.php_ext.insert("8.4".into(), vec!["apcu".into()]);
+        cfg.ini.insert("memory_limit".into(), "1G".into());
+        s.ini.insert("upload_max_filesize".into(), "64M".into());
+        let row = crate::processes::octane_row(&cfg, &s).unwrap();
+        let (port, _) = crate::processes::octane_ports(&cfg, &s);
+        // Two workers and one task worker: Octane takes 0 for "one per core".
+        assert_eq!(
+            row.command,
+            format!(
+                "php artisan octane:start --server=swoole --host=127.0.0.1 --port={port} --workers=2 --task-workers=1"
+            )
+        );
+        let scan_ini = |env: &[(String, String)]| {
+            let scans: Vec<_> = env
+                .iter()
+                .filter(|(k, _)| k == "PHP_INI_SCAN_DIR")
+                .collect();
+            assert_eq!(scans.len(), 1, "{env:?}");
+            let dir = scans[0].1.split(':').next().unwrap().to_string();
+            fs::read_to_string(Path::new(&dir).join("anvil.ini")).unwrap()
+        };
+        // The Octane process (and the server PHP it starts): the app's usual lines and Swoole.
+        let ini = scan_ini(&crate::apps::process_env(&s, &row, &cfg).unwrap());
+        assert!(ini.contains(&format!("extension={swoole}\n")), "{ini}");
+        assert!(ini.contains(&format!("extension={apcu}\n")), "{ini}");
+        assert!(ini.contains("memory_limit=1G\n"), "{ini}");
+        assert!(ini.contains("upload_max_filesize=64M\n"), "{ini}");
+        // Every other process of the app, its terminal and PHP-FPM: no Swoole.
+        let queue = crate::processes::Process {
+            id: "queue".into(),
+            ..row.clone()
+        };
+        let ini = scan_ini(&crate::apps::process_env(&s, &queue, &cfg).unwrap());
+        assert!(ini.contains(&format!("extension={apcu}\n")), "{ini}");
+        assert!(!ini.contains("swoole"), "{ini}");
+        let fpm = crate::phpext::php_args_with(&cfg, "8.4", &s.ext);
+        assert!(!fpm.iter().any(|a| a.contains("swoole")), "{fpm:?}");
+        let cli = crate::phpext::cli_args(&cfg, "8.4", Some(&s));
+        assert!(!cli.iter().any(|a| a.contains("swoole")), "{cli:?}");
+        // Built already: prepare has nothing to fetch.
+        prepare(&s, &row).unwrap();
+        s.php = None;
+        assert_eq!(
+            command(&s, Server::Swoole, port, None)
+                .unwrap_err()
+                .to_string(),
+            "Swoole is built for Anvil's PHP; this app runs on none of its versions"
+        );
+        // Told on its row before anything is built.
+        s.php = Some("8.1".into());
+        let row = crate::processes::octane_row(&cfg, &s).unwrap();
+        assert_eq!(
+            prepare(&s, &row).unwrap_err().to_string(),
+            "Swoole needs PHP 8.2 or later; this app is on 8.1"
+        );
         unsafe { std::env::remove_var("ANVIL_HOME") };
     }
 
