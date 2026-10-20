@@ -20,6 +20,15 @@ pub enum Step {
     PathBlock(PathBuf),
     /// A file or folder Anvil or its app made.
     Remove(PathBuf),
+    /// Windows: a Name Resolution Policy rule sending `.<tld>` to 127.0.0.1 (administrator).
+    Nrpt(String),
+    /// Windows: Anvil's certificate authority in a Root store, by thumbprint; the machine's
+    /// needs an administrator.
+    WinAuthority { thumb: String, machine: bool },
+    /// Windows: the shims folder on the user's PATH.
+    UserPath(PathBuf),
+    /// Windows: the login item, a value under HKCU's Run key.
+    RunKey(String),
     /// Anvil's home folder. Last, and skipped when an earlier step failed:
     /// the certificate and the DNS port are only found through it.
     Home(PathBuf),
@@ -39,6 +48,17 @@ impl Step {
                     .into()
             }
             Step::PathBlock(p) => format!("Anvil's PATH lines in {}", tilde(p)),
+            Step::Nrpt(ns) => format!(
+                "The rule sending {ns} addresses to Anvil's DNS server (asks for permission)"
+            ),
+            Step::WinAuthority { machine: true, .. } => {
+                "Anvil's HTTPS certificate authority in this computer's trusted roots (asks for permission)".into()
+            }
+            Step::WinAuthority { machine: false, .. } => {
+                "Anvil's HTTPS certificate authority in your trusted roots".into()
+            }
+            Step::UserPath(p) => format!("{} on your PATH", tilde(p)),
+            Step::RunKey(name) => format!("The login item {name}"),
             Step::Remove(p) | Step::Home(p) => tilde(p),
         }
     }
@@ -46,7 +66,7 @@ impl Step {
 
 fn tilde(p: &Path) -> String {
     match p.strip_prefix(crate::user_home()) {
-        Ok(rest) => format!("~/{}", rest.display()),
+        Ok(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
         _ => p.display().to_string(),
     }
 }
@@ -78,6 +98,9 @@ fn login_keychain() -> PathBuf {
 /// Everything there is to undo, in the order it has to happen: the
 /// certificate is read from ~/.anvil, so the folder goes last.
 pub fn plan(cfg: &Config) -> Vec<Step> {
+    if cfg!(windows) {
+        return plan_windows();
+    }
     let mut steps = Vec::new();
 
     let root = crate::root_cert();
@@ -147,12 +170,82 @@ pub fn plan(cfg: &Config) -> Vec<Step> {
     steps
 }
 
+/// A PowerShell command's output, or nothing when it can't run.
+fn powershell(script: &str) -> String {
+    crate::platform::command("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// `plan` on Windows: NRPT rules to 127.0.0.1, the authority in either Root store, the
+/// PATH entry, the login item, the web view's data, then the home folder.
+fn plan_windows() -> Vec<Step> {
+    let mut steps = Vec::new();
+    let rules = powershell(
+        "Get-DnsClientNrptRule | Where-Object { $_.NameServers -contains '127.0.0.1' } | ForEach-Object { $_.Namespace }",
+    );
+    for ns in rules.lines().map(str::trim).filter(|l| l.starts_with('.')) {
+        steps.push(Step::Nrpt(ns.to_string()));
+    }
+    let root = crate::root_cert();
+    if root.exists() {
+        // `machine user` for the stores that hold it, after its thumbprint.
+        let found = powershell(&format!(
+            "$t = (New-Object Security.Cryptography.X509Certificates.X509Certificate2 '{}').Thumbprint; \
+             $m = Test-Path \"Cert:\\LocalMachine\\Root\\$t\"; $u = Test-Path \"Cert:\\CurrentUser\\Root\\$t\"; \"$t $m $u\"",
+            root.display().to_string().replace('\'', "''")
+        ));
+        let words: Vec<&str> = found.split_whitespace().collect();
+        if let [thumb, machine, user] = words[..] {
+            // The user's view lists the machine's roots too: one step then is enough.
+            if machine == "True" {
+                steps.push(Step::WinAuthority {
+                    thumb: thumb.into(),
+                    machine: true,
+                });
+            } else if user == "True" {
+                steps.push(Step::WinAuthority {
+                    thumb: thumb.into(),
+                    machine: false,
+                });
+            }
+        }
+    }
+    let shims = home().join("shims");
+    if shims::ready() || shims.exists() {
+        steps.push(Step::UserPath(shims));
+    }
+    // tauri-plugin-autostart: a Run value named after the app, starting anvil-app.
+    let run = powershell(
+        "(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').PSObject.Properties | \
+         Where-Object { \"$($_.Value)\" -like '*anvil-app*' } | ForEach-Object { $_.Name }",
+    );
+    for name in run.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        steps.push(Step::RunKey(name.to_string()));
+    }
+    // WebView2 keeps its profile under the bundle id.
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let p = PathBuf::from(local).join("dev.anvil.desktop");
+        if p.exists() {
+            steps.push(Step::Remove(p));
+        }
+    }
+    let h = home();
+    if h.symlink_metadata().is_ok() {
+        steps.push(Step::Home(h));
+    }
+    steps
+}
+
 /// What Anvil creates in its home folder.
-const ANVIL_ENTRIES: [&str; 13] = [
+const ANVIL_ENTRIES: [&str; 16] = [
     "bin",
     "build",
     "cache",
     "composer",
+    "config.lock",
     "config.toml",
     "data",
     "log",
@@ -161,6 +254,8 @@ const ANVIL_ENTRIES: [&str; 13] = [
     "runtimes",
     "services",
     "shims",
+    "octane",
+    "tools",
     ".DS_Store",
 ];
 
@@ -216,24 +311,44 @@ fn projects(cfg: &Config) -> Vec<PathBuf> {
 /// The app, `anvil start`, and anything running from Anvil's home (servers,
 /// services, runtimes). Apps Anvil started stop with the app or `anvil start`.
 fn still_running() -> Result<Vec<String>> {
-    let out = crate::platform::command("ps")
-        .args(["-axo", "pid=,command="])
-        .output()?;
-    if !out.status.success() {
-        bail!("Couldn't list running programs to check Anvil is stopped");
+    #[cfg(windows)]
+    {
+        let me = std::process::id();
+        let h = home().display().to_string().to_lowercase();
+        Ok(crate::platform::process_table()
+            .into_iter()
+            .filter(|p| p.0 != me)
+            .filter_map(|(pid, _, _, _, name)| {
+                let path = crate::platform::command_line(pid).unwrap_or_default();
+                let ours = name.eq_ignore_ascii_case("anvil-app.exe")
+                    || path.to_lowercase().starts_with(&h);
+                let shown = if path.is_empty() { name } else { path };
+                ours.then_some(shown)
+            })
+            .collect())
     }
-    let me = std::process::id().to_string();
-    let h = home().display().to_string();
-    Ok(String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(str::trim)
-        .filter_map(|l| l.split_once(' '))
-        .filter(|(pid, _)| *pid != me)
-        .filter(|(_, cmd)| anvil_process(cmd, &h))
-        .map(|(_, cmd)| cmd.to_string())
-        .collect())
+    #[cfg(not(windows))]
+    {
+        let out = crate::platform::command("ps")
+            .args(["-axo", "pid=,command="])
+            .output()?;
+        if !out.status.success() {
+            bail!("Couldn't list running programs to check Anvil is stopped");
+        }
+        let me = std::process::id().to_string();
+        let h = home().display().to_string();
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::trim)
+            .filter_map(|l| l.split_once(' '))
+            .filter(|(pid, _)| *pid != me)
+            .filter(|(_, cmd)| anvil_process(cmd, &h))
+            .map(|(_, cmd)| cmd.to_string())
+            .collect())
+    }
 }
 
+#[cfg_attr(windows, allow(dead_code))] // Windows reads the process table instead
 fn anvil_process(cmd: &str, home: &str) -> bool {
     let mut words = cmd.split_whitespace();
     let exe = words
@@ -260,7 +375,7 @@ pub fn uninstall(cfg: &Config, config_ok: bool, yes: bool) -> Result<()> {
         println!("{}\n", yellow(format!("{} is kept: {why}.", tilde(&h))));
     }
     if steps.is_empty() {
-        println!("Nothing of Anvil's is left on this Mac.");
+        println!("Nothing of Anvil's is left on this computer.");
         return Ok(());
     }
     println!("{}\n", bold("Anvil uninstall removes:"));
@@ -279,10 +394,13 @@ pub fn uninstall(cfg: &Config, config_ok: bool, yes: bool) -> Result<()> {
     }
     println!(
         "\n{}",
-        commands(
+        commands(if cfg!(windows) {
+            "Your projects are not touched. Anvil and the anvil command itself stay:\n\
+             remove Anvil in Settings › Apps afterwards."
+        } else {
             "Your projects are not touched. Anvil.app and the anvil command itself stay:\n\
              drag Anvil.app to the Trash, and `cargo uninstall anvil` if you installed it with cargo."
-        )
+        })
     );
     if !yes {
         println!("\n{}", commands("Run `anvil uninstall --yes` to do it."));
@@ -302,10 +420,64 @@ pub fn uninstall(cfg: &Config, config_ok: bool, yes: bool) -> Result<()> {
     Ok(())
 }
 
+/// The PowerShell that undoes a Windows step, and whether it needs an administrator.
+fn windows_script(s: &Step) -> Option<(String, bool)> {
+    let q = |t: &str| format!("'{}'", t.replace('\'', "''"));
+    Some(match s {
+        Step::Nrpt(ns) => (
+            format!(
+                "Get-DnsClientNrptRule | Where-Object {{ $_.Namespace -contains {} }} | Remove-DnsClientNrptRule -Force",
+                q(ns)
+            ),
+            true,
+        ),
+        Step::WinAuthority { thumb, machine } => (
+            format!(
+                "Remove-Item \"Cert:\\{}\\Root\\{thumb}\"",
+                if *machine {
+                    "LocalMachine"
+                } else {
+                    "CurrentUser"
+                }
+            ),
+            *machine,
+        ),
+        Step::UserPath(dir) => (
+            format!(
+                "$d = {}; $p = [Environment]::GetEnvironmentVariable('Path', 'User'); \
+                 $keep = ($p -split ';') | Where-Object {{ $_ -and $_.TrimEnd('\\') -ne $d }}; \
+                 [Environment]::SetEnvironmentVariable('Path', ($keep -join ';'), 'User')",
+                q(&dir.display().to_string())
+            ),
+            false,
+        ),
+        Step::RunKey(name) => (
+            format!(
+                "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name {}",
+                q(name)
+            ),
+            false,
+        ),
+        _ => return None,
+    })
+}
+
 /// Do each step; a failure is reported and the rest still run, so the next
 /// `anvil uninstall` lists only what is left.
 fn apply(steps: &[Step]) {
     let mut failed = false;
+    // Windows: every step that needs an administrator behind one permission prompt.
+    let admin: Vec<String> = steps
+        .iter()
+        .filter_map(windows_script)
+        .filter(|(_, a)| *a)
+        .map(|(script, _)| script)
+        .collect();
+    let admin_done = if admin.is_empty() {
+        Ok(())
+    } else {
+        crate::run_as_admin(&admin.join("\r\n"), "")
+    };
     for s in steps {
         if matches!(s, Step::Home(_)) && failed {
             println!(
@@ -318,6 +490,18 @@ fn apply(steps: &[Step]) {
             continue;
         }
         let done = match s {
+            s @ (Step::Nrpt(_) | Step::WinAuthority { .. } | Step::UserPath(_) | Step::RunKey(_)) => {
+                match windows_script(s) {
+                    Some((_, true)) => admin_done
+                        .as_ref()
+                        .map(|_| ())
+                        .map_err(|e| anyhow::anyhow!("{e:#}")),
+                    Some((script, false)) => run(crate::platform::command("powershell.exe")
+                        .args(["-NoProfile", "-NonInteractive", "-Command"])
+                        .arg(format!("$ErrorActionPreference = 'Stop'; {script}"))),
+                    None => Ok(()),
+                }
+            }
             Step::Authority(sha1) => run(crate::platform::command("security")
                 .args(["delete-certificate", "-Z", sha1, "-t"])
                 .arg(login_keychain())),
