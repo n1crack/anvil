@@ -23,7 +23,11 @@ Until 1.0.0, minor versions may contain breaking changes.
   Proxy-Authorization are written as REDACTED. `anvil app requests <app>`
   prints the latest (`--status 4xx`, `--method POST`, `-n 50`, `--follow`;
   Vite's, Next's and other static assets only with `--assets`). Disk's Logs
-  item covers them.
+  item covers them. In the app, a Requests tab after Logs lists them newest
+  first (time, method, status, path, duration, size; another host of the app
+  shown before the path), new ones coming in while the tab is shown. Filter
+  by status class, method or path, show assets, Clear; a row opens to its
+  request and response headers, protocol, TLS and remote address.
 - Laravel Octane: an app with `laravel/octane` gets an `octane` process
   (RoadRunner), left out of Dev start, on a private port of its own (no two
   apps share one, and none is among the ports macOS gives outgoing

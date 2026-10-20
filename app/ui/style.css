@@ -2561,6 +2561,28 @@ button.log-file:hover { text-decoration-color: currentColor; }
 }
 
 .logs-list .empty { margin: 24px 8px; }
+
+/* Requests: the Logs list's rows, in aligned columns; status colour as text only. */
+.req-bar select { flex: none; }
+.req-assets { flex: none; display: inline-flex; font-size: 12px; align-items: center; gap: 5px; color: var(--muted); white-space: nowrap; }
+.req .log-time { width: 64px; }
+.req-method { flex: none; width: 56px; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
+.req-status,
+.req-dur,
+.req-size { flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+.req-status { width: 30px; }
+.req-dur { width: 64px; text-align: right; color: var(--muted); }
+.req-size { width: 64px; text-align: right; color: var(--muted); }
+.st-3 { color: var(--muted); }
+.st-4 { color: var(--amber-text); }
+.st-5 { color: var(--danger); }
+.req-host { margin-right: 1px; color: var(--muted); }
+.req .log-detail { padding-left: 82px; }
+.req-headers { margin: 0; font: 12px/1.6 ui-monospace, "SF Mono", Menlo, monospace; }
+.req-headers > div { display: flex; gap: 12px; }
+.req-headers dt { flex: none; width: 180px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.req-headers dd { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.req-headers .redacted { color: var(--muted); font-style: italic; }
 /* Nothing listed: no rule above the message, it would double the tabs' line. */
 .logs-list:has(> .empty, > .logs-large) { border-top: 0; }
 

@@ -1933,6 +1933,32 @@ async fn log_search(
     .await
 }
 
+/// The Requests tab: a page of the app's requests that match `filter`, newest first.
+#[tauri::command]
+async fn requests_read(
+    site: String,
+    filter: anvil::requests::Filter,
+    before: Option<u64>,
+) -> Res<anvil::requests::Page> {
+    with_site(site, move |s| {
+        anvil::requests::read(&anvil::requests::file(&s.name), &filter, before, 200)
+    })
+    .await
+}
+
+/// The Requests tab while it's shown: the app's requests since `from`.
+#[tauri::command]
+async fn requests_tail(
+    site: String,
+    filter: anvil::requests::Filter,
+    from: u64,
+) -> Res<anvil::requests::Page> {
+    with_site(site, move |s| {
+        anvil::requests::tail(&anvil::requests::file(&s.name), from, &filter)
+    })
+    .await
+}
+
 #[tauri::command]
 async fn log_clear(site: String, source: String) -> Res<()> {
     with_site(site, move |s| anvil::logs::clear(&s, &source)).await
@@ -4113,6 +4139,8 @@ fn main() {
             log_text,
             log_search,
             log_clear,
+            requests_read,
+            requests_tail,
             open_in_editor,
             log_open,
             storage_anvil,
