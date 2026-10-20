@@ -20,11 +20,11 @@ Until 1.0.0, minor versions may contain breaking changes.
   Agents, newest first. A failed action says why on its line.
 - Agents (MCP), off by default in Settings › Plugins: `anvil mcp` lets AI
   agents list apps and their processes, start, stop and restart them and
-  services, read logs, ask what failed since their last check, add and remove
+  services, read logs, ask what failed since their last check, add
   worktrees, and change an app's PHP or Node.js version, HTTPS, php.ini,
   start command and autostart. Nothing that can't be undone is offered: no
-  database drop, no service data removal, no clean, no uninstall, and a
-  worktree is removed without its database. Claude Code connects with
+  database drop, no service data removal, no clean, no uninstall, and no
+  worktree removal, which deletes its folder. Claude Code connects with
   `claude mcp add anvil -- anvil mcp`. While it's off, `anvil mcp` says where
   to turn it on and exits with 1.
 

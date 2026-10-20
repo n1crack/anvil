@@ -167,12 +167,6 @@ fn tools() -> Vec<Value> {
             &["site", "name"],
         ),
         tool(
-            "worktree_remove",
-            "Remove a worktree's folder. Refuses with uncommitted changes or unpushed commits, and never drops its database",
-            json!({"site": site, "name": {"type": "string", "description": "The worktree's name or branch"}}),
-            &["site", "name"],
-        ),
-        tool(
             "settings",
             "An app's settings: kind, PHP and language version, HTTPS, php.ini overrides, start command, port, autostart",
             json!({"site": site}),
@@ -440,26 +434,6 @@ fn call(name: &str, args: &Value, client: &str) -> Result<Value> {
                 "note": "after_create wasn't run: run those commands in the worktree's folder",
             }))
         }
-        "worktree_remove" => {
-            let app = find(&cfg, arg(args, "site")?)?;
-            let name = arg(args, "name")?;
-            let full = format!("{}--{}", app.name, crate::site_name(name));
-            let s = crate::sites(&cfg)
-                .into_iter()
-                .find(|s| {
-                    s.worktree_of.as_deref() == Some(&app.name)
-                        && (s.name == name || s.name == full || s.branch.as_deref() == Some(name))
-                })
-                .with_context(|| format!("{} has no worktree named {name}", app.name))?;
-            if apps::running_anywhere(&s.name) {
-                bail!("Stop {} first (run with action stop)", s.name);
-            }
-            // Never --drop-db, never --force. Saved after Ok and Err alike, as the CLI does.
-            let (_, result) = crate::update(|c| Ok(worktrees::remove(c, &s, false, false)))?;
-            result?;
-            done(&s.name, format!("removed worktree {}", s.name), client);
-            Ok(json!({"removed": s.name, "database": "kept"}))
-        }
         "settings" => settings(&cfg, &find(&cfg, arg(args, "site")?)?),
         "set" => {
             let s = find(&cfg, arg(args, "site")?)?;
@@ -676,7 +650,6 @@ mod tests {
                 "check",
                 "worktrees",
                 "worktree_add",
-                "worktree_remove",
                 "settings",
                 "set"
             ]
@@ -709,21 +682,10 @@ mod tests {
         ] {
             assert!(!all.contains(word), "{word} in tools/list");
         }
-        let remove = r[0]["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|t| t["name"] == "worktree_remove")
-            .unwrap();
-        let props = remove["inputSchema"]["properties"].as_object().unwrap();
-        let mut keys: Vec<_> = props.keys().collect();
-        keys.sort();
-        assert_eq!(keys, ["name", "site"]);
+        // Removing a worktree deletes its folder, ignored files and a SQLite database in it.
         assert!(
-            remove["description"]
-                .as_str()
-                .unwrap()
-                .contains("never drops")
+            !all.contains("worktree_remove"),
+            "worktree_remove in tools/list"
         );
     }
 
@@ -847,12 +809,6 @@ mod tests {
         assert!(!marker.exists());
         let (text, _) = call_tool("worktrees", json!({"site": "shop"}));
         assert!(text.contains("shop--feature-x"), "{text}");
-        let (text, err) = call_tool(
-            "worktree_remove",
-            json!({"site": "shop", "name": "feature-x"}),
-        );
-        assert!(!err, "{text}");
-        assert!(!h.0.join("apps/shop--feature-x").exists());
     }
 
     #[test]
