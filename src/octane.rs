@@ -52,8 +52,12 @@ const FP_PHP: &str = "8.5";
 /// The server of an app with `laravel/octane`: `OCTANE_SERVER` in its `.env`, else
 /// `config/octane.php`'s default, else RoadRunner. `None` without laravel/octane.
 pub fn server(dir: &Path) -> Option<Server> {
-    let composer: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("composer.json")).ok()?).ok()?;
+    let text = std::fs::read_to_string(dir.join("composer.json")).ok()?;
+    // Most apps have no Octane: no need to parse their composer.json.
+    if !text.contains("octane") {
+        return None;
+    }
+    let composer: serde_json::Value = serde_json::from_str(&text).ok()?;
     ["require", "require-dev"]
         .iter()
         .any(|k| composer[k].get("laravel/octane").is_some())
@@ -466,6 +470,13 @@ mod tests {
         fs::write(
             d.join("composer.json"),
             r#"{"require-dev": {"laravel/octane": "^2.22"}}"#,
+        )
+        .unwrap();
+        assert_eq!(server(d), Some(Server::RoadRunner));
+        // JSON's escaped slash still names it.
+        fs::write(
+            d.join("composer.json"),
+            r#"{"require": {"laravel\/octane": "^2.22"}}"#,
         )
         .unwrap();
         assert_eq!(server(d), Some(Server::RoadRunner));

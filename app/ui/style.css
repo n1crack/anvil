@@ -1274,12 +1274,36 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 
 .row-top { align-items: start; }
 
-/* Worktree hooks fields (hooksform.ts): what a field does, where it comes from, a refusal. */
+/* Worktree hooks (hooksform.ts): the summary, then rows with ×, an Add line, a refusal.
+ * Keys line up in columns: name, what it's set to, the custom value. */
 .preset-field small[hidden],
-.wt-hooks small[hidden] { display: none; }
+.wt-hooks small[hidden],
+.hk [hidden] { display: none; }
 .preset-field small.error-text,
-.wt-hooks small.error-text { color: var(--danger); }
-.wt-hooks dd small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.wt-hooks small.error-text { display: block; margin-top: 2px; color: var(--danger); font-size: 11px; }
+.wt-summary { display: grid; gap: 2px; }
+.wt-summary .muted { margin-top: 4px; color: var(--muted); }
+.wt-actions { display: flex; gap: 6px; margin-top: 4px; }
+.wt-actions .inline-action { margin-left: 0; }
+.hk { display: grid; gap: 4px; flex: 1; min-width: 0; max-width: 460px; }
+.hk-row { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+.hk .hk-text { flex: 1; min-width: 0; max-width: none; overflow-wrap: anywhere; }
+.hk code { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+.hk .hk-key,
+.hk input.hk-key[type="text"] { flex: none; box-sizing: border-box; width: 150px; overflow-wrap: anywhere; }
+.hk .hk-choice { flex: none; width: 210px; }
+.hk .seg { justify-self: start; }
+.hk .hk-custom { flex: 1; min-width: 0; max-width: none; }
+.hk input[type="text"] { width: auto; text-align: left; font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
+.hk .inline-action { flex: none; margin-left: 0; }
+.hk .hk-x { flex: none; width: 22px; height: 22px; margin-left: auto; background: none; }
+.hk .hk-x svg { width: 12px; height: 12px; }
+.hk-add .hk-key + .hk-choice + .hk-custom[hidden] + .inline-action { margin-left: auto; }
+.hk small.hk-hint { margin: 0; color: var(--muted); font-size: 11px; }
+.page .row.preset-field { align-items: start; }
+.page .row.preset-field > span:first-child { flex: none; width: 110px; padding-top: 4px; }
+.page .row.preset-field .hk { max-width: none; }
+.page .hk button.hk-x { padding: 0; border: 0; }
 
 .row-top dt { padding-top: 4px; }
 
@@ -1555,6 +1579,15 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 /* The same switches in an app's Settings tab, lined up with the other fields. */
 .app-exts .ver-exts { padding: 4px 0; }
 .app-exts .ver-error { padding: 2px 0 0; }
+
+/* A button or row label at work: its spinner before the words ("Creating…", "Removing…"). */
+#ask-ok .spin-dot,
+.pop-confirm .spin-dot { display: inline-block; margin-right: 6px; vertical-align: -1px; }
+.kind.removing { display: inline-flex; align-items: center; gap: 5px; }
+
+/* The PHP version select while a change builds and restarts, and what it ran without. */
+.php-busy { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; color: var(--muted); font-size: 12px; }
+.php-error { padding: 4px 0 0; white-space: pre-line; }
 
 .ver .actions-inline { min-height: 26px; }
 
@@ -1937,9 +1970,9 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; }
 .swatch.keep { background: var(--cold); }
-/* Orange marks what Clean up removes; rebuildable is neutral, not an alarm. */
+/* Greys from keep to safe to delete: no state's color (amber is starting), no brand orange. */
 .swatch.rebuild { background: color-mix(in srgb, var(--muted) 55%, transparent); }
-.swatch.safe { background: var(--heat); }
+.swatch.safe { background: color-mix(in srgb, var(--text) 80%, transparent); }
 
 .res-bar {
   display: flex;
@@ -1954,7 +1987,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .res-bar .seg { flex-basis: 0; min-width: 3px; }
 .res-bar .keep { background: var(--cold); }
 .res-bar .rebuild { background: color-mix(in srgb, var(--muted) 55%, transparent); }
-.res-bar .safe { background: var(--heat); }
+.res-bar .safe { background: color-mix(in srgb, var(--text) 80%, transparent); }
 
 .res-list .row { grid-template-columns: 1fr auto; }
 
@@ -1995,7 +2028,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-weight: 600;
 }
 
-.safety.safe { background: color-mix(in srgb, var(--heat) 16%, transparent); color: var(--heat-text); }
+.safety.safe { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text); }
 .safety.rebuild { background: var(--steel-raised); color: var(--text); }
 .safety.keep { background: var(--steel-raised); color: var(--muted); }
 
@@ -2520,8 +2553,9 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
 .svc-settings .row { min-height: 36px; padding: 4px 14px; }
 .svc-settings .row input { height: 24px; }
 .svc-apps-hint { max-width: 640px; margin-top: 6px; }
-/* A php.ini field's restart of the web server, said beside it. */
-.ini-note { display: block; margin-top: 4px; font-size: 12px; }
+/* A field's restart of the web server or the app, said beside it. */
+.field-note { display: block; margin-top: 4px; font-size: 12px; }
+.field-note.error-text { color: var(--danger); overflow-wrap: anywhere; }
 /* Under Connect: write its lines into a listed app's .env, with what that did beside it. */
 .svc-write { display: grid; gap: 4px; max-width: 640px; margin-top: 8px; font-size: 12px; }
 .svc-write-line { display: flex; align-items: baseline; gap: 10px; }
@@ -2873,6 +2907,8 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .mail-views { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .mail-actions { display: flex; gap: 8px; }
 .mail-actions button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: none; color: var(--muted); font-size: 12px; }
+.mail-actions.asking { align-items: baseline; white-space: nowrap; }
+.mail-actions .text-act { height: 24px; padding: 0 2px; border: 0; }
 .mail-actions button:hover { color: var(--text); border-color: var(--cold); }
 .mail-files-list { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 8px; font-size: 12px; }
 /* A mail is drawn for white paper, as mail apps show it, in either theme. */
@@ -3111,6 +3147,22 @@ a.pkg-adv-title:hover { text-decoration: underline; }
 }
 
 .welcome .link:hover { color: var(--text); text-decoration: underline; }
+
+/* What an added folder of applications turned out to be: on the welcome, or over the list. */
+.parked-note {
+  position: relative;
+  margin: 2px 0 6px;
+  padding: 8px 28px 8px 10px;
+  border-radius: var(--radius-s);
+  background: var(--steel-hover);
+  font-size: 12px;
+  text-align: left;
+}
+.welcome .parked-note { align-self: stretch; margin-top: 20px; }
+.parked-note p { margin: 0 0 6px; color: var(--text); }
+.parked-note .inline-action { margin-left: 0; }
+.parked-close { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted); }
+.parked-close:hover { color: var(--text); }
 
 /* Unfinished setup: one quiet line above the panel, a button per missing step. */
 /* Setting up this Mac: a button in the titlebar, for the whole app, not one site. */

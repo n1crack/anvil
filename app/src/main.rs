@@ -389,22 +389,44 @@ fn notify_crashes(handle: &AppHandle, new: &[(String, anvil::apps::Exit)]) {
     }
 }
 
-fn snapshot(app: &App) -> Res<Snapshot> {
-    let cfg = anvil::load().map_err(err)?;
-    let https_port = anvil::public_https_port(&cfg);
-    let http_port = anvil::public_http_port(&cfg);
-    // Always a new scan: the app list shows a folder added or removed at once.
-    let sites: Vec<Site> = scan_sites(&cfg).to_vec();
+/// Each app's sidebar dot (`app_states`) as it is now.
+fn states_of(app: &App, sites: &[Site]) -> std::collections::BTreeMap<String, &'static str> {
     let (live, crashed) = {
         let mut apps = anvil::lock(&app.apps);
         let live: Vec<String> = apps.list().into_iter().map(|(k, _, _)| k).collect();
         let crashed: Vec<String> = apps.crashed().into_iter().map(|(k, _)| k).collect();
         (live, crashed)
     };
-    let (up, broken) = compose_states(&sites);
-    let app_states = app_states(&sites, &live, &crashed, (&up, &broken), anvil::port_answers);
+    let (up, broken) = compose_states(sites);
+    app_states(sites, &live, &crashed, (&up, &broken), anvil::port_answers)
+}
+
+/// The dots and run errors alone, for the list's check while an app starts.
+#[derive(Serialize)]
+struct RunStates {
+    app_states: std::collections::BTreeMap<String, &'static str>,
+    app_errors: std::collections::BTreeMap<String, String>,
+}
+
+/// `state`'s `app_states` and `app_errors` without its scan: from the last one, which is
+/// what the list shows (a change that adds an app or moves a port clears it, `changed`).
+#[tauri::command(async)]
+fn run_states(app: State<App>) -> Res<RunStates> {
+    let cfg = anvil::load().map_err(err)?;
+    Ok(RunStates {
+        app_states: states_of(&app, &last_sites(&cfg)),
+        app_errors: anvil::lock(&app.app_errors).clone(),
+    })
+}
+
+fn snapshot(app: &App) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    let https_port = anvil::public_https_port(&cfg);
+    let http_port = anvil::public_http_port(&cfg);
+    // Always a new scan: the app list shows a folder added or removed at once.
+    let sites: Vec<Site> = scan_sites(&cfg).to_vec();
     Ok(Snapshot {
-        app_states,
+        app_states: states_of(app, &sites),
         app_errors: anvil::lock(&app.app_errors).clone(),
         kinds: anvil::apps::KINDS
             .iter()
@@ -610,11 +632,15 @@ fn set_php(
 ) -> Res<Snapshot> {
     let (cfg, ()) = edit(|c| anvil::set_site_php(c, &site, version))?;
     // Its extensions, built for the version it's on now, before PHP-FPM restarts.
-    anvil::phpext::build_missing_for(&cfg, &site);
+    let failed = anvil::phpext::build_missing_for(&cfg, &site);
     if running(&app) {
         start(&app, &cfg);
     }
     changed(&handle);
+    // It runs without the ones that failed: said beside the version, not only to stdout.
+    if !failed.is_empty() {
+        return Err(failed.join("\n"));
+    }
     snapshot(&app)
 }
 
@@ -653,6 +679,8 @@ struct ProcessRow {
     /// Where the Browser button opens it; `None` when it serves no page (a PHP app's Vite).
     web: Option<String>,
     running: bool,
+    /// Running, its port not answering yet: amber, as in the sidebar.
+    starting: bool,
     /// The newest line it wrote.
     last: Option<String>,
     error: Option<String>,
@@ -731,6 +759,7 @@ fn main_row(cfg: &Config, site: &Site, serving: bool, running: bool) -> Option<P
         main: true,
         web: Some(anvil::site_url(cfg, site)),
         running: if server { running } else { serving },
+        starting: false,
         last: None,
         error: None,
         address: None,
@@ -773,6 +802,7 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
         let web = row_web(cfg, site, &p);
         ProcessRow {
             running: apps.running(&anvil::processes::key(&site.name, &p.id)),
+            starting: false,
             kind: "process",
             main: false,
             address: web.clone(),
@@ -792,7 +822,8 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
     let mut rows: Vec<ProcessRow> = main.into_iter().chain(rows).collect();
     // The app's own row first, then those kept on top, each group in detection order.
     rows.sort_by_key(|r| !r.main);
-    rows.into_iter()
+    let mut rows = rows
+        .into_iter()
         .map(|mut r| {
             // The site row is the web server's; it has no process, log or errors of its own.
             if r.kind == "site" {
@@ -812,7 +843,15 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
             r.error = errors.get(&key).cloned();
             r
         })
-        .collect()
+        .collect::<Vec<_>>();
+    drop(apps);
+    // A server is starting until its port answers; asked without the lock held.
+    for r in &mut rows {
+        r.starting = r.running
+            && r.kind != "site"
+            && r.process.port.is_some_and(|p| !anvil::port_answers(p));
+    }
+    rows
 }
 
 fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
@@ -923,6 +962,17 @@ fn sites_of(cfg: &Config) -> std::sync::Arc<Vec<Site>> {
     let key = serde_json::to_string(cfg).unwrap_or_default();
     if let Some((at, k, all)) = &*anvil::lock(&SITES)
         && at.elapsed() < SITES_FOR
+        && *k == key
+    {
+        return all.clone();
+    }
+    scan_sites(cfg)
+}
+
+/// The last scan of this config however old, else a new one.
+fn last_sites(cfg: &Config) -> std::sync::Arc<Vec<Site>> {
+    let key = serde_json::to_string(cfg).unwrap_or_default();
+    if let Some((_, k, all)) = &*anvil::lock(&SITES)
         && *k == key
     {
         return all.clone();
@@ -1783,8 +1833,10 @@ fn set_app(
     port: Option<u16>,
     autostart: Option<bool>,
     reset: Option<Vec<String>>,
-) -> Res<Snapshot> {
+) -> Res<Applied> {
     let reset = reset.unwrap_or_default();
+    // Autostart alone changes nothing that runs.
+    let restart = kind.is_some() || command.is_some() || port.is_some() || !reset.is_empty();
     let pick = |name: &str, v: Option<String>| -> Option<Option<String>> {
         if reset.iter().any(|r| r == name) {
             Some(None)
@@ -1809,19 +1861,35 @@ fn set_app(
             autostart,
         )
     })?;
-    // A running app picks up a new command or port by restarting.
-    let was_running = anvil::lock(&app.apps).running(&site);
-    if was_running {
+    // A running app picks up a new kind, command or port by restarting.
+    let restarted = restart && anvil::lock(&app.apps).running(&site);
+    if restarted {
         stop_app(&app, &site);
     }
     if reroute {
         sites_changed(&handle, &app, &cfg);
     }
-    if was_running {
+    if restarted {
         start_app(&app, &cfg, &site);
     }
     changed(&handle);
-    snapshot(&app)
+    applied(&app, restarted)
+}
+
+/// A snapshot after a setting changed, and whether that restarted the app's server, so
+/// its field can say so.
+#[derive(Serialize)]
+struct Applied {
+    #[serde(flatten)]
+    snap: Snapshot,
+    restarted: bool,
+}
+
+fn applied(app: &App, restarted: bool) -> Res<Applied> {
+    Ok(Applied {
+        snap: snapshot(app)?,
+        restarted,
+    })
 }
 
 /// Change one row's settings: its command (`reset` goes back to the detected one),
@@ -2421,6 +2489,40 @@ fn create_options(kind: String) -> Res<Vec<anvil::create::Opt>> {
     Ok(anvil::create::options(&kind, &anvil::load().map_err(err)?))
 }
 
+/// What a template needs installed and lacks: offered in the New sheet before Create.
+#[derive(Serialize)]
+struct CreateNeed {
+    id: &'static str,
+    name: &'static str,
+    version: String,
+}
+
+#[tauri::command(async)]
+fn create_needs(
+    kind: String,
+    parent: std::path::PathBuf,
+    options: Option<anvil::create::Options>,
+) -> Res<Option<CreateNeed>> {
+    let cfg = anvil::load().map_err(err)?;
+    let opts = anvil::create::resolve(&kind, &cfg, &options.unwrap_or_default()).map_err(err)?;
+    let Some(id) = anvil::create::missing(&kind, &parent, &opts) else {
+        return Ok(None);
+    };
+    let (name, version) = match id {
+        "php" => ("PHP", "8.4".to_string()),
+        "node" => ("Node.js", anvil::runtimes::node_lts().map_err(err)?),
+        rt => (
+            anvil::runtimes::name(rt),
+            anvil::runtimes::available(rt)
+                .map_err(err)?
+                .into_iter()
+                .next()
+                .ok_or("Nothing to install")?,
+        ),
+    };
+    Ok(Some(CreateNeed { id, name, version }))
+}
+
 /// The creation log of `name` from `from` on, read while `create_app` runs.
 #[tauri::command(async)]
 fn create_log(name: String, from: u64) -> Res<anvil::logs::Text> {
@@ -2455,10 +2557,30 @@ fn link_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
     Ok(name)
 }
 
+/// What adding a folder of applications did: nothing for a folder that is one project
+/// itself (its kind, to offer adding it as one), else how many applications it holds.
+#[derive(Serialize)]
+struct Parked {
+    project: Option<&'static str>,
+    apps: usize,
+}
+
 /// Serve every project inside a folder.
 #[tauri::command(async)]
-fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<()> {
+fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<Parked> {
     let path = anvil::platform::canonicalize(&path).map_err(|e| e.to_string())?;
+    if let Some(kind) = anvil::apps::project_kind(&path) {
+        return Ok(Parked {
+            project: Some(kind),
+            apps: 0,
+        });
+    }
+    let apps = std::fs::read_dir(&path)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.'))
+        .count();
     let (cfg, ()) = edit(|c| {
         if !c.paths.contains(&path) {
             c.paths.push(path);
@@ -2466,7 +2588,10 @@ fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
         Ok(())
     })?;
     sites_changed(&handle, &app, &cfg);
-    Ok(())
+    Ok(Parked {
+        project: None,
+        apps,
+    })
 }
 
 #[tauri::command(async)]
@@ -2567,6 +2692,8 @@ fn worktree_rewrite(handle: AppHandle, app: State<App>, site: String) -> Res<Sna
 struct AppHooks {
     hooks: anvil::worktrees::Resolved,
     own: anvil::worktrees::Hooks,
+    /// What `{install}` runs for it: the JS install its lock file asks for.
+    install: Option<String>,
 }
 
 /// `AppHooks` of the app `site`; refused for a folder that isn't a git repository.
@@ -2584,6 +2711,7 @@ fn worktree_hooks(site: String) -> Res<AppHooks> {
             .get(&site)
             .map(|c| c.worktree.clone())
             .unwrap_or_default(),
+        install: anvil::worktrees::install_command(&s.path, s.shared_deps == Some(true)),
     })
 }
 
@@ -2858,15 +2986,15 @@ fn set_runtime(
     app: State<App>,
     site: String,
     version: Option<String>,
-) -> Res<Snapshot> {
+) -> Res<Applied> {
     let (cfg, ()) = edit(|c| anvil::set_site_runtime(c, &site, version))?;
-    let was_running = anvil::lock(&app.apps).running(&site);
-    if was_running {
+    let restarted = anvil::lock(&app.apps).running(&site);
+    if restarted {
         stop_app(&app, &site);
         start_app(&app, &cfg, &site);
     }
     changed(&handle);
-    snapshot(&app)
+    applied(&app, restarted)
 }
 
 /// php.ini overrides for `site`, each `[key, value]` (None unsets it). Several at once
@@ -4264,8 +4392,8 @@ fn open(site: String, target: String) -> Res<()> {
 #[tauri::command(async)]
 fn icon(site: String) -> Option<String> {
     use base64::Engine;
-    let cfg = anvil::load().ok()?;
-    let s = anvil::sites(&cfg).into_iter().find(|s| s.name == site)?;
+    // From the last scan: the list asks for every app's icon at once.
+    let s = find_site(&site).ok()?;
     let path = anvil::icon(&s)?;
     let mime = match path.extension()?.to_str()? {
         "svg" => "image/svg+xml",
@@ -4285,11 +4413,7 @@ fn icon(site: String) -> Option<String> {
 /// When the app's code last changed (unix seconds), for "edited 2 h ago".
 #[tauri::command(async)]
 fn touched(site: String) -> Res<Option<u64>> {
-    let cfg = anvil::load().map_err(err)?;
-    let s = anvil::sites(&cfg)
-        .into_iter()
-        .find(|s| s.name == site)
-        .ok_or_else(|| format!("No application named {site}"))?;
+    let s = find_site(&site).map_err(|_| format!("No application named {site}"))?;
     Ok(anvil::resources::touched(&s.path))
 }
 
@@ -4674,6 +4798,7 @@ fn main() {
         .manage(App::default())
         .invoke_handler(tauri::generate_handler![
             state,
+            run_states,
             performance,
             activity,
             agent_activity,
@@ -4686,6 +4811,7 @@ fn main() {
             link_folder,
             create_app,
             create_options,
+            create_needs,
             create_log,
             create_reveal,
             park_folder,

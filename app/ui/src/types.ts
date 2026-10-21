@@ -63,6 +63,8 @@ export interface Snapshot {
    * (server, dev process, container), "crashed" when one crashed and none runs. */
   app_states: Record<string, "starting" | "running" | "crashed">;
   app_errors: Record<string, string>;
+  /** Only from set_app and set_runtime: whether the change restarted the app. */
+  restarted?: boolean;
   /** [id, label] */
   kinds: [string, string][];
   paths: string[];
@@ -196,6 +198,8 @@ export interface ProcessRow extends Process {
   main: boolean;
   web: string | null;
   running: boolean;
+  /** Running, its port not answering yet. */
+  starting: boolean;
   last: string | null;
   error: string | null;
   address: string | null;

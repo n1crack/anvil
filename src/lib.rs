@@ -530,8 +530,18 @@ pub(crate) fn app_folders(cfg: &Config) -> BTreeSet<PathBuf> {
 }
 
 pub fn sites(cfg: &Config) -> Vec<Site> {
-    let mut found: BTreeMap<String, (PathBuf, Option<PathBuf>)> = parked(cfg)
-        .0
+    let all_parked = parked(cfg).0;
+    // Each app folder's real path, hidden ones too, resolved once per scan: a realpath
+    // per app was a third of a scan's time.
+    let canon = |p: &Path| crate::platform::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let reals: BTreeMap<PathBuf, PathBuf> = all_parked
+        .values()
+        .map(|(p, _)| p)
+        .chain(cfg.links.values())
+        .map(|p| (p.clone(), canon(p)))
+        .collect();
+    let real = |p: &Path| reals.get(p).cloned().unwrap_or_else(|| canon(p));
+    let mut found: BTreeMap<String, (PathBuf, Option<PathBuf>)> = all_parked
         .into_iter()
         .filter(|(name, _)| !cfg.hidden.contains(name))
         .map(|(name, (path, dir))| (name, (path, Some(dir))))
@@ -542,7 +552,6 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
     // The git worktrees of each app, read from the repository's files (git may be broken
     // or missing); an alias (a link to a parked app's folder) is the same app. A worktree
     // deleted by hand counts as removed.
-    let real = |p: &Path| crate::platform::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let mut seen = BTreeSet::new();
     let mut mains = vec![];
     let parked_first = found.iter().filter(|(_, (_, d))| d.is_some());
@@ -561,8 +570,8 @@ pub fn sites(cfg: &Config) -> Vec<Site> {
         .collect();
     // Every app's folder, hidden ones too: a folder that is a worktree of one of them is
     // never an app of its own (that would run on main's database). A hidden app's
-    // worktrees are hidden with it.
-    let app_paths = app_folders(cfg);
+    // worktrees are hidden with it (`app_folders`).
+    let app_paths: BTreeSet<PathBuf> = reals.values().cloned().collect();
     // A link pointing straight at a worktree folder is that worktree, at one more address.
     let mut linked_to: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
     found.retain(|name, (path, dir)| {

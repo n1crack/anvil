@@ -24,6 +24,19 @@ contain breaking changes.
 - A share whose Stop fails says why on its line.
 - Adding a service says what it is downloading and how much has come in, or that Redis is being built.
 - Mail tab: after catching is turned on or off, it offers to restart the processes still sending the old way; inboxes count "messages".
+- Worktree settings say in plain sentences what a new worktree gets; Customize… edits files, env keys and commands as rows with plain choices instead of text boxes.
+- Add Folder of Applications… on a folder that is one project offers to add it as one application instead of serving its subfolders, and an empty folder says it has none yet.
+- Changing an app's PHP version says which extensions it is building beside the version, and under it which ones the new version runs without.
+- Remove Link… asks first and says what goes: the app's processes stop and its settings in Anvil are deleted; its folder stays.
+- New Application says a missing PHP or runtime in the form, with an Install button, before anything is made; reopening the sheet keeps the typed name.
+- A new app's Open is Open in Browser and opens it there, and selects it in the sidebar as before; with the web server stopped it is Show.
+- Dev: a server whose port doesn't answer yet has an amber dot, a crashed process says its exit code, and dismissing a crash is ✕, not ■.
+- Worktrees: Create says Creating… while it works, and a worktree being removed says Removing… in its row; a failed removal is said under its name.
+- Storage and Resources mark what is safe to delete in grey instead of orange.
+- Mail tab: deleting one message asks first, in its row, as Clear does.
+- Worktree settings: "Add Install packages" reads "Add Package Install".
+- A failed New Application's "Show in Finder" is "Show Log in Finder", which is what it shows.
+- Changing a running app's type, start command, port or version says beside the field that it restarts the app; Start with Anvil no longer restarts it.
 
 ### Added
 
@@ -63,6 +76,9 @@ contain breaking changes.
 - The Processes window asks Docker every 15 s instead of every 2 s while no container runs.
 - A closed or minimized window no longer reloads after every action; it catches up when it is shown again.
 - Anvil frees the main window's memory after it has been closed for 10 minutes; opening it again shows the same app and tab.
+- Anvil uses much less CPU while it starts with many apps.
+- Less CPU while an app starts.
+- Less CPU while the Requests tab is open and no requests come in.
 
 ## [0.2.1] - 2026-10-21
 

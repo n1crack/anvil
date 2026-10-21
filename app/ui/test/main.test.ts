@@ -149,6 +149,29 @@ describe("https", () => {
     expect($("#app-https")).toBeNull();
   });
 
+  test("Remove Link… asks in a bubble, naming the settings that go, before it removes", async () => {
+    const { snap } = await import("../src/app");
+    const linked = w.mockSite("blog", "laravel", { linked: true, path: "/Users/x/Code/blog", parked_in: null });
+    w.mockSnap.sites.push(linked);
+    snap.sites.push(structuredClone(linked));
+    $("#search").dispatchEvent(new Event("input"));
+    await wait();
+    $(`#list [data-name="blog"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait(80);
+    (w.mockMenu as any[]).find((i) => i.text === "Remove Link…").action();
+    await wait();
+    expect(calls("remove_site")).toEqual([]);
+    expect($(".pop-confirm p").textContent).toContain(
+      "its settings here are deleted: PHP version, HTTPS, php.ini and extensions. Its folder stays.",
+    );
+    ($(".pop-confirm .primary") as HTMLElement).click();
+    await wait(80);
+    expect(calls("remove_site")).toEqual([["remove_site", { site: "blog" }]]);
+    expect($(`#list [data-name="blog"]`)).toBeNull();
+    // Later tests count remove_site from none.
+    w.mockCalls.splice(0, Infinity, ...w.mockCalls.filter(([c]) => c !== "remove_site"));
+  });
+
   test("the row shows a spinner while HTTPS is turned on or off", async () => {
     w.mockDelay = { set_secure: 200 };
     $(`#list [data-name="shop"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
@@ -300,6 +323,33 @@ describe("sidebar", () => {
     w.refresh();
     await wait(80);
     expect(badge("shop")).toBeNull();
+  });
+
+  test("while an app starts only the dots are asked for and redrawn, until it answers", async () => {
+    w.mockSnap.app_states = { vuefinder: "starting" };
+    await wait(550);
+    w.refresh();
+    await wait(80);
+    const { checkStarting } = await import("../src/app");
+    const badge = (name: string) => $(`#list [data-name="${name}"] .run-badge`);
+    const shopRow = $('#list [data-name="shop"]');
+    const states = calls("state").length;
+    w.mockSnap.app_states = { vuefinder: "running", shop: "crashed" };
+    await checkStarting();
+    expect(calls("run_states").length).toBeGreaterThan(0);
+    expect(calls("state").length).toBe(states);
+    expect(badge("vuefinder").className).toBe("run-badge on");
+    expect([badge("shop").className, badge("shop").title]).toEqual(["run-badge bad", "A process crashed"]);
+    // The rows themselves stay: nothing else of the list is drawn again.
+    expect($('#list [data-name="shop"]')).toBe(shopRow);
+    // Nothing starts any more: no more asking.
+    const asked = calls("run_states").length;
+    await checkStarting();
+    expect(calls("run_states").length).toBe(asked);
+    w.mockSnap.app_states = {};
+    await wait(550);
+    w.refresh();
+    await wait(80);
   });
 });
 
@@ -735,8 +785,21 @@ describe("dev", () => {
   });
 
   test("a crashed process has a red dot; a folder has no Dev tab", async () => {
+    w.mockOv.shop.rows[1].starting = true;
     await select("shop");
     expect(item("proc:logs").querySelector(".dot.bad")).not.toBeNull();
+    // Starting is amber, as in the sidebar; All is red while one has crashed, also then.
+    expect(item("proc:queue").querySelector(".dot.amber")).not.toBeNull();
+    expect(item("all").querySelector(".dot.bad")).not.toBeNull();
+    w.mockOv.shop.rows[1].starting = false;
+    // A crash says how it ended; its ✕ dismisses, the ■ only stops.
+    item("proc:logs").click();
+    await wait(80);
+    expect($(".dev-head .dev-exit.bad").textContent).toBe("Exited with code 1");
+    const dismiss = $$(".dev-head button").find((b) => b.getAttribute("aria-label") === "Dismiss logs")!;
+    expect(dismiss.querySelector("path")!.getAttribute("d")).toBe("M4.5 4.5l7 7M11.5 4.5l-7 7");
+    item("all").click();
+    await wait(40);
     await select("notes");
     expect(devTab().hidden).toBe(true);
     expect($('.tabs [data-tab="overview"]').getAttribute("aria-selected")).toBe("true");
@@ -961,6 +1024,66 @@ describe("audit fixes", () => {
     await wait();
     expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
     expect($(".toast")).toBeNull();
+  });
+
+  test("Add Folder of Applications: a project folder is offered as one app, an empty one said", async () => {
+    const open = w.__TAURI__.dialog.open;
+    w.__TAURI__.dialog.open = async () => "/Users/x/Code/shop";
+    const addFolder = async () => {
+      $("#add").click();
+      await wait();
+      await w.mockMenu.find((i) => i.text === "Add Folder of Applications…").action();
+      await wait();
+    };
+    w.mockParked = { project: "laravel", apps: 0 };
+    await addFolder();
+    expect($("#list .parked-note p").textContent).toBe("~/Code/shop is one application (Laravel), not a folder of them.");
+    $$("#list .parked-note button")
+      .find((b) => b.textContent === "Add It as One Application")!
+      .click();
+    await wait(80);
+    expect(calls("link_folder").at(-1)![1]).toEqual({ path: "/Users/x/Code/shop" });
+    expect($(".parked-note")).toBeNull();
+    expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
+
+    w.mockParked = { project: null, apps: 0 };
+    await addFolder();
+    expect($("#list .parked-note p").textContent).toContain("~/Code/shop has no applications yet");
+    ($("#list .parked-close") as HTMLElement).click();
+    expect($(".parked-note")).toBeNull();
+    delete w.mockParked;
+    w.__TAURI__.dialog.open = open;
+  });
+
+  test("PHP version: what it builds is said beside the select, a failed build under it", async () => {
+    const { snap } = await import("../src/app");
+    const saved = [snap.php_installed, snap.php_ext_built];
+    for (const m of [w.mockSnap, snap]) {
+      m.php_installed = ["8.4", "8.3"];
+      m.php_ext_built = { "8.3": [] };
+      m.sites.find((s) => s.name === "shop").ext = ["xdebug"];
+    }
+    await select("shop");
+    $('.tabs [data-tab="settings"]').click();
+    w.mockDelay = { set_php: 60 };
+    w.mockSetPhpFail = "PHP 8.3 works without xdebug for now: couldn't get xdebug-3.4.5 from pecl.php.net";
+    const php = $("#php") as HTMLSelectElement;
+    php.value = "8.3";
+    php.dispatchEvent(new Event("change"));
+    await wait(20);
+    expect($(".php-busy").textContent).toBe("Building xdebug…");
+    expect(($("#php") as HTMLSelectElement).disabled).toBe(true);
+    await wait(120);
+    expect($(".php-busy")).toBeNull();
+    expect($(".php-error").textContent).toBe(w.mockSetPhpFail);
+    expect($("#error").hidden).toBe(true);
+    delete w.mockSetPhpFail;
+    w.mockDelay = {};
+    for (const m of [w.mockSnap, snap]) {
+      [m.php_installed, m.php_ext_built] = saved;
+      m.sites.find((s) => s.name === "shop").ext = [];
+    }
+    $('.tabs [data-tab="overview"]').click();
   });
 
   test("New application: a folder can be chosen with nothing parked", async () => {
@@ -1412,6 +1535,11 @@ describe("requests", () => {
     await req.tick();
     expect(calls("requests_tail").length).toBe(n);
   });
+
+  test("the tab looks 4 times a second after a request, slowing to once a second while none come", async () => {
+    const { nextIn } = await import("../src/requests");
+    expect([0, 1, 2, 3, 50, 2000].map(nextIn)).toEqual([250, 500, 1000, 1000, 1000, 1000]);
+  });
 });
 
 describe("polls and races", () => {
@@ -1860,16 +1988,18 @@ describe("new application", () => {
     expect($("#new-progress-title").textContent).toBe("notes is ready");
     expect($("#new-state").classList.contains("ok")).toBe(true);
     expect(steps().every((s) => s.endsWith(":done"))).toBe(true);
-    expect($("#new-done").textContent).toBe("Open");
+    expect($("#new-done").textContent).toBe("Open in Browser");
     expect($("#new-reveal").hidden).toBe(true);
     await select("shop");
     $("#new-done").click();
     await wait();
     expect($("#new-app").hasAttribute("open")).toBe(false);
     expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
+    // Open in Browser does what it says, and selects the app too.
+    expect(calls("open").at(-1)![1]).toEqual({ site: "notes", target: "browser" });
   });
 
-  test("a failure shows ✕, highlights the error in the log, and offers Close and Show in Finder", async () => {
+  test("a failure shows ✕, highlights the error in the log, and offers Close and Show Log in Finder", async () => {
     await openSheet();
     fill("broken");
     w.mockCreateLog =
@@ -1886,6 +2016,7 @@ describe("new application", () => {
     expect(errors).toContain("Your requirements could not be resolved.");
     expect($("#new-done").textContent).toBe("Close");
     expect($("#new-reveal").hidden).toBe(false);
+    expect($("#new-reveal").textContent).toBe("Show Log in Finder");
     $("#new-reveal").click();
     await wait();
     expect(calls("create_reveal").at(-1)![1]).toEqual({ name: "broken" });
@@ -1904,6 +2035,33 @@ describe("new application", () => {
     expect($("#new-form").hidden).toBe(false);
     expect($("#new-error").textContent).toBe("/Users/x/Sites/shop already exists");
     $("#new-cancel").click();
+  });
+
+  test("a missing PHP is a form error with Install; the typed name stays on reopen", async () => {
+    await openSheet();
+    await pick("laravel");
+    fill("blog");
+    const created = calls("create_app").length;
+    w.mockNeed = { id: "php", name: "PHP", version: "8.4" };
+    submit();
+    await wait(80);
+    expect(calls("create_app").length).toBe(created);
+    expect($("#new-error").hidden).toBe(false);
+    expect($("#new-error").textContent).toBe("Laravel needs PHP, which isn't installed. Install PHP 8.4");
+    $("#new-cancel").click();
+    await openSheet();
+    expect(($("#new-name") as HTMLInputElement).value).toBe("blog");
+    submit();
+    await wait(80);
+    w.mockNeed = null;
+    ($("#new-error .inline-action") as HTMLElement).click();
+    await wait(80);
+    expect(calls("php_install").at(-1)![1]).toEqual({ version: "8.4" });
+    expect($("#new-error").hidden).toBe(true);
+    submit();
+    await wait(80);
+    expect(calls("create_app").length).toBe(created + 1);
+    $("#new-done").click();
   });
 });
 
@@ -2329,7 +2487,7 @@ describe("mail catcher", () => {
     expect(files[0].textContent).toBe("invoice.pdf 13 B Saved to ~/Downloads/invoice.pdf");
   });
 
-  test("new mail comes in on top while the tab is shown; Delete takes one out", async () => {
+  test("new mail comes in on top while the tab is shown; Delete asks in place, then takes one out", async () => {
     const mail = await import("../src/mail");
     mail.poll(false); // ticks by hand
     w.mockMails.shop.unshift({ ...w.mockMails.shop[1], id: "1792505400000-9", subject: "Newest" });
@@ -2338,7 +2496,15 @@ describe("mail catcher", () => {
     expect(rows().length).toBe(3);
     // The open one stays open.
     expect(rows()[1].querySelector(".log-detail")).not.toBeNull();
+    const n = calls("mail_delete").length;
     (rows()[1].querySelector(".mail-delete") as HTMLElement).click();
+    const ask = rows()[1].querySelector(".mail-actions.asking") as HTMLElement;
+    expect(ask.querySelector(".muted")!.textContent).toBe("Delete this message?");
+    (ask.querySelectorAll("button")[0] as HTMLElement).click(); // Cancel
+    expect(rows()[1].querySelector(".mail-actions.asking")).toBeNull();
+    expect(calls("mail_delete").length).toBe(n);
+    (rows()[1].querySelector(".mail-delete") as HTMLElement).click();
+    (rows()[1].querySelectorAll(".mail-actions button")[1] as HTMLElement).click();
     await wait(30);
     expect(calls("mail_delete").at(-1)![1]).toEqual({ inbox: "shop", id: "1792505339198-2" });
     expect(rows().map((r) => cell(r, ".log-msg"))).toEqual(["Newest", "(no subject)"]);
@@ -2406,7 +2572,7 @@ describe("php.ini fields", () => {
     const input = $("#ini-upload") as HTMLInputElement;
     input.value = "200M";
     input.dispatchEvent(new Event("change"));
-    expect($(".ini-note").textContent).toBe("Restarting the web server…");
+    expect($(".field-note").textContent).toBe("Restarting the web server…");
     await wait(60);
     expect(calls("set_site_ini").slice(n)).toEqual([
       [
@@ -2420,7 +2586,7 @@ describe("php.ini fields", () => {
         },
       ],
     ]);
-    expect($(".ini-note").textContent).toBe("Applied; the web server restarted.");
+    expect($(".field-note").textContent).toBe("Applied; the web server restarted.");
     input.value = "";
     input.dispatchEvent(new Event("change"));
     await wait(60);
@@ -2447,6 +2613,46 @@ describe("run settings", () => {
       w.mockSnap.sites.pop();
       delete w.mockSnap.runtimes.dotnet;
       await state();
+    }
+  });
+
+  test("a change that restarts the running app says so beside the field; stopped, nothing; refused, why", async () => {
+    const state = async () => {
+      await (await import("../src/app")).call("state");
+      await wait(40);
+    };
+    const change = async (sel: string, value: string) => {
+      const input = $(`#site ${sel}`) as HTMLInputElement;
+      input.value = value;
+      input.dispatchEvent(new Event("change"));
+      const during = input.parentElement!.querySelector(".field-note")?.textContent ?? null;
+      await wait(60);
+      return [during, $(`#site ${sel}`).parentElement!.querySelector(".field-note")?.textContent ?? null];
+    };
+    const site = w.mockSnap.sites.find((x) => x.name === "vuefinder");
+    const was = { command: site.command, command_custom: site.command_custom, port: site.port };
+    w.mockSnap.app_states.vuefinder = "running";
+    try {
+      await state();
+      await select("vuefinder");
+      $('.tabs [data-tab="settings"]').click();
+      await wait(60);
+      expect(await change("#app-command", "pnpm dev --host")).toEqual(["Restarting vuefinder…", "Applied; vuefinder restarted."]);
+      expect(calls("set_app").at(-1)![1]).toEqual({ site: "vuefinder", command: "pnpm dev --host" });
+      expect(await change("#app-port", "5174")).toEqual(["Restarting vuefinder…", "Applied; vuefinder restarted."]);
+      w.mockSetAppFail = "Port 5174 is taken by another app";
+      expect(await change("#app-port", "5175")).toEqual(["Restarting vuefinder…", "Port 5174 is taken by another app"]);
+      expect($("#site #app-port").parentElement!.querySelector(".field-note")!.classList.contains("error-text")).toBe(true);
+      delete w.mockSetAppFail;
+      delete w.mockSnap.app_states.vuefinder;
+      await state();
+      expect(await change("#app-port", "5176")).toEqual([null, null]);
+    } finally {
+      delete w.mockSetAppFail;
+      delete w.mockSnap.app_states.vuefinder;
+      Object.assign(site, was);
+      await state();
+      $('.tabs [data-tab="overview"]').click();
     }
   });
 });
@@ -2618,6 +2824,18 @@ describe("worktrees", () => {
     await wait();
     expect(sheetOpen()).toBe(true);
     expect($("#ask-label").textContent).toBe("New worktree of shop");
+    // Create says it works while git and the copied files take their time; a refusal stays.
+    ($("#ask-input") as HTMLInputElement).value = "feature/y";
+    w.mockDelay = { worktree_add: 100 };
+    w.mockAddFail = "/Users/x/Sites/shop--feature-y already exists";
+    $("#ask-form").dispatchEvent(new Event("submit", { cancelable: true }));
+    await wait(30);
+    expect($("#ask-ok").textContent).toBe("Creating…");
+    await wait(120);
+    expect($("#ask-ok").textContent).toBe("Create");
+    expect($("#ask-error").textContent).toContain("already exists");
+    w.mockDelay = {};
+    delete w.mockAddFail;
     $("#ask-cancel").click();
     expect(sheetOpen()).toBe(false);
     await select(wt);
@@ -2832,25 +3050,97 @@ describe("worktrees", () => {
     await wait(80);
     const box = $('[data-panel="settings"] .wt-hooks');
     expect(box.hidden).toBe(false);
-    expect(box.querySelector(".error-text")!.textContent).toBe("this app: copyy isn't a hooks field, or its value isn't the right kind");
+    expect(box.querySelector(".error-text:not([hidden])")!.textContent).toBe(
+      "this app: copyy isn't a hooks field, or its value isn't the right kind",
+    );
     delete w.mockProblems;
-    const rows = [...box.querySelectorAll(".row")].map((r) => r.querySelector("dt")!.textContent);
-    expect(rows).toEqual(["Worktrees", "Copy files", "Copy the database too", "Env keys", "Check keys", "After create"]);
-    expect(box.textContent).toContain("Laravel preset, edited in Settings › Worktrees");
-    expect(box.textContent).toContain("Set for this app");
-    expect(box.textContent).toContain("From .anvil.toml");
-    const keys = box.querySelectorAll("textarea")[1] as HTMLTextAreaElement;
-    expect(keys.value).toBe("APP_URL={url}\nDB_DATABASE={db}");
-    keys.value = "APP_URL={url}";
-    w.mockHooksFail = "A: {nope} isn't one of {db}, {url}, {prefix}, {port}, {name}";
-    keys.dispatchEvent(new Event("change"));
+    // Closed: what a new worktree gets, in sentences, and where it comes from, once.
+    const btn = (t: string) => [...box.querySelectorAll("button")].find((b) => b.textContent === t) as HTMLButtonElement;
+    expect([...box.querySelectorAll(".wt-summary > div:not(.muted):not(.wt-actions)")].map((d) => d.textContent)).toEqual([
+      "Copies .env",
+      "Its own database, empty",
+      "Sets APP_URL, DB_DATABASE",
+      "Then offers to run composer install",
+    ]);
+    expect(box.querySelector(".wt-summary .muted")!.textContent).toBe(
+      "Changed for this app; the rest from the Laravel preset and .anvil.toml",
+    );
+    expect(box.querySelectorAll(".row").length).toBe(1);
+    expect(box.querySelector("textarea")).toBeNull();
+    btn("Customize…").click();
     await wait(60);
-    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "keys", value: { APP_URL: "{url}" } });
-    expect(box.textContent).toContain("isn't one of");
+    const rows = [...box.querySelectorAll(".row")].map((r) => r.querySelector("dt")!.textContent);
+    expect(rows).toEqual(["Worktrees", "Copy files", "Database", "Env keys", "After create"]);
+    const [copy, db, keys, after] = [...box.querySelectorAll(".hk")] as HTMLElement[];
+    // Copy files: a row per path with ×, Add.
+    (copy.querySelector(".hk-add input") as HTMLInputElement).value = ".env.local";
+    (copy.querySelector(".hk-add .inline-action") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "copy", value: [".env", ".env.local"] });
+    // Database: Empty | Copy of main's.
+    ([...db.querySelectorAll("button")].find((b) => b.textContent === "Copy of main’s") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "copy_database", value: true });
+    // Env keys: a plain chooser, no placeholders to learn; Custom… takes free text.
+    const keysBox = () => [...box.querySelectorAll(".hk")][2] as HTMLElement;
+    const sels = [...keys.querySelectorAll("select")] as HTMLSelectElement[];
+    expect(sels.map((s) => s.selectedOptions[0].textContent)).toEqual([
+      "This worktree’s address",
+      "This worktree’s database",
+      "This worktree’s database",
+    ]);
+    sels[0].value = "{prefix}";
+    sels[0].dispatchEvent(new Event("change"));
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "keys", value: { APP_URL: "{prefix}", DB_DATABASE: "{db}" } });
+    const add = keysBox().querySelector(".hk-add")!;
+    (add.querySelector("input.hk-key") as HTMLInputElement).value = "A";
+    const sel = add.querySelector("select") as HTMLSelectElement;
+    sel.value = "";
+    sel.dispatchEvent(new Event("change"));
+    const custom = add.querySelector(".hk-custom") as HTMLInputElement;
+    expect(custom.hidden).toBe(false);
+    custom.value = "{nope}";
+    w.mockHooksFail = "A: {nope} isn't one of {db}, {url}, {prefix}, {port}, {name}";
+    (add.querySelector(".inline-action") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({
+      site: "shop",
+      field: "keys",
+      value: { APP_URL: "{url}", DB_DATABASE: "{db}", A: "{nope}" },
+    });
+    // Refused: said in its row, the typed value kept.
+    expect(keysBox().querySelector(".error-text")!.textContent).toContain("isn't one of");
+    expect(custom.value).toBe("{nope}");
     delete w.mockHooksFail;
-    ([...box.querySelectorAll("button")].find((b) => b.textContent === "Use preset") as HTMLButtonElement).click();
+    (keysBox().querySelector(".hk-row .hk-x") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "keys", value: { DB_DATABASE: "{db}" } });
+    // After create: {install} offered as Install packages (the lock file's command).
+    expect(after.textContent).not.toContain("{install}");
+    ([...after.querySelectorAll("button")].find((b) => b.textContent === "Add Package Install") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "after_create", value: ["composer install", "{install}"] });
+    btn("Use preset").click();
     await wait(60);
     expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: null, value: null });
+    btn("Done").click();
+    await wait(60);
+    expect(box.querySelectorAll(".row").length).toBe(1);
+  });
+
+  test("hooks said plainly: {install} as the lock file's command, left out without one", async () => {
+    const { summary, command } = await import("../src/hooksform");
+    expect(command("{install}", "pnpm install")).toBe("Install packages (pnpm install)");
+    expect(command("{install}")).toBe("Install packages (the lock file’s install)");
+    const h = { copy: [], copy_database: true, keys: {}, after_create: ["{install}", "php artisan migrate"] };
+    expect(summary(h, null)).toEqual([
+      "Copies no files",
+      "Its own database, a copy of main’s",
+      "Sets no env keys",
+      "Then offers to run php artisan migrate",
+    ]);
+    expect(summary(h, "npm ci").at(-1)).toBe("Then offers to run Install packages (npm ci), php artisan migrate");
   });
 
   test("Remove Worktree… says what's uncommitted, offers to delete its database, and removes anyway", async () => {
@@ -2868,9 +3158,15 @@ describe("worktrees", () => {
     expect(yes.textContent).toBe("Remove anyway");
     expect(calls("worktree_remove").length).toBe(0);
     ($(".pop-confirm input[type=checkbox]") as HTMLInputElement).checked = true;
+    w.mockDelay = { worktree_remove: 120 };
     yes.click();
-    await wait(60);
+    await wait(40);
+    // While it works the row says so, not only once the folder is gone.
+    expect($(`#list [data-name="${wt}"] .removing`).textContent).toBe("Removing…");
+    await wait(150);
+    w.mockDelay = {};
     expect(calls("worktree_remove").at(-1)![1]).toEqual({ site: wt, dropDb: true, force: true });
+    expect($(`#list [data-name="${wt}"] .removing`)).toBeNull();
   });
 
   test("Remove Worktree… names the ignored data that goes with the folder", async () => {

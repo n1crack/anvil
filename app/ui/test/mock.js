@@ -714,6 +714,8 @@ const mockHandle = (cmd, a) => {
   const ov = a?.site && mockOv[a.site];
   if (window.mockFail?.[cmd]) throw window.mockFail[cmd];
   switch (cmd) {
+    case "run_states":
+      return { app_states: mockSnap.app_states, app_errors: mockSnap.app_errors };
     case "state":
     case "app_run":
     case "worktree_adopt":
@@ -761,6 +763,7 @@ const mockHandle = (cmd, a) => {
           problems: window.mockProblems ?? [],
         },
         own: { keys: { APP_URL: "{url}", DB_DATABASE: "{db}" } },
+        install: "pnpm install",
       };
     case "worktree_losses":
       return window.mockLosses ?? [];
@@ -928,6 +931,13 @@ const mockHandle = (cmd, a) => {
       return null;
     case "link_folder":
       return "notes";
+    case "create_needs":
+      return window.mockNeed ?? null;
+    case "set_php":
+      if (window.mockSetPhpFail) throw window.mockSetPhpFail;
+      return mockSnap;
+    case "park_folder":
+      return window.mockParked ?? { project: null, apps: 3 };
     case "create_app":
       if (window.mockCreateFail) throw window.mockCreateFail;
       return "notes";
@@ -1013,6 +1023,16 @@ const mockHandle = (cmd, a) => {
     case "set_mail_catcher":
       window.mockMailCatcher = a.on;
       return mockHandle("settings", {});
+    case "set_app":
+    case "set_runtime": {
+      // As the app: a running app restarts on any change but autostart.
+      if (window.mockSetAppFail) throw window.mockSetAppFail;
+      const site = mockSnap.sites.find((x) => x.name === a.site);
+      if (a.command) Object.assign(site, { command: a.command, command_custom: true });
+      if (a.port) site.port = a.port;
+      const restarted = !("autostart" in a) && ["running", "starting", "crashed"].includes(mockSnap.app_states[a.site]);
+      return { ...mockSnap, restarted };
+    }
     case "set_site_ini": {
       const ini = mockSnap.sites.find((x) => x.name === a.site).ini;
       for (const [k, v] of a.values) {

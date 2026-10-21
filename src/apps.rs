@@ -125,6 +125,25 @@ pub fn detect(dir: &Path) -> &'static str {
     if pages { "static" } else { "folder" }
 }
 
+/// A folder that is one project itself, not a folder of them: its kind. Adding it as a
+/// folder of applications would serve its `app`, `vendor`, `node_modules`… as apps.
+pub fn project_kind(dir: &Path) -> Option<&'static str> {
+    let git = dir.join(".git").exists();
+    // Pages alone don't make one: the old ~/Sites came with an index.html beside its sites.
+    let sites_inside = || {
+        fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| e.path().is_dir() && detect(&e.path()) != "folder")
+    };
+    match detect(dir) {
+        "folder" if !git => None,
+        "static" if !git && sites_inside() => None,
+        kind => Some(kind),
+    }
+}
+
 /// Whether Anvil gives the app an address: a Compose project's containers answer on
 /// their own ports, and a plain folder has no page.
 pub fn serves(kind: &str) -> bool {
@@ -1064,6 +1083,27 @@ mod tests {
         }
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_project_is_not_a_folder_of_them() {
+        let sites = tempfile::tempdir().unwrap();
+        let d = sites.path();
+        assert_eq!(project_kind(d), None);
+        fs::write(d.join("index.html"), "").unwrap();
+        assert_eq!(project_kind(d), Some("static"));
+        fs::create_dir_all(d.join("shop")).unwrap();
+        fs::write(d.join("shop/artisan"), "").unwrap();
+        assert_eq!(
+            project_kind(d),
+            None,
+            "the old ~/Sites: a page beside its sites"
+        );
+        fs::write(d.join("composer.json"), "{}").unwrap();
+        assert_eq!(project_kind(d), Some("php"));
+        let bare = tempfile::tempdir().unwrap();
+        fs::create_dir_all(bare.path().join(".git")).unwrap();
+        assert_eq!(project_kind(bare.path()), Some("folder"));
     }
 
     #[test]

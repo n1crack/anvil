@@ -15,7 +15,7 @@ const STATUSES: [string, string][] = [
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 const MAX_ROWS = 2000; // kept while new ones come in
 let rv: any = null; // the view: { site, host, node, ... }
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
 
 window.requestsTab = (root, visible) => {
   const panel = $('[data-panel="requests"]', root);
@@ -202,17 +202,34 @@ function toggle(v, li) {
   li.append(box);
 }
 
-/** New requests every 250 ms, only while the tab is shown in a window that can be seen:
- * with nothing new that's a stat of the log and an empty read. */
+let quiet = 0; // looks in a row that found nothing new
+
+/** The wait before the next look: 250 ms after a new request, doubling while nothing new
+ * comes, up to 1 s. */
+export const nextIn = (quiet: number) => Math.min(1000, 250 * 2 ** quiet);
+
+/** New requests, only while the tab is shown in a window that can be seen: with nothing
+ * new that's a stat of the log and an empty read. */
 export function poll(on: boolean) {
-  clearInterval(timer ?? undefined);
-  timer = on ? setInterval(tick, 250) : null;
+  clearTimeout(timer ?? undefined);
+  timer = null;
+  quiet = 0;
+  if (on) next();
+}
+
+function next() {
+  const t = setTimeout(async () => {
+    await tick();
+    if (timer === t) next(); // not stopped or restarted meanwhile
+  }, nextIn(quiet));
+  timer = t;
 }
 
 export async function tick() {
   const v = rv;
   if (!v?.page || !v.node.isConnected || v.node.closest("[hidden]")) return poll(false);
   if (!shown() || v.tailing) return;
+  quiet++;
   const token = v.token;
   v.tailing = true;
   let page;
@@ -226,6 +243,7 @@ export async function tick() {
   if (token !== v.token || rv !== v) return;
   v.from = page.end_offset;
   if (!page.requests.length) return;
+  quiet = 0;
   const list = $(".req-list", v.node);
   list.querySelector(".empty")?.remove();
   v.list.keep(() => {

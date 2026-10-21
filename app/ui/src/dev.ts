@@ -16,7 +16,16 @@ import { line, streamPane } from "./stream";
 const devSel = new Map<string, string>(); // site name -> "all", "app", "proc:<id>" or "once:<id>"
 export const COLORS = 6; // name colors pc0…pc5 (blue, violet, magenta, cyan, indigo, slate), none a state's
 
-type Item = { key: string; name: string; color: string; running: boolean; crashed: boolean; row?: ProcessRow; run?: CommandChip };
+type Item = {
+  key: string;
+  name: string;
+  color: string;
+  running: boolean;
+  starting?: boolean;
+  crashed: boolean;
+  row?: ProcessRow;
+  run?: CommandChip;
+};
 
 /** The app's own server when it is a process, then every other process, each in its color. */
 const procItems = (name: string): Item[] =>
@@ -25,6 +34,7 @@ const procItems = (name: string): Item[] =>
     name: r.name,
     color: `pc${i % COLORS}`,
     running: r.running,
+    starting: r.starting,
     crashed: !!r.crashed && !r.running,
     row: r,
   }));
@@ -34,7 +44,7 @@ const runItems = (name: string): Item[] =>
     .filter((c) => c.running || c.exit)
     .map((c) => ({ key: `once:${c.id}`, name: c.name, color: "", running: c.running, crashed: !c.running && c.exit?.code !== 0, run: c }));
 const scriptLabel = (c: CommandChip) => (c.source === "composer.json" ? `composer ${c.name}` : `npm run ${c.name}`);
-const exitText = (c: CommandChip) => (c.exit?.code == null ? "Ended by a signal" : `Exited with code ${c.exit.code}`);
+const exitText = (exit: { code: number | null } | null) => (exit?.code == null ? "Ended by a signal" : `Exited with code ${exit.code}`);
 
 const pane = streamPane({
   listCls: "dev-list",
@@ -210,7 +220,9 @@ async function itemMenu(name: string, x: Item, at: HTMLElement) {
 function entry(name: string, x: Item) {
   // The status column: a process's dot; a run's spinner, then a check or a cross.
   let status: HTMLElement;
-  if (!x.run) status = el("span", `dot ${x.running ? "on" : x.crashed ? "bad" : ""}`);
+  // Red crashed, amber starting (its port doesn't answer yet), green running, grey stopped;
+  // in that order for All, as in the sidebar.
+  if (!x.run) status = el("span", `dot ${x.crashed ? "bad" : x.running ? (x.starting ? "amber" : "on") : ""}`);
   else if (x.running) {
     status = el("span", "dev-status");
     status.append(el("span", "spin-dot"));
@@ -219,7 +231,7 @@ function entry(name: string, x: Item) {
     const ok = x.run.exit?.code === 0;
     status = el("span", `dev-status ${ok ? "ok" : "bad"}`);
     status.append(icon(ok ? "check" : "x"));
-    status.title = ok ? "Succeeded" : exitText(x.run);
+    status.title = ok ? "Succeeded" : exitText(x.run.exit);
   }
   const label =
     x.run?.source === "composer.json" && runItems(name).some((y) => y.key !== x.key && y.name === x.name) ? `composer ${x.name}` : x.name;
@@ -396,7 +408,14 @@ export function drawDev(name: string) {
   const anyBad = procs.some((x) => x.crashed);
   const procCard = el("div", "group procs-list dev-card dev-procs");
   procCard.append(
-    entry(name, { key: "all", name: "All processes", color: "", running: !!running, crashed: anyBad }),
+    entry(name, {
+      key: "all",
+      name: "All processes",
+      color: "",
+      running: !!running,
+      starting: procs.some((x) => x.starting),
+      crashed: anyBad,
+    }),
     ...procs.map((x) => entry(name, x)),
   );
   if (!procs.length) procCard.append(el("p", "dev-none", "No processes yet. Configure adds one."));
@@ -407,7 +426,7 @@ export function drawDev(name: string) {
   if (!one) pane.heading("All processes", `${running} of ${procs.length} running`);
   else if (one.run) {
     const c = one.run;
-    const bad = c.exit && !c.running && c.exit.code !== 0 ? [el("span", "dev-exit bad", exitText(c))] : [];
+    const bad = c.exit && !c.running && c.exit.code !== 0 ? [el("span", "dev-exit bad", exitText(c.exit))] : [];
     const actions = pane.heading(c.name, scriptLabel(c), ...bad);
     if (c.running) actions.append(procBtn([icon("stop"), "Stop"], `Stop ${scriptLabel(c)}`, () => dismiss(name, c)));
     else {
@@ -418,10 +437,15 @@ export function drawDev(name: string) {
     }
   } else {
     const r = one.row!;
-    const actions = pane.heading(r.name, r.command);
+    // A crash says how it ended, as a one-off run's does.
+    const bad = r.crashed && !r.running ? [el("span", "dev-exit bad", exitText(r.crashed))] : [];
+    const actions = pane.heading(r.name, r.command, ...bad);
     if (r.running || r.crashed) {
       actions.append(procBtn("Restart", `Restart ${r.name}`, () => runProc(name, one, "restart")));
-      actions.append(procBtn(icon("stop"), r.running ? `Stop ${r.name}` : `Dismiss ${r.name}`, () => runProc(name, one, "stop")));
+      // ■ stops; a crashed one has nothing to stop, so its ✕ only dismisses the crash.
+      actions.append(
+        procBtn(icon(r.running ? "stop" : "x"), r.running ? `Stop ${r.name}` : `Dismiss ${r.name}`, () => runProc(name, one, "stop")),
+      );
     } else {
       const start = procBtn([icon("start"), "Start"], `Start ${r.name}`, () => runProc(name, one, "start"));
       start.classList.add("dev-head-start");

@@ -183,15 +183,30 @@ export function inboxView(inbox: string, invoke: Invoke, emptyText: string): Inb
       segs.append(b);
     }
     const del = el("button", "mail-delete", "Delete");
-    del.onclick = async () => {
-      try {
-        await invoke("mail_delete", { inbox, id: m.id });
-        li.remove();
-        ids = ids.filter((x) => x !== m.id);
-        count();
-      } catch (e) {
-        fail(e);
-      }
+    // Asks where the buttons were, as Clear does in the bar.
+    del.onclick = () => {
+      const had = [...tools.children];
+      const back = () => {
+        tools.classList.remove("asking");
+        tools.replaceChildren(...had);
+      };
+      confirmInRow(
+        tools,
+        "Delete this message?",
+        "Delete",
+        async () => {
+          try {
+            await invoke("mail_delete", { inbox, id: m.id });
+            li.remove();
+            ids = ids.filter((x) => x !== m.id);
+            count();
+          } catch (e) {
+            back();
+            fail(e);
+          }
+        },
+        back,
+      );
     };
     tools.append(del);
     pick.append(segs, tools);

@@ -2,7 +2,7 @@ import "./platform";
 import type { Settings } from "./types";
 import { ownError } from "./live";
 import { confirmInRow, textAct } from "./confirm";
-import { FIELDS, control } from "./hooksform";
+import { NAMES, editor } from "./hooksform";
 import { inboxView, type Inbox } from "./inbox";
 
 export const { invoke } = window.__TAURI__.core;
@@ -923,7 +923,7 @@ const editing = new Set<string>(); // presets open for editing
 function renderPresets() {
   const box = $("#presets");
   // A field being typed in stays as it is.
-  if (box.contains(document.activeElement) && document.activeElement?.tagName === "TEXTAREA") return;
+  if (box.contains(document.activeElement) && document.activeElement?.tagName === "INPUT") return;
   box.replaceChildren(
     ...s.worktree_presets.flatMap((p) => {
       const row = document.createElement("div");
@@ -949,29 +949,30 @@ function renderPresets() {
           render();
         });
       // Not copy_database: the switch above is that layer, a preset leaves it to it.
-      const fields: HTMLElement[] = FIELDS.filter(([f]) => f !== "copy_database").map(([field, name, hint]) => {
-        const r = document.createElement("label");
+      const fields: HTMLElement[] = (["copy", "keys", "after_create"] as const).map((field) => {
+        const r = document.createElement("div");
         r.className = "row row-top preset-field";
         const t = document.createElement("span");
-        t.textContent = name;
-        const h = document.createElement("small");
-        h.textContent = hint;
-        const fail = document.createElement("small");
-        fail.className = "error-text";
-        fail.hidden = true;
-        t.append(h, fail);
-        r.append(
-          t,
-          control(field, p.hooks, (v) => save(field, v), fail),
-        );
+        t.textContent = NAMES[field];
+        r.append(t, editor(field, p.hooks, { save }));
         return r;
       });
       if (p.edited) {
         const reset = document.createElement("div");
         reset.className = "row preset-field";
+        const fail = document.createElement("small");
+        fail.className = "error-text";
+        fail.hidden = true;
+        const why = document.createElement("span");
+        why.append(fail);
         reset.append(
-          document.createElement("span"),
-          button("Reset to default", () => save(null).catch((e) => showError(String(e)))),
+          why,
+          button("Reset to default", () =>
+            save(null).catch((e) => {
+              fail.textContent = String(e);
+              fail.hidden = false;
+            }),
+          ),
         );
         fields.push(reset);
       }

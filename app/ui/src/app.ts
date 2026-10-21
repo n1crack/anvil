@@ -1,8 +1,9 @@
 import type { Snapshot } from "./types";
 import { late } from "./late";
 import { ownError, shown } from "./live";
-import { FIELDS, control } from "./hooksform";
+import { NAMES, editor, summary } from "./hooksform";
 import { confirmInRow } from "./confirm";
+import { icon } from "./icons";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -20,6 +21,8 @@ export const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 // A standard port (443, or 80 without HTTPS) isn't written out.
 // Sites whose HTTPS is being turned on or off (the web server reloads meanwhile).
 export const securing = new Set<string>();
+// Worktrees being removed: their row says so until they're gone.
+const removing = new Set<string>();
 
 // Compose projects and plain folders get no address from Anvil.
 export const serves = (s) => !["compose", "folder"].includes(s.kind);
@@ -348,13 +351,33 @@ export function toggle(name, open = collapsed.has(name)) {
 export function markBox(m, badge) {
   const box = el("span", "mark-box");
   box.append(m);
-  if (badge) {
-    const b = el("span", `run-badge ${badge}`);
-    b.title = { on: "Running", warm: "Starting", bad: "Failed to start" }[badge];
-    box.append(b);
-    box.classList.add("running");
-  }
+  setBadge(box, badge);
   return box;
+}
+
+function setBadge(box, badge) {
+  $(".run-badge", box)?.remove();
+  box.classList.toggle("running", !!badge);
+  if (!badge) return;
+  const b = el("span", `run-badge ${badge}`);
+  b.title = { on: "Running", warm: "Starting", bad: "Failed to start" }[badge];
+  box.append(b);
+}
+
+const BADGES = { running: "on", starting: "warm", crashed: "bad" };
+const STATE_TITLES = { running: "Running", starting: "Starting", crashed: "A process crashed" };
+
+/** An app row's dot: green while anything of the app runs, amber while its server starts,
+ * red after a crash. */
+function appBadge(box, state) {
+  setBadge(box, state && BADGES[state]);
+  if (state === "crashed") $(".run-badge", box).title = STATE_TITLES.crashed;
+}
+
+/** A worktree row's branch glyph, coloured as an app's dot. */
+function wtState(m, state) {
+  m.className = `wt-glyph ${BADGES[state] ?? ""}`;
+  m.title = STATE_TITLES[state] ?? "Stopped";
 }
 
 /** The names linked to one folder: the app is the parked one, else the first by name, as
@@ -383,10 +406,9 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   // A worktree: a bare branch glyph on the tree line, no mark of its own (that's an app's);
   // green while it runs, amber while it starts, red after a crash.
   const childMark = () => {
-    const state = snap.app_states[s.name];
-    const m = el("span", `wt-glyph ${{ running: "on", starting: "warm", crashed: "bad" }[state] ?? ""}`);
+    const m = el("span");
     m.innerHTML = BRANCH;
-    m.title = { running: "Running", starting: "Starting", crashed: "A process crashed" }[state] ?? "Stopped";
+    wtState(m, snap.app_states[s.name]);
     return m;
   };
   const text = document.createElement("span");
@@ -426,7 +448,12 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   // A plain PHP app shows only its pinned version, not "PHP" twice.
   // Under a type heading the type would only repeat it.
   if (s.hiddenApp) end.append(el("span", "kind", "hidden"));
-  else if (showKind && !child && s.kind !== "static" && !(s.kind === "php" && s.php_pinned)) {
+  else if (removing.has(s.name)) {
+    // Its processes stop, its databases may go, then its folder: that takes a moment.
+    const busy = el("span", "kind removing", "Removing…");
+    busy.prepend(el("span", "spin-dot"));
+    end.append(busy);
+  } else if (showKind && !child && s.kind !== "static" && !(s.kind === "php" && s.php_pinned)) {
     const kind = document.createElement("span");
     kind.className = `kind kind-${s.kind}`;
     kind.textContent = snap.kinds.find(([id]) => id === s.kind)?.[1] ?? s.kind;
@@ -447,10 +474,8 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   }
   if (child) b.append(childMark(), text, end);
   else {
-    const state = s.hiddenApp ? undefined : snap.app_states[s.name];
-    // Green while anything of the app runs, amber while its server starts, red after a crash.
-    const box = markBox(mark(s), state && { running: "on", starting: "warm", crashed: "bad" }[state]);
-    if (state === "crashed") $(".run-badge", box).title = "A process crashed";
+    const box = markBox(mark(s), null);
+    appBadge(box, s.hiddenApp ? undefined : snap.app_states[s.name]);
     b.append(box, text, end);
   }
   b.onclick = () => select(s.name);
@@ -558,11 +583,8 @@ export function welcome(root) {
   const icon = el("img");
   icon.src = "icon.png";
   icon.alt = "";
-  const add = el("button", "primary", "Add Projects Folder…");
-  add.onclick = async () => {
-    const path = await window.__TAURI__.dialog.open({ directory: true, title: "Every project inside this folder becomes an application" });
-    if (path) await call("park_folder", { path });
-  };
+  const add = el("button", "primary", "Add Folder of Applications…");
+  add.onclick = addAppsFolder;
   const create = el("button", "link", "or create a new application");
   create.onclick = () => late.openNewApp();
   box.append(
@@ -572,7 +594,63 @@ export function welcome(root) {
     add,
     create,
   );
+  const note = parkedNoteEl();
+  if (note) box.append(note);
   root.replaceChildren(box);
+}
+
+// What the last Add Folder of Applications… added nothing for: a folder that is one
+// project itself (its kind), or one with no applications in it yet (null).
+let parked: { path: string; project: string | null } | null = null;
+
+/** Add a folder of applications. One that is a project itself isn't added (its `vendor`,
+ * `node_modules`… would become apps): a note offers adding it as one application. */
+export async function addAppsFolder() {
+  const path = await window.__TAURI__.dialog.open({ directory: true, title: "Every project inside this folder becomes an application" });
+  if (!path) return;
+  try {
+    const r = await invoke("park_folder", { path });
+    parked = r.project || !r.apps ? { path, project: r.project } : null;
+    await call("state");
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+/** The note for `parked`: on the welcome, or over the list. */
+function parkedNoteEl() {
+  if (!parked) return null;
+  const { path, project } = parked;
+  const note = el("div", "parked-note");
+  const text = project
+    ? `${tilde(path)} is one application (${kindLabel(project)}), not a folder of them.`
+    : `${tilde(path)} has no applications yet. Each folder you put in it becomes one.`;
+  const act = el("button", null, project ? "Add It as One Application" : "Create One…");
+  act.onclick = async () => {
+    if (!project) {
+      parked = null;
+      render();
+      return late.openNewApp();
+    }
+    try {
+      const name = await invoke("link_folder", { path });
+      parked = null;
+      await call("state");
+      select(name);
+    } catch (e) {
+      inlineError(act, String(e));
+    }
+  };
+  const close = el("button", "parked-close");
+  close.append(icon("x"));
+  close.title = "Dismiss";
+  close.setAttribute("aria-label", "Dismiss");
+  close.onclick = () => {
+    parked = null;
+    render();
+  };
+  note.append(close, el("p", null, text), act);
+  return note;
 }
 
 function renderList() {
@@ -581,6 +659,8 @@ function renderList() {
   const note = filterNote("apps", kindLabel);
   const hiddenApps = hiddenSites();
   if (note && (snap.sites.length || hiddenApps.length)) list.append(note);
+  const parkedNote = snap.sites.length && parkedNoteEl();
+  if (parkedNote) list.append(parkedNote);
 
   if (!snap.sites.length && !hiddenApps.length) {
     list.append(el("p", "empty", "No applications yet."));
@@ -751,14 +831,28 @@ async function siteMenu(s) {
   }
   items.push(
     await M.MenuItem.new({
-      text: s.linked ? "Remove Link" : "Hide from Anvil",
+      text: s.linked ? "Remove Link…" : "Hide from Anvil",
       action: async () => {
-        if (!s.linked) {
-          justHid.set(s.name, s);
-          setTimeout(() => {
-            if (justHid.delete(s.name) && mode === "apps") renderList();
-          }, 6000);
+        // Hide keeps the app's settings and has Undo; removing a link deletes them: asked first.
+        if (s.linked) {
+          const anchor = $(`#list [data-name="${CSS.escape(s.name)}"]`) ?? $("#site .site-name");
+          const pop = el("div", "pop-confirm wide");
+          const no = el("button", null, "Cancel");
+          const yes = el("button", "primary", "Remove");
+          const said = `Remove ${s.name} from Anvil? Its processes stop and its settings here are deleted: PHP version, HTTPS, php.ini and extensions. Its folder stays.`;
+          pop.append(el("p", null, said), no, yes);
+          const close = popAt(anchor, pop, yes);
+          no.onclick = close;
+          yes.onclick = () => {
+            close();
+            call("remove_site", { site: s.name });
+          };
+          return;
         }
+        justHid.set(s.name, s);
+        setTimeout(() => {
+          if (justHid.delete(s.name) && mode === "apps") renderList();
+        }, 6000);
         await call("remove_site", { site: s.name });
       },
     }),
@@ -798,6 +892,8 @@ export type Ask = {
   /** An error it opens with, inline. */
   error?: string;
   ok: string;
+  /** `ok` while `submit` works, for work that takes a while ("Creating…"). */
+  busy?: string;
   /** Does the work: a failure shows in the sheet, which stays open. */
   submit: (value: string, checked: boolean[]) => Promise<unknown>;
 };
@@ -852,6 +948,8 @@ export function ask(o: Ask): Promise<{ value: string; checked: boolean[] } | nul
       if (o.field && !value && !o.optional) return input.focus();
       const checked = boxes.map((b) => b.checked);
       ok.disabled = true;
+      error.hidden = true;
+      if (o.busy) ok.replaceChildren(el("span", "spin-dot"), o.busy);
       try {
         await o.submit(value, checked);
         finish({ value, checked });
@@ -860,6 +958,7 @@ export function ask(o: Ask): Promise<{ value: string; checked: boolean[] } | nul
         error.hidden = false;
       } finally {
         ok.disabled = false;
+        ok.textContent = o.ok;
       }
     };
   });
@@ -927,6 +1026,7 @@ async function newWorktree(s) {
         ]
       : [],
     ok: "Create",
+    busy: "Creating…",
     submit: async (raw, [copy]) => {
       const branch = raw.trim();
       await callOrThrow("worktree_add", { site: s.name, branch, new: !branches.includes(branch), copyDb: copyable ? copy : null });
@@ -1009,24 +1109,39 @@ async function removeWorktree(s) {
   const anchor = $(`#list [data-name="${CSS.escape(s.name)}"]`) ?? $("#site .site-name");
   const close = popAt(anchor, pop, yes);
   no.onclick = close;
-  yes.onclick = async () => {
-    if (force) {
+  // The row says Removing… until the folder is gone; a failure is said under its name.
+  const remove = async (force: boolean) => {
+    removing.add(s.name);
+    render();
+    try {
+      await askSnap("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force });
       close();
-      call("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force });
-      return;
+    } finally {
+      removing.delete(s.name);
+      render();
     }
+  };
+  const anyway = async () => {
+    close();
+    try {
+      await remove(true);
+    } catch (e) {
+      actionErrors.set(s.name, String(e));
+      select(s.name);
+    }
+  };
+  yes.onclick = async () => {
+    if (force) return anyway();
+    yes.disabled = true;
+    yes.replaceChildren(el("span", "spin-dot"), "Removing…");
     // Refused (commits on no branch, say): said here, and the button becomes Remove anyway.
     try {
-      await askSnap("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force: false });
-      close();
-      render();
+      await remove(false);
     } catch (e) {
       $("p", pop).textContent = `${String(e)}.`;
+      yes.disabled = false;
       yes.textContent = "Remove anyway";
-      yes.onclick = () => {
-        close();
-        call("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force: true });
-      };
+      yes.onclick = anyway;
     }
   };
 }
@@ -1568,7 +1683,8 @@ export function renderSite() {
   kindSel.add(new Option(`Detected (${kindLabel(s.kind_detected)})`, ""));
   for (const [id, name] of snap.kinds) kindSel.add(new Option(name, id));
   kindSel.value = s.kind === s.kind_detected ? "" : s.kind;
-  kindSel.onchange = () => call("set_app", kindSel.value ? { site: s.name, kind: kindSel.value } : { site: s.name, reset: ["kind"] });
+  fieldNote(kindSel, `${s.name}/kind`);
+  kindSel.onchange = () => setRun(s, kindSel, "kind", "set_app", kindSel.value ? { kind: kindSel.value } : { reset: ["kind"] });
 
   const php = $("#php", root);
   // Unset follows the project's .anvil.toml when its version is installed, else the default.
@@ -1580,7 +1696,9 @@ export function renderSite() {
   );
   for (const v of snap.php_installed) php.add(new Option(`PHP ${v}`, v));
   php.value = s.php_pinned ? s.php : "";
-  php.onchange = () => call("set_php", { site: s.name, version: php.value || null });
+  php.onchange = () =>
+    setPhp(s, php.value || null, php.value || (filePhp && snap.php_installed.includes(filePhp) ? filePhp : snap.php_default));
+  phpState(s, php);
 
   if (!process && serves(s)) webRoot(s, root);
   browserBridge(s, root);
@@ -1594,7 +1712,7 @@ export function renderSite() {
     const key = input.dataset.ini;
     input.value = s.ini[key] ?? "";
     input.placeholder = `${snap.ini[key] ?? base[key]} (default)`;
-    iniNote(input, `${s.name}/${key}`);
+    fieldNote(input, `${s.name}/${key}`);
     input.onchange = () => {
       const value = input.value.trim() || null;
       // The upload limit is also the largest form a POST may send: both in one restart.
@@ -1614,7 +1732,7 @@ export function renderSite() {
     .filter(([k]) => !known.has(k))
     .map(([k, v]) => `${k} = ${v}`)
     .join("\n");
-  iniNote(extra, `${s.name}/extra`);
+  fieldNote(extra, `${s.name}/extra`);
   extra.onchange = () => {
     const wanted = new Map();
     for (const line of extra.value.split("\n")) {
@@ -1643,28 +1761,48 @@ export function renderSite() {
   if (mayHaveWorktrees(s)) renderHooks(s, root);
 }
 
-// A php.ini field's change restarts the web server (when it serves): said beside the
-// field while it does, then that it's done. By `<app>/<field>`.
-const iniNotes = new Map<string, [string, boolean]>(); // what was said, whether it failed
+// A field whose change restarts something (a php.ini value: the web server, when it
+// serves; the app's kind, start command, port or version: the app, when it runs): said
+// beside the field while it does, then that it's done, or why not. By `<app>/<field>`.
+const fieldNotes = new Map<string, [string, boolean]>(); // what was said, whether it failed
 
-function iniNote(field: HTMLElement, at: string) {
-  field.parentElement?.querySelector(".ini-note")?.remove();
-  const said = iniNotes.get(at);
-  if (said) field.after(el("small", `ini-note ${said[1] ? "error" : "muted"}`, said[0]));
+function fieldNote(field: HTMLElement, at: string) {
+  field.parentElement?.querySelector(".field-note")?.remove();
+  const said = fieldNotes.get(at);
+  if (said) field.after(el("small", `field-note ${said[1] ? "error-text" : "muted"}`, said[0]));
 }
 
 async function setIni(s, field: HTMLElement, name: string, values: (string | null)[][]) {
   const at = `${s.name}/${name}`;
-  if (snap.running) iniNotes.set(at, ["Restarting the web server…", false]);
-  iniNote(field, at);
+  if (snap.running) fieldNotes.set(at, ["Restarting the web server…", false]);
+  fieldNote(field, at);
   try {
     await callOrThrow("set_site_ini", { site: s.name, values });
-    if (snap.running) iniNotes.set(at, ["Applied; the web server restarted.", false]);
-    else iniNotes.delete(at);
+    if (snap.running) fieldNotes.set(at, ["Applied; the web server restarted.", false]);
+    else fieldNotes.delete(at);
   } catch (e) {
-    iniNotes.set(at, [String(e), true]);
+    fieldNotes.set(at, [String(e), true]);
   }
-  if (field.isConnected) iniNote(field, at);
+  if (field.isConnected) fieldNote(field, at);
+  else render();
+}
+
+/** `cmd` (`set_app`, `set_runtime`) for `s`: it says whether it restarted the app. */
+async function setRun(s, field: HTMLElement, name: string, cmd: string, args: Record<string, unknown>) {
+  const at = `${s.name}/${name}`;
+  if (["running", "starting", "crashed"].includes(snap.app_states[s.name])) fieldNotes.set(at, [`Restarting ${s.name}…`, false]);
+  else fieldNotes.delete(at);
+  fieldNote(field, at);
+  try {
+    await callOrThrow(cmd, { site: s.name, ...args });
+    const failed = snap.app_errors[s.name];
+    if (!snap.restarted) fieldNotes.delete(at);
+    else if (failed) fieldNotes.set(at, [failed, true]);
+    else fieldNotes.set(at, [`Applied; ${s.name} restarted.`, false]);
+  } catch (e) {
+    fieldNotes.set(at, [String(e), true]);
+  }
+  if (field.isConnected) fieldNote(field, at);
   else render();
 }
 
@@ -1713,6 +1851,45 @@ function appExtensions(s, root) {
   cell.append(error);
 }
 
+const phpSwitching = new Map<string, [string, string]>(); // app -> [the version picked, what it does]
+const phpErrors = new Map<string, string>(); // app -> the extensions its new PHP runs without
+
+/** A version change first builds the extensions the app uses that `minor` lacks (a pecl
+ * download and compile each), then restarts PHP: said beside the select, a failure under it. */
+async function setPhp(s, version: string | null, minor: string) {
+  const want = [...(snap.php_ext?.[minor] ?? []), ...s.ext];
+  const built = snap.php_ext_built?.[minor];
+  const build = built ? (snap.php_ext_catalog ?? []).filter((n) => want.includes(n) && !built.includes(n)) : [];
+  phpSwitching.set(s.name, [version ?? "", build.length ? `Building ${build.join(", ")}…` : "Switching…"]);
+  phpErrors.delete(s.name);
+  render();
+  try {
+    await askSnap("set_php", { site: s.name, version });
+  } catch (e) {
+    phpErrors.set(s.name, String(e));
+    await askSnap("state").catch(() => {});
+  }
+  phpSwitching.delete(s.name);
+  render();
+}
+
+/** The PHP version select's busy line and last failure. */
+function phpState(s, php) {
+  const doing = phpSwitching.get(s.name);
+  php.disabled = !!doing;
+  if (doing) {
+    php.value = doing[0];
+    const busy = el("span", "php-busy", doing[1]);
+    busy.prepend(el("span", "spin-dot"));
+    php.after(busy);
+  }
+  const why = phpErrors.get(s.name);
+  if (!why) return;
+  const error = el("div", "ver-error php-error");
+  error.append(el("span", null, why));
+  php.parentElement.append(error);
+}
+
 /** On builds it first unless built for the app's PHP, then the web server restarts. */
 async function setAppExt(site: string, name: string, on: boolean) {
   const key = `${site}@${name}`;
@@ -1756,10 +1933,20 @@ function webRoot(s, root) {
   reset.onclick = () => save(null);
 }
 
-const FROM = (from: string) => (from === "this app" ? "Set for this app" : `From ${from === "Settings" ? "Settings › Worktrees" : from}`);
+const hooksOpen = new Set<string>(); // apps whose Worktrees editor is open
 
-/** The Settings tab's Worktrees section, for a git repository: each hook as it applies, where
- * it comes from, changed here for this app only; Use preset drops this app's own. */
+/** Where an app's hooks come from, said once: "Laravel preset", ".anvil.toml", changed here. */
+function hooksFrom(from: Record<string, string>): string {
+  const layers = [...new Set(Object.values(from))].filter((l) => l !== "Settings");
+  const others = layers.filter((l) => l !== "this app").map((l) => (l.endsWith(" preset") ? `the ${l}` : l));
+  if (layers.includes("this app"))
+    return others.length ? `Changed for this app; the rest from ${others.join(" and ")}` : "Changed for this app";
+  return others.length ? `From ${others.join(" and ")}` : "From Settings › Worktrees";
+}
+
+/** The Settings tab's Worktrees section, for a git repository: what a new worktree gets, in
+ * plain sentences, and where that comes from; Customize… opens the editors (hooksform.ts),
+ * changed here for this app only; Use preset drops this app's own. */
 async function renderHooks(s, root) {
   const box = $(".wt-hooks", root);
   let v;
@@ -1768,34 +1955,49 @@ async function renderHooks(s, root) {
   } catch {
     return; // not a git repository: no worktrees to set up
   }
-  if (box.contains(document.activeElement)) return; // being typed in
-  const head = el("dd", "muted", `${v.hooks.preset} preset, edited in Settings › Worktrees`);
+  if (box.contains(document.activeElement) && document.activeElement?.tagName !== "BUTTON") return; // being typed in
+  const open = hooksOpen.has(s.name);
+  const head = el("dd", "wt-summary");
+  if (!open) head.append(...summary(v.hooks, v.install).map((line) => el("div", null, line)));
+  const from = el("div", "muted", hooksFrom(v.hooks.from));
+  const fail = el("small", "error-text");
+  fail.hidden = true;
+  const toggle = el("button", "inline-action", open ? "Done" : "Customize…");
+  toggle.onclick = () => {
+    if (open) hooksOpen.delete(s.name);
+    else hooksOpen.add(s.name);
+    renderHooks(s, root);
+  };
+  const actions = el("div", "wt-actions");
+  actions.append(toggle);
   if (Object.keys(v.own).length) {
     const reset = el("button", "inline-action", "Use preset");
     reset.onclick = () =>
       invoke("set_app_hooks", { site: s.name, field: null, value: null }).then(
         () => renderHooks(s, root),
-        (e) => showError(String(e)),
+        (e) => {
+          fail.textContent = String(e);
+          fail.hidden = false;
+        },
       );
-    head.append(" ", reset);
+    actions.append(reset);
   }
+  head.append(from, actions, fail);
   // A layer with a mistake (a typo in config.toml or .anvil.toml): one line each.
-  for (const p of v.hooks.problems ?? []) {
-    const line = el("small", "error-text", p);
-    head.append(line);
-  }
-  const top = el("div", "row");
+  for (const p of v.hooks.problems ?? []) head.append(el("small", "error-text", p));
+  const top = el("div", "row row-top");
   top.append(el("dt", null, "Worktrees"), head);
-  const rows = FIELDS.map(([field, name]) => {
-    const row = el("div", "row row-top");
-    const dd = el("dd");
-    const fail = el("small", "error-text");
-    fail.hidden = true;
-    const save = (value: unknown) => invoke("set_app_hooks", { site: s.name, field, value }).then(() => renderHooks(s, root));
-    dd.append(control(field, v.hooks, save, fail), el("small", null, FROM(v.hooks.from[field])), fail);
-    row.append(el("dt", null, name), dd);
-    return row;
-  });
+  const save = (field: string, value: unknown) => invoke("set_app_hooks", { site: s.name, field, value }).then(() => renderHooks(s, root));
+  const fields = ["copy", "copy_database", "keys", "after_create"] as const;
+  const rows = open
+    ? fields.map((field) => {
+        const row = el("div", "row row-top");
+        const dd = el("dd");
+        dd.append(editor(field, v.hooks, { save, install: v.install, root: s.path }));
+        row.append(el("dt", null, NAMES[field]), dd);
+        return row;
+      })
+    : [];
   box.replaceChildren(top, ...rows);
   box.hidden = false;
 }
@@ -2357,21 +2559,23 @@ function renderRunSettings(s, root) {
     ? `Automatic uses ${pinFile} when the project has one, otherwise the newest installed`
     : "Automatic uses the newest installed";
   rt.disabled = versions.length < 2;
-  rt.onchange = () => call("set_runtime", { site: s.name, version: rt.value || null });
+  fieldNote(rt, `${s.name}/runtime`);
+  rt.onchange = () => setRun(s, rt, "runtime", "set_runtime", { version: rt.value || null });
   // dotnet picks the SDK from the project's global.json: nothing to pin.
   if (rtId === "dotnet") rt.closest(".row").remove();
 
   const cmd = $("#app-command", root);
   cmd.value = s.command_custom ? s.command : "";
   cmd.placeholder = s.command_custom ? "" : (s.command ?? "");
-  cmd.onchange = () =>
-    call("set_app", cmd.value.trim() ? { site: s.name, command: cmd.value.trim() } : { site: s.name, reset: ["command"] });
+  fieldNote(cmd, `${s.name}/command`);
+  cmd.onchange = () => setRun(s, cmd, "command", "set_app", cmd.value.trim() ? { command: cmd.value.trim() } : { reset: ["command"] });
 
   const port = $("#app-port", root);
   port.value = s.port ?? "";
+  fieldNote(port, `${s.name}/port`);
   port.onchange = () => {
     const n = parseInt(port.value, 10);
-    call("set_app", Number.isNaN(n) ? { site: s.name, reset: ["port"] } : { site: s.name, port: n });
+    setRun(s, port, "port", "set_app", Number.isNaN(n) ? { reset: ["port"] } : { port: n });
   };
 
   const auto = $("#app-autostart", root);
@@ -2379,25 +2583,41 @@ function renderRunSettings(s, root) {
   auto.onchange = () => call("set_app", { site: s.name, autostart: auto.checked });
 }
 
-// While an app is starting, check back until its port answers. Only the list dots
-// and the run box change, so nothing the user is typing gets redrawn.
+// While an app is starting, check back until its port answers: the dots and run errors
+// alone (`run_states`, no scan). Only the dots that changed and the run box are
+// redrawn, so nothing the user is typing or hovering is.
 let starting = false; // that check on its way
-setInterval(async () => {
+export async function checkStarting() {
   if (starting || !shown() || mode !== "apps" || !snap || !Object.values(snap.app_states).includes("starting")) return;
   starting = true;
+  const asked = snapAsked;
+  let next;
   try {
-    if (!(await askSnap("state"))) return;
+    next = await invoke("run_states");
   } catch {
     return;
   } finally {
     starting = false;
   }
-  if (mode !== "apps") return;
-  renderList();
+  // A whole snapshot asked for since is newer.
+  if (mode !== "apps" || snapShown > asked) return;
+  const before = snap.app_states;
+  Object.assign(snap, next);
+  const changed = new Set([...Object.keys(before), ...Object.keys(snap.app_states)].filter((k) => before[k] !== snap.app_states[k]));
+  // "Running only" may take a row out or put one in.
+  if (changed.size && filterOf("apps").running) renderList();
+  else
+    for (const b of document.querySelectorAll<HTMLElement>("#list .item:not(.hidden-app)"))
+      if (changed.has(b.dataset.name!)) {
+        const state = snap.app_states[b.dataset.name!];
+        if (b.classList.contains("child")) wtState($(".wt-glyph", b), state);
+        else appBadge($(".mark-box", b), state);
+      }
   const s = snap.sites.find((x) => x.name === selected);
   const root = $("#site");
   if (s && PROCESS_KINDS.has(s.kind) && $(".run-box", root)) renderRunState(s, root);
-}, 1500);
+}
+setInterval(checkStarting, 1500);
 
 /** Focus a sidebar row, scrolling only when it is out of view. */
 export function focusRow(row: HTMLElement | null) {
@@ -2478,19 +2698,11 @@ export async function addAppFolder() {
 
 $("#add").onclick = async () => {
   if (mode === "services") return late.openAddService();
-  const pick = (title) => window.__TAURI__.dialog.open({ directory: true, title });
   const menu = await M.Menu.new({
     items: await Promise.all([
       M.MenuItem.new({ text: "New Application…", accelerator: "CmdOrCtrl+N", action: () => late.openNewApp() }),
       M.PredefinedMenuItem.new({ item: "Separator" }),
-      M.MenuItem.new({
-        text: "Add Folder of Applications…",
-        action: async () => {
-          const path = await pick("Every project inside this folder becomes an application");
-          if (!path) return;
-          await call("park_folder", { path });
-        },
-      }),
+      M.MenuItem.new({ text: "Add Folder of Applications…", action: addAppsFolder }),
       M.MenuItem.new({ text: "Add Application Folder…", action: addAppFolder }),
     ]),
   });
@@ -2647,9 +2859,7 @@ function runAction(name) {
     if (mode === "services") late.openAddService();
     else late.openNewApp();
   } else if (name === "park") {
-    window.__TAURI__.dialog
-      .open({ directory: true, title: "Every project inside this folder becomes an application" })
-      .then((path) => path && call("park_folder", { path }));
+    addAppsFolder();
   } else if (name === "reload") {
     $("#reload").click();
   } else if (name === "find") {
