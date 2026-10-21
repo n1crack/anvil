@@ -3842,7 +3842,9 @@ fn settings(handle: AppHandle) -> Res<Settings> {
             // One the source doesn't have (8.6 before its first RC) isn't offered.
             .filter(|v| {
                 installed.iter().any(|i| i == *v)
-                    || releases.as_ref().is_none_or(|r| r.contains_key(**v))
+                    || releases
+                        .as_ref()
+                        .map_or(!anvil::PHP_PREVIEWS.contains(*v), |r| r.contains_key(**v))
             })
             .map(|v| PhpVersion {
                 version: v,

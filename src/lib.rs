@@ -1226,6 +1226,10 @@ pub fn php_dir(v: &str) -> PathBuf {
 /// listed only once it does (`php_releases`).
 pub const PHP_VERSIONS: [&str; 6] = ["8.6", "8.5", "8.4", "8.3", "8.2", "8.1"];
 
+/// Versions published only as previews (betas, RCs) so far: not offered until the
+/// source is known to have one.
+pub const PHP_PREVIEWS: [&str; 1] = ["8.6"];
+
 /// Refuse a PHP version Anvil doesn't offer, saying why for 8.0: it is end of life, and
 /// its static-php-cli macOS build can't load extensions.
 pub fn php_offered(v: &str) -> Result<(), String> {
