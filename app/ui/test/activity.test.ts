@@ -105,14 +105,24 @@ describe("processes tabs", () => {
     expect($("#log .ansi-bg4.ansi7").textContent).toBe(" INFO ");
   });
 
-  test("the log's Clear, left of ×, empties the file and the view", async () => {
+  test("the log’s Clear, left of ×, asks in place, then empties the file and the view", async () => {
     $('tr[data-key="shop@queue"]').click();
     await wait();
     expect($("#log").textContent).not.toBe("");
     const clear = $("#log-clear");
     expect(clear.hidden).toBe(false);
     expect(clear.nextElementSibling).toBe($("#log-close"));
+    // It asks in the pane's head first; Cancel leaves the file alone.
     clear.click();
+    expect($("#log-ask").hidden).toBe(false);
+    expect($("#log-title").hidden).toBe(true);
+    $("#log-no").click();
+    await wait(60);
+    expect(w.actCalls.some((c: any) => c[0] === "activity_log_clear")).toBe(false);
+    expect($("#log-ask").hidden).toBe(true);
+    expect(clear.hidden).toBe(false);
+    clear.click();
+    $("#log-yes").click();
     await wait(60);
     expect(w.actCalls.filter((c: any) => c[0] === "activity_log_clear").at(-1)[1]).toEqual({ key: "shop@queue" });
     expect($("#log").textContent).toBe("");

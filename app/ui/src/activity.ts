@@ -183,13 +183,13 @@ export function row(r, inner?: boolean) {
     d.textContent = r.detail;
     name.append(" ", d);
   }
-  // A dot and a short word; a crash keeps its exit detail, muted and as the dot's tooltip.
+  // A dot and a short word; a crash keeps its exit detail, muted and as the cell's tooltip.
   const st = td(null, "act-status");
   const dot = document.createElement("span");
   dot.className = `dot ${{ running: "on", starting: "amber", crashed: "bad" }[r.state] ?? ""}`;
   st.append(dot, status[r.state] ?? r.state);
   if (r.state === "crashed" && r.detail) {
-    dot.title = r.detail;
+    st.title = r.detail;
     const d = document.createElement("span");
     d.className = "act-detail";
     d.textContent = r.detail;
@@ -285,6 +285,7 @@ export function select(key) {
   logView.end();
   $("#pane").hidden = $("#split").hidden = !key;
   $("#log-title").textContent = key ? `${nameOf(key)} · log` : "";
+  asking(false);
   // A container's log is Docker's: only Anvil's own log files can be emptied.
   $("#log-clear").hidden = !key || key.startsWith("container:");
   render();
@@ -370,8 +371,16 @@ setInterval(() => {
   if (selected && tailing !== logToken) tail();
 }, 2000);
 window.addEventListener("focus", load);
-$("#log-clear").onclick = async () => {
+// Clearing empties the file on disk: it asks first, in the pane's head.
+function asking(on: boolean) {
+  $("#log-ask").hidden = !on;
+  $("#log-title").hidden = $("#log-clear").hidden = on;
+}
+$("#log-clear").onclick = () => asking(true);
+$("#log-no").onclick = () => asking(false);
+$("#log-yes").onclick = async () => {
   const key = selected;
+  asking(false);
   if (!key) return;
   try {
     await invoke("activity_log_clear", { key });

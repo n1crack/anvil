@@ -3162,7 +3162,7 @@ body.activity {
 .activity .error { margin: 0 16px 8px; }
 
 .act-main { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--line); }
-.act-table { flex: 1; min-width: 0; overflow: auto; }
+.act-table { flex: 1; min-width: 0; overflow: auto; container-type: inline-size; }
 .act-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 
 /* The column header is its own band: raised in dark, grey on white in light. */
@@ -3190,6 +3190,15 @@ body.activity {
   white-space: nowrap;
 }
 .act-table td:first-child, .act-table thead th:first-child { padding-left: 16px; }
+/* Narrow beside the log, Port and PID go first, then CPU and a crash's detail (the
+ * status cell's tooltip): Status stays readable. */
+@container (max-width: 600px) {
+  #procs tr:not(.act-app) > :is(:nth-child(2), :nth-child(3)) { display: none; }
+}
+@container (max-width: 460px) {
+  #procs tr:not(.act-app) > :nth-child(4), .act-status .act-detail { display: none; }
+  .act-table .act-st, .act-table .act-status { width: 96px; padding-left: 12px; }
+}
 
 .act-app th {
   padding: 8px 16px 4px;
@@ -3242,7 +3251,7 @@ body.activity {
   display: flex;
   flex-direction: column;
   flex: none;
-  width: 46%;
+  width: min(46%, 100% - 520px); /* the list first: its Status stays whole */
   min-width: 260px;
   max-width: calc(100% - 366px); /* the list keeps 360px and the splitter */
   /* The console's and Watch's terminal surface, in both themes. */
@@ -3271,6 +3280,12 @@ body.activity {
   font-weight: 600;
 }
 .act-pane-head span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Clear's question in the title's place, on the terminal surface in both themes. */
+.act-ask { flex: 1; display: flex; align-items: center; gap: 12px; min-width: 0; color: #9aa3ab; font-weight: 400; white-space: nowrap; }
+.act-ask[hidden] { display: none; }
+.act-ask .text-act { color: #b8c0c8; }
+.act-ask .text-act:hover { color: #e8ebee; }
+.act-ask .text-act.danger { color: #ff6961; }
 
 .act-log {
   flex: 1;
