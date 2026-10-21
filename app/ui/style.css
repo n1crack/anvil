@@ -3030,22 +3030,47 @@ button.log-file:hover { text-decoration-color: currentColor; }
 
 /* ---------- Packages ---------- */
 
-/* The key packages: a badge each (× unpins), + to pin another, Reset once changed. */
-.pkg-pins { margin-bottom: 14px; }
-.pkg-pin { color: var(--muted); }
-.pkg-pin b { margin-left: 5px; color: var(--text); font-weight: 500; }
-.pkg-pin-add,
-.pkg-pin-reset {
-  height: 20px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-size: 12px;
+/* A dashboard: three equal tiles, the two checks under them, then sections on one 640px column. */
+.pkg-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 10px; max-width: 640px; }
+.pkg-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 11px 14px 12px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
 }
-.pkg-pin-add { display: inline-grid; place-items: center; width: 22px; padding: 0; border: 1px solid var(--edge); border-radius: 10px; }
-.pkg-pin-reset { padding: 0 4px; }
-.pkg-pin-add:hover,
-.pkg-pin-reset:hover { color: var(--text); }
+button.pkg-tile:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.pkg-tile-big { overflow: hidden; margin-bottom: 2px; font: 600 17px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif; white-space: nowrap; text-overflow: ellipsis; }
+.pkg-tile-big.muted { color: var(--muted); font-weight: 500; }
+.pkg-tile-big.bad { color: var(--danger); }
+.pkg-tile-ver { font-weight: 500; font-variant-numeric: tabular-nums; }
+.pkg-tile-sub { overflow: hidden; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
+.pkg-tile-sub .pkg-sev { font-size: 12px; }
+
+/* A section: its small uppercase name and file, its actions at the right; what's in it under. */
+.pkg-sec { max-width: 640px; margin-top: 22px; }
+.pkg-sec .pkg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 24px; margin-bottom: 6px; padding: 0 2px; }
+.pkg-sec .pkg-name { margin: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.pkg-sec .pkg-file { font-size: 12px; }
+.pkg-sec > :is(.pkg-ran, .pkg-error, .pkg-none) { margin: 0 0 6px; padding: 0 2px; font-size: 12px; }
+.pkg-sec > .group + .pkg-none { margin-top: 6px; }
+.pkg-found dl { margin: 0; }
+.pkg-found dl + dl { border-top: 1px solid var(--line); }
+
+/* The key packages: name and version, a column each; × shows on the one under the pointer. */
+.pkg-pins { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 18px; padding: 6px 14px; }
+.pkg-pins > .pkg-none { margin: 4px 0; font-size: 12px; }
+.pkg-pin { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 28px; }
+.pkg-pin-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pkg-pin-ver { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.pkg-pin-x { display: grid; flex: none; place-items: center; width: 16px; height: 16px; margin-left: auto; padding: 0; border: 0; background: none; color: var(--muted); visibility: hidden; }
+.pkg-pin-x svg { width: 10px; height: 10px; }
+.pkg-pin-x:hover { color: var(--text); }
+.pkg-pin:is(:hover, :focus-within) .pkg-pin-x { visibility: visible; }
 
 /* The + bubble: the search, then what's installed under it, a row each. */
 .pop.pkg-pin-pop { display: grid; gap: 4px; width: 340px; padding: 4px; background: var(--pop-deep); }
@@ -3074,32 +3099,22 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .pkg-opt-from { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .pkg-opt-none { margin: 6px 8px; color: var(--muted); }
 
-/* The two checks, right above the managers' cards. */
-.pkg-hint { margin: -6px 0 14px; font-size: 12px; }
-.pkg-checkbar { display: flex; justify-content: flex-end; gap: 8px; max-width: 640px; margin-bottom: 10px; }
-/* Plain rectangular buttons: clearly clickable, unlike the rounded package badges above. */
+/* The two checks, right under the tiles. */
+.pkg-checkbar { display: flex; justify-content: flex-end; gap: 8px; max-width: 640px; margin-top: 10px; }
+.pkg-body > .pkg-error { max-width: 640px; margin: 8px 0 0; }
+/* Plain rectangular buttons: clearly clickable. */
 .pkg-btn { height: 24px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--steel-raised); color: var(--text); font-size: 12px; }
 .pkg-btn:hover:not(:disabled) { background: var(--steel-hover); }
 .pkg-btn:disabled { color: var(--muted); }
 .pkg-error { margin: 0 0 6px; color: var(--danger); font-size: 12px; user-select: text; -webkit-user-select: text; }
 
-/* A card per package manager: name and file, its actions on the right; then what the
- * checks found, each line on the card's 14px inset. */
-.pkg-card + .pkg-card { margin-top: 12px; }
-.pkg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 40px; padding: 6px 14px; }
-.pkg-name { margin: 0; font-size: 13px; font-weight: 600; }
-.pkg-file { font-size: 12px; }
 .pkg-acts { display: flex; align-items: center; gap: 12px; margin-left: auto; font-size: 12px; }
 .pkg-acts .spin-dot { flex: none; margin-right: -4px; color: var(--muted); }
 /* A question takes a line of its own under the name; Cancel and the action stay at its end. */
 .pkg-acts.asking { flex: 1 1 100%; margin: 0 0 4px; }
 .pkg-ask { flex: 0 1 auto; min-width: 0; }
 .pkg-acts.asking .text-act { flex: none; }
-.pkg-card > :is(.pkg-ran, .pkg-summary, .pkg-error) { margin: 0; padding: 0 14px 10px; font-size: 12px; }
-.pkg-found { color: var(--text); font-weight: 500; }
-.pkg-found.bad { color: var(--danger); }
-.pkg-card > dl { margin: 0; border-top: 1px solid var(--line); }
-.pkg-foot { padding: 4px 14px 6px; border-top: 1px solid var(--line); }
+.pkg-foot { padding: 4px 2px 0; }
 .pkg-foot .pkg-acts { justify-content: flex-start; margin-left: 0; }
 .pkg-foot .pkg-switch { margin-left: -2px; }
 .pkg-foot .pkg-ran { margin: 4px 0; font-size: 12px; }

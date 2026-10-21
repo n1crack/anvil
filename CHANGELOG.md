@@ -24,7 +24,7 @@ contain breaking changes.
 - Settings: "Features" in the sidebar, Tunnel explained in its row instead of a page of its own, "Applications" throughout, and storage sizes lined up.
 - Main window: plainer words on service, Mail and Settings pages; an external server shows Reachable, a crashed container says so.
 - An app's Settings › Worktrees reads as a short checklist, and Customize… is a tidier form with Done at the bottom.
-- Packages: each package manager in its own box, with its updates and advisories inside it.
+- Packages: a dashboard, with tiles for the framework, updates and advisories, then the key packages and a section per package manager.
 
 ### Fixed
 

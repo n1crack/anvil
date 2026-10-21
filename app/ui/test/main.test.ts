@@ -1788,13 +1788,21 @@ describe("polls and races", () => {
 });
 
 describe("packages", () => {
-  const pins = () => $$(".pkg-pin").map((c) => `${c.firstChild!.textContent} ${c.querySelector("b")?.textContent ?? ""}`);
+  const pins = () =>
+    $$(".pkg-pin").map((c) => `${c.querySelector(".pkg-pin-name")!.textContent} ${c.querySelector(".pkg-pin-ver")!.textContent}`);
+  const tile = (kind: string) =>
+    [...$(`.pkg-tile-${kind}`).querySelectorAll(".pkg-tile-big, .pkg-tile-sub")].map((x) => x.textContent).join(" / ");
 
-  test("the key packages as badges: the defaults, one off with ×, Reset back", async () => {
+  test("the tiles: the framework with the platform, nothing checked yet; the key packages without the platform", async () => {
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
-    expect(pins()).toEqual(["Laravel 11.36.1", "Livewire 3.5.18", "Tailwind 3.4.17", "Vite 6.0.6", "PHP ^8.2", "Node >=20"]);
-    // No list, no search, no Outdated · All: the badges and the two checks.
+    expect(tile("app")).toBe("Laravel 11.36.1 / PHP ^8.2 / Node >=20");
+    expect(tile("updates")).toBe("Not checked");
+    expect(tile("security")).toBe("Not checked");
+    expect($(".pkg-pins-sec h3").textContent).toBe("Key packages");
+    expect($(".pkg-pin-add").textContent).toBe("+ Add");
+    expect(pins()).toEqual(["Laravel 11.36.1", "Livewire 3.5.18", "Tailwind 3.4.17", "Vite 6.0.6"]);
+    // No list, no search, no Outdated · All: the tiles, the two checks and the key packages.
     expect($$(".pkg-list, .pkg-search, .pkg-tools")).toHaveLength(0);
     expect($$(".pkg-pin-reset")).toHaveLength(0);
     ($('.pkg-pin [aria-label="Unpin Livewire"]') as HTMLElement).click();
@@ -1803,11 +1811,11 @@ describe("packages", () => {
       site: "shop",
       pins: ["laravel/framework", "tailwindcss", "vite", "PHP", "Node"],
     });
-    expect(pins()).toHaveLength(5);
+    expect(pins()).toHaveLength(3);
     $(".pkg-pin-reset").click();
     await wait(80);
     expect(calls("set_packages_pinned").at(-1)![1]).toEqual({ site: "shop", pins: null });
-    expect(pins()).toHaveLength(6);
+    expect(pins()).toHaveLength(4);
     expect($$(".pkg-pin-reset")).toHaveLength(0);
   });
 
@@ -1835,21 +1843,22 @@ describe("packages", () => {
     await wait(80);
   });
 
-  const card = (eco: string) => $(`.pkg-card[data-eco="${eco}"]`);
+  const card = (eco: string) => $(`.pkg-sec[data-eco="${eco}"]`);
 
-  test("a card per manager, nothing found until a check runs; Check for updates fills each card", async () => {
+  test("a section per manager, nothing found until a check runs; Check for updates fills the tile and each section", async () => {
     expect(calls("package_updates")).toHaveLength(0);
     expect($$(".pkg-checkbar button").map((b) => b.textContent)).toEqual(["Check for updates", "Check security"]);
     expect(
-      $$(".pkg-card .pkg-head").map((h) => `${h.querySelector("h3")!.textContent} ${h.querySelector(".pkg-file")!.textContent}`),
+      $$(".pkg-sec[data-eco] .pkg-head").map((h) => `${h.querySelector("h3")!.textContent} ${h.querySelector(".pkg-file")!.textContent}`),
     ).toEqual(["Composer composer.json", "pnpm package.json"]);
-    expect($$(".pkg-summary, .pkg-card dl, .pkg-foot")).toHaveLength(0);
+    expect($$(".pkg-sec[data-eco] :is(dl, .pkg-none), .pkg-foot")).toHaveLength(0);
     $(".pkg-check-outdated").click();
     expect($(".pkg-check-outdated").textContent).toBe("Checking…");
     await wait(80);
     expect(calls("package_updates")).toHaveLength(1);
-    expect(card("composer").querySelector(".pkg-summary")!.textContent).toBe("4 updates · checked just now");
-    expect(card("npm").querySelector(".pkg-summary")!.textContent).toBe("3 updates · checked just now");
+    expect(tile("updates")).toBe("7 updates / 3 major / checked just now");
+    expect($(".pkg-tile-updates").tagName).toBe("BUTTON");
+    expect(card("composer").querySelector(".pkg-none")).toBeNull();
     expect(JSON.parse(localStorage.getItem("pkgUpdates:shop")!).list).toHaveLength(7);
     const rows = [...card("composer").querySelectorAll(".pkg-list .row")];
     expect(rows).toHaveLength(4);
@@ -1866,19 +1875,22 @@ describe("packages", () => {
     const { pkgUpdates, drawPackages } = await import("../src/packages");
     pkgUpdates.clear();
     drawPackages("shop");
-    expect(card("composer").querySelector(".pkg-summary")!.textContent).toBe("4 updates · checked just now");
+    expect(tile("updates")).toBe("7 updates / 3 major / checked just now");
+    expect(card("composer").querySelectorAll(".pkg-list .row")).toHaveLength(4);
     expect(calls("package_updates")).toHaveLength(1);
   });
 
-  test("Check security audits each manager: advisories in red with severity, CVE and range; a failure in its card", async () => {
+  test("Check security audits each manager: the tile counts, advisories first in the section; a failure in its section", async () => {
     $(".pkg-check-security").click();
     expect($(".pkg-check-security").textContent).toBe("Checking…");
     await wait(80);
     expect(calls("package_audit").map(([, a]) => a.ecosystem)).toEqual(["composer", "npm"]);
-    const summary = card("composer").querySelector(".pkg-summary")!;
-    expect(summary.textContent).toBe("4 updates · 1 security advisory · checked just now");
-    expect(summary.querySelector(".pkg-found.bad")!.textContent).toBe("1 security advisory");
+    expect(tile("security")).toBe("1 advisory / high / checked just now");
+    expect($(".pkg-tile-security .pkg-tile-big").classList.contains("bad")).toBe(true);
+    const found = card("composer").querySelector(".pkg-found")!;
+    expect([...found.children].map((d) => d.className)).toEqual(["pkg-adv-list", "pkg-list updates"]);
     expect(card("npm").querySelector(".pkg-error")!.textContent).toBe("pnpm audit failed: request to registry timed out");
+    expect(card("npm").querySelector(".pkg-none")).toBeNull();
     expect(card("composer").querySelector(".pkg-error")).toBeNull();
     expect(card("npm").querySelectorAll(".pkg-advisory")).toHaveLength(0);
     const adv = card("composer").querySelector(".pkg-advisory")!;
@@ -1893,10 +1905,10 @@ describe("packages", () => {
     expect(calls("open_url").at(-1)![1].url).toBe("https://github.com/advisories/GHSA-v5mv-p594-2x33");
   });
 
-  test("Install runs at once, Update asks in the card; either shows in Dev, then the packages are read again", async () => {
+  test("Install runs at once, Update asks in the section; either shows in Dev, then the packages are read again", async () => {
     const acts = (eco: string) => card(eco).querySelector(".pkg-head .pkg-acts")!;
     const act = (eco: string, text: string) => [...card(eco).querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;
-    expect($$(".pkg-head .pkg-acts").map((l) => l.textContent)).toEqual(["InstallUpdate…", "InstallUpdate…"]);
+    expect($$(".pkg-sec[data-eco] .pkg-head .pkg-acts").map((l) => l.textContent)).toEqual(["InstallUpdate…", "InstallUpdate…"]);
     act("composer", "Update…").click();
     expect(acts("composer").textContent).toContain("Run composer update?");
     expect(document.activeElement!.textContent).toBe("Cancel");
@@ -1939,7 +1951,7 @@ describe("packages", () => {
     await wait(30);
   });
 
-  test("an npm app offers Switch to pnpm… at the bottom of its card, asked there first", async () => {
+  test("an npm app offers Switch to pnpm… at the bottom of its section, asked there first", async () => {
     expect(card("npm").querySelector(".pkg-foot")).toBeNull();
     w.mockPackages.ecosystems[1].lock = "package-lock.json";
     await w.renderPackages({ name: "shop" });

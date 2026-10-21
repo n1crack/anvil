@@ -3,10 +3,10 @@ import { icon } from "./icons";
 import { showRun } from "./dev";
 import { askProcs, drawProcs, loadProcs } from "./processes";
 
-/* Packages tab: the app's key packages as badges (pinned per app, the detected ones by
- * default), then Check for updates and Check security, then a card per package manager
- * with its Install and Update… and what the checks found for it. Scripts live in the
- * Overview's Commands. */
+/* Packages tab, a dashboard: tiles for the framework, the updates and the advisories with
+ * the two checks under them; the key packages (pinned per app, the detected ones by
+ * default); then a section per package manager with its Install and Update… and what the
+ * checks found for it. Scripts live in the Overview's Commands. */
 
 const pkgCache = new Map<string, any>(); // site name -> packages or { error }
 // site name -> { list, at, error? } once checked
@@ -161,7 +161,7 @@ function ask(box, question, verb, idle, go) {
   no.focus();
 }
 
-/** A card's Install and Update…; Update asks first. Running, the header says so; after,
+/** A section's Install and Update…; Update asks first. Running, the header says so; after,
  * how it went under it. Either way its output is a click away in Dev. */
 function runActs(name, eco, cmds: [string, string][]) {
   const key = `${name}:${eco}`;
@@ -229,13 +229,15 @@ export function drawPackages(name) {
   if (!p.ecosystems.length) {
     return body.append(el("p", "muted", "No composer.json, package.json, Cargo.toml, go.mod or .csproj in this folder."));
   }
-  body.append(pinsLine(name, p));
-  body.append(el("p", "muted pkg-hint", "The packages that matter most, with their versions. + adds one, × removes it from this list."));
-
-  // The two checks above the managers; what they find goes into each manager's card.
   const up = updatesOf(name);
   const audits = auditsOf(name);
   const audited = p.ecosystems.filter((e) => AUDITED.has(e.id));
+
+  // The tiles: the framework, the updates, the advisories; the two checks under them.
+  const tiles = el("div", "pkg-tiles");
+  tiles.append(frameworkTile(name, p), updatesTile(up));
+  if (audited.length) tiles.append(securityTile(audited.map((e) => audits[e.id])));
+  body.append(tiles);
   const bar = el("div", "pkg-checkbar");
   const outdated = el("button", "pkg-btn pkg-check-outdated", busy.has(name) ? "Checking…" : "Check for updates");
   outdated.disabled = busy.has(name);
@@ -249,15 +251,75 @@ export function drawPackages(name) {
     bar.append(security);
   }
   body.append(bar);
-  // The update check asks every registry at once, so its failure is the app's, not a card's.
+  // The update check asks every registry at once, so its failure is the app's, not a section's.
   if (up?.error) body.append(el("p", "pkg-error", up.error));
-  for (const e of p.ecosystems) body.append(card(name, p, e, up, AUDITED.has(e.id) ? audits[e.id] : null));
+  body.append(pinsSection(name, p));
+  for (const e of p.ecosystems) body.append(section(name, p, e, up, AUDITED.has(e.id) ? audits[e.id] : null));
 }
 
-/** A package manager: its name and file, Install and Update…, what the checks found and,
- * for an npm or yarn app, Switch to pnpm…. */
-function card(name, p, e, up, audit) {
-  const box = el("section", "group pkg-card");
+const tile = (cls, big, subs: (string | Node)[], tag = "div") => {
+  const t = el(tag, `group pkg-tile ${cls}`);
+  t.append(big);
+  for (const x of subs) {
+    const sub = el("div", "pkg-tile-sub");
+    sub.append(x);
+    t.append(sub);
+  }
+  return t;
+};
+
+/** The app's framework and version (or its first key package), its platform requirements under it. */
+function frameworkTile(name, p) {
+  const facts: [string, string][] = p.ecosystems.flatMap((e) => e.facts);
+  let [label, version] = p.highlights[0] ?? [];
+  if (!label) {
+    const factKeys = new Set(facts.map(([l]) => l));
+    const k = pinsOf(name, p).find((x) => !factKeys.has(x));
+    if (k) [label, version] = [new Map<string, string>(p.defaults).get(k) ?? k, versionOf(p, k)];
+  }
+  if (!label) [label, version] = [managerLabel(p.ecosystems[0]), p.ecosystems[0].manager?.split(" ")[1]];
+  const big = el("div", "pkg-tile-big", label);
+  if (version) big.append(" ", el("span", "pkg-tile-ver", version));
+  return tile(
+    "pkg-tile-app",
+    big,
+    facts.map(([l, v]) => `${l} ${v}`),
+  );
+}
+
+/** How many updates the last check found, how many major; a click goes to the first. */
+function updatesTile(up) {
+  if (!up?.at) return tile("pkg-tile-updates", el("div", "pkg-tile-big muted", "Not checked"), []);
+  const list = up.list ?? [];
+  const n = list.length;
+  const major = list.filter((x) => x.level === "major").length;
+  const subs = [major ? `${major} major` : "", `checked ${ago(new Date(up.at))}`].filter(Boolean);
+  if (!n) return tile("pkg-tile-updates", el("div", "pkg-tile-big", "Up to date"), subs);
+  const t = tile("pkg-tile-updates", el("div", "pkg-tile-big", `${n} ${n === 1 ? "update" : "updates"}`), subs, "button");
+  t.title = "Show the updates";
+  t.onclick = () => $(".pkg-body .pkg-sec:has(.pkg-list.updates)")?.scrollIntoView({ block: "start", behavior: "smooth" });
+  return t;
+}
+
+const SEVERITY = ["critical", "high", "moderate", "medium", "low"];
+const rank = (s) => (SEVERITY.indexOf(s) + SEVERITY.length + 1) % (SEVERITY.length + 1); // unknown last
+
+/** The advisories the last security check found, across the managers, and the worst of them. */
+function securityTile(checks) {
+  const done = checks.filter((a) => a?.at);
+  if (!done.length) return tile("pkg-tile-security", el("div", "pkg-tile-big muted", "Not checked"), []);
+  const all = done.flatMap((a) => a.list ?? []);
+  const when = `checked ${ago(new Date(Math.max(...done.map((a) => a.at))))}`;
+  if (!all.length) return tile("pkg-tile-security", el("div", "pkg-tile-big", "No known advisories"), [when]);
+  const worst = all.map((v) => v.severity).sort((a, b) => rank(a) - rank(b))[0];
+  const big = el("div", "pkg-tile-big bad", `${all.length} ${all.length === 1 ? "advisory" : "advisories"}`);
+  return tile("pkg-tile-security", big, [el("span", `pkg-sev ${worst}`, worst), when]);
+}
+
+/** A package manager: its name and file, Install and Update…, then what the checks found
+ * and, for an npm or yarn app, Switch to pnpm…. */
+function section(name, p, e, up, audit) {
+  const box = el("section", "pkg-sec");
   box.dataset.eco = e.id;
   const head = el("div", "pkg-head");
   const title = el("h3", "pkg-name", managerLabel(e));
@@ -273,43 +335,31 @@ function card(name, p, e, up, audit) {
     if (msg) box.append(msg);
   }
 
-  // "3 updates · 1 security advisory · checked 2 min ago"; nothing before a check.
   const updates = (up?.list ?? []).filter((x) => x.ecosystem === e.id);
   const advisories = audit?.list ?? [];
-  const found: [any, number][] = [];
-  if (up?.at) {
-    const u = updates.length;
-    found.push([u ? el("span", "pkg-found", `${u} ${u === 1 ? "update" : "updates"}`) : "No updates", up.at]);
-  }
-  if (audit?.at) {
-    const n = advisories.length;
-    found.push([n ? el("span", "pkg-found bad", `${n} security ${n === 1 ? "advisory" : "advisories"}`) : "no known advisories", audit.at]);
-  }
-  if (found.length) {
-    const line = el("p", "muted pkg-summary");
-    const when = found.map(([, at]) => ago(new Date(at)));
-    const apart = new Set(when).size > 1;
-    found.forEach(([what], i) => {
-      if (i) line.append(" · ");
-      line.append(typeof what === "string" && !i ? what[0].toUpperCase() + what.slice(1) : what);
-      if (apart) line.append(`, checked ${when[i]}`);
-    });
-    if (!apart) line.append(` · checked ${when[0]}`);
-    box.append(line);
-  }
   if (audit?.error) box.append(el("p", "pkg-error", audit.error));
-  if (advisories.length) {
-    const dl = el("dl", "pkg-adv-list");
-    for (const v of advisories) dl.append(auditRow(v));
-    box.append(dl);
+  if (advisories.length || updates.length) {
+    const group = el("div", "group pkg-found");
+    if (advisories.length) {
+      const dl = el("dl", "pkg-adv-list");
+      for (const v of advisories) dl.append(auditRow(v));
+      group.append(dl);
+    }
+    if (updates.length) {
+      const newer = new Map(updates.map((x) => [x.name, x]));
+      const dl = el("dl", "pkg-list updates");
+      for (const x of e.packages.filter((x) => newer.has(x.name)).sort((a, b) => a.name.localeCompare(b.name)))
+        dl.append(pkgRow(e.id, x, newer.get(x.name)));
+      group.append(dl);
+    }
+    box.append(group);
   }
-  if (updates.length) {
-    const newer = new Map(updates.map((x) => [x.name, x]));
-    const dl = el("dl", "pkg-list updates");
-    for (const x of e.packages.filter((x) => newer.has(x.name)).sort((a, b) => a.name.localeCompare(b.name)))
-      dl.append(pkgRow(e.id, x, newer.get(x.name)));
-    box.append(dl);
-  }
+  // Checked and nothing found: said once, quietly; before a check, nothing.
+  const none = [
+    up?.at && !updates.length ? "Up to date" : "",
+    audit?.at && !audit.error && !advisories.length ? "No known advisories" : "",
+  ].filter(Boolean);
+  if (none.length) box.append(el("p", "muted pkg-none", none.join(" · ")));
   if (e.id === "npm") {
     const foot = switchFoot(name, e);
     if (foot) box.append(foot);
@@ -317,7 +367,7 @@ function card(name, p, e, up, audit) {
   return box;
 }
 
-/** An npm or yarn app can move to pnpm, only when asked and confirmed in the card. */
+/** An npm or yarn app can move to pnpm, only when asked and confirmed in its section. */
 function switchFoot(name, e) {
   const lock = e.lock === "package-lock.json" || e.lock === "yarn.lock" ? e.lock : null;
   const going = busy.has(`${name}:pnpm`);
@@ -341,41 +391,51 @@ function switchFoot(name, e) {
   return foot;
 }
 
-/** The key packages as badges: × unpins one, + pins another, Reset brings back the detected ones. */
-function pinsLine(name, p) {
+const pinsOf = (name, p): string[] => snap.sites.find((x) => x.name === name)?.packages_pinned ?? p.defaults.map(([k]) => k);
+
+/** Key packages: name and version each, × (on hover) unpins one, + Add pins another, Reset
+ * brings back the detected ones. The platform requirements are on the framework tile. */
+function pinsSection(name, p) {
   const s = snap.sites.find((x) => x.name === name);
   const defaults = p.defaults.map(([k]) => k);
-  const pins: string[] = s?.packages_pinned ?? defaults;
+  const pins = pinsOf(name, p);
+  const facts = new Set(p.ecosystems.flatMap((e) => e.facts.map(([l]) => l)));
   const labels = new Map<string, string>(p.defaults);
   const save = (next) => call("set_packages_pinned", { site: name, pins: next });
-  const line = el("div", "chips pkg-pins");
-  for (const k of pins) {
-    const label = labels.get(k) ?? k;
-    const c = el("span", "chip pkg-pin", label);
-    if (label !== k) c.title = k;
-    const v = versionOf(p, k);
-    if (v) c.append(el("b", null, v));
-    const x = el("button");
-    x.append(icon("x"));
-    x.setAttribute("aria-label", `Unpin ${label}`);
-    x.onclick = () => save(pins.filter((o) => o !== k));
-    c.append(x);
-    line.append(c);
-  }
-  const add = el("button", "pkg-pin-add");
-  add.append(icon("plus"));
-  add.title = "Pin a package";
-  add.setAttribute("aria-label", "Pin a package");
-  add.onclick = () => pinPop(add, p, pins, save);
-  line.append(add);
+  const box = el("section", "pkg-sec pkg-pins-sec");
+  const head = el("div", "pkg-head");
+  const acts = el("div", "pkg-acts");
+  head.append(el("h3", "pkg-name", "Key packages"), acts);
   if (pins.join("\n") !== defaults.join("\n")) {
-    const reset = el("button", "pkg-pin-reset", "Reset");
+    const reset = el("button", "text-act pkg-pin-reset", "Reset");
     reset.title = "Back to the detected packages";
     // A worktree's unset is its app's, so its reset is the defaults themselves.
     reset.onclick = () => save(s?.worktree_of ? defaults : null);
-    line.append(reset);
+    acts.append(reset);
   }
-  return line;
+  const add = el("button", "text-act pkg-pin-add", "+ Add");
+  add.title = "Pin another installed package to this list";
+  add.onclick = () => pinPop(add, p, pins, save);
+  acts.append(add);
+  box.append(head);
+  const grid = el("div", "group pkg-pins");
+  for (const k of pins.filter((x) => !facts.has(x))) {
+    const label = labels.get(k) ?? k;
+    const c = el("div", "pkg-pin");
+    const n = el("span", "pkg-pin-name", label);
+    if (label !== k) n.title = k;
+    c.append(n, el("span", "pkg-pin-ver", versionOf(p, k) ?? ""));
+    const x = el("button", "pkg-pin-x");
+    x.append(icon("x"));
+    x.title = "Remove from this list";
+    x.setAttribute("aria-label", `Unpin ${label}`);
+    x.onclick = () => save(pins.filter((o) => o !== k));
+    c.append(x);
+    grid.append(c);
+  }
+  if (!grid.childNodes.length) grid.append(el("p", "muted pkg-none", "None pinned"));
+  box.append(grid);
+  return box;
 }
 
 /** The + popover: a search over everything installed, direct dependencies first; ↑↓ and Enter pick. */
@@ -388,12 +448,12 @@ function pinPop(anchor, p, pins, save) {
     all.push({ key, version, from });
   };
   const byName = (a, b) => a.localeCompare(b);
-  for (const e of p.ecosystems) for (const [l, v] of e.facts) offer(l, v, managerLabel(e));
   for (const e of p.ecosystems)
     for (const x of [...e.packages].sort((a, b) => byName(a.name, b.name))) offer(x.name, x.version ?? x.constraint, managerLabel(e));
   for (const e of p.ecosystems) for (const [n, v] of [...e.locked].sort((a, b) => byName(a[0], b[0]))) offer(n, v, managerLabel(e));
 
   const pop = el("div", "pkg-pin-pop");
+  pop.setAttribute("aria-label", "Pin a package");
   const q = el("input");
   q.placeholder = "Search installed packages";
   q.spellcheck = false;
