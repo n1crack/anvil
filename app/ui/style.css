@@ -2811,9 +2811,15 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .mail-count { font-size: 12px; }
 .mail-err { margin: 0 0 8px; font-size: 12px; }
 .mail-item .log-time { width: 64px; }
+/* From and To give way before the subject goes below its own share; each says all on hover. */
 .mail-from,
-.mail-to { flex: none; width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
-.mail-to { width: 140px; }
+.mail-to { flex: 0 1 170px; min-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.mail-to { flex-basis: 140px; }
+.mail-item .log-msg { min-width: 80px; }
+.mail { container-type: inline-size; }
+@container (max-width: 520px) {
+  .mail-to { display: none; }
+}
 .mail-item .log-msg { font-family: inherit; font-size: 13px; }
 .mail-files { flex: none; display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; width: 30px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .mail-files svg { width: 12px; height: 12px; }
