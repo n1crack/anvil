@@ -73,7 +73,8 @@ export function streamPane(o: {
   document.addEventListener("mousedown", (e) => {
     if (!card.hidden && !card.contains(e.target as Node) && e.target !== keysBtn) toggle(false);
   });
-  card.addEventListener("keydown", (e) => e.key === "Escape" && toggle(false));
+  // The card holds no control, so Esc is heard on its button too.
+  keysHint.addEventListener("keydown", (e) => e.key === "Escape" && !card.hidden && toggle(false));
   keysHint.append(el("span", "dev-keys-full", KEYS.map(([k, w]) => `${k} ${w}`).join(" · ")), keysBtn, card);
   pane.append(head, term.out, empty, keysHint);
   main.append(list, listSplitter(main, o.widthKey, o.minWidth), pane);

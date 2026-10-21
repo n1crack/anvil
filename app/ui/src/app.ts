@@ -2,7 +2,7 @@ import type { Snapshot } from "./types";
 import { late } from "./late";
 import { ownError, shown } from "./live";
 import { NAMES, editor, summary } from "./hooksform";
-import { confirmInRow } from "./confirm";
+import { bubbleKeys, confirmInRow } from "./confirm";
 import { icon } from "./icons";
 
 export const { invoke } = window.__TAURI__.core;
@@ -1536,19 +1536,22 @@ function aliasesLine(s, root) {
 }
 
 /** A small bubble under `anchor`, right-aligned with it (or left). Esc or a click elsewhere
- * closes it; the close function is returned. */
+ * closes it, Tab stays inside it, and the focus goes back to `anchor` when it was in the
+ * bubble; the close function is returned. */
 export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | null, align: "left" | "right" = "right") {
   document.querySelector(".pop")?.remove();
   pop.classList.add("pop");
   pop.setAttribute("role", "dialog");
+  if (!pop.hasAttribute("aria-label") && !pop.hasAttribute("aria-labelledby"))
+    pop.setAttribute("aria-label", anchor.getAttribute("aria-label") || anchor.textContent?.trim() || "");
   const close = () => {
+    const inside = pop.contains(document.activeElement);
     pop.remove();
     document.removeEventListener("mousedown", outside, true);
+    if (inside) (anchor as HTMLElement).focus?.();
   };
   const outside = (e) => !pop.contains(e.target) && close();
-  pop.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") close();
-  });
+  bubbleKeys(pop, close);
   const r = anchor.getBoundingClientRect();
   Object.assign(
     pop.style,

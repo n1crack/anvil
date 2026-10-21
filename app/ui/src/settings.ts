@@ -1,7 +1,7 @@
 import "./platform";
 import type { Settings } from "./types";
 import { ownError } from "./live";
-import { confirmInRow, textAct } from "./confirm";
+import { bubbleKeys, confirmInRow, textAct } from "./confirm";
 import { NAMES, editor } from "./hooksform";
 import { inboxView, type Inbox } from "./inbox";
 
@@ -1199,13 +1199,16 @@ function confirmOpen(anchor: HTMLElement, url: string) {
   const no = node("button", "", "Cancel") as HTMLButtonElement;
   const pop = node("div", "pop pop-confirm", node("span", "", new URL(url).host), no, yes);
   pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", `Open ${new URL(url).host}`);
   const close = () => {
+    const inside = pop.contains(document.activeElement);
     pop.remove();
     document.removeEventListener("mousedown", outside, true);
     document.removeEventListener("scroll", close, true);
+    if (inside) anchor.focus();
   };
   const outside = (e: MouseEvent) => !pop.contains(e.target as Node) && close();
-  pop.addEventListener("keydown", (e) => e.key === "Escape" && close());
+  bubbleKeys(pop, close);
   yes.onclick = () => {
     close();
     invoke("open_url", { url }).catch((err) => showError(String(err)));

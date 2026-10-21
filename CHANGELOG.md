@@ -98,6 +98,8 @@ contain breaking changes.
 - `anvil app`, `anvil service`, `anvil use` and `anvil php ini` settings print what they set, e.g. "blog: port 3901".
 - An unknown service reads "No service named …" everywhere in the CLI and points to `anvil service list`.
 - Grey text is easier to read in the dark theme, also on a selected row, and the running-services count in the light theme.
+- Esc closes the New Application and Add Service sheets while the cursor is in their empty search field.
+- In a small bubble (Remove, Set up Anvil, an update) Tab stays inside it, and Esc puts the keyboard focus back on the button that opened it; Esc also closes Dev's Keys card.
 
 ## [0.2.1] - 2026-10-21
 
