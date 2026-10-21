@@ -178,6 +178,10 @@ pub fn build(minor: &str, name: &str) -> Result<()> {
         .iter()
         .find(|e| e.name == name)
         .with_context(|| format!("{name} is not in Anvil's catalog"))?;
+    // Linux's builds are fully static: they load no .so at all.
+    if cfg!(target_os = "linux") {
+        bail!("Anvil's PHP on Linux can't load extensions yet, {name} included");
+    }
     let _held = build_lock(minor, name, name)?;
     if cfg!(windows) {
         return fetch_dll(minor, ext);
@@ -995,6 +999,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "linux"))] // Linux refuses every build first
     fn second_build_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let _env = crate::lock(&ENV_LOCK);
@@ -1013,6 +1018,15 @@ pub(crate) mod tests {
         assert!(!e.to_string().contains("already"), "{e}");
         let e = crate::opcache::build("8.4").unwrap_err();
         assert!(!e.to_string().contains("already"), "{e}");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_builds_nothing_its_php_cant_load() {
+        let e = build("8.4", "xdebug").unwrap_err();
+        assert!(e.to_string().contains("can't load extensions"), "{e}");
+        let e = crate::opcache::build("8.4").unwrap_err();
+        assert!(e.to_string().contains("comes with PHP 8.5"), "{e}");
     }
 
     #[test]
@@ -1053,6 +1067,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "linux"))] // Linux refuses every build first
     fn unpinned_openssl_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let _env = crate::lock(&ENV_LOCK);

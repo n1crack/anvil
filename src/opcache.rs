@@ -83,6 +83,10 @@ pub fn build(minor: &str) -> Result<()> {
     if !BUILDS.contains(&minor) {
         bail!("PHP {minor} has OPcache built in");
     }
+    // Linux's builds are fully static: they load no .so at all.
+    if cfg!(target_os = "linux") {
+        bail!("on Linux, OPcache comes with PHP 8.5; Anvil's PHP {minor} can't load it");
+    }
     let _held = crate::phpext::build_lock(minor, "opcache", "OPcache")?;
     let php = php_dir(minor).join("php");
     let (full, src) = source_tree(minor)?;
