@@ -41,6 +41,7 @@ contain breaking changes.
 - The main window's small buttons and marks (close, remove, more, keys, start, stop, done, failed) use the same outline icons as the rest of Anvil.
 - An app's Overview says how many of its processes run once, in the header; the Dev and Containers lines below keep their dots.
 - The sidebar shows a Docker Compose app as crashed when one of its containers exited with an error, as its header does.
+- A service in the sidebar has a right-click menu: Start or Stop, open in a database app, its data, its log and Remove Service….
 - Less CPU while an app's Dev, Requests or Overview tab, or the Processes window, is open.
 - The Processes window asks Docker every 15 s instead of every 2 s while no container runs.
 - A closed or minimized window no longer reloads after every action; it catches up when it is shown again.

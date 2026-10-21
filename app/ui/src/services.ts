@@ -1,6 +1,7 @@
 import type { ServiceRow } from "./types";
 import {
   $,
+  M,
   listSection,
   resCache,
   bytes,
@@ -152,7 +153,29 @@ function serviceRow(svc) {
   for (const t of svc.tags.slice(0, 2)) end.append(el("span", "tag", t));
   b.append(markBox(serviceMark(svc), svc.running ? "on" : svc.error ? "bad" : null), text, end);
   b.onclick = () => selectService(svc.id);
+  b.oncontextmenu = (e) => {
+    e.preventDefault();
+    selectService(svc.id);
+    serviceMenu(svc);
+  };
   return b;
+}
+
+/** A service row's menu: what its page offers, Remove last. */
+async function serviceMenu(svc) {
+  const item = (text, action) => M.MenuItem.new({ text, action });
+  const fail = (e) => showError(String(e));
+  const items = [
+    item(svc.running ? "Stop" : "Start", () => serviceCall("service_run", { id: svc.id, action: svc.running ? "stop" : "start" })),
+    M.PredefinedMenuItem.new({ item: "Separator" }),
+    ...svc.clients.map((c) => item(`Open in ${c}`, () => openClient(svc, c, chosenDb[svc.id]))),
+  ];
+  if (svc.web && svc.running)
+    items.push(item(svc.kind === "mailpit" ? "Open Inbox" : "Open Web Console", () => invoke("open_url", { url: svc.web }).catch(fail)));
+  items.push(item("Show Data in Finder", () => invoke("open_service", { id: svc.id, what: "data" }).catch(fail)));
+  if (svc.running) items.push(item("Show Log in Processes", () => invoke("show_processes", { select: `service:${svc.id}` }).catch(fail)));
+  items.push(M.PredefinedMenuItem.new({ item: "Separator" }), item("Remove Service…", () => removeService(svc)));
+  (await M.Menu.new({ items: await Promise.all(items) })).popup();
 }
 
 export function renderServiceList() {

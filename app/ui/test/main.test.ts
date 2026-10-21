@@ -1003,6 +1003,33 @@ describe("service page", () => {
     expect(calls("show_processes")).toHaveLength(n);
   });
 
+  test("a service row's right-click menu: Stop or Start, its client, data, log, Remove last", async () => {
+    await show("cache");
+    const texts = () => (w.mockMenu as any[]).map((i) => i.text ?? i.item);
+    $('#list [data-name="mysql"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await wait();
+    expect($('#list [data-name="mysql"]').getAttribute("aria-current")).toBe("true");
+    expect(texts()).toEqual([
+      "Stop",
+      "Separator",
+      "Open in TablePlus",
+      "Show Data in Finder",
+      "Show Log in Processes",
+      "Separator",
+      "Remove Service…",
+    ]);
+    (w.mockMenu as any[]).find((i) => i.text === "Show Log in Processes").action();
+    await wait();
+    expect(calls("show_processes").at(-1)![1]).toEqual({ select: "service:mysql" });
+    // A stopped one: Start, and no log.
+    $('#list [data-name="postgres"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await wait();
+    expect(texts()).toEqual(["Start", "Separator", "Show Data in Finder", "Separator", "Remove Service…"]);
+    (w.mockMenu as any[])[0].action();
+    await wait();
+    expect(calls("service_run").at(-1)![1]).toEqual({ id: "postgres", action: "start" });
+  });
+
   test("Redis: keys and memory on one line that opens to the keys", async () => {
     await show("cache");
     const sum = $(".svc-summary");
