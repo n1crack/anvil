@@ -1291,22 +1291,35 @@ button.dev-summary:not(.is-muted):hover::after { border-color: var(--text); }
 .hk [hidden] { display: none; }
 .preset-field small.error-text,
 .wt-hooks small.error-text { display: block; margin-top: 2px; color: var(--danger); font-size: 11px; }
-.wt-summary { display: grid; gap: 2px; }
-.wt-summary .muted { margin-top: 4px; color: var(--muted); }
-.wt-actions { display: flex; gap: 6px; margin-top: 4px; }
+/* Worktrees in an app's Settings tab: a lead with the source as a tag and Customize… at the
+ * right, a checklist, the offered commands in one muted line; open, Done at the bottom. */
+.wt-summary { display: grid; gap: 6px; }
+.wt-head { display: flex; align-items: flex-start; gap: 12px; }
+.wt-title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: 22px; }
+.wt-tag { padding: 1px 7px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.wt-head .wt-toggle { margin-left: auto; }
+.wt-gets { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.wt-gets li { display: flex; align-items: center; gap: 7px; }
+.wt-gets svg { flex: none; width: 13px; height: 13px; color: var(--muted); }
+.wt-offers { padding-left: 20px; color: var(--muted); font-size: 12px; }
+.wt-actions { display: flex; align-items: center; gap: 12px; }
 .wt-actions .inline-action { margin-left: 0; }
-.hk { display: grid; gap: 4px; flex: 1; min-width: 0; max-width: 460px; }
+.wt-actions small.error-text { margin: 0; }
+.wt-foot { min-height: 0; }
+.hk { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; flex: 1; min-width: 0; max-width: 520px; }
+.hk-switch { gap: 8px; }
 .hk-row { display: flex; align-items: center; gap: 6px; min-height: 26px; }
 .hk .hk-text { flex: 1; min-width: 0; max-width: none; overflow-wrap: anywhere; }
 .hk code { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
 .hk .hk-key,
-.hk input.hk-key[type="text"] { flex: none; box-sizing: border-box; width: 150px; overflow-wrap: anywhere; }
-.hk .hk-choice { flex: none; width: 210px; }
-.hk .seg { justify-self: start; }
+.hk input.hk-key[type="text"] { flex: 0 1 150px; box-sizing: border-box; min-width: 72px; overflow-wrap: anywhere; }
+.hk .hk-choice { flex: 1; min-width: 120px; width: auto; }
 .hk .hk-custom { flex: 1; min-width: 0; max-width: none; }
 .hk input[type="text"] { width: auto; text-align: left; font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
 .hk .inline-action { flex: none; margin-left: 0; }
-.hk .hk-x { flex: none; width: 22px; height: 22px; margin-left: auto; background: none; }
+/* × and an Add line's Add share one column at the right: same width, so what's left of them ends together. */
+.hk .hk-x { flex: none; width: 44px; height: 22px; margin-left: auto; background: none; }
+.hk .hk-add > .inline-action:last-child { min-width: 44px; }
 .hk .hk-x svg { width: 12px; height: 12px; }
 .hk-add .hk-key + .hk-choice + .hk-custom[hidden] + .inline-action { margin-left: auto; }
 .hk small.hk-hint { margin: 0; color: var(--muted); font-size: 11px; }
@@ -2305,6 +2318,7 @@ kbd {
 
 /* The main action: a little stronger than the others, never colored. */
 .sheet-actions .primary,
+.wt-actions .primary,
 .pop-confirm .primary,
 .dev-conf-foot .primary,
 .upd-foot .primary {
@@ -2316,8 +2330,10 @@ kbd {
 
 .sheet-actions .primary:disabled,
 .dev-conf-foot button:disabled { opacity: 0.5; }
-.sheet-actions .link { padding: 0; border: 0; background: none; color: var(--muted); }
-.sheet-actions .link:hover { color: var(--text); }
+.sheet-actions .link,
+.wt-actions .link { padding: 0; border: 0; background: none; color: var(--muted); }
+.sheet-actions .link:hover,
+.wt-actions .link:hover { color: var(--text); }
 
 /* New application: templates grouped by language, two per row, each a monochrome
  * glyph, its name and a line about it; the chosen one a neutral highlight and a check. */
@@ -3542,6 +3558,7 @@ body.activity {
 .pop-confirm.wide label { flex-basis: 100%; margin: 0; }
 
 .sheet-actions .primary:hover,
+.wt-actions .primary:hover,
 .pop-confirm .primary:hover,
 .upd-foot .primary:hover:not(:disabled),
 .setup .setup-go:hover,

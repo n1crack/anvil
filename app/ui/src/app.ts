@@ -1956,7 +1956,7 @@ function webRoot(s, root) {
 
 const hooksOpen = new Set<string>(); // apps whose Worktrees editor is open
 
-/** Where an app's hooks come from, said once: "Laravel preset", ".anvil.toml", changed here. */
+/** Where an app's hooks come from, said once: "From the Laravel preset", changed here. */
 function hooksFrom(from: Record<string, string>): string {
   const layers = [...new Set(Object.values(from))].filter((l) => l !== "Settings");
   const others = layers.filter((l) => l !== "this app").map((l) => (l.endsWith(" preset") ? `the ${l}` : l));
@@ -1965,9 +1965,17 @@ function hooksFrom(from: Record<string, string>): string {
   return others.length ? `From ${others.join(" and ")}` : "From Settings › Worktrees";
 }
 
-/** The Settings tab's Worktrees section, for a git repository: what a new worktree gets, in
- * plain sentences, and where that comes from; Customize… opens the editors (hooksform.ts),
- * changed here for this app only; Use preset drops this app's own. */
+/** The same, as a small tag ("Laravel preset", "Changed for this app"); the sentence on hover. */
+function hooksTag(from: Record<string, string>): string {
+  const layers = [...new Set(Object.values(from))].filter((l) => l !== "Settings");
+  if (layers.includes("this app")) return "Changed for this app";
+  return layers.join(" · ") || "Settings › Worktrees";
+}
+
+/** The Settings tab's Worktrees section, for a git repository: what a new worktree gets as a
+ * short checklist, where that comes from as a tag, Customize… at its top right. Open, the
+ * editors (hooksform.ts) save each change for this app only; Done and Reset to preset
+ * (drops this app's own) sit at the bottom. */
 async function renderHooks(s, root) {
   const box = $(".wt-hooks", root);
   let v;
@@ -1978,21 +1986,65 @@ async function renderHooks(s, root) {
   }
   if (box.contains(document.activeElement) && document.activeElement?.tagName !== "BUTTON") return; // being typed in
   const open = hooksOpen.has(s.name);
-  const head = el("dd", "wt-summary");
-  if (!open) head.append(...summary(v.hooks, v.install).map((line) => el("div", null, line)));
-  const from = el("div", "muted", hooksFrom(v.hooks.from));
-  const fail = el("small", "error-text");
-  fail.hidden = true;
-  const toggle = el("button", "inline-action", open ? "Done" : "Customize…");
-  toggle.onclick = () => {
+  const toggle = () => {
     if (open) hooksOpen.delete(s.name);
     else hooksOpen.add(s.name);
     renderHooks(s, root);
   };
-  const actions = el("div", "wt-actions");
-  actions.append(toggle);
+  const head = el("dd", "wt-summary");
+  const top = el("div", "wt-head");
+  const title = el("div", "wt-title");
+  title.append(el("span", "wt-lead", open ? "Changes save as you make them, for this app only." : "A new worktree of this app gets:"));
+  const tag = el("span", "wt-tag", hooksTag(v.hooks.from));
+  tag.title = hooksFrom(v.hooks.from);
+  title.append(tag);
+  top.append(title);
+  if (!open) {
+    const b = el("button", "inline-action wt-toggle", "Customize…");
+    b.onclick = toggle;
+    top.append(b);
+  }
+  head.append(top);
+  if (!open) {
+    const { gets, offers } = summary(v.hooks, v.install);
+    const list = el("ul", "wt-gets");
+    for (const line of gets) {
+      const li = el("li");
+      li.append(icon("check"), el("span", null, line.text));
+      if (line.title) li.title = line.title;
+      list.append(li);
+    }
+    head.append(list);
+    if (offers) head.append(el("div", "wt-offers", offers));
+  }
+  // A layer with a mistake (a typo in config.toml or .anvil.toml): one line each.
+  for (const p of v.hooks.problems ?? []) head.append(el("small", "error-text", p));
+  const row = el("div", "row row-top");
+  row.append(el("dt", null, "Worktrees"), head);
+  if (!open) {
+    box.replaceChildren(row);
+    box.hidden = false;
+    return;
+  }
+  const save = (field: string, value: unknown) => invoke("set_app_hooks", { site: s.name, field, value }).then(() => renderHooks(s, root));
+  const fields = ["copy", "copy_database", "keys", "after_create"] as const;
+  const rows = fields.map((field) => {
+    const r = el("div", "row row-top");
+    const dd = el("dd");
+    dd.append(editor(field, v.hooks, { save, install: v.install, root: s.path }));
+    r.append(el("dt", null, NAMES[field]), dd);
+    return r;
+  });
+  const foot = el("div", "row wt-foot");
+  const actions = el("dd", "wt-actions");
+  const done = el("button", "inline-action primary", "Done");
+  done.onclick = toggle;
+  actions.append(done);
+  const fail = el("small", "error-text");
+  fail.hidden = true;
   if (Object.keys(v.own).length) {
-    const reset = el("button", "inline-action", "Use preset");
+    const reset = el("button", "link", "Reset to preset");
+    reset.title = "Drop this app’s own changes";
     reset.onclick = () =>
       invoke("set_app_hooks", { site: s.name, field: null, value: null }).then(
         () => renderHooks(s, root),
@@ -2003,23 +2055,9 @@ async function renderHooks(s, root) {
       );
     actions.append(reset);
   }
-  head.append(from, actions, fail);
-  // A layer with a mistake (a typo in config.toml or .anvil.toml): one line each.
-  for (const p of v.hooks.problems ?? []) head.append(el("small", "error-text", p));
-  const top = el("div", "row row-top");
-  top.append(el("dt", null, "Worktrees"), head);
-  const save = (field: string, value: unknown) => invoke("set_app_hooks", { site: s.name, field, value }).then(() => renderHooks(s, root));
-  const fields = ["copy", "copy_database", "keys", "after_create"] as const;
-  const rows = open
-    ? fields.map((field) => {
-        const row = el("div", "row row-top");
-        const dd = el("dd");
-        dd.append(editor(field, v.hooks, { save, install: v.install, root: s.path }));
-        row.append(el("dt", null, NAMES[field]), dd);
-        return row;
-      })
-    : [];
-  box.replaceChildren(top, ...rows);
+  actions.append(fail);
+  foot.append(el("dt"), actions);
+  box.replaceChildren(row, ...rows, foot);
   box.hidden = false;
 }
 

@@ -68,17 +68,36 @@ export function command(c: string, install?: string | null): string {
   return c.replaceAll("{install}", install ?? "the lock file’s install");
 }
 
-/** What a new worktree gets, one plain sentence each. */
-export function summary(h: Hooks, install?: string | null): string[] {
-  const keys = Object.keys(h.keys ?? {});
+/** One line of the summary; `title` names the env keys behind it. */
+export interface Line {
+  text: string;
+  title?: string;
+}
+
+/** What each env key value gives a worktree, said as a thing of its own. */
+const OWN: Record<string, string> = { "{url}": "address", "{prefix}": "cache prefix", "{port}": "port", "{name}": "name" };
+
+const and = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : xs[0]);
+
+/** What a new worktree gets, a short line each: files, database, the keys set to its own
+ * things (names on hover), and the commands it then offers. */
+export function summary(h: Hooks, install?: string | null): { gets: Line[]; offers: string | null } {
+  const keys = Object.entries(h.keys ?? {});
+  const dbKeys = keys.filter(([, v]) => v === "{db}").map(([k]) => k);
+  const rest = keys.filter(([, v]) => v !== "{db}");
+  const things = [...new Set(rest.map(([, v]) => OWN[v] ?? "other values"))];
   // Without package.json a command with {install} is left out (worktrees::commands).
   const cmds = (h.after_create ?? []).filter((c) => install !== null || !c.includes("{install}"));
-  return [
-    h.copy?.length ? `Copies ${h.copy.join(", ")}` : "Copies no files",
-    `Its own database, ${h.copy_database ? "a copy of main’s" : "empty"}`,
-    keys.length ? `Sets ${keys.join(", ")}` : "Sets no env keys",
-    ...(cmds.length ? [`Then offers to run ${cmds.map((c) => command(c, install)).join(", ")}`] : []),
+  const gets: Line[] = [
+    { text: h.copy?.length ? `${and(h.copy)} copied` : "No files copied" },
+    {
+      text: h.copy_database ? "Its own database, a copy of main’s" : "Its own empty database",
+      ...(dbKeys.length ? { title: `Set in ${dbKeys.join(", ")}` } : {}),
+    },
   ];
+  if (rest.length) gets.push({ text: `Its own ${and(things)}`, title: `Set in ${rest.map(([k]) => k).join(", ")}` });
+  const offer = (c: string) => (c.trim() === "{install}" ? (install ?? "Install packages") : command(c, install));
+  return { gets, offers: cmds.length ? `Then offers: ${cmds.map(offer).join(" · ")}` : null };
 }
 
 /** The editor of `field`, showing `h`'s value. */
@@ -102,20 +121,12 @@ export function editor(field: Field, h: Hooks, o: Opts): HTMLElement {
     });
 
   if (field === "copy_database") {
-    const seg = el("div", "seg");
-    seg.setAttribute("role", "group");
-    seg.setAttribute("aria-label", "New worktree’s database");
-    for (const [copy, text] of [
-      [false, "Empty"],
-      [true, "Copy of main’s"],
-    ] as const) {
-      const b = el("button", null, text);
-      b.type = "button";
-      b.setAttribute("aria-pressed", String(!!h.copy_database === copy));
-      b.onclick = () => !!h.copy_database !== copy && run(copy);
-      seg.append(b);
-    }
-    box.append(seg, fail);
+    const label = el("label", "hk-row hk-switch");
+    const sw = Object.assign(el("input"), { type: "checkbox", checked: !!h.copy_database }) as HTMLInputElement;
+    sw.setAttribute("role", "switch");
+    sw.onchange = () => run(sw.checked);
+    label.append(sw, el("span", null, "Start with a copy of main’s data"));
+    box.append(label, el("small", "hk-hint", "Each worktree gets a database of its own; off, it starts empty."), fail);
     return box;
   }
 
@@ -134,10 +145,7 @@ export function editor(field: Field, h: Hooks, o: Opts): HTMLElement {
       if (p && !list.includes(p)) run([...list, p]);
     };
     onEnter(path, () => go());
-    add.append(
-      path,
-      action("Add", () => go()),
-    );
+    add.append(path);
     if (o.root) {
       const root = o.root.replaceAll("\\", "/").replace(/\/$/, "");
       add.append(
@@ -154,7 +162,9 @@ export function editor(field: Field, h: Hooks, o: Opts): HTMLElement {
         }),
       );
     }
-    box.append(add, el("small", "hk-hint", "* matches any characters"), fail);
+    // Add last on every Add line, so it lines up with the × above it.
+    add.append(action("Add", () => go()));
+    box.append(add, el("small", "hk-hint", "Copied from main’s folder into the new one; * matches any characters."), fail);
     return box;
   }
 
@@ -200,7 +210,7 @@ export function editor(field: Field, h: Hooks, o: Opts): HTMLElement {
     onEnter(key, go);
     onEnter(custom, go);
     add.append(key, sel, custom, action("Add", go));
-    box.append(add, el("small", "hk-hint", "Anvil warns while a key set to its database or a prefix still has main’s value."), fail);
+    box.append(add, el("small", "hk-hint", "Set for the worktree’s processes, over its .env, so it doesn’t share main’s."), fail);
     return box;
   }
 
@@ -221,8 +231,9 @@ export function editor(field: Field, h: Hooks, o: Opts): HTMLElement {
     if (c) run([...list, c]);
   };
   onEnter(cmd, go);
-  add.append(cmd, action("Add", go));
+  add.append(cmd);
   if (!list.includes("{install}")) add.append(action("Add Package Install", () => run([...list, "{install}"])));
-  box.append(add, el("small", "hk-hint", "Offered once a worktree is made; each runs only after you say so."), fail);
+  add.append(action("Add", go));
+  box.append(add, el("small", "hk-hint", "Offered once the worktree is made; each runs only after you say so."), fail);
   return box;
 }

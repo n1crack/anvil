@@ -23,6 +23,7 @@ contain breaking changes.
 - Settings: plainer words, shorter hints, and rarely used options under Advanced.
 - Settings: "Features" in the sidebar, Tunnel explained in its row instead of a page of its own, "Applications" throughout, and storage sizes lined up; an npm or yarn app's Packages line offers Switch to pnpm beside Install and Update.
 - Main window: plainer words on service, Mail and Settings pages; an external server shows Reachable, a crashed container says so.
+- An app's Settings › Worktrees reads as a short checklist, and Customize… is a tidier form with Done at the bottom.
 
 ### Fixed
 

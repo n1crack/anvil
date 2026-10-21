@@ -782,7 +782,7 @@ describe("worktrees", () => {
     expect($$("#presets .seg").length).toBe(0);
     const after = $$("#presets .hk")[2];
     (after.querySelector(".hk-add input") as HTMLInputElement).value = "php artisan migrate";
-    (after.querySelector(".hk-add .inline-action") as HTMLButtonElement).click();
+    (after.querySelector(".hk-add .inline-action:last-child") as HTMLButtonElement).click();
     await wait();
     expect(w.mockCalls.at(-1)).toEqual([
       "set_worktree_preset",
