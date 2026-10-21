@@ -1313,11 +1313,14 @@ pub fn installed_php() -> Vec<String> {
 /// The source's list of PHP builds: static-php-cli's directory, or windows.php.net's
 /// releases.json.
 fn php_index() -> Result<serde_json::Value> {
-    fetch_json(&if cfg!(windows) {
+    let url = if cfg!(windows) {
         format!("{PHP_WINDOWS}releases.json")
     } else {
         format!("{PHP_INDEX}?format=json")
-    })
+    };
+    // `anvil php list` asks too: a dead network mustn't hold the list up.
+    serde_json::from_slice(&curl(&["-fsSL", "--max-time", "10"], &url)?)
+        .with_context(|| format!("{url} sent something unreadable"))
 }
 
 /// The newest patch of `minor` (`8.4.27`) in static-php-cli's directory that has an
