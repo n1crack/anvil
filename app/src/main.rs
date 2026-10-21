@@ -380,7 +380,8 @@ fn snapshot(app: &App) -> Res<Snapshot> {
     let cfg = anvil::load().map_err(err)?;
     let https_port = anvil::public_https_port(&cfg);
     let http_port = anvil::public_http_port(&cfg);
-    let sites = anvil::sites(&cfg);
+    // Always a new scan: the app list shows a folder added or removed at once.
+    let sites: Vec<Site> = scan_sites(&cfg).to_vec();
     let (live, crashed) = {
         let mut apps = anvil::lock(&app.apps);
         let live: Vec<String> = apps.list().into_iter().map(|(k, _, _)| k).collect();
@@ -525,6 +526,7 @@ fn stop(app: &App) {
 
 /// Something changed: rebuild the tray menu and re-render an open window.
 fn changed(handle: &AppHandle) {
+    *anvil::lock(&SITES) = None;
     if let (Some(tray), Ok(menu)) = (handle.tray_by_id("anvil"), menu(handle)) {
         let _ = tray.set_menu(Some(menu));
     }
@@ -869,12 +871,43 @@ fn find_site_cfg(name: &str) -> Res<(Config, Site)> {
     Ok((cfg, site))
 }
 
-/// The app named `name` in `cfg`, else "No app named".
+/// The app named `name` in `cfg`, else "No app named". From the recent scan
+/// (`sites_of`); a name it doesn't hold (a folder just added) is looked for in a new one.
 fn site_in(cfg: &Config, name: &str) -> Res<Site> {
-    anvil::sites(cfg)
-        .into_iter()
-        .find(|s| s.name == name)
+    let find = |all: &[Site]| all.iter().find(|s| s.name == name).cloned();
+    find(&sites_of(cfg))
+        .or_else(|| find(&scan_sites(cfg)))
         .ok_or_else(|| format!("No app named {name}"))
+}
+
+/// The last scan of the apps, with when and from which config (as JSON) it was made. Log
+/// tails, the Overview and the Processes window ask for an app several times a second,
+/// and a scan of 90 apps costs ~7 ms.
+type Scan = (std::time::Instant, String, std::sync::Arc<Vec<Site>>);
+static SITES: Mutex<Option<Scan>> = Mutex::new(None);
+
+/// How long a scan answers for the same config: what it reads from the apps' folders
+/// (their kind, a new worktree) can change without Anvil.
+const SITES_FOR: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// `anvil::sites(cfg)`, from the last scan when it is recent and of the same config.
+fn sites_of(cfg: &Config) -> std::sync::Arc<Vec<Site>> {
+    let key = serde_json::to_string(cfg).unwrap_or_default();
+    if let Some((at, k, all)) = &*anvil::lock(&SITES)
+        && at.elapsed() < SITES_FOR
+        && *k == key
+    {
+        return all.clone();
+    }
+    scan_sites(cfg)
+}
+
+/// `anvil::sites(cfg)` scanned now, kept for `sites_of`.
+fn scan_sites(cfg: &Config) -> std::sync::Arc<Vec<Site>> {
+    let key = serde_json::to_string(cfg).unwrap_or_default();
+    let all = std::sync::Arc::new(anvil::sites(cfg));
+    *anvil::lock(&SITES) = Some((std::time::Instant::now(), key, all.clone()));
+    all
 }
 
 /// One line of the Processes window.
@@ -954,7 +987,7 @@ fn agent_activity(app: State<App>, site: Option<String>) -> Vec<control::AgentAc
 #[tauri::command(async)]
 fn activity(app: State<App>) -> Res<Activity> {
     let cfg = anvil::load().map_err(err)?;
-    let sites = anvil::sites(&cfg);
+    let sites = sites_of(&cfg);
     // Quick snapshots, each lock released before anything slow.
     let web_pids = anvil::lock(&app.server)
         .as_ref()
@@ -1023,7 +1056,7 @@ fn activity(app: State<App>) -> Res<Activity> {
         .collect();
 
     let mut groups = vec![];
-    for site in &sites {
+    for site in sites.iter() {
         let mut rows = vec![];
         let mine = |key: &str| {
             key.strip_prefix(site.name.as_str())
@@ -4333,7 +4366,7 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let on = running(&app);
     let cfg = anvil::load().unwrap_or_default();
     // One scan of the folders serves the whole menu.
-    let all = anvil::sites(&cfg);
+    let all = scan_sites(&cfg);
 
     let status = if on {
         // Aliases share their app's folder; count each app once.
