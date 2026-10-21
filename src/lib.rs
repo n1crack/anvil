@@ -2589,6 +2589,8 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
         platform::command_line(pid).is_some_and(|c| ours.as_ref().is_some_and(|h| c.contains(h)))
     };
     let mut stopping = vec![];
+    let pids: Vec<&str> = pids.collect();
+    let table = platform::processes();
     for line in pids {
         let (pid, at) = line
             .split_once(' ')
@@ -2611,7 +2613,14 @@ pub(crate) fn kill_orphans(pid_file: &Path, group: bool) {
             stopping.push(n);
         }
     }
+    let strays = if group {
+        platform::left_groups(&table, &stopping)
+    } else {
+        vec![]
+    };
+    term_strays(&strays);
     finish_stopping(stopping, group);
+    kill_strays(&strays);
     let _ = fs::remove_file(pid_file);
 }
 
@@ -2638,13 +2647,39 @@ fn finish_stopping(stopping: Vec<u32>, group: bool) {
 /// whose last argument is the `anvil:<home>:<key>` tag `spawn` gives them, where `ours`
 /// accepts `<home>:<key>`. A live Anvil's children have a parent, so they are left alone.
 pub(crate) fn kill_tagged_orphans(ours: impl Fn(&str) -> bool) {
-    let stopping = platform::orphan_leaders()
+    let table = platform::processes();
+    let leaders: Vec<u32> = table
+        .iter()
+        .filter(|(pid, ppid, pgid, c)| {
+            *ppid == 1 && pgid == pid && c.rsplit_once(" anvil:").is_some_and(|(_, t)| ours(t))
+        })
+        .map(|p| p.0)
+        .collect();
+    let strays = platform::left_groups(&table, &leaders);
+    let stopping = leaders
         .into_iter()
-        .filter(|(_, c)| c.rsplit_once(" anvil:").is_some_and(|(_, t)| ours(t)))
-        .map(|(p, _)| p)
         .filter(|p| platform::term(*p, true))
         .collect();
+    term_strays(&strays);
     finish_stopping(stopping, true);
+    kill_strays(&strays);
+}
+
+/// SIGTERM to what left a stopping group (`platform::left_groups`).
+fn term_strays(strays: &[(u32, String)]) {
+    for (p, _) in strays {
+        platform::term(*p, false);
+    }
+}
+
+/// After the grace: SIGKILL what is still there of `strays`, only while its pid still
+/// runs the same command line (not a later process given that pid).
+fn kill_strays(strays: &[(u32, String)]) {
+    for (p, c) in strays {
+        if platform::alive(*p) && platform::command_line(*p).is_some_and(|now| now.trim() == c) {
+            platform::kill(*p, false);
+        }
+    }
 }
 
 /// A pid file's first line: this Anvil's pid and start time (`kill_orphans`).
@@ -2718,6 +2753,11 @@ pub(crate) fn terminate(child: &mut Child, grace: std::time::Duration) {
 /// `terminate` for many at once: SIGTERM to all, one shared `grace` for them to exit,
 /// then SIGKILL what is left. Stopping N takes one grace, not N.
 pub(crate) fn terminate_all(children: &mut [Child], grace: std::time::Duration) {
+    // What left the groups (Next's telemetry flusher) is found by its parents, so before
+    // the groups end.
+    let ids: Vec<u32> = children.iter().map(|c| c.id()).collect();
+    let strays = platform::left_groups(&platform::processes(), &ids);
+    term_strays(&strays);
     let groups: Vec<bool> = children
         .iter()
         .map(|c| {
@@ -2748,6 +2788,7 @@ pub(crate) fn terminate_all(children: &mut [Child], grace: std::time::Duration) 
         }
         let _ = c.wait();
     }
+    kill_strays(&strays);
 }
 
 /// A process taken out of `Apps`, `Services` or `Server` (`take`, `take_all`), still to
@@ -3167,6 +3208,48 @@ mod tests {
         terminate(&mut stubborn, std::time::Duration::from_millis(300));
         assert!(matches!(stubborn.try_wait(), Ok(Some(_))));
         assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    /// A process that left the app's group (Next's telemetry flusher starts in its own
+    /// session) is stopped with it; it would outlive the group's kill.
+    #[test]
+    fn terminate_stops_what_left_the_group() {
+        use std::os::unix::process::CommandExt;
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("flusher");
+        let mut leader = crate::platform::command("sh")
+            .arg("-c")
+            .arg(format!(
+                "perl -e 'setpgrp(0,0); exec @ARGV' sleep 30 & echo $! > '{}'; wait",
+                pid_file.display()
+            ))
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let flusher = (0..100)
+            .find_map(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                fs::read_to_string(&pid_file)
+                    .ok()
+                    .filter(|s| s.ends_with('\n'))
+            })
+            .unwrap();
+        let flusher: u32 = flusher.trim().parse().unwrap();
+        // Out of the group once perl has run setpgrp.
+        let left = (0..100).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            platform::group_alive(flusher)
+        });
+        assert!(left, "the test's process never left the group");
+        terminate(&mut leader, std::time::Duration::from_secs(5));
+        let gone = (0..50).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            !platform::alive(flusher)
+        });
+        if !gone {
+            platform::kill(flusher, false);
+        }
+        assert!(gone, "the process that left the group survived");
     }
 
     /// Quit stops everything against one deadline: three groups that ignore SIGTERM and

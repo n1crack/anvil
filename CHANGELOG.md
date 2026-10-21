@@ -32,6 +32,7 @@ contain breaking changes.
 - The keyboard focus ring on an app's tabs is drawn whole, not cut at the top and bottom.
 - Service tags in the sidebar line up with the apps' type labels; short of room, a tag is left out instead of cut.
 - The line under an app's or service's name wraps without a stray "·" at a line's start or end.
+- Stopping an app also ends the processes it started in the background, such as Next.js's telemetry flusher, which were left running.
 
 ## [0.2.1] - 2026-10-21
 
