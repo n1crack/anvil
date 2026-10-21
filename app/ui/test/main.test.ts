@@ -1471,6 +1471,23 @@ describe("requests", () => {
     expect(home.querySelector(".req-host")).toBeNull();
   });
 
+  test("a log that can't be read says so as an error, not as an empty list", async () => {
+    w.mockFail = { requests_read: "permission denied" };
+    try {
+      ($(".req-method-pick") as HTMLSelectElement).value = "PUT";
+      $(".req-method-pick").dispatchEvent(new Event("change"));
+      await wait(80);
+      expect($(".req-list .empty").textContent).toBe("permission denied");
+      expect($(".req-list .empty").classList.contains("error-text")).toBe(true);
+    } finally {
+      w.mockFail = null;
+      ($(".req-method-pick") as HTMLSelectElement).value = "";
+      $(".req-method-pick").dispatchEvent(new Event("change"));
+      await wait(80);
+    }
+    expect($(".req-list .empty")).toBeNull();
+  });
+
   test("a row opens to its headers, the redacted ones said so, the host first", async () => {
     const home = rows()[2];
     (home.querySelector(".log-head") as HTMLElement).click();
@@ -1502,6 +1519,8 @@ describe("requests", () => {
     expect(calls("requests_read").at(-1)![1].filter.query).toBe("login");
     const clear = $(".req-clear");
     expect(clear.hidden).toBe(false);
+    // Not Logs' Clear…, which deletes the log.
+    expect(clear.textContent).toBe("Clear Filters");
     clear.click();
     await wait(30);
     expect(calls("requests_read").at(-1)![1].filter).toEqual({ status: null, method: null, query: "", assets: false });

@@ -106,11 +106,16 @@ export function picker(o: {
     }
     move(e);
   };
-  // Esc clears the search first, then closes.
+  // Esc clears the search first, then closes. A search field keeps Esc to itself even
+  // when empty (WebKit and Chromium alike), so the sheet is closed here.
   o.sheet.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || !o.search.value || o.form.hidden) return;
+      if (e.key !== "Escape" || o.form.hidden) return;
+      if (!o.search.value) {
+        if (e.target === o.search) o.sheet.close();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       o.search.value = "";

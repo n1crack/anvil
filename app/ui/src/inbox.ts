@@ -221,9 +221,13 @@ export function inboxView(inbox: string, invoke: Invoke, emptyText: string): Inb
           save.disabled = true;
           try {
             const path = await invoke<string>("mail_save", { inbox, id: m.id, index: a.index });
-            save.replaceWith(el("span", "muted", `Saved to ${tilde(path)}`));
+            const said = el("span", "muted", `Saved to ${tilde(path)}`);
+            said.setAttribute("role", "status");
+            save.replaceWith(said);
           } catch (e) {
-            save.replaceWith(el("span", "error", String(e)));
+            const why = el("span", "error", String(e));
+            why.setAttribute("role", "status");
+            save.replaceWith(why);
           }
         };
         f.append(el("span", null, `${a.name} ${size(a.size)}`), " ", save);

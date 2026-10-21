@@ -1,7 +1,7 @@
 import "./platform";
 import type { Settings } from "./types";
 import { ownError } from "./live";
-import { confirmInRow, textAct } from "./confirm";
+import { bubbleKeys, confirmInRow, textAct } from "./confirm";
 import { NAMES, editor } from "./hooksform";
 import { inboxView, type Inbox } from "./inbox";
 
@@ -650,13 +650,12 @@ export function render() {
       row.className = "row";
       const label = document.createElement("span");
       label.textContent = name;
-      row.append(
-        label,
-        button("Show", async () => {
-          await invoke("unhide_site", { site: name }).catch((e) => showError(String(e)));
-          call("settings");
-        }),
-      );
+      const show = button("Show", async () => {
+        await invoke("unhide_site", { site: name }).catch((e) => showError(String(e)));
+        call("settings");
+      });
+      show.setAttribute("aria-label", `Show ${name}`);
+      row.append(label, show);
       return row;
     }),
   );
@@ -671,6 +670,7 @@ export function render() {
     row.className = "row";
     row.innerHTML = `<span class="path"></span><span class="actions-inline"><button>Remove</button></span>`;
     $(".path", row).textContent = tilde(p);
+    $("button", row).setAttribute("aria-label", `Remove ${tilde(p)}`);
     // Asks in the row: its apps leave Anvil and stop, nothing on disk changes.
     const box = $(".actions-inline", row);
     const remove = $("button", row);
@@ -1199,13 +1199,16 @@ function confirmOpen(anchor: HTMLElement, url: string) {
   const no = node("button", "", "Cancel") as HTMLButtonElement;
   const pop = node("div", "pop pop-confirm", node("span", "", new URL(url).host), no, yes);
   pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", `Open ${new URL(url).host}`);
   const close = () => {
+    const inside = pop.contains(document.activeElement);
     pop.remove();
     document.removeEventListener("mousedown", outside, true);
     document.removeEventListener("scroll", close, true);
+    if (inside) anchor.focus();
   };
   const outside = (e: MouseEvent) => !pop.contains(e.target as Node) && close();
-  pop.addEventListener("keydown", (e) => e.key === "Escape" && close());
+  bubbleKeys(pop, close);
   yes.onclick = () => {
     close();
     invoke("open_url", { url }).catch((err) => showError(String(err)));

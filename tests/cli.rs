@@ -499,7 +499,7 @@ fn app_start_without_anvil() {
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
-        "Anvil isn't running. Open it, then try again.\n"
+        "Error: Anvil isn't running. Open the Anvil app, then try again.\n"
     );
 }
 

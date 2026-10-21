@@ -36,6 +36,8 @@ Everything runs natively and lives in `~/.anvil`; your system packages stay unto
 
 ### macOS
 
+macOS 12 or later; 15 is recommended. MySQL needs macOS 14 and PostgreSQL 15.
+
 With [Homebrew](https://brew.sh), add Anvil's tap once:
 
 ```sh

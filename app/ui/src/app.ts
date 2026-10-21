@@ -3,7 +3,7 @@ import type { Snapshot } from "./types";
 import { late } from "./late";
 import { ownError, shown } from "./live";
 import { NAMES, editor, summary } from "./hooksform";
-import { confirmInRow } from "./confirm";
+import { bubbleKeys, confirmInRow } from "./confirm";
 import { icon } from "./icons";
 
 export const { invoke } = window.__TAURI__.core;
@@ -356,12 +356,15 @@ export function markBox(m, badge) {
   return box;
 }
 
-function setBadge(box, badge) {
+function setBadge(box, badge, title?: string) {
   $(".run-badge", box)?.remove();
   box.classList.toggle("running", !!badge);
   if (!badge) return;
   const b = el("span", `run-badge ${badge}`);
-  b.title = { on: "Running", warm: "Starting", bad: "Failed to start" }[badge];
+  b.title = title ?? { on: "Running", warm: "Starting", bad: "Failed to start" }[badge];
+  // Said in the row's name too, so the state isn't only a colour.
+  b.setAttribute("role", "img");
+  b.setAttribute("aria-label", b.title);
   box.append(b);
 }
 
@@ -371,14 +374,15 @@ const STATE_TITLES = { running: "Running", starting: "Starting", crashed: "A pro
 /** An app row's dot: green while anything of the app runs, amber while its server starts,
  * red after a crash. */
 function appBadge(box, state) {
-  setBadge(box, state && BADGES[state]);
-  if (state === "crashed") $(".run-badge", box).title = STATE_TITLES.crashed;
+  setBadge(box, state && BADGES[state], state === "crashed" ? STATE_TITLES.crashed : undefined);
 }
 
 /** A worktree row's branch glyph, coloured as an app's dot. */
 function wtState(m, state) {
   m.className = `wt-glyph ${BADGES[state] ?? ""}`;
   m.title = STATE_TITLES[state] ?? "Stopped";
+  m.setAttribute("role", "img");
+  m.setAttribute("aria-label", m.title);
 }
 
 /** The names linked to one folder: the app is the parked one, else the first by name, as
@@ -1537,19 +1541,22 @@ function aliasesLine(s, root) {
 }
 
 /** A small bubble under `anchor`, right-aligned with it (or left). Esc or a click elsewhere
- * closes it; the close function is returned. */
+ * closes it, Tab stays inside it, and the focus goes back to `anchor` when it was in the
+ * bubble; the close function is returned. */
 export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | null, align: "left" | "right" = "right") {
   document.querySelector(".pop")?.remove();
   pop.classList.add("pop");
   pop.setAttribute("role", "dialog");
+  if (!pop.hasAttribute("aria-label") && !pop.hasAttribute("aria-labelledby"))
+    pop.setAttribute("aria-label", anchor.getAttribute("aria-label") || anchor.textContent?.trim() || "");
   const close = () => {
+    const inside = pop.contains(document.activeElement);
     pop.remove();
     document.removeEventListener("mousedown", outside, true);
+    if (inside) (anchor as HTMLElement).focus?.();
   };
   const outside = (e) => !pop.contains(e.target) && close();
-  pop.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") close();
-  });
+  bubbleKeys(pop, close);
   const r = anchor.getBoundingClientRect();
   Object.assign(
     pop.style,
@@ -1560,6 +1567,10 @@ export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | n
   document.body.append(pop);
   // A button near the left edge gets its bubble to the right instead of past the window.
   if (align === "right" && pop.getBoundingClientRect().left < 8) Object.assign(pop.style, { right: "", left: `${Math.max(8, r.left)}px` });
+  // And one near the right edge (Packages' +) is moved left to fit, not past the window.
+  const w = document.documentElement.clientWidth;
+  if (align === "left" && pop.getBoundingClientRect().right > w - 8)
+    pop.style.left = `${Math.max(8, w - pop.getBoundingClientRect().width - 8)}px`;
   // A button near the bottom gets it above, so its buttons aren't cut off.
   const below = pop.getBoundingClientRect();
   if (below.bottom > window.innerHeight - 8 && r.top - below.height - 6 > 8)
@@ -1770,7 +1781,10 @@ const fieldNotes = new Map<string, [string, boolean]>(); // what was said, wheth
 function fieldNote(field: HTMLElement, at: string) {
   field.parentElement?.querySelector(".field-note")?.remove();
   const said = fieldNotes.get(at);
-  if (said) field.after(el("small", `field-note ${said[1] ? "error-text" : "muted"}`, said[0]));
+  if (!said) return;
+  const note = el("small", `field-note ${said[1] ? "error-text" : "muted"}`, said[0]);
+  note.setAttribute("role", "status");
+  field.after(note);
 }
 
 async function setIni(s, field: HTMLElement, name: string, values: (string | null)[][]) {
@@ -1881,12 +1895,14 @@ function phpState(s, php) {
   if (doing) {
     php.value = doing[0];
     const busy = el("span", "php-busy", doing[1]);
+    busy.setAttribute("role", "status");
     busy.prepend(el("span", "spin-dot"));
     php.after(busy);
   }
   const why = phpErrors.get(s.name);
   if (!why) return;
   const error = el("div", "ver-error php-error");
+  error.setAttribute("role", "status");
   error.append(el("span", null, why));
   php.parentElement.append(error);
 }

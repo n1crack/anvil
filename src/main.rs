@@ -23,7 +23,19 @@ const HELP_STYLES: clap::builder::Styles = {
 };
 
 #[derive(Parser)]
-#[command(version, about = "Anvil — your tools, your rules.", styles = HELP_STYLES)]
+#[command(
+    version,
+    about = "Anvil — your tools, your rules.",
+    styles = HELP_STYLES,
+    after_help = "Examples:
+  anvil php install 8.4     Install PHP 8.4
+  anvil park ~/Sites        Serve every folder in ~/Sites as <folder>.test
+  anvil sites               List the applications and their addresses
+  anvil service add mysql   Add a MySQL service
+  anvil logs blog           The latest log entries of the app blog
+
+Run `anvil <command> --help` for a command's arguments."
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -31,15 +43,27 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Serve every sub-folder of a directory (default: current)
-    Park { path: Option<PathBuf> },
-    /// Stop serving a parked directory
-    Forget { path: Option<PathBuf> },
+    /// Serve every sub-folder of a directory as an application
+    Park {
+        /// The folder (default: the current one)
+        path: Option<PathBuf>,
+    },
+    /// Stop serving a parked directory (its folders are left alone)
+    Forget {
+        /// The parked folder (default: the current one)
+        path: Option<PathBuf>,
+    },
     /// Serve the current directory as <name>.<tld>
-    Link { name: Option<String> },
-    /// Remove a linked site
-    Unlink { name: String },
-    /// List sites
+    Link {
+        /// The application's name (default: the folder's name)
+        name: Option<String>,
+    },
+    /// Stop serving a linked application (its folder is left alone)
+    Unlink {
+        /// The name `anvil link` gave it
+        name: String,
+    },
+    /// List the applications: address, type, PHP version and web root
     Sites,
     /// Parallel workspaces: git worktrees of an app, each served on its own
     Worktree {
@@ -52,7 +76,10 @@ enum Cmd {
         cmd: PhpCmd,
     },
     /// Set the default PHP version
-    Use { version: String },
+    Use {
+        /// An installed version, e.g. 8.4
+        version: String,
+    },
     /// Databases, cache, mail and S3 storage: mysql, postgres, redis, mailpit, versitygw, silo
     Service {
         #[command(subcommand)]
@@ -70,7 +97,9 @@ enum Cmd {
     },
     /// Create a new application: laravel, statamic, symfony, php, static, next, nuxt, vite, node, rust, go, dotnet, django, fastapi, flask
     New {
+        /// The template, e.g. laravel
         kind: String,
+        /// The application's name, also its folder's
         name: String,
         /// Parent folder (default: the first parked folder)
         #[arg(long = "in")]
@@ -80,19 +109,33 @@ enum Cmd {
     },
     /// Disk usage of an app, what is safe to delete, and the services it uses.
     /// Without an app: Anvil's own footprint and every app's size.
-    Usage { site: Option<String> },
+    Usage {
+        /// The application, by its name in `anvil sites` (default: the current folder's)
+        #[arg(value_name = "APP")]
+        site: Option<String>,
+    },
     /// Delete items `anvil usage` lists for an app (by path), or with --safe every
     /// item that is safe to delete; --safe without an app cleans every app
     Clean {
+        /// The application, by its name in `anvil sites` (default: the current folder's)
+        #[arg(value_name = "APP")]
         site: Option<String>,
+        /// Paths `anvil usage <APP>` lists, e.g. node_modules
         paths: Vec<String>,
+        /// Every item that is safe to delete
         #[arg(long)]
         safe: bool,
     },
     /// Branch, changes, last commit and remote of an app (default: current folder)
-    Git { site: Option<String> },
+    Git {
+        /// The application, by its name in `anvil sites` (default: the current folder's)
+        #[arg(value_name = "APP")]
+        site: Option<String>,
+    },
     /// Recent log entries of an app, oldest first
     Logs {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
         /// A file name like laravel.log, "app" or "php-fpm" (default: the newest)
         #[arg(long)]
@@ -106,6 +149,8 @@ enum Cmd {
     },
     /// Dependencies of an app (or a folder, default: current) from its manifests and lock files
     Packages {
+        /// The application, by its name in `anvil sites` (default: the current folder's)
+        #[arg(value_name = "APP")]
         site: Option<String>,
         /// Also ask the registries for newer versions
         #[arg(long)]
@@ -118,11 +163,17 @@ enum Cmd {
     /// one-time system setup command
     Setup,
     /// The program `php`, `composer`, `laravel`, `node`, `npm`, `npx` or `pnpm` runs in this folder
-    Which { tool: String },
+    Which {
+        /// php, composer, laravel, node, npm, npx or pnpm
+        tool: String,
+    },
     /// What an app's .anvil.toml asks for (PHP, Node.js, services) and what's missing
     /// (default: the app of the current folder); --apply installs and adds it
     Project {
+        /// The application, by its name in `anvil sites` (default: the current folder's)
+        #[arg(value_name = "APP")]
         site: Option<String>,
+        /// Install and add what's missing
         #[arg(long)]
         apply: bool,
         /// Accept the services' licenses without being asked
@@ -140,19 +191,26 @@ enum Cmd {
         #[command(subcommand)]
         cmd: DbCmd,
     },
-    /// Serve a site over HTTPS, its http:// address redirecting there; with --off,
-    /// HTTP only. New sites get HTTP unless `https_default = true` in config.toml
+    /// Serve an application over HTTPS, its http:// address redirecting there; with --off,
+    /// HTTP only. New applications get HTTP unless `https_default = true` in config.toml
     Https {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// Serve it over HTTP only
         #[arg(long)]
         off: bool,
     },
     /// Show the domain suffix applications answer at, or set it: `anvil tld localhost`
     /// needs no password or resolver file; `anvil tld test` needs one setup step
-    Tld { tld: Option<String> },
+    Tld {
+        /// The new suffix, e.g. test or localhost
+        tld: Option<String>,
+    },
     /// List what Anvil changed on this Mac (resolver files, keychain, login item,
     /// ~/.anvil); with --yes, remove it all
     Uninstall {
+        /// Remove it all, without asking
         #[arg(long)]
         yes: bool,
     },
@@ -266,23 +324,38 @@ impl NewOpts {
 #[derive(Subcommand)]
 enum WorktreeCmd {
     /// List worktrees, of one app or of every app
-    List { app: Option<String> },
+    List {
+        /// Only this application's worktrees
+        app: Option<String>,
+    },
     /// Add a worktree of the current app (or --app) next to it
     Add {
+        /// The branch, e.g. feature/login
         branch: String,
+        /// The application (default: the current folder's)
         #[arg(long)]
         app: Option<String>,
         /// Create the branch, from the app's current one
         #[arg(long)]
         new: bool,
         /// Its own database a copy of main's (--copy-db=false: empty); unset follows the hooks
-        #[arg(long, num_args = 0..=1, require_equals = true, default_missing_value = "true")]
+        #[arg(
+            long,
+            value_name = "BOOL",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true"
+        )]
         copy_db: Option<bool>,
     },
     /// Print an app's worktree hooks and where each field comes from
-    Hooks { app: Option<String> },
+    Hooks {
+        /// The application (default: the current folder's)
+        app: Option<String>,
+    },
     /// Use the database a worktree would get that is there already and Anvil didn't make
     UseDb {
+        /// The worktree, by its name (shop--feat) or its branch (feat)
         name: String,
         /// Don't ask first
         #[arg(long)]
@@ -290,7 +363,9 @@ enum WorktreeCmd {
     },
     /// Remove a worktree: its folder, and with --drop-db its database copies
     Remove {
+        /// The worktree, by its name (shop--feat) or its branch (feat)
         name: String,
+        /// Also drop its database copies
         #[arg(long)]
         drop_db: bool,
         /// Remove even with uncommitted changes or unpushed commits
@@ -309,6 +384,7 @@ enum DbCmd {
     Open {
         /// A service or an app
         name: String,
+        /// A database to open at (default: an app's own; a service opens at its list)
         database: Option<String>,
     },
 }
@@ -324,6 +400,7 @@ enum ServiceCmd {
         kind: String,
         /// Defaults to a readable one no service has, like `redis-swift-ember`
         name: Option<String>,
+        /// A free port (default: the service's usual one, or the next free)
         #[arg(long)]
         port: Option<u16>,
         /// e.g. 8.0.46; `anvil service versions` lists them
@@ -336,34 +413,78 @@ enum ServiceCmd {
     /// Versions each service offers, and which are installed
     Versions,
     /// What a running service holds: databases, keys or messages
-    Databases { id: String },
+    Databases {
+        /// The service, by its name in `anvil service list`
+        id: String,
+    },
     /// Create a database in a running MySQL or PostgreSQL service
-    CreateDb { id: String, name: String },
+    CreateDb {
+        /// The service, by its name in `anvil service list`
+        id: String,
+        /// The new database's name
+        name: String,
+    },
     /// Drop a database from a running MySQL or PostgreSQL service
-    DropDb { id: String, name: String },
+    DropDb {
+        /// The service, by its name in `anvil service list`
+        id: String,
+        /// The database to drop
+        name: String,
+    },
     /// Remove a service; its data is kept unless --delete-data
     Remove {
+        /// The service, by its name in `anvil service list`
         id: String,
+        /// Also delete its data
         #[arg(long)]
         delete_data: bool,
     },
     /// Set a service's tags (none clears them)
-    Tag { id: String, tags: Vec<String> },
+    Tag {
+        /// The service, by its name in `anvil service list`
+        id: String,
+        /// The tags, e.g. cache queue
+        tags: Vec<String>,
+    },
     /// Set the applications that use a service (none clears them)
-    Link { id: String, apps: Vec<String> },
+    Link {
+        /// The service, by its name in `anvil service list`
+        id: String,
+        /// The applications, by their names in `anvil sites`
+        apps: Vec<String>,
+    },
     /// Remove a program version no service uses anymore, e.g. `uninstall redis 7.2.16`
-    Uninstall { kind: String, version: String },
+    Uninstall {
+        /// mysql, postgres, redis, mailpit, versitygw or silo
+        kind: String,
+        /// The version, as `anvil service versions` lists it
+        version: String,
+    },
     /// Start the service with Anvil
-    Enable { id: String },
+    Enable {
+        /// The service, by its name in `anvil service list`
+        id: String,
+    },
     /// Don't start the service with Anvil
-    Disable { id: String },
+    Disable {
+        /// The service, by its name in `anvil service list`
+        id: String,
+    },
     /// Start the service in the running Anvil (and with Anvil from now on)
-    Start { id: String },
+    Start {
+        /// The service, by its name in `anvil service list`
+        id: String,
+    },
     /// Stop the service in the running Anvil (and don't start it with Anvil)
-    Stop { id: String },
+    Stop {
+        /// The service, by its name in `anvil service list`
+        id: String,
+    },
     /// Set the port, or reset it to the default by leaving it out
     Port {
+        /// The service, by its name in `anvil service list`
         id: String,
+        /// A free port (leave it out for the default)
         port: Option<u16>,
         /// The web inbox or console port (leave the value out for the default)
         #[arg(long, num_args = 0..=1)]
@@ -375,84 +496,148 @@ enum ServiceCmd {
 enum RuntimeCmd {
     /// Installed and available versions
     List,
-    /// e.g. `node 22`, `go 1.27.2`, `rust stable`, `dotnet 10.0`
-    Install { id: String, version: String },
+    /// Install a version, e.g. `node 22`, `go 1.27.2`, `rust stable`, `dotnet 10.0`
+    Install {
+        /// node, go, rust, dotnet or python
+        id: String,
+        /// A version `anvil runtime list` offers
+        version: String,
+    },
     /// Remove an installed version, e.g. `node 22`
-    Uninstall { id: String, version: String },
+    Uninstall {
+        /// node, go, rust, dotnet or python
+        id: String,
+        /// An installed version
+        version: String,
+    },
 }
 
 #[derive(Subcommand)]
 enum AppCmd {
     /// Pin the app's PHP version (e.g. `8.3`), or leave it out for the default
     Php {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// e.g. 8.3 (leave it out for the default)
         version: Option<String>,
     },
     /// Show the app's web root, set it to a folder inside the project (`web`, `dist`,
     /// `.`), or go back to the detected one (`public/` when present) with --reset
     Root {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// A folder inside the project, e.g. web, dist or .
         dir: Option<String>,
+        /// Go back to the detected web root
         #[arg(long, conflicts_with = "dir")]
         reset: bool,
     },
     /// Turn an extension on or off for this app only, which then gets a PHP-FPM of its own
     /// (xdebug, pcov, apcu, igbinary, msgpack)
     Ext {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
         #[arg(value_enum)]
         action: ExtAction,
+        /// xdebug, pcov, apcu, igbinary or msgpack
         name: String,
     },
     /// Set a php.ini value for the app, or clear it by leaving out the value
     Ini {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// A php.ini setting, e.g. memory_limit
         key: String,
+        /// Its value, e.g. 512M (leave it out to clear the setting)
         value: Option<String>,
     },
     /// Set the start command (leave it out to go back to the default)
     Command {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// e.g. "pnpm dev" (leave it out for the default)
         command: Option<String>,
     },
     /// Pin the language version (e.g. `24` for Node), or leave it out for automatic
     Runtime {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// e.g. 24 (leave it out for automatic)
         version: Option<String>,
     },
     /// Start the app whenever Anvil starts
     Autostart {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// true or false
         #[arg(action = clap::ArgAction::Set)]
         on: bool,
     },
     /// Set the app type (e.g. `vite`), or leave it out to use the detected one
-    Type { site: String, kind: Option<String> },
+    Type {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
+        site: String,
+        /// e.g. vite, next or laravel
+        kind: Option<String>,
+    },
     /// Pin the app's private port, or leave it out for an automatic one
-    Port { site: String, port: Option<u16> },
+    Port {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
+        site: String,
+        /// A free port, e.g. 3001
+        port: Option<u16>,
+    },
     /// Start the app's processes, or one of them, in the running Anvil
     Start {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// One process, by its name in the app's Processes (default: all)
         process: Option<String>,
     },
     /// Stop the app's processes, or one of them
     Stop {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// One process, by its name in the app's Processes (default: all)
         process: Option<String>,
     },
     /// Restart the app's processes, or one of them
     Restart {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
+        /// One process, by its name in the app's Processes (default: all)
         process: Option<String>,
     },
     /// Share the app at a temporary public address (a Cloudflare quick tunnel) until Ctrl-C
-    Share { site: String },
+    Share {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
+        site: String,
+    },
     /// Switch an npm or yarn app to pnpm: pnpm-lock.yaml from its lock file, node_modules
     /// installed again; the old lock file goes only after that works. Test the app after
-    Pnpm { site: String },
+    Pnpm {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
+        site: String,
+    },
     /// The app's latest mails, oldest first, while the mail catcher (Settings › Features)
     /// catches them; else the inbox address of the Anvil Mailpit its .env sends to
     Mail {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
         /// Print one message: its headers, attachments, links and text
         #[arg(long, value_name = "ID")]
@@ -464,6 +649,8 @@ enum AppCmd {
     /// The latest requests Caddy served for the app, oldest first: time, method, status,
     /// duration, size and path. Static assets (Vite's, Next's, maps) only with --assets
     Requests {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
         /// Only one status class
         #[arg(long, value_parser = ["1xx", "2xx", "3xx", "4xx", "5xx"])]
@@ -485,6 +672,8 @@ enum AppCmd {
     /// failed requests, CSP), grouped, oldest first, while its Browser errors switch is on;
     /// --on and --off turn it on (PHP apps and dev servers) and off
     Browser {
+        /// The application, by its name in `anvil sites` (e.g. blog)
+        #[arg(value_name = "APP")]
         site: String,
         /// How many groups
         #[arg(short, default_value_t = 20)]
@@ -492,8 +681,10 @@ enum AppCmd {
         /// Keep printing new events as they come
         #[arg(long, short)]
         follow: bool,
+        /// Turn its Browser errors switch on
         #[arg(long, conflicts_with = "off")]
         on: bool,
+        /// Turn its Browser errors switch off
         #[arg(long)]
         off: bool,
     },
@@ -502,15 +693,29 @@ enum AppCmd {
 #[derive(Subcommand)]
 enum PhpCmd {
     /// Install the latest patch release of a PHP minor version, e.g. 8.4
-    Install { version: String },
+    Install {
+        /// The minor version, e.g. 8.4
+        version: String,
+    },
     /// List installed versions
     List,
     /// Remove an installed version
-    Uninstall { version: String },
-    /// Set a php.ini value for every site, or clear it by leaving out the value
-    Ini { key: String, value: Option<String> },
+    Uninstall {
+        /// An installed version, e.g. 8.4
+        version: String,
+    },
+    /// Set a php.ini value for every application, or clear it by leaving out the value
+    Ini {
+        /// A php.ini setting, e.g. memory_limit
+        key: String,
+        /// Its value, e.g. 512M (leave it out to clear the setting)
+        value: Option<String>,
+    },
     /// Build OPcache for an installed PHP 8.1–8.4
-    Opcache { version: String },
+    Opcache {
+        /// An installed version, e.g. 8.3
+        version: String,
+    },
     /// Extensions for every app on a PHP version, built on this Mac (xdebug, pcov, apcu, igbinary, msgpack)
     Ext {
         #[command(subcommand)]
@@ -528,22 +733,52 @@ enum ExtAction {
 enum ExtCmd {
     /// Turn an extension on, building it first if needed
     Add {
+        /// xdebug, pcov, apcu, igbinary or msgpack
         name: String,
         /// The PHP version, e.g. 8.4; the default version if left out
-        #[arg(long)]
+        #[arg(long, value_name = "VERSION")]
         php: Option<String>,
     },
     /// Turn an extension off (its build is kept)
     Remove {
+        /// xdebug, pcov, apcu, igbinary or msgpack
         name: String,
-        #[arg(long)]
+        /// The PHP version, e.g. 8.4; the default version if left out
+        #[arg(long, value_name = "VERSION")]
         php: Option<String>,
     },
     /// The extensions Anvil can add, and which are on
     List {
-        #[arg(long)]
+        /// The PHP version, e.g. 8.4; the default version if left out
+        #[arg(long, value_name = "VERSION")]
         php: Option<String>,
     },
+}
+
+/// `anvil forget`: a folder that isn't parked is an error that lists the parked ones.
+fn forget(cfg: &mut Config, p: &std::path::Path) -> Result<()> {
+    if !cfg.paths.iter().any(|x| x == p) {
+        let parked: Vec<_> = cfg.paths.iter().map(|x| x.display().to_string()).collect();
+        match parked.is_empty() {
+            true => bail!("{} isn't parked; no folder is", p.display()),
+            false => bail!(
+                "{} isn't parked; these are: {}",
+                p.display(),
+                parked.join(", ")
+            ),
+        }
+    }
+    cfg.paths.retain(|x| x != p);
+    Ok(())
+}
+
+/// `anvil unlink`: the name as `anvil link` saved it (`blog.test` works too).
+fn unlink(cfg: &mut Config, name: &str) -> Result<String> {
+    let name = site_name(name.trim().trim_end_matches(&format!(".{}", cfg.tld)));
+    if cfg.links.remove(&name).is_none() {
+        bail!("No linked app named {name}; `anvil sites` lists the applications");
+    }
+    Ok(name)
 }
 
 fn dir_or_cwd(p: Option<PathBuf>) -> Result<PathBuf> {
@@ -595,7 +830,7 @@ fn start(cfg: &Config) -> Result<()> {
         );
     }
     for c in site_name_clashes(cfg) {
-        eprintln!("  {}", yellow(c));
+        eprintln!("  {}", style::warn(c));
     }
     match &server.mail_error {
         Some(e) => eprintln!("  {}", style::error(e)),
@@ -951,6 +1186,16 @@ fn main() -> ExitCode {
     // Same output as returning the Result, with `Error:` in red on a terminal.
     if let Err(e) = run() {
         eprintln!("{} {e:?}", style::error("Error:"));
+        // Every lookup by name fails with one of these messages; the list is a command away.
+        let msg = e.to_string();
+        if msg.starts_with("No app named ") {
+            eprintln!("{}", style::note("`anvil sites` lists the applications."));
+        } else if msg.starts_with("No service named ") {
+            eprintln!(
+                "{}",
+                style::note("`anvil service list` lists the services.")
+            );
+        }
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
@@ -983,15 +1228,10 @@ fn edit<T>(cfg: &mut Config, f: impl FnOnce(&mut Config) -> Result<T>) -> Result
     Ok(out)
 }
 
-/// Asks the running app, which owns every process; exits 1 when none runs.
+/// Asks the running app, which owns every process; an error when none runs.
 fn ask_app(method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
-    match control::request(method, params, "Terminal")? {
-        Some(v) => Ok(v),
-        None => {
-            eprintln!("Anvil isn't running. Open it, then try again.");
-            std::process::exit(1)
-        }
-    }
+    control::request(method, params, "Terminal")?
+        .context("Anvil isn't running. Open the Anvil app, then try again.")
 }
 
 /// `name: running` for each row `keep` picks from the app's reply.
@@ -1105,16 +1345,13 @@ fn share(cfg: &Config, site: &str) -> Result<()> {
     if !cfg.tunnel {
         bail!("{}", tunnel::TURNED_OFF);
     }
-    let s = sites(cfg)
-        .into_iter()
-        .find(|s| s.name == site_name(site))
-        .with_context(|| format!("No app named {site}"))?;
+    let s = find_site(cfg, site)?;
     let (tx, rx) = std::sync::mpsc::channel();
     let stop = tx.clone();
     ctrlc::set_handler(move || {
         let _ = stop.send(());
     })?;
-    eprintln!("{}", dim("Opening a tunnel…"));
+    eprintln!("{}", style::note("Opening a tunnel…"));
     let mut shares = tunnel::Shares::default();
     shares.start(cfg, &s, move || {
         let _ = tx.send(());
@@ -1124,10 +1361,10 @@ fn share(cfg: &Config, site: &str) -> Result<()> {
         Some(State::Ready { url }) => {
             println!("{}", cyan(&url));
             if let Some(note) = tunnel::note(&s) {
-                eprintln!("{}", yellow(note));
+                eprintln!("{}", style::warn(note));
             }
-            eprintln!("{}", dim(tunnel::LIMITS));
-            eprintln!("{}", dim("Ctrl-C stops it."));
+            eprintln!("{}", style::note(tunnel::LIMITS));
+            eprintln!("{}", style::note("Ctrl-C stops it."));
         }
         Some(State::Failed { error }) => bail!(error),
         _ => return Ok(()), // Ctrl-C while it opened; dropping `shares` stops it
@@ -1203,11 +1440,13 @@ fn run() -> Result<()> {
             println!("Parked {}", p.display());
         }
         Cmd::Forget { path } => {
-            let p = dir_or_cwd(path)?;
-            edit(&mut cfg, |c| {
-                c.paths.retain(|x| x != &p);
-                Ok(())
-            })?;
+            // A parked folder that was deleted can still be forgotten.
+            let p = match dir_or_cwd(path.clone()) {
+                Ok(p) => p,
+                Err(_) => std::path::absolute(path.unwrap_or_default())?,
+            };
+            edit(&mut cfg, |c| forget(c, &p))?;
+            println!("Forgot {}", p.display());
         }
         Cmd::Link { name } => {
             let p = dir_or_cwd(None)?;
@@ -1220,10 +1459,8 @@ fn run() -> Result<()> {
             );
         }
         Cmd::Unlink { name } => {
-            edit(&mut cfg, |c| {
-                c.links.remove(&name);
-                Ok(())
-            })?;
+            let name = edit(&mut cfg, |c| unlink(c, &name))?;
+            println!("Unlinked {name}");
         }
         Cmd::Sites => {
             let all = sites(&cfg);
@@ -1239,6 +1476,15 @@ fn run() -> Result<()> {
                 .map(|s| apps::label(&s.kind).chars().count())
                 .max()
                 .unwrap_or(0);
+            // On stderr, so a script reading the list gets nothing for none.
+            if all.is_empty() {
+                eprintln!(
+                    "{}",
+                    style::note(
+                        "No applications yet: `anvil park` a folder of projects, or `anvil link` one."
+                    )
+                );
+            }
             for s in &all {
                 let indent = if s.worktree_of.is_some() { "  " } else { "" };
                 println!(
@@ -1253,7 +1499,7 @@ fn run() -> Result<()> {
                 );
             }
             for c in site_name_clashes(&cfg) {
-                eprintln!("{}", yellow(c));
+                eprintln!("{}", style::warn(c));
             }
         }
         Cmd::Worktree { cmd } => {
@@ -1261,9 +1507,21 @@ fn run() -> Result<()> {
             match cmd {
                 WorktreeCmd::List { app } => {
                     let app = app.map(|a| site_name(&a));
-                    for s in all.iter().filter(|s| {
-                        s.worktree_of.is_some() && (app.is_none() || s.worktree_of == app)
-                    }) {
+                    let list: Vec<_> = all
+                        .iter()
+                        .filter(|s| {
+                            s.worktree_of.is_some() && (app.is_none() || s.worktree_of == app)
+                        })
+                        .collect();
+                    if list.is_empty() {
+                        eprintln!(
+                            "{}",
+                            style::note(
+                                "No worktrees yet: `anvil worktree add <branch>` in an app."
+                            )
+                        );
+                    }
+                    for s in list {
                         println!(
                             "{} {} {}",
                             s.name,
@@ -1355,7 +1613,10 @@ fn run() -> Result<()> {
         } => php_uninstall(&cfg, &version)?,
         Cmd::Php {
             cmd: PhpCmd::Ini { key, value },
-        } => edit(&mut cfg, |c| set_global_ini(c, &key, value.as_deref()))?,
+        } => {
+            edit(&mut cfg, |c| set_global_ini(c, &key, value.as_deref()))?;
+            changed("Every app", &key, value.as_deref(), "cleared");
+        }
         Cmd::Php {
             cmd: PhpCmd::Opcache { version },
         } => {
@@ -1444,10 +1705,7 @@ fn run() -> Result<()> {
             paths,
             safe,
         } => {
-            let s = sites(&cfg)
-                .into_iter()
-                .find(|s| s.name == site_name(&site))
-                .with_context(|| format!("No app named {site}"))?;
+            let s = find_site(&cfg, &site)?;
             let running = apps::running_anywhere(&s.name);
             let mut targets = paths;
             if safe {
@@ -1482,7 +1740,14 @@ fn run() -> Result<()> {
             }
         }
         Cmd::Php { cmd: PhpCmd::List } => {
-            for v in installed_php() {
+            let all = installed_php();
+            if all.is_empty() {
+                eprintln!(
+                    "{}",
+                    style::note("No PHP yet: `anvil php install 8.4` installs one.")
+                );
+            }
+            for v in all {
                 let mark = if cfg.php.as_deref() == Some(&v) {
                     dim(" (default)")
                 } else {
@@ -1500,6 +1765,7 @@ fn run() -> Result<()> {
             edit(&mut cfg, |c| set_default_php(c, &version))?;
             phpext::build_missing(&cfg, &version);
             control::notify_changed();
+            println!("Default PHP: {version}");
         }
         Cmd::Service { cmd } => match cmd {
             ServiceCmd::List => {
@@ -1548,10 +1814,27 @@ fn run() -> Result<()> {
                 accept_license,
             )?,
             ServiceCmd::Remove { id, delete_data } => {
-                edit(&mut cfg, |c| services::remove(c, &id, delete_data))?
+                edit(&mut cfg, |c| services::remove(c, &id, delete_data))?;
+                match delete_data {
+                    true => println!("Removed {id} and its data"),
+                    false => println!("Removed {id}; its data is kept"),
+                }
             }
-            ServiceCmd::Tag { id, tags } => edit(&mut cfg, |c| services::set_tags(c, &id, &tags))?,
-            ServiceCmd::Link { id, apps } => edit(&mut cfg, |c| services::set_apps(c, &id, &apps))?,
+            ServiceCmd::Tag { id, tags } => {
+                edit(&mut cfg, |c| services::set_tags(c, &id, &tags))?;
+                let list = tags.join(", ");
+                changed(&id, "tags", (!list.is_empty()).then_some(&list), "none");
+            }
+            ServiceCmd::Link { id, apps } => {
+                edit(&mut cfg, |c| services::set_apps(c, &id, &apps))?;
+                let list = apps.join(", ");
+                changed(
+                    &id,
+                    "applications",
+                    (!list.is_empty()).then_some(&list),
+                    "none",
+                );
+            }
             ServiceCmd::Databases { id } => {
                 let c = anvil::databases::contents(&cfg, &id)?;
                 for (n, b) in c.databases {
@@ -1600,17 +1883,35 @@ fn run() -> Result<()> {
                 }
                 services::uninstall(&kind, &version)?
             }
-            ServiceCmd::Enable { id } => edit(&mut cfg, |c| services::set_enabled(c, &id, true))?,
-            ServiceCmd::Disable { id } => edit(&mut cfg, |c| services::set_enabled(c, &id, false))?,
+            ServiceCmd::Enable { id } => {
+                edit(&mut cfg, |c| services::set_enabled(c, &id, true))?;
+                println!("{id} starts with Anvil");
+            }
+            ServiceCmd::Disable { id } => {
+                edit(&mut cfg, |c| services::set_enabled(c, &id, false))?;
+                println!("{id} doesn't start with Anvil");
+            }
             ServiceCmd::Start { id } => service_in_app(id, "start")?,
             ServiceCmd::Stop { id } => service_in_app(id, "stop")?,
             ServiceCmd::Port { id, port, web } => {
                 // With --web, the SMTP port only changes when it's given too.
                 if let Some(web) = web {
                     edit(&mut cfg, |c| services::set_web_port(c, &id, web))?;
+                    changed(
+                        &id,
+                        "web port",
+                        web.map(|p| p.to_string()).as_deref(),
+                        "default",
+                    );
                 }
                 if web.is_none() || port.is_some() {
                     edit(&mut cfg, |c| services::set_port(c, &id, port))?;
+                    changed(
+                        &id,
+                        "port",
+                        port.map(|p| p.to_string()).as_deref(),
+                        "default",
+                    );
                 }
             }
         },
@@ -1632,21 +1933,19 @@ fn run() -> Result<()> {
         },
         Cmd::App { cmd } => match cmd {
             AppCmd::Php { site, version } => {
-                edit(&mut cfg, |c| set_site_php(c, &site, version))?;
+                edit(&mut cfg, |c| set_site_php(c, &site, version.clone()))?;
                 // Its own extensions, built for the version it's on now; the app then
                 // restarts PHP-FPM with them (`needs_restart`).
                 phpext::build_missing_for(&cfg, &site);
                 control::notify_changed();
+                changed(&site, "PHP", version.as_deref(), "default");
             }
             AppCmd::Root {
                 site,
                 dir: None,
                 reset: false,
             } => {
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No site named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 has_web_root(&s)?;
                 match &s.root_custom {
                     Some(dir) => println!("{dir} {}", dim(format!("({})", s.root.display()))),
@@ -1658,7 +1957,8 @@ fn run() -> Result<()> {
                 }
             }
             AppCmd::Root { site, dir, .. } => {
-                edit(&mut cfg, |c| set_site_root(c, &site, dir.as_deref()))?
+                edit(&mut cfg, |c| set_site_root(c, &site, dir.as_deref()))?;
+                changed(&site, "web root", dir.as_deref(), "detected");
             }
             AppCmd::Ext { site, action, name } => {
                 match action {
@@ -1674,40 +1974,56 @@ fn run() -> Result<()> {
                 );
             }
             AppCmd::Ini { site, key, value } => {
-                edit(&mut cfg, |c| set_site_ini(c, &site, &key, value.as_deref()))?
+                edit(&mut cfg, |c| set_site_ini(c, &site, &key, value.as_deref()))?;
+                changed(&site, &key, value.as_deref(), "cleared");
             }
-            AppCmd::Command { site, command } => edit(&mut cfg, |c| {
-                set_site_app(c, &site, None, Some(command), None, None)
-            })?,
+            AppCmd::Command { site, command } => {
+                edit(&mut cfg, |c| {
+                    set_site_app(c, &site, None, Some(command.clone()), None, None)
+                })?;
+                changed(&site, "start command", command.as_deref(), "default");
+            }
             AppCmd::Runtime { site, version } => {
-                edit(&mut cfg, |c| set_site_runtime(c, &site, version))?
+                edit(&mut cfg, |c| set_site_runtime(c, &site, version.clone()))?;
+                changed(&site, "runtime", version.as_deref(), "automatic");
             }
             AppCmd::Pnpm { site } => {
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No site named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 let lock = anvil::packages::switch_to_pnpm(&cfg, &s)?;
                 println!("{} uses pnpm now; {lock} is gone. Test the app.", s.name);
             }
-            AppCmd::Autostart { site, on } => edit(&mut cfg, |c| {
-                set_site_app(c, &site, None, None, None, Some(on))
-            })?,
-            AppCmd::Type { site, kind } => edit(&mut cfg, |c| {
-                set_site_app(c, &site, Some(kind), None, None, None)
-            })?,
-            AppCmd::Port { site, port } => edit(&mut cfg, |c| {
-                set_site_app(c, &site, None, None, Some(port), None)
-            })?,
+            AppCmd::Autostart { site, on } => {
+                edit(&mut cfg, |c| {
+                    set_site_app(c, &site, None, None, None, Some(on))
+                })?;
+                match on {
+                    true => println!("{site} starts with Anvil"),
+                    false => println!("{site} doesn't start with Anvil"),
+                }
+            }
+            AppCmd::Type { site, kind } => {
+                edit(&mut cfg, |c| {
+                    set_site_app(c, &site, Some(kind.clone()), None, None, None)
+                })?;
+                changed(&site, "type", kind.as_deref(), "detected");
+            }
+            AppCmd::Port { site, port } => {
+                edit(&mut cfg, |c| {
+                    set_site_app(c, &site, None, None, Some(port), None)
+                })?;
+                changed(
+                    &site,
+                    "port",
+                    port.map(|p| p.to_string()).as_deref(),
+                    "automatic",
+                );
+            }
             AppCmd::Start { site, process } => run_in_app(site, process, "start")?,
             AppCmd::Stop { site, process } => run_in_app(site, process, "stop")?,
             AppCmd::Restart { site, process } => run_in_app(site, process, "restart")?,
             AppCmd::Share { site } => share(&cfg, &site)?,
             AppCmd::Mail { site, open, n } => {
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No site named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 if anvil::mail::caught(&cfg, &s.name) {
                     let dir = anvil::mail::root().join(&s.name);
                     match open {
@@ -1768,10 +2084,7 @@ fn run() -> Result<()> {
                 if !cfg.request_log {
                     bail!("{}", requests::TURNED_OFF);
                 }
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No app named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 let filter = requests::Filter {
                     status,
                     method,
@@ -1805,10 +2118,7 @@ fn run() -> Result<()> {
                 if on || off {
                     edit(&mut cfg, |c| browser::set(c, &site, on))?;
                 }
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No app named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 if on || off {
                     println!(
                         "Browser errors {} for {}{}",
@@ -1922,10 +2232,7 @@ fn run() -> Result<()> {
             }
         }
         Cmd::Usage { site: Some(site) } => {
-            let s = sites(&cfg)
-                .into_iter()
-                .find(|s| s.name == site_name(&site))
-                .with_context(|| format!("No app named {site}"))?;
+            let s = find_site(&cfg, &site)?;
             let (total, items) = resources::disk(&s);
             let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
             println!(
@@ -1935,13 +2242,11 @@ fn run() -> Result<()> {
                 mb(total)
             );
             for i in items.iter().filter(|i| i.bytes > 0) {
-                println!(
-                    "  {} {:>10}  {:<28} {}",
-                    safety(i.safety, 10),
-                    mb(i.bytes),
-                    i.label,
-                    dim(&i.path)
-                );
+                let (safe, size) = (safety(i.safety, 10), mb(i.bytes));
+                match i.path.is_empty() {
+                    true => println!("  {safe} {size:>10}  {}", i.label),
+                    false => println!("  {safe} {size:>10}  {:<28} {}", i.label, dim(&i.path)),
+                }
             }
             let mut svc = services::Services::default();
             for u in resources::services_used(&cfg, &s, &svc.pids()) {
@@ -1963,16 +2268,11 @@ fn run() -> Result<()> {
         }
         Cmd::Git { site } => {
             let dir = match site {
-                Some(site) => {
-                    sites(&cfg)
-                        .into_iter()
-                        .find(|s| s.name == site_name(&site))
-                        .with_context(|| format!("No app named {site}"))?
-                        .path
-                }
+                Some(site) => find_site(&cfg, &site)?.path,
                 None => dir_or_cwd(None)?,
             };
-            let g = git::info(&dir).context("Not a git repository")?;
+            let g = git::info(&dir)
+                .with_context(|| format!("{} isn't a Git repository", dir.display()))?;
             let mut branch = g.branch;
             if let Some(u) = &g.upstream {
                 branch += &format!(" (tracks {u})");
@@ -1997,13 +2297,7 @@ fn run() -> Result<()> {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0, |d| d.as_secs());
-                let ago = match now.saturating_sub(c.time) {
-                    s if s < 3600 => format!("{} minutes ago", s / 60),
-                    s if s < 86400 => format!("{} hours ago", s / 3600),
-                    s if s < 60 * 86400 => format!("{} days ago", s / 86400),
-                    s if s < 730 * 86400 => format!("{} months ago", s / (30 * 86400)),
-                    s => format!("{} years ago", s / (365 * 86400)),
-                };
+                let ago = ago(now.saturating_sub(c.time));
                 println!(
                     "{}   {} {} {}",
                     dim("Commit"),
@@ -2022,10 +2316,7 @@ fn run() -> Result<()> {
             n,
             level,
         } => {
-            let s = sites(&cfg)
-                .into_iter()
-                .find(|s| s.name == site_name(&site))
-                .with_context(|| format!("No app named {site}"))?;
+            let s = find_site(&cfg, &site)?;
             let src = match source {
                 Some(id) => logs::find(&s, &id)?,
                 None => logs::sources(&s)
@@ -2082,6 +2373,15 @@ fn run() -> Result<()> {
                 None => dir_or_cwd(site.map(PathBuf::from))?,
             };
             let p = packages::read(&dir);
+            if p.ecosystems.is_empty() {
+                eprintln!(
+                    "{}",
+                    style::note(format!(
+                        "No dependencies in {}: no composer.json, package.json, Cargo.toml, go.mod or .csproj",
+                        dir.display()
+                    ))
+                );
+            }
             for (name, version) in &p.highlights {
                 println!("{name} {version}");
             }
@@ -2151,10 +2451,7 @@ fn run() -> Result<()> {
             }
         }
         Cmd::Https { site, off } => {
-            let s = sites(&cfg)
-                .into_iter()
-                .find(|s| s.name == site_name(&site))
-                .with_context(|| format!("No site named {site}"))?;
+            let s = find_site(&cfg, &site)?;
             if !apps::serves(&s.kind) {
                 bail!(
                     "{} is a {} app, which Anvil doesn't serve, so it has no HTTPS",
@@ -2250,6 +2547,24 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+/// What a setting command did: `blog: port 3901`, or `blog: port automatic` when unset.
+fn changed(subject: &str, what: &str, value: Option<&str>, unset: &str) {
+    println!("{subject}: {what} {}", value.unwrap_or(unset));
+}
+
+/// `secs` ago in words: "just now", "1 hour ago", "3 days ago".
+fn ago(secs: u64) -> String {
+    let (n, unit) = match secs {
+        s if s < 60 => return "just now".into(),
+        s if s < 3600 => (s / 60, "minute"),
+        s if s < 86400 => (s / 3600, "hour"),
+        s if s < 60 * 86400 => (s / 86400, "day"),
+        s if s < 730 * 86400 => (s / (30 * 86400), "month"),
+        s => (s / (365 * 86400), "year"),
+    };
+    format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
+}
+
 /// A disk item's safety, padded to `width`; what you should keep is yellow.
 fn safety(s: resources::Safety, width: usize) -> String {
     let text = format!("{:<width$}", format!("{s:?}"));
@@ -2297,6 +2612,36 @@ fn find_worktree<'a>(all: &'a [Site], name: &str) -> Result<&'a Site> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ago_reads_as_words() {
+        assert_eq!(ago(5), "just now");
+        assert_eq!(ago(60), "1 minute ago");
+        assert_eq!(ago(7200), "2 hours ago");
+        assert_eq!(ago(86400), "1 day ago");
+        assert_eq!(ago(400 * 86400), "13 months ago");
+        assert_eq!(ago(800 * 86400), "2 years ago");
+    }
+
+    #[test]
+    fn forget_and_unlink_refuse_what_isnt_there() {
+        let mut cfg = Config {
+            paths: vec![PathBuf::from("/sites")],
+            ..Config::default()
+        };
+        cfg.links.insert("blog".into(), PathBuf::from("/blog"));
+        let e = forget(&mut cfg, std::path::Path::new("/nope")).unwrap_err();
+        assert_eq!(e.to_string(), "/nope isn't parked; these are: /sites");
+        forget(&mut cfg, std::path::Path::new("/sites")).unwrap();
+        assert!(cfg.paths.is_empty());
+        let e = forget(&mut cfg, std::path::Path::new("/sites")).unwrap_err();
+        assert_eq!(e.to_string(), "/sites isn't parked; no folder is");
+
+        let tld = cfg.tld.clone();
+        assert!(unlink(&mut cfg, "ghost").is_err());
+        assert_eq!(unlink(&mut cfg, &format!("blog.{tld}")).unwrap(), "blog");
+        assert!(cfg.links.is_empty());
+    }
 
     fn flags(args: &[&str]) -> NewOpts {
         let argv = ["anvil", "new", "laravel", "shop"].iter().chain(args);

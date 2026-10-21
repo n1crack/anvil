@@ -313,7 +313,7 @@ pub fn add_site(site: &str, name: &str) -> Result<Config> {
     let s = crate::sites(&crate::load()?)
         .into_iter()
         .find(|s| s.name == site)
-        .with_context(|| format!("No site named {site}"))?;
+        .with_context(|| format!("No app named {site}"))?;
     let minor = s
         .php
         .with_context(|| format!("{site} runs on no PHP of Anvil's"))?;
@@ -337,7 +337,7 @@ fn set_site_ext(site: &str, name: &str, on: bool) -> Result<Config> {
         let found = crate::sites(c)
             .into_iter()
             .find(|s| s.name == site)
-            .with_context(|| format!("No site named {site}"))?;
+            .with_context(|| format!("No app named {site}"))?;
         let mut names = found.ext.clone();
         let worktree = found.worktree_of.is_some();
         if names.iter().any(|n| n == name) == on {

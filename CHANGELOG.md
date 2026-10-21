@@ -9,6 +9,7 @@ contain breaking changes.
 
 ### Changed
 
+- Anvil needs macOS 12 or later; it no longer installs on older versions, where its web server and PHP don't run.
 - Settings › Plugins is now Settings › Features: they come with Anvil and only need turning on.
 - Settings › Features › Request log: on as before; off, the web server keeps no request logs and apps lose the Requests tab.
 - Unfinished setup is one titlebar button; it lists each step and says which one asks for your password before anything runs.
@@ -37,6 +38,7 @@ contain breaking changes.
 - Worktree settings: "Add Install packages" reads "Add Package Install".
 - A failed New Application's "Show in Finder" is "Show Log in Finder", which is what it shows.
 - Changing a running app's type, start command, port or version says beside the field that it restarts the app; Start with Anvil no longer restarts it.
+- `anvil --help` and each command's help explain every argument and flag, with examples, and say "application" where they said "site".
 
 ### Added
 
@@ -79,6 +81,27 @@ contain breaking changes.
 - Anvil uses much less CPU while it starts with many apps.
 - Less CPU while an app starts.
 - Less CPU while the Requests tab is open and no requests come in.
+- Logs and Requests say in red when a log can't be read, instead of looking empty; Packages' and Resources' errors line up with the tab.
+- Requests: the filters wrap onto a second line in a narrow window instead of running off the edge; their reset reads Clear Filters, so it isn't mistaken for deleting the log.
+- Processes: a row says Restarting… or Stopping… while its Restart or Stop runs, instead of looking unchanged.
+- Processes: a log with nothing in it says No output yet instead of an empty black pane.
+- Menu bar menu: Start, Stop and Restart say Starting…, Stopping… or Restarting… until done; "1 application" is singular; Quit reads Quit Anvil and Stop Everything with ⌥⌘Q, as in the Anvil menu, since ⌘Q only closes the windows.
+- Settings › Shortcuts lists ⌘Q as closing the windows and ⌥⌘Q as quitting, and no longer lists PHP keys the menu doesn't have.
+- Packages: in a narrow window the + list opens inside the window instead of pushing the sidebar out of view.
+- Settings › About: static-php-cli no longer breaks across two lines.
+- Menu bar menu: picking a default PHP version while Anvil runs says Restarting… until its extensions are built and the web server is back.
+- `anvil unlink` and `anvil forget` say what they did, and fail for a name or folder Anvil doesn't serve; `anvil forget` works for a deleted folder.
+- CLI errors for an unknown app all read "No app named …" and point to `anvil sites`; "Anvil isn't running" is an error like the others.
+- Warnings and hints the CLI writes to stderr have no color codes when stderr isn't a terminal.
+- `anvil sites`, `anvil php list`, `anvil worktree list` and `anvil packages` say so when there is nothing to list, and what to run.
+- `anvil git` names the folder that isn't a Git repository and says "1 hour ago", not "1 hours ago".
+- `anvil app`, `anvil service`, `anvil use` and `anvil php ini` settings print what they set, e.g. "blog: port 3901".
+- An unknown service reads "No service named …" everywhere in the CLI and points to `anvil service list`.
+- Grey text is easier to read in the dark theme, also on a selected row, and the running-services count in the light theme.
+- Esc closes the New Application and Add Service sheets while the cursor is in their empty search field.
+- In a small bubble (Remove, Set up Anvil, an update) Tab stays inside it, and Esc puts the keyboard focus back on the button that opened it; Esc also closes Dev's Keys card.
+- Screen readers hear a running, starting or crashed state where the window shows it as a coloured dot, and the notes that appear beside a field while something restarts or saves.
+- Settings › General: each folder's Remove and each hidden app's Show say which one they act on to a screen reader.
 
 ## [0.2.1] - 2026-10-21
 

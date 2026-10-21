@@ -9,7 +9,7 @@
   --selected: rgba(255, 255, 255, 0.11);
   --line: rgba(255, 255, 255, 0.08);
   --text: #e8ebee;
-  --muted: #8d959f;
+  --muted: #9aa2ac;
   --cold: #5b636d;
 
   --heat-white: #ffd166;
@@ -74,7 +74,7 @@
     --heat-text: #c2410c;
     --danger: #c42127;
     --ok: #1f9d3e;
-    --ok-text: #157030;
+    --ok-text: #126429;
     --lock-on: #4e8a5d;
     --lock-off: #b0675e;
     --amber: #b87400;
@@ -511,6 +511,9 @@ button, select, input { font: inherit; color: inherit; }
   background: var(--selected);
   box-shadow: inset 2px 0 0 var(--select-mark);
 }
+/* Quiet text on a selection's grey: a step brighter, so it keeps 4.5:1 there too. */
+.item[aria-current="true"] :is(.kind, .sub),
+.storage-tabs [aria-selected="true"] span { color: color-mix(in srgb, var(--muted) 50%, var(--text)); }
 
 .empty {
   margin: 24px 4px;
@@ -2860,9 +2863,16 @@ button.log-file:hover { text-decoration-color: currentColor; }
 }
 
 .logs-list .empty { margin: 24px 8px; }
+/* A log or the requests that couldn't be read: said in red, selectable to copy. */
+.logs-list .empty.error-text { color: var(--danger); overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+/* A tab whose content couldn't be read: the error box in the tab's own column. */
+.pkg-body > .error,
+.res-body > .error { margin: 0 0 12px; }
 
 /* Requests: the Logs list's rows, in aligned columns; status colour as text only. */
 .req-bar select { flex: none; }
+/* In a narrow window the filters go onto a second line instead of past the edge. */
+.req-bar { flex-wrap: wrap; }
 .req-assets { flex: none; display: inline-flex; font-size: 12px; align-items: center; gap: 5px; color: var(--muted); white-space: nowrap; }
 .req .log-time { width: 64px; }
 .req-method { flex: none; width: 56px; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
@@ -3453,6 +3463,9 @@ body.activity {
   user-select: text;
   -webkit-user-select: text;
 }
+
+/* A log with nothing in it says so, as the Logs tab does. */
+.act-log:empty::before { content: attr(data-empty); color: #8d959f; }
 
 /* A small confirm bubble next to the button that asked. */
 /* A bubble under its button (popAt in app.js). */
