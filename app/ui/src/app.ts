@@ -1674,6 +1674,7 @@ export function renderSite() {
     };
     $('[data-field="runtime"]', root).append(" ", install);
   }
+  if (s.kind === "wordpress" && s.php && snap.php_no_mysqli?.includes(s.php)) mysqliLine(s, root);
   aliasesLine(s, root);
   projectNeeds(s, root);
   worktreeLines(s, root);
@@ -2026,6 +2027,35 @@ async function renderHooks(s, root) {
 /** The version the app's .anvil.toml asks for, if it asks. */
 function fromFile(s, kind: string): string | null {
   return snap.projects?.[s.name]?.find((n) => n.kind === kind)?.version ?? null;
+}
+
+const mysqliErrors = new Map<string, string>(); // PHP version -> why building its mysqli failed
+
+/** WordPress reaches MySQL through mysqli, which Anvil's macOS PHP comes without: a line
+ * under the runtime that builds it (a minute, once per version). */
+function mysqliLine(s, root) {
+  const v = s.php;
+  const key = `mysqli:${v}`;
+  const b = el("button", "inline-action", installing.has(key) ? "Building mysqli…" : "Build mysqli");
+  b.disabled = installing.has(key);
+  b.onclick = async () => {
+    installing.add(key);
+    mysqliErrors.delete(v);
+    render();
+    try {
+      await invoke("php_mysqli", { version: v });
+    } catch (e) {
+      mysqliErrors.set(v, String(e));
+    }
+    installing.delete(key);
+    call("state");
+  };
+  const dd = el("dd", "muted", `PHP ${v} lacks mysqli, which WordPress needs for MySQL. `);
+  dd.append(b);
+  if (mysqliErrors.has(v)) dd.append(el("small", "error-text", ` ${mysqliErrors.get(v)}`));
+  const row = el("div", "row");
+  row.append(el("dt", null, "mysqli"), dd);
+  $('[data-field="runtime"]', root).closest(".row")?.after(row);
 }
 
 const installing = new Set<string>(); // "php:8.3" while it installs, across re-renders
@@ -2536,7 +2566,7 @@ function cleanItems(name, items, box: HTMLElement) {
   );
 }
 
-export const PHP_KINDS = new Set(["laravel", "statamic", "symfony", "php"]);
+export const PHP_KINDS = new Set(["laravel", "statamic", "symfony", "wordpress", "php"]);
 export const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet", "django", "fastapi", "flask"]);
 
 /** The run error: safe to redraw while the user types elsewhere. The run box is

@@ -58,6 +58,7 @@
     "allow-packages",
     "allow-park-folder",
     "allow-php-install",
+    "allow-php-mysqli",
     "allow-process-add",
     "allow-process-run",
     "allow-processes",

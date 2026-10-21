@@ -148,6 +148,7 @@ window.mockSnap = {
   app_errors: {},
   kinds: [
     ["laravel", "Laravel"],
+    ["wordpress", "WordPress"],
     ["vite", "Vite"],
     ["folder", "Folder"],
     ["compose", "Docker Compose"],

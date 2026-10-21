@@ -1837,7 +1837,7 @@ describe("new application", () => {
     await openSheet();
     expect($("#new-app").hasAttribute("open")).toBe(true);
     expect($$("#new-kinds .kind-head").map((h) => h.textContent)).toEqual(["PHP", "JavaScript", "Python", "Other"]);
-    expect(kinds()).toHaveLength(15);
+    expect(kinds()).toHaveLength(16);
     for (const k of kinds()) {
       expect(k.querySelector(".kind-icon svg")).not.toBeNull();
       expect(k.querySelector(".kind-icon")!.innerHTML).toContain("currentColor");
@@ -1905,7 +1905,7 @@ describe("new application", () => {
     expect($(".kind-none").hidden).toBe(false);
     search.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     expect(search.value).toBe("");
-    expect(shown()).toHaveLength(15);
+    expect(shown()).toHaveLength(16);
     expect($(".kind-none").hidden).toBe(true);
     expect($("#new-app").hasAttribute("open")).toBe(true);
     $("#new-cancel").click();
@@ -2086,6 +2086,26 @@ describe("new application", () => {
     await wait(80);
     expect(calls("create_app").length).toBe(created + 1);
     $("#new-done").click();
+  });
+
+  test("WordPress without a MySQL service offers the Add service sheet, nothing made", async () => {
+    await openSheet();
+    await pick("wordpress");
+    expect($('#new-kinds [data-kind="wordpress"] svg path')!.getAttribute("fill")).toBe("none"); // an outline, not the logo
+    fill("press");
+    const created = calls("create_app").length;
+    w.mockNeed = { id: "mysql", name: "MySQL", version: "8.4.11" };
+    submit();
+    await wait(80);
+    w.mockNeed = null;
+    expect(calls("create_app").length).toBe(created);
+    expect($("#new-error").textContent).toBe("WordPress needs a MySQL service, and there is none yet. Add MySQL…");
+    ($("#new-error .inline-action") as HTMLElement).click();
+    await wait(80);
+    expect($("#new-app").hasAttribute("open")).toBe(false);
+    expect($("#new-service").hasAttribute("open")).toBe(true);
+    expect(($("#svc-version") as HTMLSelectElement).value).toBe("8.4.11");
+    $("#svc-cancel").click();
   });
 });
 
@@ -2656,6 +2676,33 @@ describe("php.ini fields", () => {
     input.dispatchEvent(new Event("change"));
     await wait(60);
     $('.tabs [data-tab="overview"]').click();
+  });
+});
+
+describe("wordpress", () => {
+  test("a WordPress site on a PHP without mysqli offers to build it, and says so in its type", async () => {
+    w.mockSnap.sites.push(w.mockSite("press", "wordpress", { php: "8.4", root: "/Users/x/Sites/press", root_detected: "." }));
+    w.mockSnap.php_no_mysqli = ["8.4"];
+    const state = async () => {
+      await (await import("../src/app")).call("state");
+      await wait(40);
+    };
+    try {
+      await state();
+      await select("press");
+      expect($('#site [data-field="runtime"]').textContent).toBe("WordPress on PHP 8.4 (default)");
+      const row = $('#site [data-field="runtime"]').closest(".row")!.nextElementSibling as HTMLElement;
+      expect(row.textContent).toBe("mysqliPHP 8.4 lacks mysqli, which WordPress needs for MySQL. Build mysqli");
+      w.mockSnap.php_no_mysqli = [];
+      (row.querySelector(".inline-action") as HTMLElement).click();
+      await wait(80);
+      expect(calls("php_mysqli").at(-1)![1]).toEqual({ version: "8.4" });
+      expect($$("#site dt").some((d) => d.textContent === "mysqli")).toBe(false);
+    } finally {
+      w.mockSnap.sites.pop();
+      delete w.mockSnap.php_no_mysqli;
+      await state();
+    }
   });
 });
 

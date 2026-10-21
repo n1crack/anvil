@@ -719,6 +719,8 @@ fn site_at(
 ) -> Site {
     let root_detected = if path.join("public").is_dir() {
         "public"
+    } else if path.join("web/wp-config.php").is_file() {
+        "web" // WordPress as Bedrock lays it out
     } else {
         "."
     };
@@ -1013,8 +1015,9 @@ pub(crate) fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T>
 /// it, or on the line after when that line has none (certutil's `SHA256 hash of <file>:`),
 /// or the only word of a file that holds just a digest.
 pub(crate) fn sum_in(text: &str, file: &str) -> Option<String> {
-    let hex =
-        |w: &&str| matches!(w.len(), 32 | 64 | 128) && w.bytes().all(|b| b.is_ascii_hexdigit());
+    let hex = |w: &&str| {
+        matches!(w.len(), 32 | 40 | 64 | 128) && w.bytes().all(|b| b.is_ascii_hexdigit())
+    };
     let words: Vec<&str> = text.split_whitespace().collect();
     if let [w] = words[..] {
         return Some(w).filter(hex).map(String::from);
@@ -1039,11 +1042,13 @@ pub(crate) fn published_sum(url: &str, file: &str) -> Result<String> {
     sum_in(&fetch_text(url)?, file).with_context(|| format!("{url} lists no checksum for {file}"))
 }
 
-/// Hash `file` and compare with `sum` (hex MD5, SHA-256 or SHA-512, told apart by length).
-/// openssl rather than shasum: one tool for all three, and every Mac has it.
+/// Hash `file` and compare with `sum` (hex MD5, SHA-1, SHA-256 or SHA-512, told apart by
+/// length). openssl rather than shasum: one tool for all of them, and every Mac has it.
 pub(crate) fn verify(file: &Path, sum: &str, what: &str) -> Result<()> {
     let algo = match sum.len() {
         32 => "md5",
+        // WordPress publishes only SHA-1 and MD5.
+        40 => "sha1",
         64 => "sha256",
         128 => "sha512",
         _ => bail!("The published checksum of {what} is malformed"),
@@ -4327,6 +4332,9 @@ mod tests {
             h
         );
         assert_eq!(sum_in(&format!("{h}\n"), "composer.phar").unwrap(), h);
+        // WordPress's latest.tar.gz.sha1: a bare SHA-1.
+        let sha1 = "491a78c7676b15dffcc69130c6054b8f49228a91";
+        assert_eq!(sum_in(sha1, "latest.tar.gz").unwrap(), sha1);
         let redis = format!(
             "hash redis-8.10.2.tar.gz sha256 {h} http://download.redis.io/releases/redis-8.10.2.tar.gz\n"
         );
@@ -4350,6 +4358,7 @@ mod tests {
         verify(&f, sha256, "hello").unwrap();
         verify(&f, &sha256.to_uppercase(), "hello").unwrap();
         verify(&f, "b1946ac92492d2347c6235b4d2611184", "hello").unwrap(); // md5
+        verify(&f, "f572d396fae9206628714fb2ce00f72e94f2258f", "hello").unwrap(); // sha1
         let bad = sha256.replace('5', "6");
         let err = verify(&f, &bad, "hello").unwrap_err().to_string();
         assert_eq!(

@@ -112,6 +112,8 @@ struct Snapshot {
     /// The catalog extensions built for each version that has some turned on: one on
     /// without a build loads nothing and shows as not built.
     php_ext_built: std::collections::BTreeMap<String, Vec<&'static str>>,
+    /// Installed PHP versions without mysqli, which a WordPress site's Overview offers to build.
+    php_no_mysqli: Vec<String>,
     /// Settings › Features › Tunnel: Overview offers Share.
     tunnel: bool,
     /// Shared apps' tunnels, by app.
@@ -482,6 +484,10 @@ fn snapshot(app: &App) -> Res<Snapshot> {
                 let built = anvil::phpext::built_names(&v);
                 (v, built)
             })
+            .collect(),
+        php_no_mysqli: anvil::installed_php()
+            .into_iter()
+            .filter(|v| !anvil::opcache::has_mysqli(v))
             .collect(),
         tunnel: cfg.tunnel,
         request_log: cfg.request_log,
@@ -2515,6 +2521,11 @@ fn create_needs(
     };
     let (name, version) = match id {
         "php" => ("PHP", "8.4".to_string()),
+        // A service: the form offers the Add service sheet, which asks for its license.
+        "mysql" => (
+            "MySQL",
+            anvil::services::default_version("mysql").to_string(),
+        ),
         "node" => ("Node.js", anvil::runtimes::node_lts().map_err(err)?),
         rt => (
             anvil::runtimes::name(rt),
@@ -4200,6 +4211,29 @@ async fn php_opcache(handle: AppHandle, version: String) -> Res<Settings> {
     settings(handle)
 }
 
+/// Builds mysqli for an installed PHP (WordPress's way to MySQL), then restarts PHP-FPM
+/// to load it. A second build of the same is refused by its lock file.
+#[tauri::command]
+async fn php_mysqli(handle: AppHandle, version: String) -> Res<()> {
+    let h = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Res<()> {
+        if !anvil::installed_php().contains(&version) {
+            return Err(format!("PHP {version} is not installed"));
+        }
+        anvil::opcache::build_mysqli(&version).map_err(err)?;
+        let cfg = anvil::load().map_err(err)?;
+        let app = h.state::<App>();
+        if running(&app) {
+            start(&app, &cfg);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    changed(&handle);
+    Ok(())
+}
+
 /// (version, extension) pairs being built here; another process's build is refused by
 /// `phpext::build`'s lock file.
 static EXT_BUILDS: Mutex<Vec<(String, &'static str)>> = Mutex::new(Vec::new());
@@ -4942,6 +4976,7 @@ fn main() {
             set_ini,
             php_install,
             php_opcache,
+            php_mysqli,
             php_opcache_remove,
             php_ext,
             app_ext,

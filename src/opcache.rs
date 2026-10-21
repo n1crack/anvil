@@ -1,5 +1,6 @@
 //! OPcache for PHP 8.1–8.4: the default builds lack it, so Anvil builds `opcache.so` from
-//! php.net's source of the same patch version on this Mac. 8.5 has it built in.
+//! php.net's source of the same patch version on this Mac. 8.5 has it built in. So is
+//! `mysqli.so`, which every macOS build lacks and WordPress needs.
 
 use crate::{fetch_json, fetch_tgz, home, php_dir, run};
 use anyhow::{Context, Result, bail};
@@ -56,8 +57,12 @@ pub fn remove(minor: &str) -> Result<()> {
 /// hasn't set in `ini` (the php.ini overrides of the master's apps: global, or with one
 /// app's own over them), then theirs.
 pub fn fpm_args(ini: &std::collections::BTreeMap<String, String>, minor: &str) -> Vec<String> {
+    let mysqli: Vec<String> = match mysqli_path(minor) {
+        p if p.exists() => vec!["-d".into(), format!("extension={}", p.display())],
+        _ => vec![],
+    };
     let mut args = match state(minor) {
-        State::Missing => return vec![],
+        State::Missing => return mysqli,
         State::BuiltIn => vec![],
         State::Ready => vec![
             "-d".into(),
@@ -74,7 +79,60 @@ pub fn fpm_args(ini: &std::collections::BTreeMap<String, String>, minor: &str) -
     {
         args.extend(["-d".into(), format!("{k}={v}")]);
     }
+    args.extend(mysqli);
     args
+}
+
+/// Anvil's build of mysqli for PHP `minor`, loaded with OPcache's `-d`s when there.
+pub fn mysqli_path(minor: &str) -> PathBuf {
+    php_dir(minor).join("ext").join("mysqli.so")
+}
+
+/// Whether PHP `minor` has mysqli: Windows' PHP loads its own (`PHP_WINDOWS_EXT`).
+pub fn has_mysqli(minor: &str) -> bool {
+    cfg!(windows) || mysqli_path(minor).exists()
+}
+
+/// Build `mysqli.so` for the installed PHP `minor` from php.net's source of its exact
+/// version (a few seconds once the source is configured), and put it in place once it loads.
+pub fn build_mysqli(minor: &str) -> Result<()> {
+    if has_mysqli(minor) {
+        return Ok(());
+    }
+    if cfg!(target_os = "linux") {
+        bail!("Anvil's PHP on Linux can't load extensions yet, mysqli included");
+    }
+    let _held = crate::phpext::build_lock(minor, "mysqli", "mysqli")?;
+    let (full, src) = source_tree(minor)?;
+    println!("Building mysqli for PHP {full}…");
+    let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
+    run(crate::platform::command("make")
+        .args(["-s", &format!("-j{jobs}"), "ext/mysqli/mysqli.la"])
+        .current_dir(&src))
+    .map_err(|e| tools_error("mysqli", e))?;
+    put_mysqli(minor, &src)?;
+    println!("mysqli built for PHP {full}");
+    stage_in(&src)?;
+    prune(&src);
+    Ok(())
+}
+
+/// The tree's built mysqli in place for PHP `minor`, once PHP loads it.
+fn put_mysqli(minor: &str, src: &Path) -> Result<()> {
+    let built = src.join("ext/mysqli/.libs/mysqli.so");
+    let check = crate::platform::command(php_dir(minor).join("php"))
+        .arg("-n")
+        .arg("-d")
+        .arg(format!("extension={}", built.display()))
+        .arg("-m")
+        .output()?;
+    if !String::from_utf8_lossy(&check.stdout)
+        .lines()
+        .any(|l| l.trim() == "mysqli")
+    {
+        bail!("the mysqli built for PHP {minor} doesn't load");
+    }
+    install_so(&built, &mysqli_path(minor))
 }
 
 /// Build `opcache.so` for the installed PHP `minor` from php.net's source of its exact
@@ -109,6 +167,10 @@ pub fn build(minor: &str) -> Result<()> {
     }
     install_so(&built, &so_path(minor))?;
     println!("OPcache built for PHP {full}");
+    // The same make built mysqli too: no reason to leave it out.
+    if let Err(e) = put_mysqli(minor, &src) {
+        println!("PHP {full} works without mysqli for now: {e}");
+    }
     // Extensions need only the staged headers: keep those, not the whole tree.
     stage_in(&src)?;
     prune(&src);
@@ -199,7 +261,10 @@ pub fn source_tree(minor: &str) -> Result<(String, PathBuf)> {
     let full = installed_full(minor)?;
     let src = home().join("cache").join("php-src").join(&full);
     let done = src.join(".anvil-configured");
-    if done.exists() {
+    // A tree configured before mysqli was built from it is configured again.
+    let with_mysqli =
+        || fs::read_to_string(src.join("Makefile")).is_ok_and(|m| m.contains("mysqli.la"));
+    if done.exists() && with_mysqli() {
         return Ok((full, src));
     }
     println!("Getting PHP {full}'s source…");
@@ -223,6 +288,11 @@ pub fn source_tree(minor: &str) -> Result<(String, PathBuf)> {
             "--without-sqlite3",
             "--without-pdo-sqlite",
             "--enable-opcache=shared",
+            // mysqli as a module, against the binary's own mysqlnd (whose structs keep
+            // their size without compression support, so the module fits it either way).
+            "--with-mysqli=shared",
+            "--enable-mysqlnd",
+            "--disable-mysqlnd-compression-support",
             // The default builds have sessions: igbinary and msgpack add their
             // session serializers only when the headers say so.
             "--enable-session",

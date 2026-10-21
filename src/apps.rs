@@ -12,9 +12,25 @@ use std::process::{Child, Stdio};
 use std::time::Duration;
 
 /// Every kind Anvil knows, in detection order.
-pub const KINDS: [&str; 17] = [
-    "laravel", "statamic", "symfony", "php", "next", "nuxt", "vite", "node", "rust", "go",
-    "dotnet", "django", "fastapi", "flask", "compose", "static", "folder",
+pub const KINDS: [&str; 18] = [
+    "laravel",
+    "statamic",
+    "symfony",
+    "wordpress",
+    "php",
+    "next",
+    "nuxt",
+    "vite",
+    "node",
+    "rust",
+    "go",
+    "dotnet",
+    "django",
+    "fastapi",
+    "flask",
+    "compose",
+    "static",
+    "folder",
 ];
 
 pub fn label(kind: &str) -> &'static str {
@@ -22,6 +38,7 @@ pub fn label(kind: &str) -> &'static str {
         "laravel" => "Laravel",
         "statamic" => "Statamic",
         "symfony" => "Symfony",
+        "wordpress" => "WordPress",
         "php" => "PHP",
         "next" => "Next.js",
         "nuxt" => "Nuxt",
@@ -57,6 +74,13 @@ pub fn detect(dir: &Path) -> &'static str {
         && read(&dir.join("composer.json")).contains("\"symfony/framework-bundle\"")
     {
         return "symfony";
+    }
+    // WordPress: its core at the top, or Bedrock's layout (core in web/wp, served from web).
+    let bedrock = || {
+        has("web/wp-config.php") && read(&dir.join("composer.json")).contains("\"roots/wordpress")
+    };
+    if has("wp-includes") && (has("wp-load.php") || has("wp-config.php")) || bedrock() {
+        return "wordpress";
     }
     if has("composer.json") || has("index.php") || has("public/index.php") {
         return "php";
@@ -167,7 +191,10 @@ pub fn runtime(kind: &str) -> Option<&'static str> {
 }
 
 pub fn is_php(kind: &str) -> bool {
-    matches!(kind, "laravel" | "statamic" | "symfony" | "php")
+    matches!(
+        kind,
+        "laravel" | "statamic" | "symfony" | "wordpress" | "php"
+    )
 }
 
 /// The package manager a JS project uses, by its lockfile; npm without one.
@@ -1108,7 +1135,7 @@ mod tests {
 
     #[test]
     fn detects_kinds() {
-        let cases: [(&[(&str, &str)], &str); 25] = [
+        let cases: [(&[(&str, &str)], &str); 28] = [
             (
                 &[("artisan", ""), ("package.json", "{\"vite\":1}")],
                 "laravel",
@@ -1125,6 +1152,26 @@ mod tests {
                 "symfony",
             ),
             (&[("public/index.php", "")], "php"),
+            (
+                &[
+                    ("index.php", ""),
+                    ("wp-load.php", ""),
+                    ("wp-includes/version.php", ""),
+                ],
+                "wordpress",
+            ),
+            // A wp-config.php alone (a backup of one, say) isn't WordPress.
+            (&[("index.php", ""), ("wp-config.php", "")], "php"),
+            (
+                &[
+                    (
+                        "composer.json",
+                        "{\"require\":{\"roots/wordpress\":\"^6\"}}",
+                    ),
+                    ("web/wp-config.php", ""),
+                ],
+                "wordpress",
+            ),
             (&[("Cargo.toml", "")], "rust"),
             (&[("go.mod", "")], "go"),
             (&[("Api.csproj", "")], "dotnet"),
