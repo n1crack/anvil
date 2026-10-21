@@ -3044,7 +3044,7 @@ button.log-file:hover { text-decoration-color: currentColor; }
   text-align: left;
 }
 button.pkg-tile:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
-.pkg-tile-big { overflow: hidden; margin-bottom: 2px; font: 600 17px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif; white-space: nowrap; text-overflow: ellipsis; }
+.pkg-tile-big { margin-bottom: 2px; font: 600 17px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif; overflow-wrap: anywhere; }
 .pkg-tile-big.muted { color: var(--muted); font-weight: 500; }
 .pkg-tile-big.bad { color: var(--danger); }
 .pkg-tile-ver { font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -3067,7 +3067,7 @@ button.pkg-tile:hover { background: color-mix(in srgb, var(--text) 6%, transpare
 .pkg-pin { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 28px; }
 .pkg-pin-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pkg-pin-ver { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.pkg-pin-x { display: grid; flex: none; place-items: center; width: 16px; height: 16px; margin-left: auto; padding: 0; border: 0; background: none; color: var(--muted); visibility: hidden; }
+.pkg-pin-x { display: grid; flex: none; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--muted); visibility: hidden; }
 .pkg-pin-x svg { width: 10px; height: 10px; }
 .pkg-pin-x:hover { color: var(--text); }
 .pkg-pin:is(:hover, :focus-within) .pkg-pin-x { visibility: visible; }
