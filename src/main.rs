@@ -1459,6 +1459,15 @@ fn run() -> Result<()> {
                 .map(|s| apps::label(&s.kind).chars().count())
                 .max()
                 .unwrap_or(0);
+            // On stderr, so a script reading the list gets nothing for none.
+            if all.is_empty() {
+                eprintln!(
+                    "{}",
+                    style::note(
+                        "No applications yet: `anvil park` a folder of projects, or `anvil link` one."
+                    )
+                );
+            }
             for s in &all {
                 let indent = if s.worktree_of.is_some() { "  " } else { "" };
                 println!(
@@ -1481,9 +1490,21 @@ fn run() -> Result<()> {
             match cmd {
                 WorktreeCmd::List { app } => {
                     let app = app.map(|a| site_name(&a));
-                    for s in all.iter().filter(|s| {
-                        s.worktree_of.is_some() && (app.is_none() || s.worktree_of == app)
-                    }) {
+                    let list: Vec<_> = all
+                        .iter()
+                        .filter(|s| {
+                            s.worktree_of.is_some() && (app.is_none() || s.worktree_of == app)
+                        })
+                        .collect();
+                    if list.is_empty() {
+                        eprintln!(
+                            "{}",
+                            style::note(
+                                "No worktrees yet: `anvil worktree add <branch>` in an app."
+                            )
+                        );
+                    }
+                    for s in list {
                         println!(
                             "{} {} {}",
                             s.name,
@@ -1699,7 +1720,14 @@ fn run() -> Result<()> {
             }
         }
         Cmd::Php { cmd: PhpCmd::List } => {
-            for v in installed_php() {
+            let all = installed_php();
+            if all.is_empty() {
+                eprintln!(
+                    "{}",
+                    style::note("No PHP yet: `anvil php install 8.4` installs one.")
+                );
+            }
+            for v in all {
                 let mark = if cfg.php.as_deref() == Some(&v) {
                     dim(" (default)")
                 } else {
@@ -2134,13 +2162,11 @@ fn run() -> Result<()> {
                 mb(total)
             );
             for i in items.iter().filter(|i| i.bytes > 0) {
-                println!(
-                    "  {} {:>10}  {:<28} {}",
-                    safety(i.safety, 10),
-                    mb(i.bytes),
-                    i.label,
-                    dim(&i.path)
-                );
+                let (safe, size) = (safety(i.safety, 10), mb(i.bytes));
+                match i.path.is_empty() {
+                    true => println!("  {safe} {size:>10}  {}", i.label),
+                    false => println!("  {safe} {size:>10}  {:<28} {}", i.label, dim(&i.path)),
+                }
             }
             let mut svc = services::Services::default();
             for u in resources::services_used(&cfg, &s, &svc.pids()) {
@@ -2165,7 +2191,8 @@ fn run() -> Result<()> {
                 Some(site) => find_site(&cfg, &site)?.path,
                 None => dir_or_cwd(None)?,
             };
-            let g = git::info(&dir).context("Not a git repository")?;
+            let g = git::info(&dir)
+                .with_context(|| format!("{} isn't a Git repository", dir.display()))?;
             let mut branch = g.branch;
             if let Some(u) = &g.upstream {
                 branch += &format!(" (tracks {u})");
@@ -2190,13 +2217,7 @@ fn run() -> Result<()> {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0, |d| d.as_secs());
-                let ago = match now.saturating_sub(c.time) {
-                    s if s < 3600 => format!("{} minutes ago", s / 60),
-                    s if s < 86400 => format!("{} hours ago", s / 3600),
-                    s if s < 60 * 86400 => format!("{} days ago", s / 86400),
-                    s if s < 730 * 86400 => format!("{} months ago", s / (30 * 86400)),
-                    s => format!("{} years ago", s / (365 * 86400)),
-                };
+                let ago = ago(now.saturating_sub(c.time));
                 println!(
                     "{}   {} {} {}",
                     dim("Commit"),
@@ -2272,6 +2293,15 @@ fn run() -> Result<()> {
                 None => dir_or_cwd(site.map(PathBuf::from))?,
             };
             let p = packages::read(&dir);
+            if p.ecosystems.is_empty() {
+                eprintln!(
+                    "{}",
+                    style::note(format!(
+                        "No dependencies in {}: no composer.json, package.json, Cargo.toml, go.mod or .csproj",
+                        dir.display()
+                    ))
+                );
+            }
             for (name, version) in &p.highlights {
                 println!("{name} {version}");
             }
@@ -2426,6 +2456,19 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+/// `secs` ago in words: "just now", "1 hour ago", "3 days ago".
+fn ago(secs: u64) -> String {
+    let (n, unit) = match secs {
+        s if s < 60 => return "just now".into(),
+        s if s < 3600 => (s / 60, "minute"),
+        s if s < 86400 => (s / 3600, "hour"),
+        s if s < 60 * 86400 => (s / 86400, "day"),
+        s if s < 730 * 86400 => (s / (30 * 86400), "month"),
+        s => (s / (365 * 86400), "year"),
+    };
+    format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
+}
+
 /// A disk item's safety, padded to `width`; what you should keep is yellow.
 fn safety(s: resources::Safety, width: usize) -> String {
     let text = format!("{:<width$}", format!("{s:?}"));
@@ -2473,6 +2516,16 @@ fn find_worktree<'a>(all: &'a [Site], name: &str) -> Result<&'a Site> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ago_reads_as_words() {
+        assert_eq!(ago(5), "just now");
+        assert_eq!(ago(60), "1 minute ago");
+        assert_eq!(ago(7200), "2 hours ago");
+        assert_eq!(ago(86400), "1 day ago");
+        assert_eq!(ago(400 * 86400), "13 months ago");
+        assert_eq!(ago(800 * 86400), "2 years ago");
+    }
 
     #[test]
     fn forget_and_unlink_refuse_what_isnt_there() {

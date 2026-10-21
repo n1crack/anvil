@@ -93,6 +93,8 @@ contain breaking changes.
 - `anvil unlink` and `anvil forget` say what they did, and fail for a name or folder Anvil doesn't serve; `anvil forget` works for a deleted folder.
 - CLI errors for an unknown app all read "No app named …" and point to `anvil sites`; "Anvil isn't running" is an error like the others.
 - Warnings and hints the CLI writes to stderr have no color codes when stderr isn't a terminal.
+- `anvil sites`, `anvil php list`, `anvil worktree list` and `anvil packages` say so when there is nothing to list, and what to run.
+- `anvil git` names the folder that isn't a Git repository and says "1 hour ago", not "1 hours ago".
 
 ## [0.2.1] - 2026-10-21
 
