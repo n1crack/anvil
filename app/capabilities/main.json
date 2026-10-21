@@ -46,6 +46,7 @@
     "allow-mail-read",
     "allow-mail-save",
     "allow-mail-source",
+    "allow-menu-origin",
     "allow-once-stop",
     "allow-open",
     "allow-open-in-client",

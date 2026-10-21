@@ -3344,6 +3344,22 @@ fn remove_service(
     services(app)
 }
 
+/// Where the page starts inside its window, in logical pixels. Linux places a menu
+/// relative to the whole GTK window, title bar and shadow included, so a position on
+/// the page is off by this much; elsewhere it is the page's own.
+#[tauri::command]
+fn menu_origin(window: tauri::WebviewWindow) -> (i32, i32) {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::WidgetExt;
+        if let (Ok(w), Ok(page)) = (window.gtk_window(), window.default_vbox()) {
+            return page.translate_coordinates(&w, 0, 0).unwrap_or_default();
+        }
+    }
+    let _ = window;
+    (0, 0)
+}
+
 #[tauri::command(async)]
 fn open_url(url: String) -> Res<()> {
     let tld = anvil::load().map(|c| c.tld).unwrap_or_default();
@@ -4797,6 +4813,7 @@ fn main() {
         ))
         .manage(App::default())
         .invoke_handler(tauri::generate_handler![
+            menu_origin,
             state,
             run_states,
             performance,

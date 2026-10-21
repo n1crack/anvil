@@ -23,3 +23,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
+
+# Linux: where the page sits in its GTK window, for placing menus (menu_origin).
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"

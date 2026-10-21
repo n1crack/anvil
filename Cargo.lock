@@ -117,6 +117,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "ctrlc",
+ "gtk",
  "serde",
  "serde_json",
  "tauri",

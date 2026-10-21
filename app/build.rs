@@ -2,6 +2,7 @@
 // permission and a window may call only what its capability (capabilities/) lists.
 // ui/test/permissions.test.ts checks the lists match.
 const COMMANDS: &[&str] = &[
+    "menu_origin",
     "state",
     "run_states",
     "performance",
