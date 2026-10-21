@@ -95,6 +95,8 @@ contain breaking changes.
 - Warnings and hints the CLI writes to stderr have no color codes when stderr isn't a terminal.
 - `anvil sites`, `anvil php list`, `anvil worktree list` and `anvil packages` say so when there is nothing to list, and what to run.
 - `anvil git` names the folder that isn't a Git repository and says "1 hour ago", not "1 hours ago".
+- `anvil app`, `anvil service`, `anvil use` and `anvil php ini` settings print what they set, e.g. "blog: port 3901".
+- An unknown service reads "No service named …" everywhere in the CLI and points to `anvil service list`.
 
 ## [0.2.1] - 2026-10-21
 

@@ -1175,9 +1175,15 @@ fn main() -> ExitCode {
     // Same output as returning the Result, with `Error:` in red on a terminal.
     if let Err(e) = run() {
         eprintln!("{} {e:?}", style::error("Error:"));
-        // Every lookup by app name fails with this one message; the list is a command away.
-        if e.to_string().starts_with("No app named ") {
+        // Every lookup by name fails with one of these messages; the list is a command away.
+        let msg = e.to_string();
+        if msg.starts_with("No app named ") {
             eprintln!("{}", style::note("`anvil sites` lists the applications."));
+        } else if msg.starts_with("No service named ") {
+            eprintln!(
+                "{}",
+                style::note("`anvil service list` lists the services.")
+            );
         }
         return ExitCode::FAILURE;
     }
@@ -1596,7 +1602,10 @@ fn run() -> Result<()> {
         } => php_uninstall(&cfg, &version)?,
         Cmd::Php {
             cmd: PhpCmd::Ini { key, value },
-        } => edit(&mut cfg, |c| set_global_ini(c, &key, value.as_deref()))?,
+        } => {
+            edit(&mut cfg, |c| set_global_ini(c, &key, value.as_deref()))?;
+            changed("Every app", &key, value.as_deref(), "cleared");
+        }
         Cmd::Php {
             cmd: PhpCmd::Opcache { version },
         } => {
@@ -1745,6 +1754,7 @@ fn run() -> Result<()> {
             edit(&mut cfg, |c| set_default_php(c, &version))?;
             phpext::build_missing(&cfg, &version);
             control::notify_changed();
+            println!("Default PHP: {version}");
         }
         Cmd::Service { cmd } => match cmd {
             ServiceCmd::List => {
@@ -1793,10 +1803,27 @@ fn run() -> Result<()> {
                 accept_license,
             )?,
             ServiceCmd::Remove { id, delete_data } => {
-                edit(&mut cfg, |c| services::remove(c, &id, delete_data))?
+                edit(&mut cfg, |c| services::remove(c, &id, delete_data))?;
+                match delete_data {
+                    true => println!("Removed {id} and its data"),
+                    false => println!("Removed {id}; its data is kept"),
+                }
             }
-            ServiceCmd::Tag { id, tags } => edit(&mut cfg, |c| services::set_tags(c, &id, &tags))?,
-            ServiceCmd::Link { id, apps } => edit(&mut cfg, |c| services::set_apps(c, &id, &apps))?,
+            ServiceCmd::Tag { id, tags } => {
+                edit(&mut cfg, |c| services::set_tags(c, &id, &tags))?;
+                let list = tags.join(", ");
+                changed(&id, "tags", (!list.is_empty()).then_some(&list), "none");
+            }
+            ServiceCmd::Link { id, apps } => {
+                edit(&mut cfg, |c| services::set_apps(c, &id, &apps))?;
+                let list = apps.join(", ");
+                changed(
+                    &id,
+                    "applications",
+                    (!list.is_empty()).then_some(&list),
+                    "none",
+                );
+            }
             ServiceCmd::Databases { id } => {
                 let c = anvil::databases::contents(&cfg, &id)?;
                 for (n, b) in c.databases {
@@ -1845,17 +1872,35 @@ fn run() -> Result<()> {
                 }
                 services::uninstall(&kind, &version)?
             }
-            ServiceCmd::Enable { id } => edit(&mut cfg, |c| services::set_enabled(c, &id, true))?,
-            ServiceCmd::Disable { id } => edit(&mut cfg, |c| services::set_enabled(c, &id, false))?,
+            ServiceCmd::Enable { id } => {
+                edit(&mut cfg, |c| services::set_enabled(c, &id, true))?;
+                println!("{id} starts with Anvil");
+            }
+            ServiceCmd::Disable { id } => {
+                edit(&mut cfg, |c| services::set_enabled(c, &id, false))?;
+                println!("{id} doesn't start with Anvil");
+            }
             ServiceCmd::Start { id } => service_in_app(id, "start")?,
             ServiceCmd::Stop { id } => service_in_app(id, "stop")?,
             ServiceCmd::Port { id, port, web } => {
                 // With --web, the SMTP port only changes when it's given too.
                 if let Some(web) = web {
                     edit(&mut cfg, |c| services::set_web_port(c, &id, web))?;
+                    changed(
+                        &id,
+                        "web port",
+                        web.map(|p| p.to_string()).as_deref(),
+                        "default",
+                    );
                 }
                 if web.is_none() || port.is_some() {
                     edit(&mut cfg, |c| services::set_port(c, &id, port))?;
+                    changed(
+                        &id,
+                        "port",
+                        port.map(|p| p.to_string()).as_deref(),
+                        "default",
+                    );
                 }
             }
         },
@@ -1877,11 +1922,12 @@ fn run() -> Result<()> {
         },
         Cmd::App { cmd } => match cmd {
             AppCmd::Php { site, version } => {
-                edit(&mut cfg, |c| set_site_php(c, &site, version))?;
+                edit(&mut cfg, |c| set_site_php(c, &site, version.clone()))?;
                 // Its own extensions, built for the version it's on now; the app then
                 // restarts PHP-FPM with them (`needs_restart`).
                 phpext::build_missing_for(&cfg, &site);
                 control::notify_changed();
+                changed(&site, "PHP", version.as_deref(), "default");
             }
             AppCmd::Root {
                 site,
@@ -1900,7 +1946,8 @@ fn run() -> Result<()> {
                 }
             }
             AppCmd::Root { site, dir, .. } => {
-                edit(&mut cfg, |c| set_site_root(c, &site, dir.as_deref()))?
+                edit(&mut cfg, |c| set_site_root(c, &site, dir.as_deref()))?;
+                changed(&site, "web root", dir.as_deref(), "detected");
             }
             AppCmd::Ext { site, action, name } => {
                 match action {
@@ -1916,28 +1963,50 @@ fn run() -> Result<()> {
                 );
             }
             AppCmd::Ini { site, key, value } => {
-                edit(&mut cfg, |c| set_site_ini(c, &site, &key, value.as_deref()))?
+                edit(&mut cfg, |c| set_site_ini(c, &site, &key, value.as_deref()))?;
+                changed(&site, &key, value.as_deref(), "cleared");
             }
-            AppCmd::Command { site, command } => edit(&mut cfg, |c| {
-                set_site_app(c, &site, None, Some(command), None, None)
-            })?,
+            AppCmd::Command { site, command } => {
+                edit(&mut cfg, |c| {
+                    set_site_app(c, &site, None, Some(command.clone()), None, None)
+                })?;
+                changed(&site, "start command", command.as_deref(), "default");
+            }
             AppCmd::Runtime { site, version } => {
-                edit(&mut cfg, |c| set_site_runtime(c, &site, version))?
+                edit(&mut cfg, |c| set_site_runtime(c, &site, version.clone()))?;
+                changed(&site, "runtime", version.as_deref(), "automatic");
             }
             AppCmd::Pnpm { site } => {
                 let s = find_site(&cfg, &site)?;
                 let lock = anvil::packages::switch_to_pnpm(&cfg, &s)?;
                 println!("{} uses pnpm now; {lock} is gone. Test the app.", s.name);
             }
-            AppCmd::Autostart { site, on } => edit(&mut cfg, |c| {
-                set_site_app(c, &site, None, None, None, Some(on))
-            })?,
-            AppCmd::Type { site, kind } => edit(&mut cfg, |c| {
-                set_site_app(c, &site, Some(kind), None, None, None)
-            })?,
-            AppCmd::Port { site, port } => edit(&mut cfg, |c| {
-                set_site_app(c, &site, None, None, Some(port), None)
-            })?,
+            AppCmd::Autostart { site, on } => {
+                edit(&mut cfg, |c| {
+                    set_site_app(c, &site, None, None, None, Some(on))
+                })?;
+                match on {
+                    true => println!("{site} starts with Anvil"),
+                    false => println!("{site} doesn't start with Anvil"),
+                }
+            }
+            AppCmd::Type { site, kind } => {
+                edit(&mut cfg, |c| {
+                    set_site_app(c, &site, Some(kind.clone()), None, None, None)
+                })?;
+                changed(&site, "type", kind.as_deref(), "detected");
+            }
+            AppCmd::Port { site, port } => {
+                edit(&mut cfg, |c| {
+                    set_site_app(c, &site, None, None, Some(port), None)
+                })?;
+                changed(
+                    &site,
+                    "port",
+                    port.map(|p| p.to_string()).as_deref(),
+                    "automatic",
+                );
+            }
             AppCmd::Start { site, process } => run_in_app(site, process, "start")?,
             AppCmd::Stop { site, process } => run_in_app(site, process, "stop")?,
             AppCmd::Restart { site, process } => run_in_app(site, process, "restart")?,
@@ -2454,6 +2523,11 @@ fn run() -> Result<()> {
         Cmd::Uninstall { yes } => anvil::uninstall::uninstall(&cfg, config_ok, yes)?,
     }
     Ok(())
+}
+
+/// What a setting command did: `blog: port 3901`, or `blog: port automatic` when unset.
+fn changed(subject: &str, what: &str, value: Option<&str>, unset: &str) {
+    println!("{subject}: {what} {}", value.unwrap_or(unset));
 }
 
 /// `secs` ago in words: "just now", "1 hour ago", "3 days ago".

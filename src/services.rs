@@ -421,7 +421,10 @@ fn binary(kind: &str, version: &str) -> PathBuf {
 
 fn check(id: &str) -> Result<()> {
     if !SERVICES.contains(&id) {
-        bail!("Unknown service {id}");
+        bail!(
+            "Unknown service type {id}; use one of: {}",
+            SERVICES.join(", ")
+        );
     }
     Ok(())
 }
@@ -435,7 +438,7 @@ pub fn kind_of(cfg: &Config, id: &str) -> Result<&'static str> {
     SERVICES
         .into_iter()
         .find(|k| Some(*k) == kind)
-        .with_context(|| format!("Unknown service {id}"))
+        .with_context(|| format!("No service named {id}"))
 }
 
 /// Every added service, by name.
@@ -614,7 +617,7 @@ fn insert(
 /// name again finds the databases; the program stays for other services.
 pub fn remove(cfg: &mut Config, id: &str, delete_data: bool) -> Result<()> {
     if !cfg.services.contains_key(id) {
-        bail!("There's no service called {id}");
+        bail!("No service named {id}");
     }
     crate::validate::service_id(id)?;
     cfg.services.remove(id);
@@ -946,7 +949,7 @@ pub fn set_apps(cfg: &mut Config, id: &str, apps: &[String]) -> Result<()> {
 fn entry<'a>(cfg: &'a mut Config, id: &str) -> Result<&'a mut ServiceConfig> {
     cfg.services
         .get_mut(id)
-        .with_context(|| format!("There's no service called {id}"))
+        .with_context(|| format!("No service named {id}"))
 }
 
 /// What an app puts in `.env` to use this service (Laravel names plus a URL).
