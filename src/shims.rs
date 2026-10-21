@@ -644,6 +644,9 @@ mod tests {
     #[test]
     fn shims_carry_the_worktree_env() {
         use crate::worktrees::tests::{git, tmp};
+        // It reads ANVIL_HOME (installed_php, then resolve_with): never while another
+        // test points it at a fake PHP of its own and then away again.
+        let _env = crate::lock(&crate::ENV_LOCK);
         let root = tmp("shims");
         let shop = root.join("shop");
         fs::create_dir(&shop).unwrap();
