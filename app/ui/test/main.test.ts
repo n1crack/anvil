@@ -2292,7 +2292,7 @@ describe("mail catcher", () => {
     expect(cell(second, ".log-msg")).toBe("(no subject)");
     expect(second.querySelector(".mail-files")!.textContent).toBe("");
     expect($(".mail-how").textContent).toBe(
-      "Anvil catches shop’s mail: its processes and PHP get MAIL_HOST=127.0.0.1, MAIL_PORT=2525 and MAIL_USERNAME=shop, over its .env. A running process gets them when it restarts.",
+      "Anvil catches shop’s mail: its processes and PHP get MAIL_HOST=127.0.0.1, MAIL_PORT=2525 and MAIL_USERNAME=shop, overriding its .env. A running process gets them when it restarts.",
     );
     expect(($(".mail-catch input") as HTMLInputElement).checked).toBe(true);
   });
@@ -2357,6 +2357,32 @@ describe("mail catcher", () => {
     expect(rows()).toEqual([]);
     expect($(".mail-clear").hidden).toBe(true);
     w.mockMails.shop = saved;
+  });
+
+  test("turning catching off or on while processes run offers to restart them, asked first", async () => {
+    const box = $(".mail-catch input") as HTMLInputElement;
+    expect($(".mail-restart")).toBeNull();
+    const n = calls("process_run").length;
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    await wait(60);
+    const line = $(".mail-restart");
+    expect(line.textContent).toMatch(/still sends? mail the old way until restarted\. Restart/);
+    (line.querySelector("button") as HTMLElement).click();
+    expect(calls("process_run").length).toBe(n);
+    expect($(".pop-confirm").textContent).toMatch(/^Restart .+ for a moment\./);
+    ($(".pop-confirm button.primary") as HTMLElement).click();
+    await wait(60);
+    expect(
+      calls("process_run")
+        .slice(n)
+        .every(([, a]) => a.action === "restart" && a.site === "shop" && a.name),
+    ).toBe(true);
+    expect(calls("process_run").length).toBeGreaterThan(n);
+    expect($(".mail-restart")).toBeNull();
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    await wait(60);
   });
 
   test("the switch leaves the app to its own mail setup; the line says so", async () => {

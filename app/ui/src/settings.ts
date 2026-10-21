@@ -1059,7 +1059,7 @@ function renderMailCatcher() {
     return;
   }
   if (!other) {
-    other = inboxView("_other", invoke, "No mail from outside your apps.");
+    other = inboxView("_other", invoke, "No messages from outside your apps.");
     box.append(other.node);
   }
   other.load().then(() => (box.hidden = !other!.node.querySelector(".mail-item")));

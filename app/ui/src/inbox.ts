@@ -1,4 +1,4 @@
-/* One inbox of the mail catcher (src/mail.rs): its mails newest first, each opening to
+/* One inbox of the mail catcher (src/mail.rs): its messages newest first, each opening to
  * its HTML (sandboxed), text, headers or source, with its files to save. The Mail tab
  * shows an app's (mail.ts); Settings › Features the one for mail from no app. Only
  * `invoke` comes in, so both windows use it. */
@@ -62,7 +62,7 @@ export function inboxView(inbox: string, invoke: Invoke, emptyText: string): Inb
 
   const count = () => {
     const n = list.querySelectorAll(".mail-item").length;
-    node.querySelector(".mail-count").textContent = n ? `${n} ${n === 1 ? "mail" : "mails"}` : "";
+    node.querySelector(".mail-count").textContent = n ? `${n} ${n === 1 ? "message" : "messages"}` : "";
     clear.hidden = !n;
     if (!n && !list.querySelector(".empty")) list.replaceChildren(el("li", "empty", emptyText));
     if (n) list.querySelector(".empty")?.remove();

@@ -1,4 +1,5 @@
 import { $, call, el, invoke, selected, snap, tab } from "./app";
+import { confirmPop, loadProcs, procCache } from "./processes";
 import { inboxView, type Inbox } from "./inbox";
 import { shown } from "./live";
 
@@ -8,6 +9,8 @@ import { shown } from "./live";
 
 let view: Inbox | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
+// Apps whose catching changed while processes ran: they still send the old way until restarted.
+const stale = new Set<string>();
 
 window.mailTab = (root, visible) => {
   const panel = $('[data-panel="mail"]', root);
@@ -15,7 +18,7 @@ window.mailTab = (root, visible) => {
   const c = snap?.catcher;
   if (!visible || !panel || !s || !c) return poll(false);
   if (view?.inbox !== s.name) {
-    view = inboxView(s.name, invoke, "No mail yet. What the app sends shows up here.");
+    view = inboxView(s.name, invoke, "No messages yet. What the app sends shows up here.");
     view.load();
   }
   const caught = c.caught.includes(s.name);
@@ -24,7 +27,7 @@ window.mailTab = (root, visible) => {
     "p",
     "mail-how muted",
     caught
-      ? `Anvil catches ${s.name}’s mail: its processes and PHP get MAIL_HOST=127.0.0.1, MAIL_PORT=${c.port} and MAIL_USERNAME=${s.name}, over its .env. A running process gets them when it restarts.`
+      ? `Anvil catches ${s.name}’s mail: its processes and PHP get MAIL_HOST=127.0.0.1, MAIL_PORT=${c.port} and MAIL_USERNAME=${s.name}, overriding its .env. A running process gets them when it restarts.`
       : `${s.name} sends mail with its own settings; Anvil doesn’t catch it.`,
   );
   const sw = el("label", "mail-catch");
@@ -32,10 +35,34 @@ window.mailTab = (root, visible) => {
   box.type = "checkbox";
   box.setAttribute("role", "switch");
   box.checked = caught;
-  box.onchange = () => call("set_mail_caught", { site: s.name, on: box.checked });
+  const running = () => (procCache.get(s.name)?.rows ?? []).filter((r) => r.running && r.kind !== "site");
+  box.onchange = () => {
+    if (running().length) stale.add(s.name);
+    call("set_mail_caught", { site: s.name, on: box.checked });
+  };
   sw.append(box, " Catch mail");
   head.append(how, sw);
   const parts = [head];
+  // The processes that ran through the change: Restart, asked first since they stop a moment.
+  const procs = running();
+  if (!procs.length) stale.delete(s.name);
+  if (stale.has(s.name)) {
+    const names = procs.map((r) => r.name).join(", ");
+    const line = el(
+      "p",
+      "mail-restart muted",
+      `${names} still ${procs.length === 1 ? "sends" : "send"} mail the old way until restarted. `,
+    );
+    const b = el("button", "inline-action", procs.length === 1 ? "Restart…" : "Restart Them…");
+    b.onclick = () =>
+      confirmPop(b, `Restart ${names}? ${procs.length === 1 ? "It stops" : "They stop"} for a moment.`, "Restart", async () => {
+        stale.delete(s.name);
+        await Promise.all(procs.map((r) => loadProcs(s.name, "process_run", { name: r.id, action: "restart" })));
+        window.mailTab($("#site"), true);
+      });
+    line.append(b);
+    parts.push(line);
+  }
   if (c.error) parts.push(el("p", "error mail-down", c.error));
   panel.replaceChildren(...parts, view.node);
   poll(true);
