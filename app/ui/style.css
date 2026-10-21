@@ -3552,6 +3552,7 @@ body.activity {
 html:not(.windows) .windows-only { display: none; }
 html.windows .mac-only,
 html.linux .mac-only { display: none; }
+html:not(.windows):not(.linux) .not-mac { display: none; }
 #perf-devdrive { font-weight: 500; }
 
 /* The system's title bar sits above the page: no room for traffic lights, and the

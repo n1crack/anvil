@@ -5,7 +5,7 @@ import { ownError, shown } from "./live";
 import { NAMES, editor, summary } from "./hooksform";
 import { bubbleKeys, confirmInRow } from "./confirm";
 import { icon } from "./icons";
-import { fileManager, keys, mod } from "./platform";
+import { fileManager, keys, mac, mod } from "./platform";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -2844,7 +2844,7 @@ $("#error-close").onclick = () => {
   showError(null);
 };
 
-// Keyboard: ⌘1–9 tabs in order, ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
+// Keyboard: ⌘1–7 tabs (Ctrl+1–9 the shown tabs without a menu bar), ⌘O browser, ⌘E editor, ⌘T terminal, ⌘G git app, ⌘L log.
 /* ---------- Shortcuts: the menu bar and the keyboard run the same actions ---------- */
 
 const TAB_KEYS = { 1: "overview", 2: "git", 3: "dev", 4: "logs", 5: "packages", 6: "resources", 7: "settings" };
@@ -2900,8 +2900,12 @@ document.addEventListener("keydown", (e) => {
   if (!mod(e) || e.shiftKey || e.altKey) return;
   // In text fields only the app-wide keys apply; the rest belong to editing.
   const typing = (e.target as HTMLElement).closest("input, textarea, select");
-  const name = TAB_KEYS[e.key]
-    ? `tab:${TAB_KEYS[e.key]}`
+  // macOS's View menu names a tab for each of ⌘1–7. Without that menu (Windows, Linux)
+  // Ctrl+1–9 are the tabs as they show, a hidden one (Git, Dev, Mail) not counted.
+  const shown = [...document.querySelectorAll<HTMLElement>("#site .tabs [data-tab]")].filter((t) => !t.hidden);
+  const tab = mac ? TAB_KEYS[e.key] : /^[1-9]$/.test(e.key) && shown[Number(e.key) - 1]?.dataset.tab;
+  const name = tab
+    ? `tab:${tab}`
     : {
         o: "open:browser",
         e: "open:editor",
