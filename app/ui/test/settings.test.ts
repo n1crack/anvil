@@ -340,6 +340,46 @@ describe("versions", () => {
     await open("rust");
     expect(text("#rust .ver-label")).toEqual(["Rust stable"]);
   });
+
+  test("a failed Install says why in its row, not at the top; the next action clears it", async () => {
+    await open("node");
+    const nodeRow = (i: number) => $$("#node .ver")[i];
+    w.mockFail = { runtime_install: "Couldn't download Node.js 26: timed out" };
+    try {
+      nodeRow(0).querySelector("button")!.click();
+      await wait(60);
+      expect(nodeRow(0).querySelector(".ver-error")?.textContent).toBe("Couldn't download Node.js 26: timed out");
+      expect(nodeRow(3).querySelector(".ver-error")).toBeNull();
+      expect($("#error").hidden).toBe(true);
+      w.mockFail = {};
+      nodeRow(3).querySelector("button")!.click();
+      await wait(60);
+      expect($$("#node .ver-error").length).toBe(0);
+    } finally {
+      w.mockFail = {};
+    }
+  });
+
+  test("PHP: a failed Uninstall says why in its row", async () => {
+    await open("php");
+    w.mockFail = { php_uninstall: "PHP 8.5 is in use" };
+    try {
+      const row = () => $$("#versions .ver")[0];
+      (row().querySelectorAll(".actions-inline button")[1] as HTMLElement).click(); // Uninstall
+      (row().querySelectorAll(".actions-inline button")[1] as HTMLElement).click(); // confirm
+      await wait(60);
+      expect(row().querySelector(".ver-error")?.textContent).toBe("PHP 8.5 is in use");
+      expect($("#error").hidden).toBe(true);
+      w.mockFail = {};
+      (row().querySelectorAll(".actions-inline button")[0] as HTMLElement).click(); // Make default
+      await wait(60);
+      expect(row().querySelector(".ver-error")).toBeNull();
+    } finally {
+      w.mockFail = {};
+      w.refresh();
+      await wait(60);
+    }
+  });
 });
 
 describe("Node.js package managers", () => {

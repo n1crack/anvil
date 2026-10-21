@@ -143,6 +143,38 @@ function versionRow(
   return row;
 }
 
+// "node@22", "php@8.3" -> why its last Install, Uninstall or Make default failed, said in
+// its row; the language's next action clears them.
+const verErrors = new Map<string, string>();
+
+/** A row's failed action, as versionRow's `error`. */
+function verError(key: string) {
+  const reason = verErrors.get(key);
+  if (!reason) return undefined;
+  const error = Object.assign(document.createElement("div"), { className: "ver-error" });
+  error.append(Object.assign(document.createElement("span"), { textContent: reason }));
+  return error;
+}
+
+/** Run a version row's action; a failure lands in that row instead of the page's top. */
+async function verAction(key: string, run: () => Promise<unknown>) {
+  const lang = key.split("@")[0];
+  for (const k of verErrors.keys()) if (k.startsWith(`${lang}@`)) verErrors.delete(k);
+  try {
+    await run();
+  } catch (e) {
+    verErrors.set(key, String(e));
+  }
+}
+
+/** A PHP version row's command (php_install, php_uninstall, set_default_php). */
+async function phpAct(version: string, cmd: string) {
+  await verAction(`php@${version}`, async () => {
+    s = (await invoke(cmd, { version })) ?? s;
+  });
+  render();
+}
+
 async function loadRuntimes() {
   try {
     runtimes = await invoke("runtimes");
@@ -171,6 +203,7 @@ function renderLanguages() {
             uninstall: () => uninstallRuntime(rt, v),
             note: "Apps on it switch to another version.",
           },
+          { error: verError(`${rt.id}@${v}`) },
         ),
       ),
     );
@@ -181,23 +214,15 @@ function renderLanguages() {
 async function installRuntime(id: string, version: string) {
   const k = `${id}@${version}`;
   installing.add(k);
+  const done = verAction(k, () => invoke("runtime_install", { id, version })); // clears the old errors first
   renderLanguages();
-  try {
-    await invoke("runtime_install", { id, version });
-    showError(null, "runtime_install");
-  } catch (e) {
-    showError(String(e), "runtime_install");
-  }
+  await done;
   installing.delete(k);
   loadRuntimes();
 }
 
 async function uninstallRuntime(rt, v: string) {
-  try {
-    await invoke("runtime_uninstall", { id: rt.id, version: v });
-  } catch (e) {
-    showError(String(e));
-  }
+  await verAction(`${rt.id}@${v}`, () => invoke("runtime_uninstall", { id: rt.id, version: v }));
   loadRuntimes();
 }
 
@@ -753,16 +778,17 @@ export function render() {
         {
           install: async () => {
             installing.add(`php@${v.version}`);
+            const done = phpAct(v.version, "php_install"); // clears the old errors first
             render();
-            await call("php_install", { version: v.version });
+            await done;
             installing.delete(`php@${v.version}`);
             render();
           },
-          makeDefault: () => call("set_default_php", { version: v.version }),
-          uninstall: () => call("php_uninstall", { version: v.version }),
+          makeDefault: () => phpAct(v.version, "set_default_php"),
+          uninstall: () => phpAct(v.version, "php_uninstall"),
           note: "Apps asking for it use the default.",
         },
-        phpParts(v),
+        { ...phpParts(v), ...(verErrors.has(`php@${v.version}`) && { error: verError(`php@${v.version}`) }) },
       ),
     ),
   );

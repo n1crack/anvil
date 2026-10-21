@@ -43,6 +43,7 @@ contain breaking changes.
 - `anvil --help` and each command's help explain every argument and flag, with examples, and say "application" where they said "site".
 - `anvil apps` lists the applications; `anvil sites` still works.
 - Git tab: a branch that tracks the same name on its remote shows only the remote ("origin"), not the branch twice.
+- Settings › PHP and the other language pages: a failed Install, Uninstall or Make default says why in its version's row, not at the top of the page.
 
 ### Added
 

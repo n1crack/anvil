@@ -1469,6 +1469,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 /* No default in the list (only PHP has one): no empty column for the check. */
 .versions:not(:has(.is-default)) .ver-mark { display: none; }
+.versions:not(:has(.is-default)) .ver-error { padding-left: 0; }
 
 .ver.missing .ver-label { color: var(--muted); }
 
