@@ -383,13 +383,28 @@ describe("storage", () => {
     expect(del.disabled).toBe(true);
     expect(del.textContent).toBe("Delete Logs and Caches in All Apps");
     expect($$("#app-sizes .placeholder").length).toBe(6);
+    expect($("#apps-hint").textContent).toBe("Measuring every application…");
     await wait(250);
+    expect($("#apps-hint").textContent).toMatch(/^2 applications use /);
     expect(scan.disabled).toBe(false);
     expect($("#measured").textContent).toBe("Measured 2 min ago");
     expect(del.disabled).toBe(false);
     expect(del.textContent).toBe("Delete Logs and Caches in All Apps (100 MB)");
     expect($$("#app-sizes .placeholder").length).toBe(0);
     expect($$("#app-sizes .row").length).toBe(2);
+  });
+
+  test("measuring shows only that; no applications is said once a measurement found none", async () => {
+    w.mockDelay.storage_apps = 100;
+    $("#scan-apps").click();
+    await wait(20);
+    expect($("#apps-hint").textContent).toBe("Measuring every application…");
+    expect($("#app-sizes").textContent).not.toContain("No applications");
+    await wait(150);
+    // The mock's measurement counts no app: the ones from before drop out.
+    expect($("#apps-hint").textContent).toBe("");
+    expect($("#app-sizes").textContent).toBe("No applications take any space.");
+    delete w.mockDelay.storage_apps;
   });
 });
 

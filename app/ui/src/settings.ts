@@ -548,10 +548,13 @@ function drawSizes() {
   const sum = (k) => apps.reduce((a, x) => a + x[k], 0);
   const busy = measuring || loading;
   $("#apps-size").textContent = apps.length ? bytes(sum("total")) : "";
-  $("#apps-hint").textContent = !apps.length
+  // One state at a time: measuring, the numbers, or (after a measurement) nothing to show.
+  $("#apps-hint").textContent = busy
     ? "Measuring every application…"
-    : `${apps.length} applications use ${bytes(sum("total"))}. ${bytes(sum("safe"))} is logs and caches that can be deleted safely; ` +
-      `${bytes(sum("rebuild"))} is dependencies and builds that can be recreated.`;
+    : !apps.length
+      ? ""
+      : `${apps.length} applications use ${bytes(sum("total"))}. ${bytes(sum("safe"))} is logs and caches that can be deleted safely; ` +
+        `${bytes(sum("rebuild"))} is dependencies and builds that can be recreated.`;
 
   const scan = $("#scan-apps");
   scan.disabled = busy || deleting;
@@ -594,7 +597,8 @@ function drawSizes() {
     row.innerHTML = `<span><span><i class="bar"></i></span><small><i class="bar short"></i></small></span><span class="size"><i class="bar size"></i></span>`;
     list.append(row);
   }
-  if (!busy && !shown.length) list.innerHTML = `<div class="row"><span class="muted">No applications take any space.</span></div>`;
+  if (!busy && measuredAt && !shown.length)
+    list.innerHTML = `<div class="row"><span class="muted">No applications take any space.</span></div>`;
 }
 
 function agoText(secs) {
