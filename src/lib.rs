@@ -66,7 +66,9 @@ const CADDY_SHA512: [(&str, &str); 5] = [
         "c308154504e53755958ffc62d8a2657ab17eefd6dd25c45dbb2c3d93d29519971f77ca652f7d0f2bcb7f980b9ba3822478865e29969d0272d7613550a43152b1",
     ),
 ];
-const PHP_INDEX: &str = "https://dl.static-php.dev/static-php-cli/common/";
+/// Anvil's own builds of php.net's releases (github.com/n1crack/anvil-php): the newest
+/// patch of each version, whether it is a preview, and each file's URL and SHA-256.
+const PHP_INDEX: &str = "https://raw.githubusercontent.com/n1crack/anvil-php/main/index.json";
 
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -882,7 +884,7 @@ pub fn icon(site: &Site) -> Option<PathBuf> {
 }
 
 pub(crate) fn platform() -> Result<(&'static str, &'static str)> {
-    // (static-php-cli suffix, caddy suffix)
+    // (PHP build suffix, caddy suffix)
     Ok(match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => ("macos-aarch64", "mac_arm64"),
         ("macos", "x86_64") => ("macos-x86_64", "mac_amd64"),
@@ -1220,7 +1222,9 @@ pub fn php_dir(v: &str) -> PathBuf {
 }
 
 /// PHP versions Anvil offers to install, newest first.
-pub const PHP_VERSIONS: [&str; 5] = ["8.5", "8.4", "8.3", "8.2", "8.1"];
+/// One the source doesn't publish yet (8.6 before its first release candidate) is
+/// listed only once it does (`php_releases`).
+pub const PHP_VERSIONS: [&str; 6] = ["8.6", "8.5", "8.4", "8.3", "8.2", "8.1"];
 
 /// Refuse a PHP version Anvil doesn't offer, saying why for 8.0: it is end of life, and
 /// its static-php-cli macOS build can't load extensions.
@@ -1310,64 +1314,73 @@ pub fn installed_php() -> Vec<String> {
     v
 }
 
-/// The source's list of PHP builds: static-php-cli's directory, or windows.php.net's
-/// releases.json.
+/// The source's list of PHP builds: Anvil's index.json, or windows.php.net's
+/// releases.json. Both list each version's newest patch under `[minor].version`.
 fn php_index() -> Result<serde_json::Value> {
     let url = if cfg!(windows) {
         format!("{PHP_WINDOWS}releases.json")
     } else {
-        format!("{PHP_INDEX}?format=json")
+        PHP_INDEX.to_string()
     };
     // `anvil php list` asks too: a dead network mustn't hold the list up.
     serde_json::from_slice(&curl(&["-fsSL", "--max-time", "10"], &url)?)
         .with_context(|| format!("{url} sent something unreadable"))
 }
 
-/// The newest patch of `minor` (`8.4.27`) in static-php-cli's directory that has an
-/// FPM build for `plat`.
-fn static_php_newest(list: &serde_json::Value, minor: &str, plat: &str) -> Option<String> {
-    let prefix = format!("php-{minor}.");
-    let suffix = format!("-fpm-{plat}.tar.gz");
-    let patch = list
-        .as_array()?
-        .iter()
-        .filter_map(|f| f["name"].as_str())
-        .filter_map(|n| {
-            n.strip_prefix(&prefix)?
-                .strip_suffix(&suffix)?
-                .parse::<u32>()
-                .ok()
-        })
-        .max()?;
-    Some(format!("{minor}.{patch}"))
-}
+/// What the source has of each PHP version: minor -> (newest patch, preview).
+pub type PhpReleases = BTreeMap<String, (String, bool)>;
 
-/// `new` is a later patch release than `have`: `8.4.27` after `8.4.9`.
-fn newer_patch(have: &str, new: &str) -> bool {
-    let patch = |v: &str| v.rsplit('.').next()?.parse::<u32>().ok();
-    matches!((patch(have), patch(new)), (Some(a), Some(b)) if b > a)
-}
-
-/// The installed PHP versions the source has a newer patch of: (minor, installed, newest).
-pub fn php_updates() -> Result<Vec<(String, String, String)>> {
-    let installed = installed_php();
-    if installed.is_empty() {
-        return Ok(vec![]);
-    }
-    let index = php_index()?;
+/// The source's PHP versions Anvil offers, each with its newest patch.
+pub fn php_releases() -> Result<PhpReleases> {
     let plat = if cfg!(windows) { "" } else { platform()?.0 };
-    Ok(installed
+    Ok(releases_from(&php_index()?, plat))
+}
+
+/// The versions in `index` with a build for `plat` (Windows' releases.json has one
+/// build per version, so `plat` is ""). Only Anvil's index marks previews.
+fn releases_from(index: &serde_json::Value, plat: &str) -> PhpReleases {
+    PHP_VERSIONS
+        .iter()
+        .filter_map(|m| {
+            let rel = &index[*m];
+            if !plat.is_empty() && rel["files"][format!("fpm-{plat}")].is_null() {
+                return None;
+            }
+            let version = rel["version"].as_str()?.to_string();
+            Some((m.to_string(), (version, rel["preview"] == true)))
+        })
+        .collect()
+}
+
+/// `new` is a later patch release than `have`: `8.4.27` after `8.4.9`, `8.6.0` after
+/// `8.6.0RC4`, `8.6.0RC5` after that.
+// ponytail: alpha/beta/RC count alike; the index only moves forward, so it doesn't matter.
+fn newer_patch(have: &str, new: &str) -> bool {
+    let key = |v: &str| {
+        let last = v.rsplit('.').next()?;
+        let (patch, pre) = last.split_at(
+            last.find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(last.len()),
+        );
+        let n = match pre.trim_start_matches(|c: char| c.is_ascii_alphabetic()) {
+            _ if pre.is_empty() => 0,
+            n => n.parse::<u32>().ok()?,
+        };
+        Some((patch.parse::<u32>().ok()?, pre.is_empty(), n))
+    };
+    matches!((key(have), key(new)), (Some(a), Some(b)) if b > a)
+}
+
+/// The installed PHP versions `releases` has a newer patch of: (minor, installed, newest).
+pub fn php_updates(releases: &PhpReleases) -> Vec<(String, String, String)> {
+    installed_php()
         .into_iter()
         .filter_map(|minor| {
             let have = opcache::installed_full(&minor).ok()?;
-            let new = if cfg!(windows) {
-                index[minor.as_str()]["version"].as_str()?.to_string()
-            } else {
-                static_php_newest(&index, &minor, plat)?
-            };
+            let new = releases.get(&minor)?.0.clone();
             newer_patch(&have, &new).then_some((minor, have, new))
         })
-        .collect())
+        .collect()
 }
 
 /// A new PHP folder's `php` and server start, or it doesn't replace the one that does.
@@ -1391,19 +1404,26 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
         return php_install_windows(cfg, minor, &index);
     }
     let (plat, _) = platform()?;
-    let full = static_php_newest(&index, minor, plat)
-        .with_context(|| format!("no PHP {minor} build for {plat}"))?;
+    let rel = &index[minor];
+    let file = |kind: &str| {
+        let f = &rel["files"][format!("{kind}-{plat}")];
+        f["url"].as_str().zip(f["sha256"].as_str())
+    };
+    let full = rel["version"]
+        .as_str()
+        .filter(|_| file("fpm").is_some() && file("cli").is_some())
+        .with_context(|| format!("no PHP {minor} build for {plat} yet"))?;
+    let preview = if rel["preview"] == true {
+        " (preview)"
+    } else {
+        ""
+    };
     let dir = php_dir(minor);
-    println!("Installing PHP {full}…");
+    println!("Installing PHP {full}{preview}…");
     replace_dir(&dir, |new| {
         for kind in ["fpm", "cli"] {
-            // static-php-cli publishes no checksums; HTTPS is the only check.
-            fetch_tgz(
-                &format!("{PHP_INDEX}php-{full}-{kind}-{plat}.tar.gz"),
-                new,
-                false,
-                None,
-            )?;
+            let (url, sum) = file(kind).context("no PHP build")?;
+            fetch_tgz(url, new, false, Some(sum))?;
         }
         php_runs(new)?;
         let ini = dir.join("php.ini");
@@ -1423,9 +1443,11 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
         Ok(())
     })?
     .0;
-    println!("PHP {full} installed in {}", dir.display());
+    println!("PHP {full}{preview} installed in {}", dir.display());
     opcache::prune_sources();
-    if opcache::BUILDS.contains(&minor)
+    // Built in (Anvil's builds, 8.5's): nothing to build. The folder is new, so an
+    // opcache.so built for the PHP it replaced is gone with it.
+    if opcache::state(minor) == opcache::State::Missing
         && let Err(e) = opcache::build(minor)
     {
         println!("PHP {full} works without OPcache for now: {e}");
@@ -4258,26 +4280,36 @@ mod tests {
     }
 
     #[test]
-    fn php_newest_patch_is_picked_by_number() {
-        let list = serde_json::json!([
-            {"name": "php-8.4.9-fpm-macos-aarch64.tar.gz"},
-            {"name": "php-8.4.27-fpm-macos-aarch64.tar.gz"},
-            {"name": "php-8.4.30-cli-macos-aarch64.tar.gz"},
-            {"name": "php-8.4.31-fpm-linux-x86_64.tar.gz"},
-            {"name": "php-8.40.1-fpm-macos-aarch64.tar.gz"},
-        ]);
-        let newest = static_php_newest(&list, "8.4", "macos-aarch64");
-        assert_eq!(newest.as_deref(), Some("8.4.27"));
-        assert_eq!(static_php_newest(&list, "8.3", "macos-aarch64"), None);
+    fn php_newest_patch_comes_from_the_index() {
+        let index = serde_json::json!({
+            "8.6": {"version": "8.6.0RC4", "preview": true, "files": {
+                "fpm-macos-aarch64": {"url": "u", "sha256": "s"}}},
+            "8.4": {"version": "8.4.27", "preview": false, "files": {
+                "fpm-macos-aarch64": {"url": "u", "sha256": "s"}}},
+            "8.3": {"version": "8.3.30", "files": {
+                "fpm-linux-x86_64": {"url": "u", "sha256": "s"}}},
+            "8.0": {"version": "8.0.30", "files": {
+                "fpm-macos-aarch64": {"url": "u", "sha256": "s"}}},
+        });
+        let got = releases_from(&index, "macos-aarch64");
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(got["8.6"], ("8.6.0RC4".into(), true));
+        assert_eq!(got["8.4"], ("8.4.27".into(), false));
+        // windows.php.net's releases.json: one build per version, no previews.
+        let win = serde_json::json!({"8.4": {"version": "8.4.27"}});
+        assert_eq!(releases_from(&win, "")["8.4"], ("8.4.27".into(), false));
         assert!(newer_patch("8.4.9", "8.4.27"));
         assert!(!newer_patch("8.4.27", "8.4.27"));
         assert!(!newer_patch("8.4.27", "8.4.9"));
         assert!(!newer_patch("8.4.27", "8.4.x"));
+        assert!(newer_patch("8.6.0RC4", "8.6.0RC5"));
+        assert!(newer_patch("8.6.0RC5", "8.6.0"));
+        assert!(!newer_patch("8.6.0", "8.6.0RC5"));
     }
 
     #[test]
     fn php_8_0_is_not_offered() {
-        assert_eq!(PHP_VERSIONS, ["8.5", "8.4", "8.3", "8.2", "8.1"]);
+        assert_eq!(PHP_VERSIONS, ["8.6", "8.5", "8.4", "8.3", "8.2", "8.1"]);
         let dir = tempfile::tempdir().unwrap();
         let _env = crate::lock(&ENV_LOCK);
         // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
@@ -4286,7 +4318,7 @@ mod tests {
         fs::create_dir_all(php_dir("8.0")).unwrap();
         fs::write(php_dir("8.0").join("php-fpm"), "").unwrap();
         assert!(installed_php().is_empty());
-        let eol = "PHP 8.0 is end of life — Anvil offers PHP 8.5, 8.4, 8.3, 8.2, 8.1";
+        let eol = "PHP 8.0 is end of life — Anvil offers PHP 8.6, 8.5, 8.4, 8.3, 8.2, 8.1";
         let mut cfg = Config::default();
         assert_eq!(php_install(&mut cfg, "8.0").unwrap_err().to_string(), eol);
         assert_eq!(
@@ -4297,7 +4329,7 @@ mod tests {
         assert_eq!(pin.to_string(), eol);
         assert_eq!(
             php_install(&mut cfg, "7.4").unwrap_err().to_string(),
-            "PHP 7.4 isn't offered — Anvil offers PHP 8.5, 8.4, 8.3, 8.2, 8.1"
+            "PHP 7.4 isn't offered — Anvil offers PHP 8.6, 8.5, 8.4, 8.3, 8.2, 8.1"
         );
     }
 
@@ -4447,6 +4479,42 @@ mod tests {
             sum_in(&win, "postgresql-18.6.0-x86_64-pc-windows-msvc.zip").unwrap(),
             h
         );
+    }
+
+    /// A PHP build is unpacked only when it matches the index's SHA-256.
+    #[cfg(unix)]
+    #[test]
+    fn a_download_with_the_wrong_sum_is_not_unpacked() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
+        fs::write(dir.path().join("php"), "php").unwrap();
+        let tgz = dir.path().join("php.tar.gz");
+        run(Command::new("tar")
+            .arg("-czf")
+            .arg(&tgz)
+            .arg("-C")
+            .arg(dir.path())
+            .arg("php"))
+        .unwrap();
+        let url = format!("file://{}", tgz.display());
+        let out = dir.path().join("out");
+        let wrong = "0".repeat(64);
+        assert!(fetch_tgz(&url, &out, false, Some(&wrong)).is_err());
+        assert!(!out.join("php").exists());
+        let out_sum = Command::new("openssl")
+            .args(["dgst", "-sha256", "-r"])
+            .arg(&tgz)
+            .output()
+            .unwrap();
+        let sum = String::from_utf8_lossy(&out_sum.stdout)
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_string();
+        fetch_tgz(&url, &out, false, Some(&sum)).unwrap();
+        assert_eq!(fs::read_to_string(out.join("php")).unwrap(), "php");
     }
 
     #[test]

@@ -15,6 +15,15 @@ contain breaking changes.
 - Docker services: Anvil runs an image for you or adds a container you already have, and starts, stops and restarts it (`anvil service add --docker mongo:7 --port 27017:27017`).
 - External services: a MySQL, PostgreSQL or Redis server elsewhere, with its .env lines and database apps; its dot is green while it answers (`anvil service add --external db.lan:3306 --kind mysql`).
 - A service's right-click menu has Restart and Rename….
+- PHP 8.6 as a preview.
+
+### Changed
+
+- PHP comes from Anvil's own builds of php.net's releases, so new patch releases arrive within a day; OPcache, mysqli, intl and sodium are built in.
+
+### Fixed
+
+- WordPress can be created on Linux.
 
 ## [0.3.0] - 2026-10-21
 

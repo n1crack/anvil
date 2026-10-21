@@ -1310,7 +1310,7 @@ pub(crate) mod tests {
         let e = build("8.4", "xdebug").unwrap_err();
         assert!(e.to_string().contains("can't load extensions"), "{e}");
         let e = crate::opcache::build("8.4").unwrap_err();
-        assert!(e.to_string().contains("comes with PHP 8.5"), "{e}");
+        assert!(e.to_string().contains("anvil php update 8.4"), "{e}");
     }
 
     #[test]

@@ -790,6 +790,7 @@ export function render() {
         },
         {
           ...phpParts(v),
+          ...(v.preview && { slot: Object.assign(document.createElement("span"), { className: "ver-pinned", textContent: "Preview" }) }),
           status: phpPatch(v),
           ...(verErrors.has(`php@${v.version}`) && { error: verError(`php@${v.version}`) }),
         },
@@ -1248,7 +1249,13 @@ const SOFTWARE: Software[] = (<Software[]>[
   ["Caddy", "Web server and HTTPS certificates", "Apache-2.0", "https://caddyserver.com", "Downloaded when used"],
   windows
     ? ["PHP", "PHP apps, in windows.php.net’s builds; PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded when used"]
-    : ["PHP", "PHP apps, in static-php-cli’s builds (MIT); PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded when used"],
+    : [
+        "PHP",
+        "PHP apps, in Anvil’s builds of php.net’s releases (github.com/n1crack/anvil-php, made with static-php-cli); PHP 8.1–8.5, 8.6 as a preview",
+        "PHP-3.01",
+        "https://www.php.net",
+        "Downloaded when used",
+      ],
   ["Composer", "PHP packages", "MIT", "https://getcomposer.org", "Downloaded when used"],
   ["Node.js", "JavaScript apps", "MIT", "https://nodejs.org", "Downloaded when used"],
   ["pnpm", "JavaScript packages", "MIT", "https://pnpm.io", "Downloaded when used"],

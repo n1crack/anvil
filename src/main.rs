@@ -746,12 +746,12 @@ enum PhpCmd {
         /// Its value, e.g. 512M (leave it out to clear the setting)
         value: Option<String>,
     },
-    /// Build OPcache for an installed PHP 8.1–8.4
+    /// Build OPcache for an installed PHP that lacks it
     Opcache {
         /// An installed version, e.g. 8.3
         version: String,
     },
-    /// Build mysqli for an installed PHP: WordPress needs it, and Anvil's macOS PHP lacks it
+    /// Build mysqli for an installed PHP that lacks it: WordPress needs it
     Mysqli {
         /// An installed version, e.g. 8.4
         version: String,
@@ -1718,7 +1718,7 @@ fn run() -> Result<()> {
             {
                 bail!("PHP {v} is not installed — run `anvil php install {v}`");
             }
-            let found: Vec<_> = php_updates()?
+            let found: Vec<_> = php_updates(&php_releases()?)
                 .into_iter()
                 .filter(|(minor, ..)| version.as_ref().is_none_or(|v| v == minor))
                 .collect();
@@ -1896,8 +1896,9 @@ fn run() -> Result<()> {
                     style::note("No PHP yet: `anvil php install 8.4` installs one.")
                 );
             }
-            // Offline, the list goes without it.
-            let updates = php_updates().unwrap_or_default();
+            // Offline, the list goes without them.
+            let releases = php_releases().unwrap_or_default();
+            let updates = php_updates(&releases);
             for v in all {
                 let mark = if cfg.php.as_deref() == Some(&v) {
                     dim(" (default)")
@@ -1913,8 +1914,12 @@ fn run() -> Result<()> {
                     Some((_, _, new)) => format!("  {new} available (anvil php update {v})"),
                     None => String::new(),
                 };
+                let preview = match releases.get(&v) {
+                    Some((_, true)) => dim(" (preview)"),
+                    _ => String::new(),
+                };
                 let full = opcache::installed_full(&v).unwrap_or_else(|_| v.clone());
-                println!("{full}  {opcache}{mark}{patch}");
+                println!("{full}  {opcache}{preview}{mark}{patch}");
             }
         }
         Cmd::Use { version } => {

@@ -1,6 +1,8 @@
-//! OPcache for PHP 8.1–8.4: the default builds lack it, so Anvil builds `opcache.so` from
-//! php.net's source of the same patch version on this Mac. 8.5 has it built in. So is
-//! `mysqli.so`, which every macOS build lacks and WordPress needs.
+//! OPcache and mysqli for a PHP that lacks them. Anvil's own builds have both built in
+//! (and 8.5 OPcache). A PHP installed from static-php-cli before (8.1–8.4 without
+//! OPcache, every macOS one without mysqli, which WordPress needs) gets `opcache.so`
+//! and `mysqli.so` built from php.net's source of the same patch version on this Mac,
+//! until it is updated.
 
 use crate::{fetch_json, fetch_tgz, home, php_dir, run};
 use anyhow::{Context, Result, bail};
@@ -8,7 +10,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The versions whose default build lacks OPcache.
+/// The versions whose static-php-cli build lacks OPcache.
 pub const BUILDS: [&str; 4] = ["8.1", "8.2", "8.3", "8.4"];
 
 /// Tuned for development: a saved file shows on the next request. JIT stays off: it
@@ -33,9 +35,36 @@ pub fn so_path(minor: &str) -> PathBuf {
     php_dir(minor).join("ext").join("opcache.so")
 }
 
+/// Whether the installed PHP `minor` has `module` compiled in, as `php -n -m` lists it.
+/// Asked once per binary: an install replaces it, and with it its modification time.
+fn built_in(minor: &str, module: &str) -> bool {
+    type Seen = std::collections::BTreeMap<PathBuf, (std::time::SystemTime, Vec<String>)>;
+    static SEEN: std::sync::Mutex<Seen> = std::sync::Mutex::new(Seen::new());
+    let bin = crate::php_bin(minor);
+    let Ok(at) = fs::metadata(&bin).and_then(|m| m.modified()) else {
+        return false;
+    };
+    let mut seen = crate::lock(&SEEN);
+    if !seen.get(&bin).is_some_and(|(t, _)| *t == at) {
+        let list = crate::platform::command(&bin)
+            .args(["-n", "-m"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| {
+                let out = String::from_utf8_lossy(&o.stdout);
+                out.lines().map(|l| l.trim().to_string()).collect()
+            })
+            .unwrap_or_default();
+        seen.insert(bin.clone(), (at, list));
+    }
+    seen[&bin].1.iter().any(|m| m == module)
+}
+
 pub fn state(minor: &str) -> State {
-    // Windows' PHP ships OPcache; its php.ini loads it.
-    if cfg!(windows) || !BUILDS.contains(&minor) {
+    // Windows' PHP ships OPcache; its php.ini loads it. Built in wins over an
+    // opcache.so left from before, which would load it twice.
+    if cfg!(windows) || !BUILDS.contains(&minor) || built_in(minor, "Zend OPcache") {
         State::BuiltIn
     } else if so_path(minor).exists() {
         State::Ready
@@ -88,9 +117,10 @@ pub fn mysqli_path(minor: &str) -> PathBuf {
     php_dir(minor).join("ext").join("mysqli.so")
 }
 
-/// Whether PHP `minor` has mysqli: Windows' PHP loads its own (`PHP_WINDOWS_EXT`).
+/// Whether PHP `minor` has mysqli: Windows' PHP loads its own (`PHP_WINDOWS_EXT`),
+/// Anvil's builds have it built in.
 pub fn has_mysqli(minor: &str) -> bool {
-    cfg!(windows) || mysqli_path(minor).exists()
+    cfg!(windows) || mysqli_path(minor).exists() || built_in(minor, "mysqli")
 }
 
 /// Build `mysqli.so` for the installed PHP `minor` from php.net's source of its exact
@@ -100,7 +130,9 @@ pub fn build_mysqli(minor: &str) -> Result<()> {
         return Ok(());
     }
     if cfg!(target_os = "linux") {
-        bail!("Anvil's PHP on Linux can't load extensions yet, mysqli included");
+        bail!(
+            "this PHP {minor} can't load mysqli on Linux; the newest has it built in: anvil php update {minor}"
+        );
     }
     let _held = crate::phpext::build_lock(minor, "mysqli", "mysqli")?;
     let (full, src) = source_tree(minor)?;
@@ -138,12 +170,14 @@ fn put_mysqli(minor: &str, src: &Path) -> Result<()> {
 /// Build `opcache.so` for the installed PHP `minor` from php.net's source of its exact
 /// version, verified against php.net's checksum, and put it in place once it loads.
 pub fn build(minor: &str) -> Result<()> {
-    if !BUILDS.contains(&minor) {
+    if state(minor) == State::BuiltIn {
         bail!("PHP {minor} has OPcache built in");
     }
     // Linux's builds are fully static: they load no .so at all.
     if cfg!(target_os = "linux") {
-        bail!("on Linux, OPcache comes with PHP 8.5; Anvil's PHP {minor} can't load it");
+        bail!(
+            "this PHP {minor} can't load OPcache on Linux; the newest has it built in: anvil php update {minor}"
+        );
     }
     let _held = crate::phpext::build_lock(minor, "opcache", "OPcache")?;
     let php = php_dir(minor).join("php");

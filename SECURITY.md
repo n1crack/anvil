@@ -52,8 +52,9 @@ Anvil is meant for your own machine only:
     each release file, which shows the download is the uploaded file.
   - MySQL publishes only MD5 (`.md5` next to each download). That catches a
     broken download but not a deliberately altered one.
-  - PHP (static-php-cli builds) and the .NET install script publish no
-    checksums; for them HTTPS is the only integrity check.
+  - The .NET install script publishes no checksums; for it HTTPS is the
+    only integrity check. PHP (Anvil's builds, github.com/n1crack/anvil-php)
+    is checked against the SHA-256 in that repository's index.json.
 
   A checksum fetched from the same host as the file guards against broken or
   swapped downloads, not against a compromised upstream. A failed or

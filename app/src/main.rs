@@ -1621,6 +1621,9 @@ async fn update_check(handle: AppHandle) -> Res<Option<Release>> {
 /// newest). Settings › PHP offers Update.
 static PHP_AVAILABLE: Mutex<std::collections::BTreeMap<String, (String, String)>> =
     Mutex::new(std::collections::BTreeMap::new());
+/// What the last check found the source has of each version (`anvil::php_releases`):
+/// Settings › PHP lists only those, and tags previews. None before a check got through.
+static PHP_RELEASES: Mutex<Option<anvil::PhpReleases>> = Mutex::new(None);
 /// The patch each version was updated to since Anvil started, said on its row.
 static PHP_UPDATED: Mutex<std::collections::BTreeMap<String, String>> =
     Mutex::new(std::collections::BTreeMap::new());
@@ -1632,16 +1635,18 @@ static PHP_UPDATING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 fn php_check(handle: &AppHandle) {
     let handle = handle.clone();
     std::thread::spawn(move || {
-        let Ok(found) = anvil::php_updates() else {
+        let Ok(releases) = anvil::php_releases() else {
             return;
         };
-        let found: std::collections::BTreeMap<_, _> = found
+        let found: std::collections::BTreeMap<_, _> = anvil::php_updates(&releases)
             .into_iter()
             .map(|(minor, have, new)| (minor, (have, new)))
             .collect();
         let minors: Vec<String> = found.keys().cloned().collect();
-        let differs = *anvil::lock(&PHP_AVAILABLE) != found;
+        let differs = *anvil::lock(&PHP_AVAILABLE) != found
+            || anvil::lock(&PHP_RELEASES).as_ref() != Some(&releases);
         *anvil::lock(&PHP_AVAILABLE) = found;
+        *anvil::lock(&PHP_RELEASES) = Some(releases);
         if differs {
             changed(&handle);
         }
@@ -3623,6 +3628,8 @@ struct PhpVersion {
     /// The installed patch release, "8.4.23".
     full: Option<String>,
     default: bool,
+    /// A release candidate, not a release yet (the source says so).
+    preview: bool,
     /// Apps pinned to it: it can't be uninstalled until they are unpinned.
     pinned_by: Vec<String>,
     opcache: anvil::opcache::State,
@@ -3828,9 +3835,15 @@ fn settings(handle: AppHandle) -> Res<Settings> {
             edited: cfg.worktree_presets.contains_key(*id),
         })
         .collect();
+    let releases = anvil::lock(&PHP_RELEASES).clone();
     Ok(Settings {
         php: anvil::PHP_VERSIONS
             .iter()
+            // One the source doesn't have (8.6 before its first RC) isn't offered.
+            .filter(|v| {
+                installed.iter().any(|i| i == *v)
+                    || releases.as_ref().is_none_or(|r| r.contains_key(**v))
+            })
             .map(|v| PhpVersion {
                 version: v,
                 installed: installed.iter().any(|i| i == v),
@@ -3840,6 +3853,10 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                     .then(|| anvil::opcache::installed_full(v).ok())
                     .flatten(),
                 default: cfg.php.as_deref() == Some(*v),
+                preview: releases
+                    .as_ref()
+                    .and_then(|r| r.get(*v))
+                    .is_some_and(|(_, p)| *p),
                 pinned_by: anvil::pinned_to(&cfg, "php", v),
                 opcache: anvil::opcache::state(v),
                 opcache_building: anvil::lock(&OPCACHE_BUILDS).iter().any(|b| b == v),

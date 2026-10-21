@@ -317,6 +317,8 @@ export interface Settings {
     version: string;
     installed: boolean;
     default: boolean;
+    /** A release candidate, tagged Preview. */
+    preview: boolean;
     pinned_by: string[];
     /** The installed patch release, "8.4.23". */
     full: string | null;

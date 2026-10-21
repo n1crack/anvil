@@ -267,7 +267,7 @@ mod tests {
             ("php = \"7.4\"\n", "php = \"7.4\""),
             (
                 "php = \"8.0\"\n",
-                "php = \"8.0\": PHP 8.0 is end of life — Anvil offers PHP 8.5, 8.4, 8.3, 8.2, 8.1",
+                "php = \"8.0\": PHP 8.0 is end of life — Anvil offers PHP 8.6, 8.5, 8.4, 8.3, 8.2, 8.1",
             ),
             ("node = \"lts\"\n", "node = \"lts\""),
             ("[services]\nmysql = \"5.7\"\n", "mysql = \"5.7\""),

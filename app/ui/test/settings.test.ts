@@ -109,6 +109,21 @@ describe("versions", () => {
     }
   });
 
+  test("PHP: a release candidate is tagged Preview", async () => {
+    w.mockPhpPreview = ["8.5"];
+    w.refresh();
+    try {
+      await open("php");
+      const rows = $$("#versions .ver");
+      expect(rows[0].querySelector(".ver-pinned")?.textContent).toBe("Preview");
+      expect(rows[1].querySelector(".ver-pinned")).toBeNull();
+    } finally {
+      delete w.mockPhpPreview;
+      w.refresh();
+      await open("php");
+    }
+  });
+
   test("installing shows progress in the row and holds the other Install buttons", async () => {
     w.mockDelay.php_install = 100;
     ($$("#versions .ver")[2].querySelector(".actions-inline button") as HTMLElement).click();
