@@ -820,6 +820,7 @@ function phpPatch(v: Settings["php"][number]) {
     box.append(update);
   } else if (v.updated) {
     box.textContent = "Updated";
+    box.classList.add("done");
     box.title = `Updated to ${v.updated}`;
   } else return undefined;
   return box;

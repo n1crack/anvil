@@ -1238,7 +1238,7 @@ const mockHandle = (cmd, a) => {
           version,
           installed: (window.mockPhpInstalled ?? ["8.5", "8.4"]).includes(version),
           full: (window.mockPhpInstalled ?? ["8.5", "8.4"]).includes(version) ? `${version}.${version === "8.5" ? 8 : 23}` : null,
-          default: version === "8.4",
+          default: version === (window.mockPhpDefault ?? "8.4"),
           preview: window.mockPhpPreview?.includes(version) ?? false,
           pinned_by: window.mockPhpPins?.[version] ?? [],
           opcache: version === "8.5" ? "builtin" : (window.mockOpcache?.[version] ?? (version === "8.4" ? "ready" : "missing")),

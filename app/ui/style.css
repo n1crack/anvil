@@ -1492,6 +1492,11 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 /* PHP: a newer patch at the row's end, before Extensions. */
 .ver-patch { display: inline-flex; flex: none; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .ver-patch + .ext-toggle { margin-left: 8px; }
+/* With a patch note, the hover actions take their room before it instead of drawing over the name. */
+.ver .actions-inline.on-hover + .ver-patch { margin-left: 8px; }
+.ver:is(:hover, :focus-within):has(.ver-patch) .actions-inline.on-hover:not(.asking) { width: auto; }
+/* "Updated" only informs: on hover it gives its room to the actions. */
+.ver:is(:hover, :focus-within) .ver-patch.done { display: none; }
 
 /* PHP: Versions, with Update automatically at its right. */
 .page h2.versions-head { display: flex; align-items: center; justify-content: space-between; max-width: 600px; }
