@@ -158,7 +158,7 @@ pub fn open_with(app: &str, target: impl AsRef<std::ffi::OsStr>) -> Command {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let mut c = command(app);
+        let mut c = command(desktop_program(app).unwrap_or_else(|| app.into()));
         c.arg(target);
         c
     }
@@ -205,7 +205,10 @@ pub fn terminal(app: Option<&str>, dir: &Path) -> Command {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let program = app.map(String::from).unwrap_or_else(linux_terminal);
+        let program = match app {
+            Some(app) => desktop_program(app).unwrap_or_else(|| app.into()),
+            None => linux_terminal().into(),
+        };
         let mut c = command(program);
         // Terminals open where they are started.
         c.current_dir(dir);
@@ -237,6 +240,120 @@ fn linux_terminal() -> String {
     .find(|t| std::env::split_paths(&path).any(|d| d.join(t).is_file()))
     .unwrap_or("xterm")
     .to_string()
+}
+
+/// Linux: the apps Settings offers, by name, each with the programs that are it: its
+/// own command, then its Flatpak id. The first one found is the one that runs.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub const DESKTOP_APPS: [(&str, &str, &[&str]); 31] = [
+    ("terminal", "Ghostty", &["ghostty", "com.mitchellh.ghostty"]),
+    (
+        "terminal",
+        "Alacritty",
+        &["alacritty", "org.alacritty.Alacritty"],
+    ),
+    ("terminal", "kitty", &["kitty"]),
+    (
+        "terminal",
+        "WezTerm",
+        &["wezterm", "org.wezfurlong.wezterm"],
+    ),
+    ("terminal", "foot", &["foot"]),
+    ("terminal", "GNOME Terminal", &["gnome-terminal"]),
+    ("terminal", "Ptyxis", &["ptyxis", "app.devsuite.Ptyxis"]),
+    ("terminal", "Console", &["kgx", "org.gnome.Console"]),
+    ("terminal", "Konsole", &["konsole", "org.kde.konsole"]),
+    ("terminal", "Warp", &["warp-terminal"]),
+    ("terminal", "Tilix", &["tilix", "com.gexperts.Tilix"]),
+    (
+        "editor",
+        "Visual Studio Code",
+        &["code", "com.visualstudio.code"],
+    ),
+    ("editor", "VSCodium", &["codium", "com.vscodium.codium"]),
+    ("editor", "Cursor", &["cursor"]),
+    ("editor", "Windsurf", &["windsurf"]),
+    // Arch packages Zed as `zeditor`: `zed` is also ZFS's event daemon.
+    ("editor", "Zed", &["zeditor", "zed", "dev.zed.Zed"]),
+    ("editor", "Sublime Text", &["subl", "com.sublimetext.three"]),
+    (
+        "editor",
+        "PhpStorm",
+        &["phpstorm", "com.jetbrains.PhpStorm"],
+    ),
+    (
+        "editor",
+        "WebStorm",
+        &["webstorm", "com.jetbrains.WebStorm"],
+    ),
+    (
+        "editor",
+        "IntelliJ IDEA",
+        &[
+            "idea",
+            "intellij-idea-ultimate",
+            "com.jetbrains.IntelliJ-IDEA-Ultimate",
+            "com.jetbrains.IntelliJ-IDEA-Community",
+        ],
+    ),
+    ("editor", "Kate", &["kate", "org.kde.kate"]),
+    (
+        "editor",
+        "Text Editor",
+        &["gnome-text-editor", "org.gnome.TextEditor"],
+    ),
+    ("git", "GitKraken", &["gitkraken", "com.axosoft.GitKraken"]),
+    ("git", "Sublime Merge", &["smerge", "com.sublimemerge.App"]),
+    ("git", "SmartGit", &["smartgit", "com.syntevo.SmartGit"]),
+    (
+        "git",
+        "GitHub Desktop",
+        &["github-desktop", "io.github.shiftey.Desktop"],
+    ),
+    ("git", "Gitg", &["gitg", "org.gnome.gitg"]),
+    ("git", "GitButler", &["gitbutler-tauri", "gitbutler"]),
+    ("git", "Gittyup", &["gittyup", "com.github.Murmele.Gittyup"]),
+    ("git", "GitAhead", &["gitahead"]),
+    ("git", "QGit", &["qgit"]),
+];
+
+/// Linux: the `kind` apps of `DESKTOP_APPS` (terminal, editor, git) installed here.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn desktop_apps(kind: &str) -> Vec<String> {
+    DESKTOP_APPS
+        .iter()
+        .filter(|(k, name, _)| *k == kind && desktop_program(name).is_some())
+        .map(|(_, name, _)| name.to_string())
+        .collect()
+}
+
+/// Linux: the program an app from Settings runs: one of `DESKTOP_APPS`' by its name,
+/// else a program picked by path or found by name.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn desktop_program(app: &str) -> Option<PathBuf> {
+    if app.contains('/') {
+        return Path::new(app).is_file().then(|| app.into());
+    }
+    let programs: &[&str] = DESKTOP_APPS
+        .iter()
+        .find(|(_, name, _)| *name == app)
+        .map_or(&[], |(_, _, p)| p);
+    let home = crate::user_home();
+    // Beside PATH: where Flatpak exports its apps and JetBrains Toolbox its launchers,
+    // which a desktop session's PATH often leaves out.
+    let dirs: Vec<PathBuf> = std::env::split_paths(&crate::env_path())
+        .chain([
+            home.join(".local/bin"),
+            home.join(".local/share/flatpak/exports/bin"),
+            PathBuf::from("/var/lib/flatpak/exports/bin"),
+            home.join(".local/share/JetBrains/Toolbox/scripts"),
+        ])
+        .collect();
+    programs
+        .iter()
+        .copied()
+        .chain(programs.is_empty().then_some(app))
+        .find_map(|p| dirs.iter().map(|d| d.join(p)).find(|f| f.is_file()))
 }
 
 /// No console window for a background child (Windows); nothing elsewhere.

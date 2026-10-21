@@ -3500,22 +3500,32 @@ fn app_label(app: &str) -> String {
 fn git_client(cfg: &Config) -> Option<String> {
     cfg.git_client
         .clone()
-        .or_else(|| installed_apps(&GIT_CLIENTS).into_iter().next())
+        .or_else(|| installed_apps("git", &GIT_CLIENTS).into_iter().next())
 }
 
-/// Which of `apps` are installed in the usual macOS app folders.
-fn installed_apps(apps: &[&str]) -> Vec<String> {
-    let user = anvil::user_home().join("Applications");
-    let dirs = [
-        std::path::Path::new("/Applications"),
-        std::path::Path::new("/Applications/Utilities"),
-        std::path::Path::new("/System/Applications/Utilities"),
-        user.as_path(),
-    ];
-    apps.iter()
-        .filter(|a| dirs.iter().any(|d| d.join(format!("{a}.app")).exists()))
-        .map(|a| a.to_string())
-        .collect()
+/// Which of `apps` are installed in the usual macOS app folders. Linux has its own
+/// list of each `kind` (terminal, editor, git), found by program.
+fn installed_apps(kind: &str, apps: &[&str]) -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = apps;
+        anvil::platform::desktop_apps(kind)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = kind;
+        let user = anvil::user_home().join("Applications");
+        let dirs = [
+            std::path::Path::new("/Applications"),
+            std::path::Path::new("/Applications/Utilities"),
+            std::path::Path::new("/System/Applications/Utilities"),
+            user.as_path(),
+        ];
+        apps.iter()
+            .filter(|a| dirs.iter().any(|d| d.join(format!("{a}.app")).exists()))
+            .map(|a| a.to_string())
+            .collect()
+    }
 }
 
 fn apply_theme(handle: &AppHandle, theme: Option<&str>) {
@@ -3587,9 +3597,9 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                     .collect(),
             })
             .collect(),
-        editors: installed_apps(&EDITORS),
-        terminals: installed_apps(&TERMINALS),
-        git_clients: installed_apps(&GIT_CLIENTS),
+        editors: installed_apps("editor", &EDITORS),
+        terminals: installed_apps("terminal", &TERMINALS),
+        git_clients: installed_apps("git", &GIT_CLIENTS),
         git_client: cfg.git_client.clone(),
         login: handle.autolaunch().is_enabled().unwrap_or(false),
         config_dir: anvil::home(),
@@ -3693,10 +3703,16 @@ fn set_terminal(handle: AppHandle, terminal: Option<String>) -> Res<Settings> {
 
 #[tauri::command(async)]
 fn set_git_client(handle: AppHandle, git_client: Option<String>) -> Res<Settings> {
-    // Any app can be picked by path ("Other app…"); it has to be a real .app bundle.
+    // Any app can be picked by path ("Other app…"): a real .app bundle; on Linux a
+    // program file.
     if let Some(c) = git_client.as_deref().filter(|c| c.contains('/')) {
         let p = std::path::Path::new(c);
-        if p.extension().is_none_or(|e| e != "app") || !p.is_dir() {
+        let app = if cfg!(target_os = "linux") {
+            p.is_file()
+        } else {
+            p.extension().is_some_and(|e| e == "app") && p.is_dir()
+        };
+        if !app {
             return Err(format!("{c} isn't an app"));
         }
     }
@@ -4751,8 +4767,10 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
             "logs",
             if mac {
                 "Show Anvil Logs in Finder"
-            } else {
+            } else if cfg!(windows) {
                 "Show Anvil Logs in File Explorer"
+            } else {
+                "Show Anvil Logs in File Manager"
             },
             true,
             None,

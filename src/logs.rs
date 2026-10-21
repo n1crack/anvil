@@ -596,18 +596,32 @@ pub fn strip_ansi(s: &str) -> String {
 }
 
 /// The command that opens `file` at `line` in `editor` (an app name from Settings):
-/// the editor's own CLI where it takes a line, `open -a` otherwise.
+/// the editor's own CLI where it takes a line, `open -a` otherwise. On Linux the
+/// program is the one Settings found for the name (`zeditor`, a Flatpak id), and an
+/// editor that takes no line gets the file alone.
 pub fn editor_command(editor: &str, file: &Path, line: u32) -> (String, Vec<String>) {
     let f = file.display().to_string();
-    match editor {
-        "Zed" => ("zed".into(), vec![format!("{f}:{line}")]),
-        "Visual Studio Code" => ("code".into(), vec!["-g".into(), format!("{f}:{line}")]),
-        "PhpStorm" => (
-            "phpstorm".into(),
-            vec!["--line".into(), line.to_string(), f],
-        ),
-        _ => ("open".into(), vec!["-a".into(), editor.into(), f]),
+    let at = format!("{f}:{line}");
+    let (cli, args) = match editor {
+        "Zed" => ("zed", vec![at]),
+        "Visual Studio Code" => ("code", vec!["-g".into(), at]),
+        "PhpStorm" => ("phpstorm", vec!["--line".into(), line.to_string(), f]),
+        _ if !cfg!(target_os = "linux") => {
+            return ("open".into(), vec!["-a".into(), editor.into(), f]);
+        }
+        "VSCodium" | "Cursor" | "Windsurf" => ("", vec!["-g".into(), at]),
+        "Sublime Text" => ("", vec![at]),
+        "WebStorm" | "IntelliJ IDEA" => ("", vec!["--line".into(), line.to_string(), f]),
+        "Kate" => ("", vec!["-l".into(), line.to_string(), f]),
+        "Text Editor" => ("", vec![format!("+{line}"), f]),
+        _ => ("", vec![f]),
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if let Some(p) = crate::platform::desktop_program(editor) {
+        return (p.display().to_string(), args);
     }
+    let cli = if cli.is_empty() { editor } else { cli };
+    (cli.into(), args)
 }
 
 /* ---------- Retention: logs don't grow without end ---------- */
@@ -850,10 +864,8 @@ mod tests {
     #[test]
     fn editor_commands_take_the_line() {
         let f = Path::new("/a/app/X.php");
-        assert_eq!(
-            editor_command("Zed", f, 7),
-            ("zed".into(), vec!["/a/app/X.php:7".into()])
-        );
+        // The program is the one found here on Linux; the arguments are the same.
+        assert_eq!(editor_command("Zed", f, 7).1, ["/a/app/X.php:7"]);
         assert_eq!(
             editor_command("Visual Studio Code", f, 7).1,
             ["-g", "/a/app/X.php:7"]
@@ -862,13 +874,19 @@ mod tests {
             editor_command("PhpStorm", f, 7).1,
             ["--line", "7", "/a/app/X.php"]
         );
-        assert_eq!(
-            editor_command("Nova", f, 7),
-            (
-                "open".into(),
-                vec!["-a".into(), "Nova".into(), "/a/app/X.php".into()]
-            )
-        );
+        if cfg!(target_os = "linux") {
+            assert_eq!(editor_command("Kate", f, 7).1, ["-l", "7", "/a/app/X.php"]);
+            assert_eq!(editor_command("Cursor", f, 7).1, ["-g", "/a/app/X.php:7"]);
+            assert_eq!(editor_command("Nova", f, 7).1, ["/a/app/X.php"]);
+        } else {
+            assert_eq!(
+                editor_command("Nova", f, 7),
+                (
+                    "open".into(),
+                    vec!["-a".into(), "Nova".into(), "/a/app/X.php".into()]
+                )
+            );
+        }
     }
 
     const LARAVEL: &str = "[2026-05-30 15:12:40] local.INFO: Started {\"user\":1} []

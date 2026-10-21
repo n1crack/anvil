@@ -1,4 +1,4 @@
-import "./platform";
+import { say } from "./platform";
 import type { Settings } from "./types";
 import { ownError } from "./live";
 import { bubbleKeys, confirmInRow, textAct } from "./confirm";
@@ -758,7 +758,7 @@ export function render() {
   tld.value = s.tld;
   $("#tld-note").textContent =
     s.tld === "localhost"
-      ? "Reaches this Mac by itself, no setup."
+      ? say("Reaches this Mac by itself, no setup.")
       : "Reaches Anvil through a resolver file, set up once with your password.";
   tld.onchange = () => call("set_tld", { tld: tld.value });
   $("#ports").textContent = `HTTP on ${s.http_port}${s.tld === "localhost" ? "" : `, DNS on ${s.dns_port}`}. Change them in config.toml.`;
@@ -1113,10 +1113,11 @@ $("#terminal").onchange = (e) => call("set_terminal", { terminal: e.target.value
 $("#git-client").onchange = async (e) => {
   let app = e.target.value || null;
   if (app === "other") {
+    // Linux has no app bundles: the program itself.
+    const linux = document.documentElement.classList.contains("linux");
     app = await window.__TAURI__.dialog.open({
       title: "Choose the app that opens your repositories",
-      defaultPath: "/Applications",
-      filters: [{ name: "Apps", extensions: ["app"] }],
+      ...(linux ? { defaultPath: "/usr/bin" } : { defaultPath: "/Applications", filters: [{ name: "Apps", extensions: ["app"] }] }),
     });
     if (!app) return render();
   }
