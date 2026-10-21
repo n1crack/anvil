@@ -1468,7 +1468,7 @@ export function renderSite() {
 
   // Caddy serves neither a compose project nor a plain folder.
   $('.tabs [data-tab="requests"]', root).hidden = s.kind === "compose" || s.kind === "folder";
-  // Only while the mail catcher is on (Settings › Plugins); its switch lives in the tab.
+  // Only while the mail catcher is on (Settings › Features); its switch lives in the tab.
   $('.tabs [data-tab="mail"]', root).hidden = !snap.catcher || s.kind === "compose" || s.kind === "folder";
   hideEmptyTabs(s, root);
   for (const b of root.querySelectorAll(".tabs [role=tab]")) b.onclick = () => showTab(root, b.dataset.tab);

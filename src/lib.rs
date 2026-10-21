@@ -126,17 +126,17 @@ pub struct Config {
     /// Per worktree site (`<app>--<name>`): its database choice and copies made.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub worktrees: BTreeMap<String, worktrees::WorktreeConfig>,
-    /// Settings › Plugins › Agents (MCP): `anvil mcp` serves AI agents. Stored only when on.
+    /// Settings › Features › Agents (MCP): `anvil mcp` serves AI agents. Stored only when on.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub mcp: bool,
-    /// Settings › Plugins › Tunnel: an app's Overview offers Share (`tunnel`). Stored only when on.
+    /// Settings › Features › Tunnel: an app's Overview offers Share (`tunnel`). Stored only when on.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub tunnel: bool,
-    /// Settings › Plugins › Mail catcher (`mail`): an SMTP listener with an inbox per app.
+    /// Settings › Features › Mail catcher (`mail`): an SMTP listener with an inbox per app.
     /// Stored only when on.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub mail_catcher: bool,
-    /// Settings › Plugins › Database viewer (`dbviewer`): Adminer at db.<tld>. Stored only when on.
+    /// Settings › Features › Database viewer (`dbviewer`): Adminer at db.<tld>. Stored only when on.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub db_viewer: bool,
     /// The catcher's SMTP port; unset is `mail::DEFAULT_PORT`.
@@ -1993,7 +1993,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             s += &format!("\n{n} {{\n\tredir {to}{{uri}} 308\n}}\n");
         }
     }
-    // Settings › Plugins › Database viewer: last, so an app with its address keeps it.
+    // Settings › Features › Database viewer: last, so an app with its address keeps it.
     if let Some(v) = dbviewer::php(cfg)
         && claim(&dbviewer::host(cfg))
     {
@@ -2897,7 +2897,7 @@ pub struct Server {
     children: Vec<Child>,
     /// What each child is, parallel to `children`.
     labels: Vec<String>,
-    /// Settings › Plugins › Mail catcher's SMTP listener, while it's on.
+    /// Settings › Features › Mail catcher's SMTP listener, while it's on.
     mail: Option<mail::Listener>,
     /// Why the mail catcher isn't listening though it's on (its port is taken).
     pub mail_error: Option<String>,

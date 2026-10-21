@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- Settings › Plugins is now Settings › Features: they come with Anvil and only need turning on.
+
 ### Added
 
 - Check for Updates… in the Anvil menu opens a Software Update window with what's new.

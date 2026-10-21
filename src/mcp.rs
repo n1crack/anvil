@@ -15,7 +15,7 @@ const PROTOCOL: &str = "2025-06-18";
 const PROTOCOLS: [&str; 3] = [PROTOCOL, "2025-03-26", "2024-11-05"];
 
 pub const NOT_RUNNING: &str = "Anvil isn't running. Open it, then try again.";
-pub const TURNED_OFF: &str = "Turn on Agents (MCP) in Settings › Plugins";
+pub const TURNED_OFF: &str = "Turn on Agents (MCP) in Settings › Features";
 
 /// The first line of a result that carries the app's own text: a page can write
 /// anything to its log, a visitor anything into a URL, a sender anything into a mail.
@@ -282,7 +282,7 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "mail",
-            "Mail the app sent, as the mail catcher (Settings › Plugins) caught it. Without an id: the latest, newest first. With an id: that message's text, HTML and links, e.g. to follow a sign-up mail's link",
+            "Mail the app sent, as the mail catcher (Settings › Features) caught it. Without an id: the latest, newest first. With an id: that message's text, HTML and links, e.g. to follow a sign-up mail's link",
             json!({
                 "app": app,
                 "id": {"type": "string", "description": "A message id from the list"},
@@ -319,7 +319,7 @@ fn mail(cfg: &Config, args: &Value) -> Result<Value> {
     let s = site(cfg, args)?;
     if !crate::mail::caught(cfg, &s.name) {
         bail!(
-            "Anvil doesn't catch {}'s mail: turn on Settings › Plugins › Mail catcher (and the app's Catch mail switch)",
+            "Anvil doesn't catch {}'s mail: turn on Settings › Features › Mail catcher (and the app's Catch mail switch)",
             s.name
         );
     }

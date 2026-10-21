@@ -89,7 +89,7 @@ fn value(v: impl Serialize) -> Res<Value> {
     serde_json::to_value(v).map_err(|e| e.to_string())
 }
 
-/// Methods behind Settings › Plugins › Agents (MCP).
+/// Methods behind Settings › Features › Agents (MCP).
 const MCP_ONLY: [&str; 2] = ["set_done", "exits"];
 
 /// The app's processes for `check`: each with its log key, state and how it ended. A

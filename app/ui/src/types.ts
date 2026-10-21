@@ -71,7 +71,7 @@ export interface Snapshot {
   projects: Record<string, Need[]>;
   /** The Anvil Mailpit each app's .env sends mail to, by app name; apps that send there only. */
   mail: Record<string, string>;
-  /** Settings › Plugins › Mail catcher while it's on: its port, why it isn't listening,
+  /** Settings › Features › Mail catcher while it's on: its port, why it isn't listening,
    * the apps whose mail it catches. */
   catcher: { port: number; error: string | null; caught: string[] } | null;
   /** Each worktree's database and what its Overview warns about, by worktree name. */
@@ -84,11 +84,11 @@ export interface Snapshot {
   php_ext: Record<string, string[]>;
   /** The extensions built for each version that has some on; one on without a build loads nothing. */
   php_ext_built: Record<string, string[]>;
-  /** Settings › Plugins › Tunnel: Overview offers Share. */
+  /** Settings › Features › Tunnel: Overview offers Share. */
   tunnel: boolean;
   /** Shared apps' tunnels, by app; `note` says what links the app builds point to. */
   shares: Record<string, Share>;
-  /** Settings › Plugins › Database viewer while it's on: why it isn't served, and each
+  /** Settings › Features › Database viewer while it's on: why it isn't served, and each
    * app's database it opens, as the Overview names it. */
   db_viewer: { problem: string | null; apps: Record<string, string> } | null;
 }
@@ -315,15 +315,15 @@ export interface Settings {
   notifications: boolean;
   https_default: boolean;
   worktree_db: DbChoice;
-  /** Settings › Plugins › Agents (MCP). */
+  /** Settings › Features › Agents (MCP). */
   mcp: boolean;
-  /** Settings › Plugins › Tunnel. */
+  /** Settings › Features › Tunnel. */
   tunnel: boolean;
-  /** Settings › Plugins › Mail catcher, its port and why it isn't listening. */
+  /** Settings › Features › Mail catcher, its port and why it isn't listening. */
   mail_catcher: boolean;
   mail_port: number;
   mail_error: string | null;
-  /** Settings › Plugins › Database viewer, where it answers, and why it isn't served. */
+  /** Settings › Features › Database viewer, where it answers, and why it isn't served. */
   db_viewer: boolean;
   db_viewer_host: string;
   db_viewer_problem: string | null;

@@ -2,7 +2,7 @@ import { $, call, el, invoke, selected, snap, tab } from "./app";
 import { inboxView, type Inbox } from "./inbox";
 import { shown } from "./live";
 
-/* Mail tab: the mail catcher's inbox for the app (Settings › Plugins › Mail catcher), live
+/* Mail tab: the mail catcher's inbox for the app (Settings › Features › Mail catcher), live
  * while the tab is shown, under a line saying how Anvil catches it and a switch to leave
  * the app to its own mail setup. app.ts calls mailTab() from showTab. */
 

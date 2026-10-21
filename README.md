@@ -27,7 +27,7 @@ Anvil turns the folders on your computer into running applications at local doma
 - **Dev processes.** Queue workers, Vite and other dev scripts run in the background with live output, restart and a crash alert.
 - **Branches side by side.** A Git worktree gets its own address, processes and database while main keeps running.
 - **Readable logs and requests.** Laravel, Symfony and PHP-FPM logs as entries with stack frames that open in your editor, and every request the app served.
-- **Plugins, off by default.** A mail inbox per app, a database viewer, a public address through a Cloudflare tunnel, browser errors, and an MCP server for AI agents.
+- **Features, off by default.** A mail inbox per app, a database viewer, a public address through a Cloudflare tunnel, browser errors, and an MCP server for AI agents.
 - **Docker Compose.** If a project brings its own compose file, Anvil shows and controls its containers too.
 
 Everything runs natively and lives in `~/.anvil`; your system packages stay untouched. The few system changes Anvil makes are ones you approve, and `anvil uninstall` removes them.

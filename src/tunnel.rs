@@ -1,4 +1,4 @@
-//! Settings › Plugins › Tunnel: share an app at a temporary public address through a
+//! Settings › Features › Tunnel: share an app at a temporary public address through a
 //! Cloudflare quick tunnel (no account). cloudflared reaches Caddy on this computer
 //! with the app's own Host, so Caddy serves it as it serves the browser here.
 
@@ -13,7 +13,7 @@ use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const TURNED_OFF: &str = "Turn on Tunnel in Settings › Plugins";
+pub const TURNED_OFF: &str = "Turn on Tunnel in Settings › Features";
 /// What a quick tunnel is, said once beside the address.
 pub const LIMITS: &str = "A temporary address that changes every time; Cloudflare gives quick tunnels no uptime guarantee.";
 

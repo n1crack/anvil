@@ -1,6 +1,6 @@
 /* One inbox of the mail catcher (src/mail.rs): its mails newest first, each opening to
  * its HTML (sandboxed), text, headers or source, with its files to save. The Mail tab
- * shows an app's (mail.ts); Settings › Plugins the one for mail from no app. Only
+ * shows an app's (mail.ts); Settings › Features the one for mail from no app. Only
  * `invoke` comes in, so both windows use it. */
 
 type Invoke = <T = any>(cmd: string, args?: Record<string, unknown>) => Promise<T>;

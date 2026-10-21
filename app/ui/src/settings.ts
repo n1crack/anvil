@@ -984,8 +984,8 @@ $("#mcp").onchange = (e) => call("set_mcp", { on: e.target.checked });
 $("#tunnel").onchange = (e) => call("set_tunnel", { on: e.target.checked });
 $("#mail-catcher").onchange = (e) => call("set_mail_catcher", { on: e.target.checked });
 
-/** A plugin that is on has a page of its own under Plugins in the sidebar; turned off
- * while it's shown, the list of plugins takes its place. */
+/** A feature that is on has a page of its own under Features in the sidebar; turned off
+ * while it's shown, the list of features takes its place. */
 function pluginPages() {
   const on = { "plugin-mcp": s.mcp, "plugin-tunnel": s.tunnel, "plugin-mail": s.mail_catcher, "plugin-db": s.db_viewer || !!dbViewerBusy };
   for (const [page, shown] of Object.entries(on)) {
@@ -995,7 +995,7 @@ function pluginPages() {
   }
 }
 
-/** Settings › Plugins › Database viewer: turning it on downloads Adminer first, said in
+/** Settings › Features › Database viewer: turning it on downloads Adminer first, said in
  * its own line; a failure shows there and leaves it off. */
 let dbViewerBusy = "";
 let dbViewerFail = "";
@@ -1026,7 +1026,7 @@ function renderDbViewer() {
   $("#db-viewer-error").hidden = !why;
 }
 
-/** Settings › Plugins › Mail catcher: where it listens, why it can't, and the inbox of
+/** Settings › Features › Mail catcher: where it listens, why it can't, and the inbox of
  * mail from no app, shown once there is some. */
 let other: Inbox | null = null;
 function renderMailCatcher() {

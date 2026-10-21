@@ -2,7 +2,7 @@ import { $, callOrThrow, el, invoke, render, showError, snap } from "./app";
 import { confirmPop } from "./processes";
 import { copy } from "./services";
 
-/* The Overview's Public address line (Settings › Plugins › Tunnel): Share opens a
+/* The Overview's Public address line (Settings › Features › Tunnel): Share opens a
  * Cloudflare quick tunnel to the app; its address, Copy and Stop show on the line. */
 
 const LIMITS = "The address is temporary and changes every time; Cloudflare gives no uptime guarantee.";

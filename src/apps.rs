@@ -723,7 +723,7 @@ impl Apps {
             .with_context(|| format!("{} apps are served by Anvil directly", label(&site.kind)))?;
         let version = site.runtime_version.clone().with_context(|| {
             format!(
-                "{} isn't installed in Anvil yet — add it in Settings › Languages",
+                "{0} isn't installed in Anvil yet — add it in Settings › {0}",
                 runtimes::name(runtime)
             )
         })?;

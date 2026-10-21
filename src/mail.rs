@@ -1,4 +1,4 @@
-//! Settings › Plugins › Mail catcher: an SMTP listener on 127.0.0.1 that only accepts and
+//! Settings › Features › Mail catcher: an SMTP listener on 127.0.0.1 that only accepts and
 //! stores. Each app's processes and PHP get `MAIL_*` with the app's name as the SMTP
 //! username (`env`), so its mail lands in its own inbox, `~/.anvil/mail/<app>/`.
 

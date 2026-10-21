@@ -2003,7 +2003,7 @@ describe("mail", () => {
 describe("share", () => {
   const row = () => $('[data-panel="overview"] .share-row');
   const state = async () => (await import("../src/app")).call("state");
-  test("off in Settings › Plugins: no Share line", async () => {
+  test("off in Settings › Features: no Share line", async () => {
     await select("shop");
     expect(row().hidden).toBe(true);
   });

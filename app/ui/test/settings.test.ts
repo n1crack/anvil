@@ -40,7 +40,7 @@ describe("sidebar", () => {
     expect(head.tagName).not.toBe("BUTTON");
     // Windows-only pages (Performance) are in the markup but hidden on macOS and Linux.
     expect($$(".nav button.windows-only").map((b) => b.dataset.page)).toEqual(["performance"]);
-    // The app's pages, then Languages, then Plugins (a page per plugin that is on), About at the foot.
+    // The app's pages, then Languages, then Features (a page per feature that is on), About at the foot.
     expect(text(".nav button:not(.windows-only):not([hidden])")).toEqual([
       "General",
       "Worktrees",
@@ -52,10 +52,10 @@ describe("sidebar", () => {
       "Rust",
       ".NET",
       "Python",
-      "All plugins",
+      "All features",
       "About",
     ]);
-    expect(text(".nav-head")).toEqual(["Languages", "Plugins"]);
+    expect(text(".nav-head")).toEqual(["Languages", "Features"]);
     expect($$(".nav button").every((b) => b.querySelector("svg"))).toBe(true);
     expect($("[data-page='languages']")).toBeNull();
     // Each language its own glyph, drawn in currentColor by the stylesheet (no fill of its own).
@@ -436,7 +436,7 @@ describe("plugins", () => {
     expect($("#mcp-line").hidden).toBe(true);
   });
 
-  test("a plugin that is on gets its page under Plugins; turned off while shown, All plugins takes its place", async () => {
+  test("a plugin that is on gets its page under Features; turned off while shown, All features takes its place", async () => {
     await open("plugins");
     const nav = () => text(".nav button.plugin-nav:not([hidden])");
     expect(nav()).toEqual([]);

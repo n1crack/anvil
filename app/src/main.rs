@@ -43,7 +43,7 @@ struct App {
     server_crashed: AtomicBool,
     /// The last actions taken through the control socket, oldest first.
     agent_log: Mutex<std::collections::VecDeque<control::AgentAction>>,
-    /// Apps shared through a tunnel (Settings › Plugins › Tunnel).
+    /// Apps shared through a tunnel (Settings › Features › Tunnel).
     shares: Mutex<anvil::tunnel::Shares>,
 }
 
@@ -97,7 +97,7 @@ struct Snapshot {
     projects: std::collections::BTreeMap<String, Vec<anvil::project::Need>>,
     /// The Anvil Mailpit each app's .env sends mail to, apps that send there only.
     mail: std::collections::BTreeMap<String, String>,
-    /// Settings › Plugins › Mail catcher, while it's on.
+    /// Settings › Features › Mail catcher, while it's on.
     catcher: Option<Catcher>,
     /// Each worktree's database and what its Overview warns about.
     worktrees: std::collections::BTreeMap<String, WorktreeView>,
@@ -110,11 +110,11 @@ struct Snapshot {
     /// The catalog extensions built for each version that has some turned on: one on
     /// without a build loads nothing and shows as not built.
     php_ext_built: std::collections::BTreeMap<String, Vec<&'static str>>,
-    /// Settings › Plugins › Tunnel: Overview offers Share.
+    /// Settings › Features › Tunnel: Overview offers Share.
     tunnel: bool,
     /// Shared apps' tunnels, by app.
     shares: std::collections::BTreeMap<String, ShareView>,
-    /// Settings › Plugins › Database viewer, while it's on.
+    /// Settings › Features › Database viewer, while it's on.
     db_viewer: Option<DbViewer>,
 }
 
@@ -3237,15 +3237,15 @@ struct Settings {
     notifications: bool,
     https_default: bool,
     worktree_db: anvil::worktrees::DbChoice,
-    /// Settings › Plugins › Agents (MCP).
+    /// Settings › Features › Agents (MCP).
     mcp: bool,
-    /// Settings › Plugins › Tunnel.
+    /// Settings › Features › Tunnel.
     tunnel: bool,
-    /// Settings › Plugins › Mail catcher, its port and why it isn't listening.
+    /// Settings › Features › Mail catcher, its port and why it isn't listening.
     mail_catcher: bool,
     mail_port: u16,
     mail_error: Option<String>,
-    /// Settings › Plugins › Database viewer, where it answers, and why it isn't served.
+    /// Settings › Features › Database viewer, where it answers, and why it isn't served.
     db_viewer: bool,
     db_viewer_host: String,
     db_viewer_problem: Option<String>,
@@ -3608,7 +3608,7 @@ fn set_worktree_preset(
     )
 }
 
-/// Settings › Plugins › Agents (MCP): whether `anvil mcp` serves, and the socket answers it.
+/// Settings › Features › Agents (MCP): whether `anvil mcp` serves, and the socket answers it.
 #[tauri::command(async)]
 fn set_mcp(handle: AppHandle, on: bool) -> Res<Settings> {
     apply(
@@ -3621,7 +3621,7 @@ fn set_mcp(handle: AppHandle, on: bool) -> Res<Settings> {
     )
 }
 
-/// Settings › Plugins › Tunnel: Share on apps' Overview. Off ends every tunnel.
+/// Settings › Features › Tunnel: Share on apps' Overview. Off ends every tunnel.
 #[tauri::command(async)]
 fn set_tunnel(handle: AppHandle, app: State<App>, on: bool) -> Res<Settings> {
     if !on {
@@ -3637,7 +3637,7 @@ fn set_tunnel(handle: AppHandle, app: State<App>, on: bool) -> Res<Settings> {
     )
 }
 
-/// Settings › Plugins › Mail catcher: the web server restarts, so PHP gets `MAIL_*` (or
+/// Settings › Features › Mail catcher: the web server restarts, so PHP gets `MAIL_*` (or
 /// loses it) and the listener starts or stops with it.
 #[tauri::command(async)]
 fn set_mail_catcher(handle: AppHandle, on: bool) -> Res<Settings> {
@@ -3651,7 +3651,7 @@ fn set_mail_catcher(handle: AppHandle, on: bool) -> Res<Settings> {
     )
 }
 
-/// Settings › Plugins › Database viewer: on downloads Adminer first (a failure leaves it
+/// Settings › Features › Database viewer: on downloads Adminer first (a failure leaves it
 /// off), then the web server restarts to serve db.<tld> or stop serving it.
 #[tauri::command(async)]
 fn set_db_viewer(handle: AppHandle, on: bool) -> Res<Settings> {
@@ -3739,7 +3739,7 @@ async fn browser_status(site: String) -> Res<anvil::browser::Status> {
     .map_err(|e| e.to_string())?
 }
 
-/// An inbox's folder: an app's, or `_other` (Settings › Plugins › Mail catcher).
+/// An inbox's folder: an app's, or `_other` (Settings › Features › Mail catcher).
 fn inbox(name: &str) -> Res<std::path::PathBuf> {
     anvil::mail::inbox(&anvil::mail::root(), name).ok_or_else(|| format!("No inbox {name}"))
 }

@@ -135,7 +135,7 @@ enum Cmd {
     Start,
     /// Serve Anvil to AI agents (MCP, stdio)
     Mcp,
-    /// The Database viewer (Adminer at db.<tld>, Settings › Plugins)
+    /// The Database viewer (Adminer at db.<tld>, Settings › Features)
     Db {
         #[command(subcommand)]
         cmd: DbCmd,
@@ -450,7 +450,7 @@ enum AppCmd {
     /// Switch an npm or yarn app to pnpm: pnpm-lock.yaml from its lock file, node_modules
     /// installed again; the old lock file goes only after that works. Test the app after
     Pnpm { site: String },
-    /// The app's latest mails, oldest first, while the mail catcher (Settings › Plugins)
+    /// The app's latest mails, oldest first, while the mail catcher (Settings › Features)
     /// catches them; else the inbox address of the Anvil Mailpit its .env sends to
     Mail {
         site: String,
@@ -1730,7 +1730,7 @@ fn run() -> Result<()> {
                 }
                 if open.is_some() {
                     bail!(
-                        "Anvil doesn't catch {}'s mail: turn on Settings › Plugins › Mail catcher",
+                        "Anvil doesn't catch {}'s mail: turn on Settings › Features › Mail catcher",
                         s.name
                     );
                 }

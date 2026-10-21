@@ -438,12 +438,11 @@ fn build(
             "node" => node.clone(),
             _ => apps::runtime_version(rt, parent).map(|v| runtimes::env(rt, &v)),
         };
-        env.extend(version.with_context(|| {
-            format!(
-                "Install {} in Settings › Languages first",
-                runtimes::name(rt)
-            )
-        })?);
+        env.extend(
+            version.with_context(|| {
+                format!("Install {0} in Settings › {0} first", runtimes::name(rt))
+            })?,
+        );
     }
     let sh = |cmd: &mut Command, cwd: &Path| -> Result<()> {
         let status = cmd
@@ -473,7 +472,7 @@ fn build(
         let Some(node) = &node else {
             writeln!(
                 &*log,
-                "Skipped: install Node.js in Settings › Languages, then start the app"
+                "Skipped: install Node.js in Settings › Node.js, then start the app"
             )?;
             return Ok(());
         };

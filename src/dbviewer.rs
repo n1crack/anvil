@@ -1,4 +1,4 @@
-//! Settings › Plugins › Database viewer: Adminer at `db.<tld>`, served by Anvil's default
+//! Settings › Features › Database viewer: Adminer at `db.<tld>`, served by Anvil's default
 //! PHP, that logs in without a password to Anvil's own MySQL and PostgreSQL services and
 //! opens the SQLite files of the apps Anvil knows (`dbviewer.php`, Adminer's documented
 //! `adminer_object()` customization). Off: nothing of it is served or downloaded.
@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::PathBuf;
 
-pub const TURNED_OFF: &str = "Turn on Database viewer in Settings › Plugins";
+pub const TURNED_OFF: &str = "Turn on Database viewer in Settings › Features";
 
 /// Adminer, pinned: the English single-file build. A newer pin replaces the older download.
 pub const VERSION: &str = "6.1.2";
