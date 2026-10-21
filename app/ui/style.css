@@ -44,9 +44,9 @@
   /* On: a muted green, the one "on" means everywhere, light enough under the white knob. */
   --switch-on: #4c9a62;
 
-  /* A process's name color in Watch (blue, purple, pink, orange, green, cyan), as
-   * Laravel's concurrently gives them; darker in light so they hold on white. */
-  --pc0: #93c5fd; --pc1: #c4b5fd; --pc2: #fb7185; --pc3: #fdba74; --pc4: #86efac; --pc5: #67e8f9;
+  /* A process's name color in Dev (blue, violet, magenta, cyan, indigo, slate): no red,
+   * amber, green or plain grey, which are states; darker in light so they hold on white. */
+  --pc0: #93c5fd; --pc1: #c4b5fd; --pc2: #f0abfc; --pc3: #67e8f9; --pc4: #a5b4fc; --pc5: #cbd5e1;
 
   --radius-s: 6px;
   --radius-m: 10px;
@@ -90,7 +90,7 @@
     --pop-deep: #ebebee;
     --switch-on: #3f8f56;
 
-    --pc0: #1d4ed8; --pc1: #6d28d9; --pc2: #be123c; --pc3: #c2410c; --pc4: #15803d; --pc5: #0e7490;
+    --pc0: #1d4ed8; --pc1: #6d28d9; --pc2: #a21caf; --pc3: #0e7490; --pc4: #4338ca; --pc5: #475569;
   }
 }
 
@@ -1005,8 +1005,8 @@ button.proc-name:hover { text-decoration: underline; }
 .pc0, .pc1, .pc2, .pc3, .pc4, .pc5 { color: var(--pc); }
 .pc0 { --pc: var(--pc0); } .pc1 { --pc: var(--pc1); } .pc2 { --pc: var(--pc2); }
 .pc3 { --pc: var(--pc3); } .pc4 { --pc: var(--pc4); } .pc5 { --pc: var(--pc5); }
-.dev-out .pc0 { --pc: #93c5fd; } .dev-out .pc1 { --pc: #c4b5fd; } .dev-out .pc2 { --pc: #fb7185; }
-.dev-out .pc3 { --pc: #fdba74; } .dev-out .pc4 { --pc: #86efac; } .dev-out .pc5 { --pc: #67e8f9; }
+.dev-out .pc0 { --pc: #93c5fd; } .dev-out .pc1 { --pc: #c4b5fd; } .dev-out .pc2 { --pc: #f0abfc; }
+.dev-out .pc3 { --pc: #67e8f9; } .dev-out .pc4 { --pc: #a5b4fc; } .dev-out .pc5 { --pc: #cbd5e1; }
 
 /* Dev: a toolbar, the app's processes on the left, the chosen one's output on the
  * console's terminal surface; "All" tags each line with its process's name. */

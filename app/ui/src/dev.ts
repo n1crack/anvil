@@ -13,7 +13,7 @@ import { line, streamPane } from "./stream";
  * script, listed below the processes until dismissed; Configure edits the processes. */
 
 const devSel = new Map<string, string>(); // site name -> "all", "app", "proc:<id>" or "once:<id>"
-export const COLORS = 6; // name colors pc0…pc5 (blue, purple, pink, orange, green, cyan), as concurrently gives them
+export const COLORS = 6; // name colors pc0…pc5 (blue, violet, magenta, cyan, indigo, slate), none a state's
 
 type Item = { key: string; name: string; color: string; running: boolean; crashed: boolean; row?: ProcessRow; run?: CommandChip };
 

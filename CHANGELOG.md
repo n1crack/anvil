@@ -12,6 +12,10 @@ contain breaking changes.
 - Check for Updates… in the Anvil menu opens a Software Update window with what's new.
 - The menu bar icon's menu offers a new version when there is one.
 
+### Changed
+
+- Process names in Dev and Containers no longer use red, orange or green, so only the dot shows a process's state.
+
 ### Fixed
 
 - Release notes in an update read as text, without markdown marks.
