@@ -973,6 +973,12 @@ const mockHandle = (cmd, a) => {
       return window.mockPackages;
     case "package_updates":
       return window.mockUpdates;
+    case "switch_to_pnpm": {
+      const js = window.mockPackages.ecosystems.find((e) => e.id === "npm");
+      const lock = js.lock;
+      js.lock = "pnpm-lock.yaml";
+      return lock;
+    }
     case "package_run": {
       const name = window.mockPackages.commands.find(([id]) => id === a.id)[1];
       ov.commands = ov.commands.filter((c) => c.id !== a.id);

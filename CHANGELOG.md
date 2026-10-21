@@ -21,9 +21,10 @@ contain breaking changes.
 
 - PHP comes from Anvil's own builds of php.net's releases, so new patch releases arrive within a day; OPcache, mysqli, intl and sodium are built in.
 - Settings: plainer words, shorter hints, and rarely used options under Advanced.
-- Settings: "Features" in the sidebar, Tunnel explained in its row instead of a page of its own, "Applications" throughout, and storage sizes lined up; an npm or yarn app's Packages line offers Switch to pnpm beside Install and Update.
+- Settings: "Features" in the sidebar, Tunnel explained in its row instead of a page of its own, "Applications" throughout, and storage sizes lined up.
 - Main window: plainer words on service, Mail and Settings pages; an external server shows Reachable, a crashed container says so.
 - An app's Settings › Worktrees reads as a short checklist, and Customize… is a tidier form with Done at the bottom.
+- Packages: each package manager in its own box, with its updates and advisories inside it.
 
 ### Fixed
 

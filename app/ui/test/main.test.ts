@@ -1835,26 +1835,27 @@ describe("packages", () => {
     await wait(80);
   });
 
-  test("nothing below the checks until one runs; Check outdated: the notice, then a tab per manager", async () => {
+  const card = (eco: string) => $(`.pkg-card[data-eco="${eco}"]`);
+
+  test("a card per manager, nothing found until a check runs; Check for updates fills each card", async () => {
     expect(calls("package_updates")).toHaveLength(0);
-    expect($$(".pkg-checks:not(.pkg-run-line) button").map((b) => b.textContent)).toEqual(["Outdated packages", "Security advisories"]);
-    expect($$(".pkg-notice, .pkg-results, .pkg-checked")).toHaveLength(0);
+    expect($$(".pkg-checkbar button").map((b) => b.textContent)).toEqual(["Check for updates", "Check security"]);
+    expect(
+      $$(".pkg-card .pkg-head").map((h) => `${h.querySelector("h3")!.textContent} ${h.querySelector(".pkg-file")!.textContent}`),
+    ).toEqual(["Composer composer.json", "pnpm package.json"]);
+    expect($$(".pkg-summary, .pkg-card dl, .pkg-foot")).toHaveLength(0);
     $(".pkg-check-outdated").click();
-    expect($(".pkg-check-outdated").textContent).toBe("Checking outdated…");
+    expect($(".pkg-check-outdated").textContent).toBe("Checking…");
     await wait(80);
     expect(calls("package_updates")).toHaveLength(1);
-    expect($(".pkg-notice.warn").textContent).toBe("7 updates available");
-    expect($$(".pkg-notice.bad")).toHaveLength(0);
-    expect($(".pkg-checked").textContent).toBe("Updates checked just now");
+    expect(card("composer").querySelector(".pkg-summary")!.textContent).toBe("4 updates · checked just now");
+    expect(card("npm").querySelector(".pkg-summary")!.textContent).toBe("3 updates · checked just now");
     expect(JSON.parse(localStorage.getItem("pkgUpdates:shop")!).list).toHaveLength(7);
-    expect($$(".pkg-ecos button").map((b) => b.textContent)).toEqual(["Composer4", "pnpm3"]);
-    expect($$(".pkg-ecos .pkg-count.bad")).toHaveLength(0);
-    const rows = $$(".pkg-results .row");
+    const rows = [...card("composer").querySelectorAll(".pkg-list .row")];
     expect(rows).toHaveLength(4);
     const fw = rows.find((r) => r.querySelector("a")?.textContent === "laravel/framework")!;
     expect(fw.querySelector(".pkg-ver")?.textContent).toBe("11.36.1→12.4.0major");
-    ($('.pkg-ecos [data-id="npm"]') as HTMLElement).click();
-    expect($$(".pkg-results .row")).toHaveLength(3);
+    expect(card("npm").querySelectorAll(".pkg-list .row")).toHaveLength(3);
     $('.tabs [data-tab="logs"]').click();
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
@@ -1865,24 +1866,22 @@ describe("packages", () => {
     const { pkgUpdates, drawPackages } = await import("../src/packages");
     pkgUpdates.clear();
     drawPackages("shop");
-    expect($(".pkg-notice.warn").textContent).toBe("7 updates available");
+    expect(card("composer").querySelector(".pkg-summary")!.textContent).toBe("4 updates · checked just now");
     expect(calls("package_updates")).toHaveLength(1);
   });
 
-  test("Check security audits each manager: advisories in red with severity, CVE and range; a failure inline", async () => {
+  test("Check security audits each manager: advisories in red with severity, CVE and range; a failure in its card", async () => {
     $(".pkg-check-security").click();
-    expect($(".pkg-check-security").textContent).toBe("Checking security…");
+    expect($(".pkg-check-security").textContent).toBe("Checking…");
     await wait(80);
     expect(calls("package_audit").map(([, a]) => a.ecosystem)).toEqual(["composer", "npm"]);
-    expect($(".pkg-notice.bad").textContent).toBe("1 security advisory");
-    expect($(".pkg-notice.warn").textContent).toBe("7 updates available");
-    expect($(".pkg-errors").textContent).toBe("pnpm audit failed: request to registry timed out");
-    // guzzle has an advisory and no update: Composer counts 5, in red.
-    const composer = $('.pkg-ecos [data-id="composer"]');
-    expect(composer.textContent).toBe("Composer5");
-    expect(composer.querySelector(".pkg-count")!.classList.contains("bad")).toBe(true);
-    composer.click();
-    const adv = $(".pkg-advisory");
+    const summary = card("composer").querySelector(".pkg-summary")!;
+    expect(summary.textContent).toBe("4 updates · 1 security advisory · checked just now");
+    expect(summary.querySelector(".pkg-found.bad")!.textContent).toBe("1 security advisory");
+    expect(card("npm").querySelector(".pkg-error")!.textContent).toBe("pnpm audit failed: request to registry timed out");
+    expect(card("composer").querySelector(".pkg-error")).toBeNull();
+    expect(card("npm").querySelectorAll(".pkg-advisory")).toHaveLength(0);
+    const adv = card("composer").querySelector(".pkg-advisory")!;
     expect(adv.querySelector(".pkg-sev")!.textContent).toBe("high");
     expect(adv.querySelector("a")!.textContent).toBe("Noncanonical host can bypass host-based checks");
     expect(adv.textContent).toContain("guzzlehttp/guzzle 7.9.2");
@@ -1894,66 +1893,40 @@ describe("packages", () => {
     expect(calls("open_url").at(-1)![1].url).toBe("https://github.com/advisories/GHSA-v5mv-p594-2x33");
   });
 
-  test("an npm app's one line: npm, Install, Update… and Switch to pnpm…, which asks in the line", async () => {
-    const pkgs = w.mockPackages;
-    const reread = async () => {
-      await select("notes");
-      await select("shop");
-      $('.tabs [data-tab="packages"]').click();
-      await wait(80);
-    };
-    try {
-      w.mockPackages = {
-        ...pkgs,
-        ecosystems: pkgs.ecosystems.map((e: any) => (e.id === "npm" ? { ...e, lock: "package-lock.json", manager: "npm 11.6.2" } : e)),
-        commands: pkgs.commands.map(([id, c]: [string, string]) => [id, c.replace("pnpm", "npm")]),
-      };
-      await reread();
-      const js = $('.pkg-run-line[data-eco="js"]');
-      expect(js.textContent).toBe("npmInstallUpdate…Switch to pnpm…");
-      expect($$(".pkg-switch-line")).toHaveLength(0);
-      (js.querySelector(".pkg-switch") as HTMLElement).click();
-      expect(js.textContent).toContain("Replace package-lock.json with pnpm-lock.yaml");
-      ([...js.querySelectorAll("button")].find((b) => b.textContent === "Cancel") as HTMLElement).click();
-      expect(js.textContent).toBe("npmInstallUpdate…Switch to pnpm…");
-      expect(calls("switch_to_pnpm")).toHaveLength(0);
-    } finally {
-      w.mockPackages = pkgs;
-      await reread();
-    }
-    expect($('.pkg-run-line[data-eco="js"]').textContent).toBe("pnpmInstallUpdate…");
-  });
-
-  test("Install runs at once, Update asks in the line; either shows in Dev, then the packages are read again", async () => {
-    const line = (eco: string) => $(`.pkg-run-line[data-eco="${eco}"]`);
-    const act = (eco: string, text: string) => [...line(eco).querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;
-    expect($$(".pkg-run-line").map((l) => l.textContent)).toEqual(["ComposerInstallUpdate…", "pnpmInstallUpdate…"]);
+  test("Install runs at once, Update asks in the card; either shows in Dev, then the packages are read again", async () => {
+    const acts = (eco: string) => card(eco).querySelector(".pkg-head .pkg-acts")!;
+    const act = (eco: string, text: string) => [...card(eco).querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;
+    expect($$(".pkg-head .pkg-acts").map((l) => l.textContent)).toEqual(["InstallUpdate…", "InstallUpdate…"]);
     act("composer", "Update…").click();
-    expect(line("composer").textContent).toContain("Run composer update?");
+    expect(acts("composer").textContent).toContain("Run composer update?");
+    expect(document.activeElement!.textContent).toBe("Cancel");
     act("composer", "Cancel").click();
-    expect(line("composer").textContent).toBe("ComposerInstallUpdate…");
+    expect(acts("composer").textContent).toBe("InstallUpdate…");
     expect(calls("package_run")).toHaveLength(0);
     act("composer", "Update…").click();
     act("composer", "Update").click();
     await wait(30);
     expect(calls("package_run").at(-1)![1]).toEqual({ site: "shop", id: "pkg-composer-update" });
-    expect(line("composer").textContent).toBe("ComposerRunning composer update…Output");
+    expect(acts("composer").textContent).toBe("Running composer update…Output");
     const reads = calls("packages").length;
     const checks = calls("package_updates").length;
     w.mockPackageExit({ code: 1, at: 1 });
     await wait(80);
-    expect($(".pkg-ran").textContent).toBe("composer update failed (exit code 1). Output");
-    expect($(".pkg-ran").classList.contains("pkg-error")).toBe(true);
+    const failed = card("composer").querySelector(".pkg-ran")!;
+    expect(failed.textContent).toBe("composer update failed (exit code 1). Output");
+    expect(failed.classList.contains("pkg-error")).toBe(true);
+    expect(acts("composer").textContent).toBe("InstallUpdate…");
     // The list is read again and, checked before, the outdated ones too.
     expect(calls("packages").length).toBeGreaterThan(reads);
     expect(calls("package_updates")).toHaveLength(checks + 1);
 
-    act("js", "Install").click();
+    act("npm", "Install").click();
     await wait(30);
     expect(calls("package_run").at(-1)![1].id).toBe("pkg-js-install");
+    expect(acts("npm").textContent).toBe("Running pnpm install…Output");
     w.mockPackageExit({ code: 0, at: 2 });
     await wait(80);
-    const done = $$(".pkg-ran").find((p) => p.textContent!.startsWith("pnpm install"))!;
+    const done = card("npm").querySelector(".pkg-ran")!;
     expect(done.textContent).toBe("pnpm install finished. Output");
     // Output: Dev, at the run, which Run ▾ doesn't offer.
     (done.querySelector(".pkg-output") as HTMLElement).click();
@@ -1964,6 +1937,23 @@ describe("packages", () => {
     w.mockOv.shop.commands = w.mockOv.shop.commands.filter((c: any) => c.source !== "Packages");
     $('.tabs [data-tab="packages"]').click();
     await wait(30);
+  });
+
+  test("an npm app offers Switch to pnpm… at the bottom of its card, asked there first", async () => {
+    expect(card("npm").querySelector(".pkg-foot")).toBeNull();
+    w.mockPackages.ecosystems[1].lock = "package-lock.json";
+    await w.renderPackages({ name: "shop" });
+    const foot = () => card("npm").querySelector(".pkg-foot")!;
+    (foot().querySelector(".pkg-switch") as HTMLElement).click();
+    expect(foot().textContent).toBe(
+      "Replace package-lock.json with pnpm-lock.yaml and install node_modules again? Test the app afterwards.CancelSwitch",
+    );
+    (foot().querySelector(".text-act.danger") as HTMLElement).click();
+    expect(foot().textContent).toBe("Switching to pnpm…");
+    await wait(80);
+    expect(calls("switch_to_pnpm").at(-1)![1]).toEqual({ site: "shop" });
+    expect(foot().textContent).toBe("Switched to pnpm: package-lock.json is gone and node_modules was installed again. Test the app.");
+    expect(foot().querySelector(".pkg-switch")).toBeNull();
   });
 });
 

@@ -1,11 +1,11 @@
-import { $, ago, call, el, invoke, popAt, renderMain, seg, selected, showError, snap } from "./app";
+import { $, ago, call, el, invoke, popAt, renderMain, selected, showError, snap } from "./app";
 import { icon } from "./icons";
 import { showRun } from "./dev";
 import { askProcs, drawProcs, loadProcs } from "./processes";
 
 /* Packages tab: the app's key packages as badges (pinned per app, the detected ones by
- * default), then Check outdated and Check security. What a check finds shows as a notice
- * and a tab per package manager with only the packages it concerns. Scripts live in the
+ * default), then Check for updates and Check security, then a card per package manager
+ * with its Install and Update… and what the checks found for it. Scripts live in the
  * Overview's Commands. */
 
 const pkgCache = new Map<string, any>(); // site name -> packages or { error }
@@ -17,7 +17,6 @@ export const pkgAudits = new Map<string, Record<string, any>>();
 const busy = new Set<string>();
 // Ecosystems whose package manager has an audit Anvil runs.
 const AUDITED = new Set(["composer", "npm"]);
-const pkgEco = new Map<string, string>(); // site name -> ecosystem shown
 const REGISTRY = {
   composer: "https://packagist.org/packages/",
   npm: "https://www.npmjs.com/package/",
@@ -145,52 +144,59 @@ async function runPkg(name, eco, id, command) {
   if (updatesOf(name)?.at) checkUpdates(name);
 }
 
-/** A manager's Install and Update…, and from `extra` what else it offers (Switch to pnpm…);
- * Update asks in the line first. Running, the line says so; after, how it went. Either way
- * its output is a click away in Dev. */
-function runLine(name, eco, cmds: [string, string][], extra?: (line: HTMLElement, idle: () => void) => HTMLElement[]) {
+const output = (name, id) => {
+  const b = el("button", "text-act pkg-output", "Output");
+  b.onclick = () => showRun(name, id);
+  return b;
+};
+
+/** A question asked in place: Cancel goes back to `idle`, the action (in red) does it. */
+function ask(box, question, verb, idle, go) {
+  const no = el("button", "text-act", "Cancel");
+  no.onclick = idle;
+  const yes = el("button", "text-act danger", verb);
+  yes.onclick = go;
+  box.classList.add("asking");
+  box.replaceChildren(el("span", "muted pkg-ask", question), no, yes);
+  no.focus();
+}
+
+/** A card's Install and Update…; Update asks first. Running, the header says so; after,
+ * how it went under it. Either way its output is a click away in Dev. */
+function runActs(name, eco, cmds: [string, string][]) {
   const key = `${name}:${eco}`;
-  const label = eco === "composer" ? "Composer" : cmds[0][1].split(" ")[0];
-  const line = el("div", "pkg-checks pkg-run-line");
-  line.dataset.eco = eco;
-  const output = (id) => {
-    const b = el("button", "text-act pkg-output", "Output");
-    b.onclick = () => showRun(name, id);
-    return b;
+  const acts = el("div", "pkg-acts");
+  const idle = () => {
+    acts.classList.remove("asking");
+    acts.replaceChildren(
+      ...cmds.map(([id, command]) => {
+        const update = id.endsWith("-update");
+        const b = el("button", `text-act ${update ? "pkg-update" : "pkg-install"}`, update ? "Update…" : "Install");
+        b.title = command;
+        b.onclick = () =>
+          update
+            ? ask(
+                acts,
+                `Run ${command}? Packages move to the newest versions their constraints allow, and the lock file changes.`,
+                "Update",
+                idle,
+                () => runPkg(name, eco, id, command),
+              )
+            : runPkg(name, eco, id, command);
+        return b;
+      }),
+    );
   };
   const going = running.get(key);
-  const idle = () => {
-    line.classList.remove("asking");
-    const acts = cmds.map(([id, command]) => {
-      const update = id.endsWith("-update");
-      const b = el("button", `pkg-btn ${update ? "pkg-update" : "pkg-install"}`, update ? "Update…" : "Install");
-      b.title = command;
-      b.onclick = () => {
-        if (!update) return runPkg(name, eco, id, command);
-        const no = el("button", "text-act", "Cancel");
-        no.onclick = idle;
-        const yes = el("button", "text-act danger", "Update");
-        yes.onclick = () => runPkg(name, eco, id, command);
-        line.classList.add("asking");
-        line.replaceChildren(
-          el("span", "muted", `Run ${command}? Packages move to the newest versions their constraints allow, and the lock file changes.`),
-          no,
-          yes,
-        );
-      };
-      return b;
-    });
-    line.replaceChildren(el("span", "pkg-label", label), ...acts, ...(extra?.(line, idle) ?? []));
-  };
   if (going) {
-    const command = cmds.find(([id]) => id === going)?.[1] ?? label;
-    line.replaceChildren(el("span", "pkg-label", label), el("span", "spin-dot"), el("span", "muted", `Running ${command}…`), output(going));
+    const command = cmds.find(([id]) => id === going)?.[1] ?? eco;
+    acts.replaceChildren(el("span", "spin-dot"), el("span", "muted", `Running ${command}…`), output(name, going));
   } else idle();
   const done = ran.get(key);
-  if (!done) return [line];
-  const msg = el("p", done.ok ? "muted pkg-checked pkg-ran" : "pkg-error pkg-ran", done.text);
-  if (done.id) msg.append(" ", output(done.id));
-  return [line, msg];
+  if (!done) return [acts, null];
+  const msg = el("p", done.ok ? "muted pkg-ran" : "pkg-error pkg-ran", done.text);
+  if (done.id) msg.append(" ", output(name, done.id));
+  return [acts, msg];
 }
 
 /** The manager's name for a section: Composer, or pnpm/npm/yarn/bun for npm packages. */
@@ -209,29 +215,9 @@ function versionOf(p, key) {
   return null;
 }
 
-/** An npm or yarn app can move to pnpm, only when asked and confirmed in its manager's line. */
-function switchOffer(name, p) {
-  const js = p.ecosystems.find((e) => e.id === "npm");
-  const lock = js?.lock === "package-lock.json" || js?.lock === "yarn.lock" ? js.lock : null;
-  if (!lock) return undefined;
-  return (line: HTMLElement, idle: () => void) => {
-    if (busy.has(`${name}:pnpm`)) return [el("span", "muted", "Switching to pnpm…")];
-    const b = el("button", "pkg-btn pkg-switch", "Switch to pnpm…");
-    b.onclick = () => {
-      const no = el("button", "text-act", "Cancel");
-      no.onclick = idle;
-      const yes = el("button", "text-act danger", "Switch");
-      yes.onclick = () => switchToPnpm(name);
-      line.classList.add("asking");
-      line.replaceChildren(
-        el("span", "muted", `Replace ${lock} with pnpm-lock.yaml and install node_modules again? Test the app afterwards.`),
-        no,
-        yes,
-      );
-    };
-    return [b];
-  };
-}
+// The file each manager reads, shown by its name; and the prefix of its Install/Update commands.
+const FILE = { composer: "composer.json", npm: "package.json", cargo: "Cargo.toml", go: "go.mod", nuget: ".csproj" };
+const RUN = { composer: "composer", npm: "js" };
 
 export function drawPackages(name) {
   const body = $("#site .pkg-body");
@@ -246,98 +232,113 @@ export function drawPackages(name) {
   body.append(pinsLine(name, p));
   body.append(el("p", "muted pkg-hint", "The packages that matter most, with their versions. + adds one, × removes it from this list."));
 
-  // The two checks, set apart from the badges; what they last found under them.
+  // The two checks above the managers; what they find goes into each manager's card.
   const up = updatesOf(name);
   const audits = auditsOf(name);
   const audited = p.ecosystems.filter((e) => AUDITED.has(e.id));
-  const bar = el("div", "pkg-checks");
-  bar.append(el("span", "pkg-label", "Check"));
-  const outdated = el("button", "pkg-btn pkg-check-outdated", busy.has(name) ? "Checking outdated…" : "Outdated packages");
+  const bar = el("div", "pkg-checkbar");
+  const outdated = el("button", "pkg-btn pkg-check-outdated", busy.has(name) ? "Checking…" : "Check for updates");
   outdated.disabled = busy.has(name);
   outdated.onclick = () => checkUpdates(name);
   bar.append(outdated);
   if (audited.length) {
     const auditing = audited.some((e) => busy.has(`${name}:${e.id}`));
-    const security = el("button", "pkg-btn pkg-check-security", auditing ? "Checking security…" : "Security advisories");
+    const security = el("button", "pkg-btn pkg-check-security", auditing ? "Checking…" : "Check security");
     security.disabled = auditing;
     security.onclick = () => audited.forEach((e) => checkAudit(name, e.id));
     bar.append(security);
   }
   body.append(bar);
-  for (const eco of ["composer", "js"]) {
-    const cmds = p.commands.filter(([id]) => id.startsWith(`pkg-${eco}-`));
-    if (cmds.length) body.append(...runLine(name, eco, cmds, eco === "js" ? switchOffer(name, p) : undefined));
+  // The update check asks every registry at once, so its failure is the app's, not a card's.
+  if (up?.error) body.append(el("p", "pkg-error", up.error));
+  for (const e of p.ecosystems) body.append(card(name, p, e, up, AUDITED.has(e.id) ? audits[e.id] : null));
+}
+
+/** A package manager: its name and file, Install and Update…, what the checks found and,
+ * for an npm or yarn app, Switch to pnpm…. */
+function card(name, p, e, up, audit) {
+  const box = el("section", "group pkg-card");
+  box.dataset.eco = e.id;
+  const head = el("div", "pkg-head");
+  const title = el("h3", "pkg-name", managerLabel(e));
+  if (e.manager) title.title = e.manager;
+  head.append(title);
+  if (FILE[e.id]) head.append(el("span", "muted pkg-file", FILE[e.id]));
+  box.append(head);
+  const run = RUN[e.id];
+  const cmds = run ? p.commands.filter(([id]) => id.startsWith(`pkg-${run}-`)) : [];
+  if (cmds.length) {
+    const [acts, msg] = runActs(name, run, cmds);
+    head.append(acts);
+    if (msg) box.append(msg);
   }
+
+  // "3 updates · 1 security advisory · checked 2 min ago"; nothing before a check.
+  const updates = (up?.list ?? []).filter((x) => x.ecosystem === e.id);
+  const advisories = audit?.list ?? [];
+  const found: [any, number][] = [];
+  if (up?.at) {
+    const u = updates.length;
+    found.push([u ? el("span", "pkg-found", `${u} ${u === 1 ? "update" : "updates"}`) : "No updates", up.at]);
+  }
+  if (audit?.at) {
+    const n = advisories.length;
+    found.push([n ? el("span", "pkg-found bad", `${n} security ${n === 1 ? "advisory" : "advisories"}`) : "no known advisories", audit.at]);
+  }
+  if (found.length) {
+    const line = el("p", "muted pkg-summary");
+    const when = found.map(([, at]) => ago(new Date(at)));
+    const apart = new Set(when).size > 1;
+    found.forEach(([what], i) => {
+      if (i) line.append(" · ");
+      line.append(typeof what === "string" && !i ? what[0].toUpperCase() + what.slice(1) : what);
+      if (apart) line.append(`, checked ${when[i]}`);
+    });
+    if (!apart) line.append(` · checked ${when[0]}`);
+    box.append(line);
+  }
+  if (audit?.error) box.append(el("p", "pkg-error", audit.error));
+  if (advisories.length) {
+    const dl = el("dl", "pkg-adv-list");
+    for (const v of advisories) dl.append(auditRow(v));
+    box.append(dl);
+  }
+  if (updates.length) {
+    const newer = new Map(updates.map((x) => [x.name, x]));
+    const dl = el("dl", "pkg-list updates");
+    for (const x of e.packages.filter((x) => newer.has(x.name)).sort((a, b) => a.name.localeCompare(b.name)))
+      dl.append(pkgRow(e.id, x, newer.get(x.name)));
+    box.append(dl);
+  }
+  if (e.id === "npm") {
+    const foot = switchFoot(name, e);
+    if (foot) box.append(foot);
+  }
+  return box;
+}
+
+/** An npm or yarn app can move to pnpm, only when asked and confirmed in the card. */
+function switchFoot(name, e) {
+  const lock = e.lock === "package-lock.json" || e.lock === "yarn.lock" ? e.lock : null;
+  const going = busy.has(`${name}:pnpm`);
   const sw = switched.get(name);
-  if (sw) body.append(el("p", sw.ok ? "muted pkg-checked" : "pkg-error", sw.text));
-
-  const errors = [up?.error, ...audited.map((e) => audits[e.id]?.error)].filter(Boolean);
-  if (errors.length) {
-    const box = el("div", "pkg-errors");
-    for (const m of errors) box.append(el("p", "pkg-error", m));
-    body.append(box);
-  }
-
-  const updates = up?.list ?? [];
-  const advisories = audited.flatMap((e) => (audits[e.id]?.list ?? []).map((v) => ({ ...v, eco: e.id })));
-  const auditAt = Math.max(0, ...audited.map((e) => audits[e.id]?.at ?? 0));
-  const checked: string[] = [];
-  if (up?.at) checked.push(`${updates.length ? "Updates" : "No updates,"} checked ${ago(new Date(up.at))}`);
-  if (auditAt) checked.push(`${advisories.length ? "security" : "no known advisories,"} checked ${ago(new Date(auditAt))}`);
-  if (checked.length) {
-    const line = checked.join(" · ");
-    body.append(el("p", "muted pkg-checked", line[0].toUpperCase() + line.slice(1)));
-  }
-
-  const n = advisories.length;
-  if (n) body.append(el("p", "pkg-notice bad", `${n} security ${n === 1 ? "advisory" : "advisories"}`));
-  const u = updates.length;
-  if (u) body.append(el("p", "pkg-notice warn", `${u} ${u === 1 ? "update" : "updates"} available`));
-
-  // A tab per manager with something found, counting the packages concerned.
-  const found = (e) => ({
-    updates: updates.filter((x) => x.ecosystem === e.id),
-    advisories: advisories.filter((v) => v.eco === e.id),
-  });
-  const affected = (e) => {
-    const f = found(e);
-    return new Set([...f.updates.map((x) => x.name), ...f.advisories.map((v) => v.package)]).size;
+  if (!lock && !going && !sw) return null;
+  const foot = el("div", "pkg-foot");
+  const line = el("div", "pkg-acts");
+  const idle = () => {
+    line.classList.remove("asking");
+    const b = el("button", "text-act pkg-switch", "Switch to pnpm…");
+    b.onclick = () =>
+      ask(line, `Replace ${lock} with pnpm-lock.yaml and install node_modules again? Test the app afterwards.`, "Switch", idle, () =>
+        switchToPnpm(name),
+      );
+    line.replaceChildren(b);
   };
-  const ecos = p.ecosystems.filter((e) => affected(e));
-  if (!ecos.length) return;
-  const eco = ecos.find((e) => e.id === pkgEco.get(name)) ?? ecos[0];
-  const tabs = seg(
-    "Package manager",
-    ecos.map((e) => [e.id, managerLabel(e)]),
-    eco.id,
-    (id) => {
-      pkgEco.set(name, id);
-      drawPackages(name);
-    },
-  );
-  tabs.classList.add("pkg-ecos");
-  for (const b of tabs.children) {
-    const e = ecos.find((x) => x.id === b.dataset.id);
-    b.title = e.manager ?? "";
-    b.append(el("span", found(e).advisories.length ? "pkg-count bad" : "pkg-count", affected(e)));
-  }
-  body.append(tabs);
-
-  const results = el("div", "pkg-results");
-  const f = found(eco);
-  if (f.advisories.length) {
-    const dl = el("dl", "group pkg-adv-list");
-    for (const v of f.advisories) dl.append(auditRow(v));
-    results.append(dl);
-  }
-  if (f.updates.length) {
-    const newer = new Map(f.updates.map((x) => [x.name, x]));
-    const dl = el("dl", "group pkg-list updates");
-    for (const x of eco.packages.filter((x) => newer.has(x.name)).sort((a, b) => a.name.localeCompare(b.name)))
-      dl.append(pkgRow(eco.id, x, newer.get(x.name)));
-    results.append(dl);
-  }
-  body.append(results);
+  if (going) line.replaceChildren(el("span", "spin-dot"), el("span", "muted", "Switching to pnpm…"));
+  else if (lock) idle();
+  if (line.childNodes.length) foot.append(line);
+  if (sw && !going) foot.append(el("p", sw.ok ? "muted pkg-ran" : "pkg-error pkg-ran", sw.text));
+  return foot;
 }
 
 /** The key packages as badges: × unpins one, + pins another, Reset brings back the detected ones. */
