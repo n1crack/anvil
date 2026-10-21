@@ -597,6 +597,20 @@ describe("general", () => {
     await wait();
     expect(w.mockCalls.filter(([c]) => c === "remove_path").at(-1)[1]).toEqual({ path: "/Users/x/Sites" });
   });
+
+  test("domain, ports and the config folder wait under a closed Advanced, and still work", async () => {
+    await open("general");
+    const advanced = $("#general details.advanced") as HTMLDetailsElement;
+    expect(advanced.open).toBe(false);
+    for (const id of ["#tld", "#ports", "#open-config"]) expect(advanced.querySelector(id)).not.toBeNull();
+    expect($("#ports").textContent).toBe("HTTP 80, DNS 53");
+    expect($("#address").closest("details")).toBeNull();
+    const tld = $("#tld") as HTMLSelectElement;
+    tld.value = "localhost";
+    tld.dispatchEvent(new Event("change"));
+    await wait();
+    expect(w.mockCalls.filter(([c]) => c === "set_tld").at(-1)[1]).toEqual({ tld: "localhost" });
+  });
 });
 
 describe("about", () => {

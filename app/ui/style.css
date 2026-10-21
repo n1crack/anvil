@@ -1743,9 +1743,40 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 }
 
 .page .hint {
+  max-width: 600px;
   margin: 0 0 8px;
   color: var(--muted);
 }
+
+/* The page's one sentence under its title, with room before what follows. */
+.page h1 + .hint { margin-bottom: 16px; }
+
+/* Rarely needed settings, folded at the bottom of their page. */
+.page details.advanced { max-width: 600px; margin-top: 28px; }
+.page details.advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  list-style: none;
+}
+.page details.advanced > summary::-webkit-details-marker { display: none; }
+.page details.advanced > summary::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  margin: 0 4px 2px 1px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.page details.advanced[open] > summary::before { transform: rotate(45deg); }
+.page details.advanced > summary:hover { color: var(--text); }
+.page details.advanced > h2:first-of-type { margin-top: 16px; }
 
 /* Storage: Anvil's files or the applications', then groups with their size. */
 #storage > .group { margin-bottom: 12px; }

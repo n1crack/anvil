@@ -1,4 +1,4 @@
-import { say } from "./platform";
+import "./platform"; // the platform classes and wording, before anything reads them
 import type { Settings } from "./types";
 import { ownError } from "./live";
 import { bubbleKeys, confirmInRow, textAct } from "./confirm";
@@ -45,12 +45,12 @@ const LANGS = [
   [
     "node",
     "Node.js",
-    "Apps use the version in .nvmrc or .node-version when it is installed, otherwise the newest. An app can pin one in its settings.",
+    "Applications use the version their .nvmrc or .node-version asks for, otherwise the newest. An application can pin one in its settings.",
   ],
-  ["go", "Go", "Apps use the newest installed version unless an app pins one in its settings."],
-  ["rust", "Rust", "One toolchain, managed by rustup inside Anvil’s folder, serves every app."],
-  ["dotnet", ".NET", "The SDKs sit side by side; dotnet picks one per project (global.json), otherwise the newest."],
-  ["python", "Python", "uv picks one of these per project (.python-version, requires-python) unless an app pins one in its settings."],
+  ["go", "Go", "Applications use the newest installed version unless one pins another in its settings."],
+  ["rust", "Rust", "One toolchain serves every application."],
+  ["dotnet", ".NET", "Each project uses the SDK its global.json names, otherwise the newest."],
+  ["python", "Python", "Each project uses the version its .python-version asks for, unless an application pins one in its settings."],
 ];
 
 // One page per language, the same shape as PHP's.
@@ -61,15 +61,15 @@ for (const [id, name, note] of LANGS) {
   page.hidden = true;
   page.innerHTML = `<h1></h1><p class="hint"></p><h2>Versions</h2><div class="group versions"><div class="row"><span class="muted">Loading versions…</span></div></div><p class="hint note"></p>`;
   $("h1", page).textContent = name;
-  $(".hint", page).textContent =
-    `Installed into Anvil’s folder and used only for the apps Anvil runs; ${name} on your system stays untouched.`;
+  $(".hint", page).textContent = `Used only by your applications in Anvil. A ${name} you installed yourself is left alone.`;
   $(".note", page).textContent = note;
   if (id === "node") {
+    // Rarely needed: npm comes with Node.js, and the others arrive when an app needs them.
     page.insertAdjacentHTML(
       "beforeend",
-      `<h2>Package managers</h2><div id="pms" class="group pms"><div class="row"><span class="muted">Looking…</span></div></div>` +
-        `<p class="hint note">An app missing node_modules gets them from the manager its lockfile names (npm without one). ` +
-        `Apps find yarn and bun installed here first, and your own pnpm before Anvil’s, which is downloaded when an app needs it; your terminal is left alone.</p>`,
+      `<details class="advanced"><summary>Advanced</summary><h2>Package managers</h2>` +
+        `<p class="hint">Applications install packages with the one their lockfile names, npm without one. Your terminal is left alone.</p>` +
+        `<div id="pms" class="group pms"><div class="row"><span class="muted">Looking…</span></div></div></details>`,
     );
   }
   $("#storage").before(page);
@@ -351,7 +351,7 @@ async function loadAnvilStorage() {
   } catch (e) {
     return showError(String(e));
   }
-  $("#anvil-total").textContent = `PHP, languages, services, their data, caches and logs. Caches and logs can be deleted safely.`;
+  $("#anvil-total").textContent = `What Anvil installed, and your services’ data. Caches and logs are safe to delete.`;
   $("#anvil-size").textContent = bytes(st.total);
   const box = $("#anvil-items");
   box.replaceChildren();
@@ -758,12 +758,9 @@ export function render() {
   tld.replaceChildren(new Option(".test", "test"), new Option(".localhost (no password needed)", "localhost"));
   if (!["test", "localhost"].includes(s.tld)) tld.add(new Option(`.${s.tld}`, s.tld));
   tld.value = s.tld;
-  $("#tld-note").textContent =
-    s.tld === "localhost"
-      ? say("Reaches this Mac by itself, no setup.")
-      : "Reaches Anvil through a resolver file, set up once with your password.";
+  $("#tld-note").textContent = s.tld === "localhost" ? "Works without any setup." : "Needs your password once, to set it up.";
   tld.onchange = () => call("set_tld", { tld: tld.value });
-  $("#ports").textContent = `HTTP on ${s.http_port}${s.tld === "localhost" ? "" : `, DNS on ${s.dns_port}`}. Change them in config.toml.`;
+  $("#ports").textContent = `HTTP ${s.http_port}${s.tld === "localhost" ? "" : `, DNS ${s.dns_port}`}`;
   $("#config-dir").textContent = tilde(s.config_dir);
 
   // PHP versions
@@ -1399,6 +1396,7 @@ function confirmOpen(anchor: HTMLElement, url: string) {
   yes.focus();
 }
 
+$("#credits-programs-count").textContent = String(SOFTWARE.length);
 $("#credits-software").replaceChildren(
   ...SOFTWARE.map(([name, use, license, url, how]) => {
     const link = node("a", "", name) as HTMLAnchorElement;

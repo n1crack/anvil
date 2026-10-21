@@ -39,14 +39,15 @@
 
     <section id="general" class="page">
       <h1>General</h1>
+      <p class="hint">Where your projects are, which tools open them, and how Anvil starts.</p>
 
       <h2>Application folders</h2>
-      <p class="hint">Every project inside these folders becomes an application.</p>
+      <p class="hint">Each project in these folders shows up in Anvil as an application.</p>
       <div id="paths" class="group"></div>
       <div class="below"><button id="add-path">Add Folder…</button></div>
       <div id="hidden-box" hidden>
         <h2>Hidden applications</h2>
-        <p class="hint">Hidden from Anvil and not served; their settings are kept.</p>
+        <p class="hint">Not shown or served. Show brings one back with its settings.</p>
         <div id="hidden-apps" class="group"></div>
       </div>
 
@@ -57,11 +58,11 @@
           <input id="login" type="checkbox" role="switch">
         </label>
         <label class="row mac-only">
-          <span>Always show Dock icon<small>When off, Anvil only shows in the Dock while a window is open.</small></span>
+          <span>Always show Dock icon<small>Off: only while one of Anvil’s windows is open.</small></span>
           <input id="dock" type="checkbox" role="switch">
         </label>
         <label class="row">
-          <span>Notifications<small>While Anvil isn’t in front: when something stops unexpectedly or a new application’s setup ends.</small></span>
+          <span>Notifications<small>When something crashes or a new application is ready, while Anvil is in the background.</small></span>
           <input id="notifications" type="checkbox" role="switch">
         </label>
         <label class="row">
@@ -92,41 +93,48 @@
 
       <h2>Addresses</h2>
       <div class="group">
+        <div class="row"><span>Applications open at</span><span id="address" class="value"></span></div>
         <label class="row">
-          <span>Domain<small id="tld-note"></small></span>
-          <select id="tld"></select>
-        </label>
-        <div class="row"><span>Applications answer at<small id="ports"></small></span><span id="address" class="value"></span></div>
-        <label class="row">
-          <span>HTTPS for new applications<small>Each application can still turn it on or off: right-click › Use HTTPS, or its Settings tab.</small></span>
+          <span>HTTPS for new applications<small>Each application can change it in its Settings tab.</small></span>
           <input id="https-default" type="checkbox" role="switch">
         </label>
-        <div class="row">
-          <span>Configuration files<small id="config-dir"></small></span>
-          <button id="open-config">Show in Finder</button>
-        </div>
       </div>
+
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="group">
+          <label class="row">
+            <span>Domain<small id="tld-note"></small></span>
+            <select id="tld"></select>
+          </label>
+          <div class="row"><span>Ports<small>Change them in config.toml.</small></span><span id="ports" class="value"></span></div>
+          <div class="row">
+            <span>Configuration files<small id="config-dir"></small></span>
+            <button id="open-config">Show in Finder</button>
+          </div>
+        </div>
+      </details>
     </section>
 
     <section id="php" class="page" hidden>
       <h1>PHP</h1>
 
-      <p class="hint">Installed into Anvil’s folder and used only for the apps Anvil runs; PHP on your system stays untouched.</p>
+      <p class="hint">Used only by your applications in Anvil. A PHP you installed yourself is left alone.</p>
 
       <h2 class="versions-head">Versions
-        <label title="Once a day, a newer patch release installs in the background, php.ini and extensions kept, and PHP restarts once. Off, a version with one offers Update.">Update automatically <input id="php-auto-update" type="checkbox" role="switch"></label>
+        <label title="Installs bug-fix releases in the background, settings and extensions kept. Off: each version shows Update.">Update automatically <input id="php-auto-update" type="checkbox" role="switch"></label>
       </h2>
       <div id="versions" class="group versions"></div>
 
       <h2>Composer global packages</h2>
       <div id="composer-globals" class="group versions"><div class="row"><span class="muted">Looking…</span></div></div>
-      <p class="hint note">In Anvil’s own Composer home; their commands, such as laravel and forge, work in your terminal.</p>
+      <p class="hint note">Command-line tools such as laravel and forge; they work in your terminal.</p>
 
-      <h2>Defaults for all applications</h2>
-      <p class="hint">Empty fields use Anvil’s standard values, shown in grey. Each application can override these.</p>
+      <h2>Limits for all applications</h2>
+      <p class="hint">Empty uses the grey value. Each application can set its own.</p>
       <div class="group" id="ini">
         <label class="row">
-          <span>Memory limit</span>
+          <span>Memory limit<small>Most memory one request can use.</small></span>
           <input data-ini="memory_limit" placeholder="512M" spellcheck="false">
         </label>
         <label class="row">
@@ -141,25 +149,22 @@
     </section>
     <section id="worktrees" class="page" hidden>
       <h1>Worktrees</h1>
-      <p class="hint">What a new worktree of an app gets, by the app’s type. An app changes any of it in its Settings tab; a project can share its own in .anvil.toml’s [worktree], and .worktreeinclude lists the files to copy.</p>
+      <p class="hint">A worktree is a second copy of an application on another branch. Choose what each new one gets.</p>
       <div class="group">
         <label class="row">
-          <span>Copy the database too<small>New Worktree’s checkbox where no preset or app sets it, and what a worktree opened outside Anvil gets. Off: an empty database of its own.</small></span>
+          <span>Copy the database too<small>Off: each new worktree starts with an empty database.</small></span>
           <input id="worktree-db" type="checkbox" role="switch">
         </label>
       </div>
       <h2>Presets</h2>
+      <p class="hint">By type of application: files to copy, .env values to set, commands to run.</p>
       <div id="presets" class="group"></div>
+      <p class="hint note">An application can change these in its Settings tab. A project can share its own in .anvil.toml’s [worktree] and .worktreeinclude.</p>
     </section>
 
     <section id="storage" class="page" hidden>
       <h1>Storage</h1>
-      <div class="group">
-        <label class="row">
-          <span>Trim app logs weekly<small>Logs in an app’s storage/logs over 10 MB keep their last 1 MB; daily logs older than 14 days are deleted. Anvil’s own logs always stay under 5 MB.</small></span>
-          <input id="trim-logs" type="checkbox" role="switch">
-        </label>
-      </div>
+      <p class="hint">What takes up disk space, and what is safe to delete.</p>
       <div class="storage-tabs" role="tablist" aria-label="Storage">
         <button role="tab" data-storage="anvil">Anvil <span id="anvil-size"></span></button>
         <button role="tab" data-storage="apps">Applications <span id="apps-size"></span></button>
@@ -180,39 +185,47 @@
         <p class="hint" id="apps-hint"></p>
         <div id="app-sizes" class="group"></div>
       </div>
+
+      <h2>Automatic cleanup</h2>
+      <div class="group">
+        <label class="row">
+          <span>Trim app logs weekly<small>Logs over 10 MB keep their last 1 MB; daily logs older than 14 days go.</small></span>
+          <input id="trim-logs" type="checkbox" role="switch">
+        </label>
+      </div>
     </section>
     <section id="performance" class="page" hidden>
       <h1>Performance</h1>
 
-      <p class="hint">Microsoft Defender and other antivirus programs scan every file a program opens. Installing packages and starting a dev server read thousands of them, so the first start after a restart or an install can take a minute; later ones are quick.</p>
+      <p class="hint">Antivirus scanning can make the first start after a restart or an install take a minute. Folders on a Dev Drive are scanned without the wait.</p>
 
       <h2>Folders <span id="perf-devdrive" class="muted"></span></h2>
-      <p class="hint">On a Dev Drive, Defender scans without holding programs up. Anvil leaves these settings as they are, so you can choose what suits you.</p>
+      <p class="hint">Anvil doesn’t move these folders; that is your choice.</p>
       <div class="group" id="perf-folders"></div>
       <div class="below"><button class="link" id="perf-guide">Set up a Dev Drive…</button></div>
     </section>
     <section id="plugins" class="page" hidden>
       <h1>Features</h1>
-      <p class="hint">Turn on only what you use. One with settings of its own gets its page under Features when it is on.</p>
+      <p class="hint">Extras, all off until you turn them on. One that is on gets its own page in the sidebar.</p>
       <div class="group">
         <label class="row">
-          <span>Agents (MCP)<small>AI agents such as Claude Code see your apps, start and stop their processes and services, read logs and caught mail, add worktrees and change app settings. Nothing that can’t be undone is offered.</small></span>
+          <span>Agents (MCP)<small>AI agents such as Claude Code can see and run your applications. Nothing they can do is irreversible.</small></span>
           <input id="mcp" type="checkbox" role="switch">
         </label>
         <label class="row">
-          <span>Tunnel<small>Share an app at a temporary public address through a Cloudflare quick tunnel, no account needed. Each app’s Overview gets Share; nothing is shared until you click it.</small></span>
+          <span>Tunnel<small>Share an application at a temporary public address. Nothing is shared until you click Share.</small></span>
           <input id="tunnel" type="checkbox" role="switch">
         </label>
         <label class="row">
-          <span>Mail catcher<small>Each app’s mail lands in an inbox of its own, in its Mail tab: Anvil gives the app’s processes and PHP MAIL_* settings that win over its .env, and keeps the mail. Nothing is sent on.</small></span>
+          <span>Mail catcher<small>Mail your applications send lands in their Mail tab instead of real inboxes.</small></span>
           <input id="mail-catcher" type="checkbox" role="switch">
         </label>
         <label class="row">
-          <span>Database viewer<small>Adminer at db.<span class="db-tld">test</span>, logged in to your MySQL and PostgreSQL services and your apps’ SQLite files with no password. Services and apps get Browse. Downloads Adminer (about 420 KB) when turned on.</small></span>
+          <span>Database viewer<small>Browse your databases at db.<span class="db-tld">test</span> with no password. Downloads 420 KB once.</small></span>
           <input id="db-viewer" type="checkbox" role="switch">
         </label>
         <label class="row">
-          <span>Request log<small>Each app’s requests, kept for its Requests tab: the web server writes one small log per app, at most about 4 MB. Off, nothing is written and the tab goes away.</small></span>
+          <span>Request log<small>Each application’s requests in its Requests tab. At most about 4 MB per application.</small></span>
           <input id="request-log" type="checkbox" role="switch">
         </label>
       </div>
@@ -220,14 +233,14 @@
 
     <section id="plugin-mcp" class="page" hidden>
       <h1>Agents (MCP)</h1>
-      <p class="hint">AI agents such as Claude Code see your apps, start and stop their processes and services, read logs and caught mail, add worktrees and change app settings.</p>
+      <p class="hint">AI agents can see your applications, start and stop them, read their logs and mail, and add worktrees. Connect one once:</p>
       <div class="group" id="mcp-line">
         <div class="row">
-          <span>Claude Code, once in a terminal<code>claude mcp add anvil -- anvil mcp</code></span>
+          <span>Claude Code: run in a terminal<code>claude mcp add anvil -- anvil mcp</code></span>
           <button class="mcp-copy">Copy</button>
         </div>
         <div class="row">
-          <span>Other agents, in their MCP settings<code>anvil mcp</code></span>
+          <span>Other agents: add to their MCP settings<code>anvil mcp</code></span>
           <button class="mcp-copy">Copy</button>
         </div>
       </div>
@@ -235,29 +248,29 @@
 
     <section id="plugin-tunnel" class="page" hidden>
       <h1>Tunnel</h1>
-      <p class="hint">Share an app at a temporary public address through a Cloudflare quick tunnel, no account needed.</p>
-      <div class="group"><div class="row"><span>Sharing<small>Each app’s Overview has Share; nothing is shared until you click it, and it stops when you stop it or quit Anvil.</small></span></div></div>
+      <p class="hint">Share an application at a temporary public address, through Cloudflare. No account needed.</p>
+      <div class="group"><div class="row"><span>How to share<small>Click Share in an application’s Overview. It stops when you stop it or quit Anvil.</small></span></div></div>
     </section>
 
     <section id="plugin-mail" class="page" hidden>
       <h1>Mail catcher</h1>
-      <p class="hint">Each app’s mail lands in an inbox of its own, in its Mail tab. Nothing is sent on.</p>
+      <p class="hint">Mail your applications send lands in their Mail tab. Nothing reaches a real inbox.</p>
       <div class="group">
         <div class="row" id="mail-line">
-          <span>Listens on<small>Change mail_port in config.toml</small></span>
+          <span>Mail server<small>Applications get it on their own. Change mail_port in config.toml.</small></span>
           <span class="actions-inline"><code></code></span>
         </div>
       </div>
       <p class="error" id="mail-error" hidden></p>
       <div id="mail-other" hidden>
         <h2>Mail from no app</h2>
-        <p class="hint">Sent with an SMTP username that is no app’s, or none.</p>
+        <p class="hint">Mail Anvil couldn’t match to an application.</p>
       </div>
     </section>
 
     <section id="plugin-db" class="page" hidden>
       <h1>Database viewer</h1>
-      <p class="hint">Adminer, logged in to your MySQL and PostgreSQL services and your apps’ SQLite files with no password. Services and apps get Browse.</p>
+      <p class="hint">Adminer, signed in to your MySQL, PostgreSQL and SQLite databases with no password. Services and applications get Browse.</p>
       <div class="group">
         <div class="row" id="db-viewer-line">
           <span>Opens at</span>
@@ -269,6 +282,7 @@
 
     <section id="shortcuts" class="page" hidden>
       <h1>Shortcuts</h1>
+      <p class="hint">Keys that work in Anvil’s windows.</p>
       <h2>Applications window</h2>
       <div class="group keys">
         <div class="row"><span>New application, or new service in Services</span><kbd>⌘N</kbd></div>
@@ -308,12 +322,13 @@
 
       <div class="credits">
         <h2>Credits</h2>
-        <p class="hint">Software Anvil downloads when you first use it, or ships inside the app, each under its own license.</p>
-        <div id="credits-software" class="group"></div>
-        <h2>Libraries in Anvil</h2>
-        <p class="hint">Compiled into the app and the anvil command, listed when Anvil was built.</p>
+        <p class="hint">Open-source software in Anvil, each under its own license.</p>
+        <details id="credits-programs" class="group">
+          <summary class="row"><span>Programs Anvil downloads or ships</span><span id="credits-programs-count" class="muted"></span></summary>
+          <div id="credits-software"></div>
+        </details>
         <details id="credits-libs" class="group">
-          <summary class="row"><span>Rust crates and npm packages</span><span id="credits-count" class="muted"></span></summary>
+          <summary class="row"><span>Libraries built into Anvil</span><span id="credits-count" class="muted"></span></summary>
           <div id="credits-list"></div>
         </details>
         <details id="credits-notices" class="group">

@@ -25,6 +25,10 @@ contain breaking changes.
 
 - WordPress can be created on Linux.
 
+### Changed
+
+- Settings: plainer words, shorter hints, and rarely used options under Advanced.
+
 ## [0.3.0] - 2026-10-21
 
 Anvil for Linux, in beta; WordPress, more PHP extensions, and a round of polish and speed across the app and the CLI. Still a beta.
