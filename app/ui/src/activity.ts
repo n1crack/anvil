@@ -17,7 +17,7 @@ let logFrom = 0;
 let logToken = 0;
 export let tailing: number | null = null; // token of the log request on its way
 export let replace = true; // the next page replaces the log (new row, error shown, file rotated)
-export const busy = new Set<string>(); // keys with an action on its way
+export const busy = new Map<string, string>(); // key -> the action on its way (restart, stop)
 // Folded application groups, kept across windows like the main list's folds.
 export const folded = new Set(JSON.parse(localStorage.getItem("act-folded") ?? "[]"));
 // Which tab is shown: apps, services, anvil (Anvil's own: Caddy, PHP-FPM, DNS…) or agents
@@ -129,8 +129,8 @@ export function run(key, action) {
   return invoke("app_run", { site: key, action });
 }
 
-export async function act(key, action?) {
-  busy.add(key);
+export async function act(key, action) {
+  busy.set(key, action);
   render();
   try {
     await run(key, action);
@@ -171,8 +171,12 @@ const cpuText = (r) => (r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`);
 const memText = (r) => (r.memory == null ? "" : mb(r.memory));
 
 export function row(r, inner?: boolean) {
+  // While its Restart or Stop runs, the row says so, amber like a start.
+  const doing = busy.get(r.key);
+  const word = doing === "restart" ? "Restarting…" : doing === "stop" && r.state !== "crashed" ? "Stopping…" : null;
+  const state = word ? "starting" : r.state;
   const tr = document.createElement("tr");
-  tr.className = `act-row ${r.state}${inner ? " inner" : ""}`;
+  tr.className = `act-row ${state}${inner ? " inner" : ""}`;
   tr.setAttribute("aria-selected", String(r.key === selected));
   tr.dataset.key = r.key;
   tr.tabIndex = -1;
@@ -194,9 +198,9 @@ export function row(r, inner?: boolean) {
   // A dot and a short word; a crash keeps its exit detail, muted and as the cell's tooltip.
   const st = td(null, "act-status");
   const dot = document.createElement("span");
-  dot.className = `dot ${{ running: "on", starting: "amber", crashed: "bad" }[r.state] ?? ""}`;
-  st.append(dot, status[r.state] ?? r.state);
-  if (r.state === "crashed" && r.detail) {
+  dot.className = `dot ${{ running: "on", starting: "amber", crashed: "bad" }[state] ?? ""}`;
+  st.append(dot, word ?? status[r.state] ?? r.state);
+  if (!word && r.state === "crashed" && r.detail) {
     st.title = r.detail;
     const d = document.createElement("span");
     d.className = "act-detail";

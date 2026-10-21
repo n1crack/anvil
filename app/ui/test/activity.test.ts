@@ -49,6 +49,7 @@ beforeAll(async () => {
         if (cmd === "activity") return structuredClone(activity);
         if (cmd === "agent_activity") return structuredClone(w.agents ?? []);
         if (cmd === "activity_log_clear") return void (w.logCleared = true);
+        if (cmd === "process_run") return w.hold;
         return w.logCleared ? { text: "", end_offset: 0 } : { text: LOG, end_offset: LOG.length };
       },
     },
@@ -73,6 +74,27 @@ describe("processes window", () => {
     tr().click();
     await wait();
     expect(tr().getAttribute("aria-selected")).toBe("true");
+  });
+
+  test("while Restart or Stop runs, the row says Restarting… or Stopping…", async () => {
+    const st = () => $('tr[data-key="shop@queue"] .act-status').textContent;
+    for (const [item, word] of [
+      ["Restart", "Restarting…"],
+      ["Stop", "Stopping…"],
+    ]) {
+      let done = () => {};
+      w.hold = new Promise<void>((r) => (done = r));
+      $('tr[data-key="shop@queue"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await wait();
+      w.mockMenu.find((i) => i.text === item).action();
+      await wait();
+      expect(st()).toBe(word);
+      expect($('tr[data-key="shop@queue"] .dot').classList.contains("amber")).toBe(true);
+      done();
+      await wait(80);
+      expect(st()).toBe("Running");
+    }
+    w.hold = undefined;
   });
 
   test("a folded group says what it hides on its header line", async () => {
