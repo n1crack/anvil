@@ -355,12 +355,15 @@ export function markBox(m, badge) {
   return box;
 }
 
-function setBadge(box, badge) {
+function setBadge(box, badge, title?: string) {
   $(".run-badge", box)?.remove();
   box.classList.toggle("running", !!badge);
   if (!badge) return;
   const b = el("span", `run-badge ${badge}`);
-  b.title = { on: "Running", warm: "Starting", bad: "Failed to start" }[badge];
+  b.title = title ?? { on: "Running", warm: "Starting", bad: "Failed to start" }[badge];
+  // Said in the row's name too, so the state isn't only a colour.
+  b.setAttribute("role", "img");
+  b.setAttribute("aria-label", b.title);
   box.append(b);
 }
 
@@ -370,14 +373,15 @@ const STATE_TITLES = { running: "Running", starting: "Starting", crashed: "A pro
 /** An app row's dot: green while anything of the app runs, amber while its server starts,
  * red after a crash. */
 function appBadge(box, state) {
-  setBadge(box, state && BADGES[state]);
-  if (state === "crashed") $(".run-badge", box).title = STATE_TITLES.crashed;
+  setBadge(box, state && BADGES[state], state === "crashed" ? STATE_TITLES.crashed : undefined);
 }
 
 /** A worktree row's branch glyph, coloured as an app's dot. */
 function wtState(m, state) {
   m.className = `wt-glyph ${BADGES[state] ?? ""}`;
   m.title = STATE_TITLES[state] ?? "Stopped";
+  m.setAttribute("role", "img");
+  m.setAttribute("aria-label", m.title);
 }
 
 /** The names linked to one folder: the app is the parked one, else the first by name, as
@@ -1776,7 +1780,10 @@ const fieldNotes = new Map<string, [string, boolean]>(); // what was said, wheth
 function fieldNote(field: HTMLElement, at: string) {
   field.parentElement?.querySelector(".field-note")?.remove();
   const said = fieldNotes.get(at);
-  if (said) field.after(el("small", `field-note ${said[1] ? "error-text" : "muted"}`, said[0]));
+  if (!said) return;
+  const note = el("small", `field-note ${said[1] ? "error-text" : "muted"}`, said[0]);
+  note.setAttribute("role", "status");
+  field.after(note);
 }
 
 async function setIni(s, field: HTMLElement, name: string, values: (string | null)[][]) {
@@ -1887,12 +1894,14 @@ function phpState(s, php) {
   if (doing) {
     php.value = doing[0];
     const busy = el("span", "php-busy", doing[1]);
+    busy.setAttribute("role", "status");
     busy.prepend(el("span", "spin-dot"));
     php.after(busy);
   }
   const why = phpErrors.get(s.name);
   if (!why) return;
   const error = el("div", "ver-error php-error");
+  error.setAttribute("role", "status");
   error.append(el("span", null, why));
   php.parentElement.append(error);
 }

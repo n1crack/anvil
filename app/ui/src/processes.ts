@@ -246,7 +246,11 @@ function summaryLine(title: string, dots: [string, string][], tab: string, keys:
   const box = el("span", "dev-summary-dots");
   for (const [name, cls] of dots) {
     const d = el("span", `dot ${cls}`);
-    d.title = name;
+    // The state in words too, not only the colour.
+    const state = Object.keys(DOT).find((k) => DOT[k] === cls) ?? "stopped";
+    d.title = `${name}: ${state}`;
+    d.setAttribute("role", "img");
+    d.setAttribute("aria-label", d.title);
     box.append(d);
   }
   b.append(el("span", "dev-summary-title", title), ...(error ? [el("span", "dev-summary-state error-text", error)] : []), box);

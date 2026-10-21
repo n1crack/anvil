@@ -100,6 +100,8 @@ contain breaking changes.
 - Grey text is easier to read in the dark theme, also on a selected row, and the running-services count in the light theme.
 - Esc closes the New Application and Add Service sheets while the cursor is in their empty search field.
 - In a small bubble (Remove, Set up Anvil, an update) Tab stays inside it, and Esc puts the keyboard focus back on the button that opened it; Esc also closes Dev's Keys card.
+- Screen readers hear a running, starting or crashed state where the window shows it as a coloured dot, and the notes that appear beside a field while something restarts or saves.
+- Settings › General: each folder's Remove and each hidden app's Show say which one they act on to a screen reader.
 
 ## [0.2.1] - 2026-10-21
 

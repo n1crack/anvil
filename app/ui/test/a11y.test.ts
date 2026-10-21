@@ -65,3 +65,23 @@ describe("keyboard", () => {
     expect(sheet.open).toBe(false);
   });
 });
+
+describe("state in words", () => {
+  test("the Dev line's dots and the sidebar's badges say their state, not only their colour", async () => {
+    $('#list [data-name="vuefinder"]').click();
+    await wait(80);
+    const dots = $$(".procs .dev-summary .dot");
+    expect(dots.length).toBeGreaterThan(0);
+    for (const d of dots) {
+      expect(d.getAttribute("role")).toBe("img");
+      expect(d.getAttribute("aria-label")).toMatch(/: (running|starting|crashed|stopped)$/);
+    }
+    $('[data-mode="services"]').click();
+    await wait(80);
+    const badges = $$("#list .run-badge");
+    expect(badges.length).toBeGreaterThan(0);
+    for (const b of badges) expect([b.getAttribute("role"), b.getAttribute("aria-label")]).toEqual(["img", "Running"]);
+    $('[data-mode="apps"]').click();
+    await wait(80);
+  });
+});

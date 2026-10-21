@@ -52,6 +52,7 @@ export function updateBar(popAt: (anchor: Element, pop: HTMLElement, focus?: HTM
       const pop = el("div", "pop-confirm wide update-pop", "");
       const note = el("p", "update-note", update ? `Anvil ${update.version} is ready.` : "A newer build of Anvil is on disk.");
       const what = el("p", "muted", "Anvil restarts; the apps running now start again.");
+      what.setAttribute("role", "status"); // restart() says its progress and errors here
       const later = el("button", null, "Later") as HTMLButtonElement;
       const go = el("button", "primary", update ? "Restart to update" : "Restart") as HTMLButtonElement;
       if (update) {

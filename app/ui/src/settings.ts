@@ -650,13 +650,12 @@ export function render() {
       row.className = "row";
       const label = document.createElement("span");
       label.textContent = name;
-      row.append(
-        label,
-        button("Show", async () => {
-          await invoke("unhide_site", { site: name }).catch((e) => showError(String(e)));
-          call("settings");
-        }),
-      );
+      const show = button("Show", async () => {
+        await invoke("unhide_site", { site: name }).catch((e) => showError(String(e)));
+        call("settings");
+      });
+      show.setAttribute("aria-label", `Show ${name}`);
+      row.append(label, show);
       return row;
     }),
   );
@@ -671,6 +670,7 @@ export function render() {
     row.className = "row";
     row.innerHTML = `<span class="path"></span><span class="actions-inline"><button>Remove</button></span>`;
     $(".path", row).textContent = tilde(p);
+    $("button", row).setAttribute("aria-label", `Remove ${tilde(p)}`);
     // Asks in the row: its apps leave Anvil and stop, nothing on disk changes.
     const box = $(".actions-inline", row);
     const remove = $("button", row);
