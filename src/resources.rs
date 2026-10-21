@@ -790,6 +790,76 @@ fn parse_lsof(out: &str) -> BTreeMap<u16, String> {
     map
 }
 
+/// Linux: the listening sockets on `ports` in /proc/net/tcp{,6}, named by the process
+/// holding each socket. Another user's processes can't be looked into, so a port held by
+/// one (a system service) is left out, as lsof leaves it out without root.
+fn proc_listeners(ports: &[u16]) -> BTreeMap<u16, String> {
+    let mut inodes = BTreeMap::new();
+    for f in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        if let Ok(text) = std::fs::read_to_string(f) {
+            for (inode, port) in parse_proc_net_tcp(&text) {
+                if ports.contains(&port) {
+                    inodes.insert(inode, port);
+                }
+            }
+        }
+    }
+    let mut map = BTreeMap::new();
+    if inodes.is_empty() {
+        return map;
+    }
+    for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let pid = e.path();
+        if !e
+            .file_name()
+            .to_string_lossy()
+            .bytes()
+            .all(|b| b.is_ascii_digit())
+        {
+            continue;
+        }
+        for fd in std::fs::read_dir(pid.join("fd"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let Ok(link) = std::fs::read_link(fd.path()) else {
+                continue;
+            };
+            let link = link.to_string_lossy();
+            let Some(inode) = link
+                .strip_prefix("socket:[")
+                .and_then(|l| l.strip_suffix(']'))
+                .and_then(|i| i.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            if let Some(port) = inodes.get(&inode) {
+                let comm = std::fs::read_to_string(pid.join("comm")).unwrap_or_default();
+                map.entry(*port).or_insert_with(|| comm.trim().to_string());
+            }
+        }
+    }
+    map
+}
+
+/// (socket inode, local port) of each listening socket in /proc/net/tcp or tcp6.
+fn parse_proc_net_tcp(text: &str) -> Vec<(u64, u16)> {
+    text.lines()
+        .skip(1)
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            // local_address is HEXIP:HEXPORT; state 0A is LISTEN; inode is the 10th field.
+            if f.get(3) != Some(&"0A") {
+                return None;
+            }
+            let port = u16::from_str_radix(f.get(1)?.rsplit(':').next()?, 16).ok()?;
+            let inode = f.get(9)?.parse().ok()?;
+            Some((inode, port))
+        })
+        .collect()
+}
+
 /// Host port -> container name, from `docker ps --format '{{.Names}}\t{{.Ports}}'`.
 fn parse_docker_ps(out: &str) -> BTreeMap<u16, String> {
     let mut map = BTreeMap::new();
@@ -823,10 +893,14 @@ fn is_docker(process: &str) -> bool {
     .any(|d| p.starts_with(d))
 }
 
-/// Who listens on these ports, with one `lsof` call.
+/// Who listens on these ports, with one `lsof` call; on Linux from /proc, as not every
+/// distribution has lsof (Arch doesn't).
 fn listeners(ports: &[u16]) -> BTreeMap<u16, String> {
     if ports.is_empty() {
         return BTreeMap::new();
+    }
+    if cfg!(target_os = "linux") {
+        return proc_listeners(ports);
     }
     let list: Vec<String> = ports.iter().map(u16::to_string).collect();
     let out = crate::platform::command("lsof")
@@ -2002,6 +2076,11 @@ mod tests {
         let l = parse_lsof(lsof);
         assert_eq!(l.get(&3306).map(String::as_str), Some("mariadbd"));
         assert_eq!(l.get(&3307).map(String::as_str), Some("com.docker.backend"));
+
+        let tcp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
+                   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 52731 1 0\n\
+                   1: 0100007F:0CEA 0100007F:9C40 01 00000000:00000000 00:00000000 00000000  1000        0 52799 1 0\n";
+        assert_eq!(parse_proc_net_tcp(tcp), [(52731, 8080)]);
         assert!(is_docker("com.docke") && is_docker("OrbStack") && !is_docker("mariadbd"));
 
         let ps = "shop-db\t0.0.0.0:3307->3306/tcp, [::]:3307->3306/tcp\n\
