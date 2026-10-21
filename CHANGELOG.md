@@ -85,6 +85,7 @@ contain breaking changes.
 - Processes: a log with nothing in it says No output yet instead of an empty black pane.
 - Menu bar menu: Start, Stop and Restart say Starting…, Stopping… or Restarting… until done; "1 application" is singular; Quit reads Quit Anvil and Stop Everything with ⌥⌘Q, as in the Anvil menu, since ⌘Q only closes the windows.
 - Settings › Shortcuts lists ⌘Q as closing the windows and ⌥⌘Q as quitting, and no longer lists PHP keys the menu doesn't have.
+- Packages: in a narrow window the + list opens inside the window instead of pushing the sidebar out of view.
 
 ## [0.2.1] - 2026-10-21
 

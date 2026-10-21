@@ -1559,6 +1559,10 @@ export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | n
   document.body.append(pop);
   // A button near the left edge gets its bubble to the right instead of past the window.
   if (align === "right" && pop.getBoundingClientRect().left < 8) Object.assign(pop.style, { right: "", left: `${Math.max(8, r.left)}px` });
+  // And one near the right edge (Packages' +) is moved left to fit, not past the window.
+  const w = document.documentElement.clientWidth;
+  if (align === "left" && pop.getBoundingClientRect().right > w - 8)
+    pop.style.left = `${Math.max(8, w - pop.getBoundingClientRect().width - 8)}px`;
   // A button near the bottom gets it above, so its buttons aren't cut off.
   const below = pop.getBoundingClientRect();
   if (below.bottom > window.innerHeight - 8 && r.top - below.height - 6 > 8)
