@@ -758,8 +758,21 @@ describe("dev", () => {
   });
 
   test("a crashed process has a red dot; a folder has no Dev tab", async () => {
+    w.mockOv.shop.rows[1].starting = true;
     await select("shop");
     expect(item("proc:logs").querySelector(".dot.bad")).not.toBeNull();
+    // Starting is amber, as in the sidebar; All too while one starts.
+    expect(item("proc:queue").querySelector(".dot.amber")).not.toBeNull();
+    expect(item("all").querySelector(".dot.amber")).not.toBeNull();
+    w.mockOv.shop.rows[1].starting = false;
+    // A crash says how it ended; its ✕ dismisses, the ■ only stops.
+    item("proc:logs").click();
+    await wait(80);
+    expect($(".dev-head .dev-exit.bad").textContent).toBe("Exited with code 1");
+    const dismiss = $$(".dev-head button").find((b) => b.getAttribute("aria-label") === "Dismiss logs")!;
+    expect(dismiss.querySelector("path")!.getAttribute("d")).toBe("M4.5 4.5l7 7M11.5 4.5l-7 7");
+    item("all").click();
+    await wait(40);
     await select("notes");
     expect(devTab().hidden).toBe(true);
     expect($('.tabs [data-tab="overview"]').getAttribute("aria-selected")).toBe("true");

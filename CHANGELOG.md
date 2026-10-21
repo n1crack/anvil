@@ -30,6 +30,7 @@ contain breaking changes.
 - Remove Link… asks first and says what goes: the app's processes stop and its settings in Anvil are deleted; its folder stays.
 - New Application says a missing PHP or runtime in the form, with an Install button, before anything is made; reopening the sheet keeps the typed name.
 - A new app's Open is Open in Browser and opens it there, and selects it in the sidebar as before; with the web server stopped it is Show.
+- Dev: a server whose port doesn't answer yet has an amber dot, a crashed process says its exit code, and dismissing a crash is ✕, not ■.
 
 ### Added
 

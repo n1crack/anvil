@@ -196,6 +196,8 @@ export interface ProcessRow extends Process {
   main: boolean;
   web: string | null;
   running: boolean;
+  /** Running, its port not answering yet. */
+  starting: boolean;
   last: string | null;
   error: string | null;
   address: string | null;

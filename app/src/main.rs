@@ -657,6 +657,8 @@ struct ProcessRow {
     /// Where the Browser button opens it; `None` when it serves no page (a PHP app's Vite).
     web: Option<String>,
     running: bool,
+    /// Running, its port not answering yet: amber, as in the sidebar.
+    starting: bool,
     /// The newest line it wrote.
     last: Option<String>,
     error: Option<String>,
@@ -735,6 +737,7 @@ fn main_row(cfg: &Config, site: &Site, serving: bool, running: bool) -> Option<P
         main: true,
         web: Some(anvil::site_url(cfg, site)),
         running: if server { running } else { serving },
+        starting: false,
         last: None,
         error: None,
         address: None,
@@ -777,6 +780,7 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
         let web = row_web(cfg, site, &p);
         ProcessRow {
             running: apps.running(&anvil::processes::key(&site.name, &p.id)),
+            starting: false,
             kind: "process",
             main: false,
             address: web.clone(),
@@ -796,7 +800,8 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
     let mut rows: Vec<ProcessRow> = main.into_iter().chain(rows).collect();
     // The app's own row first, then those kept on top, each group in detection order.
     rows.sort_by_key(|r| !r.main);
-    rows.into_iter()
+    let mut rows = rows
+        .into_iter()
         .map(|mut r| {
             // The site row is the web server's; it has no process, log or errors of its own.
             if r.kind == "site" {
@@ -816,7 +821,15 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
             r.error = errors.get(&key).cloned();
             r
         })
-        .collect()
+        .collect::<Vec<_>>();
+    drop(apps);
+    // A server is starting until its port answers; asked without the lock held.
+    for r in &mut rows {
+        r.starting = r.running
+            && r.kind != "site"
+            && r.process.port.is_some_and(|p| !anvil::port_answers(p));
+    }
+    rows
 }
 
 fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
