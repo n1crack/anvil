@@ -730,6 +730,9 @@ describe("containers", () => {
     const line = $(".procs .dev-summary");
     expect(line.querySelector(".dev-summary-title")!.textContent).toBe("Containers");
     expect(line.querySelector(".dev-summary-state")!.textContent).toBe("3 of 4 running");
+    // The header counts the exited worker as crashed: red, never green.
+    expect($("#site .state-text").textContent).toBe("3 running, 1 crashed");
+    expect($("#site .run-box .dot").className).toBe("dot bad");
     expect([...line.querySelectorAll(".dot")].map((d) => d.className)).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
     expect($$(".procs .proc, .procs .proc-log")).toHaveLength(0);
     expect($('.tabs [data-tab="dev"]').hidden).toBe(true);

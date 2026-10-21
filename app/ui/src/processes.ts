@@ -162,7 +162,7 @@ function drawRunBox(name, rows, containers) {
   const own = rows.filter((r) => r.kind !== "site");
   const total = own.length + containers.length;
   const running = own.filter((r) => r.running).length + containers.filter(up).length;
-  const crashed = own.filter((r) => r.crashed && !r.running).length;
+  const crashed = own.filter((r) => r.crashed && !r.running).length + containers.filter((c) => containerState(c) === "crashed").length;
   box.hidden = !rows.length && !containers.length;
   const text = $(".state-text", box);
   // A click on the state opens the Dev tab, or the Containers tab when there is no Dev.
