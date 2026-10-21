@@ -108,9 +108,10 @@ window.refresh = () => {
   // A command's own answer already carries the new state; the "changed" signal
   // that follows it doesn't need a second read.
   // ponytail: a Settings change landing within 0.5 s of a click here waits for the next refresh.
-  if (Date.now() - snapAt > 500) call("state");
+  const asked = Date.now() - snapAt > 500 ? call("state") : null;
   window.loadServices?.();
   loadSetup();
+  return asked;
 };
 
 /* ---------- Setup: what still stands between this Mac and working addresses ---------- */
@@ -2611,7 +2612,10 @@ document.addEventListener("keydown", (e) => {
   if (runAction(name)) e.preventDefault();
 });
 
-window.refresh();
+// A menu pick that made this window anew (it is freed after 10 minutes closed, see
+// `show_main` in app/src/main.rs) runs once the first state is drawn.
+const picked = window.__anvilMenu;
+Promise.resolve(window.refresh()).then(() => picked && runAction(picked));
 
 export function setMode(m) {
   mode = m;

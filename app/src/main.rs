@@ -4252,16 +4252,95 @@ fn hide_windows(handle: &AppHandle) {
             let _ = w.close();
         }
     }
+    free_main_later(handle);
     update_dock(handle);
 }
 
 fn show(handle: &AppHandle) {
-    if let Some(w) = handle.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
-    update_dock(handle);
+    show_main(handle, None);
 }
+
+/// Show the main window. When it was freed (`free_main_later`) it is made anew from its
+/// tauri.conf.json definition and its page restores what it showed from localStorage;
+/// `menu`, the menu pick that opened it, then runs once the page is up, as the `menu`
+/// event would have before it listened. Whether it was made anew.
+fn show_main(handle: &AppHandle, menu: Option<&str>) -> bool {
+    HIDES.fetch_add(1, Ordering::SeqCst); // a pending free is off
+    let made = match handle.get_webview_window("main") {
+        Some(w) => {
+            let _ = w.show();
+            let _ = w.set_focus();
+            false
+        }
+        None => {
+            let conf = handle
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main");
+            let built = conf
+                .map(|c| WebviewWindowBuilder::from_config(handle, c))
+                .transpose()
+                .ok()
+                .flatten()
+                .map(|b| match *anvil::lock(&MAIN_AT) {
+                    Some((x, y, w, h)) => b.position(x, y).inner_size(w, h),
+                    None => b,
+                })
+                .map(|b| match menu {
+                    Some(m) => b.initialization_script(format!(
+                        "window.__anvilMenu = {};",
+                        serde_json::to_string(m).unwrap_or_default()
+                    )),
+                    None => b,
+                })
+                .and_then(|b| b.build().ok());
+            if let Some(w) = built {
+                let _ = w.set_focus();
+            }
+            true
+        }
+    };
+    update_dock(handle);
+    made
+}
+
+/// Counts the main window's hides and shows: a free is only due while none came after it.
+static HIDES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How long the main window stays hidden before its webview is freed.
+const FREE_MAIN_AFTER: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// The main window was hidden (closed, ⌘Q): once it has stayed hidden `FREE_MAIN_AFTER`,
+/// destroy it, so WebKit's page and GPU processes (~70 MB) end while only the menu bar
+/// icon is used. Showing it in between calls this off; `show_main` makes it anew.
+fn free_main_later(handle: &AppHandle) {
+    if handle.get_webview_window("main").is_none() {
+        return;
+    }
+    let due = HIDES.fetch_add(1, Ordering::SeqCst) + 1;
+    let handle = handle.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(FREE_MAIN_AFTER);
+        if HIDES.load(Ordering::SeqCst) == due
+            && let Some(w) = handle.get_webview_window("main")
+            && !w.is_visible().unwrap_or(true)
+        {
+            // Where it was, to come back there (logical, as the builder takes it).
+            if let (Ok(scale), Ok(at), Ok(size)) =
+                (w.scale_factor(), w.outer_position(), w.inner_size())
+            {
+                let (at, size) = (at.to_logical::<f64>(scale), size.to_logical::<f64>(scale));
+                *anvil::lock(&MAIN_AT) = Some((at.x, at.y, size.width, size.height));
+            }
+            let _ = w.destroy();
+        }
+    });
+}
+
+/// The freed main window's place and size: x, y, width, height.
+static MAIN_AT: Mutex<Option<(f64, f64, f64, f64)>> = Mutex::new(None);
 
 /// The app's menu bar: every shortcut is listed where macOS users look for it.
 /// Picks are sent to the main window as a `menu` event; the page acts on them
@@ -4374,8 +4453,9 @@ fn on_app_menu(handle: &AppHandle, id: &str) {
         "quit_all" => return handle.exit(0),
         _ => {}
     }
-    show(handle);
-    if let Some(w) = handle.get_webview_window("main") {
+    if !show_main(handle, Some(action))
+        && let Some(w) = handle.get_webview_window("main")
+    {
         let _ = w.emit("menu", action);
     }
 }
@@ -4839,6 +4919,7 @@ fn main() {
                 WindowEvent::CloseRequested { api, .. } if w.label() == "main" => {
                     api.prevent_close();
                     let _ = w.hide();
+                    free_main_later(w.app_handle());
                     update_dock(w.app_handle());
                 }
                 WindowEvent::Destroyed => update_dock(w.app_handle()),
