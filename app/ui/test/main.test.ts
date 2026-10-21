@@ -249,7 +249,12 @@ describe("app extensions", () => {
         ["apcu", true, true],
         ["igbinary", false, false],
         ["msgpack", false, false],
+        ["mongodb", false, false],
+        ["memcached", false, false],
+        ["imagick", false, true],
       ]);
+      // Without Homebrew's ImageMagick: held off, saying what to install.
+      expect(exts().at(-1)!.text).toBe("imagickNeeds ImageMagick from Homebrew: brew install imagemagick");
       flip("xdebug");
       await wait(10);
       expect(calls("app_ext").at(-1)![1]).toEqual({ site: "shop", name: "xdebug", on: true });

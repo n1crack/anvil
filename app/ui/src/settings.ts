@@ -889,7 +889,14 @@ function extensionsList(v: Settings["php"][number]) {
     const end = Object.assign(document.createElement("span"), { className: "ext-end" });
     if (building) end.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Building…" }));
     if (unbuilt) end.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Not built" }));
-    const input = Object.assign(document.createElement("input"), { type: "checkbox", checked: e.on && !unbuilt, disabled: building });
+    // One that needs something first (Homebrew's ImageMagick) says what, and can only go off.
+    const blocked = !!e.needs && !e.on;
+    if (blocked) end.append(Object.assign(document.createElement("span"), { className: "muted", textContent: e.needs }));
+    const input = Object.assign(document.createElement("input"), {
+      type: "checkbox",
+      checked: e.on && !unbuilt,
+      disabled: building || blocked,
+    });
     input.setAttribute("role", "switch");
     input.onchange = () => setExtension(v.version, e.name, input.checked);
     end.append(input);
@@ -1174,6 +1181,28 @@ const SOFTWARE: Software[] = (<Software[]>[
           "Built on this Mac",
         ],
       ]) as [string, string, string, string, string][]),
+  [
+    "MongoDB PHP driver",
+    "PHP extension mongodb, from PECL; bundles libmongoc and libbson",
+    "Apache-2.0",
+    "https://github.com/mongodb/mongo-php-driver",
+    windows ? "Downloaded when used" : "Built on this Mac",
+  ],
+  [
+    "php-memcached",
+    "PHP extension memcached, from PECL",
+    "PHP-3.01",
+    "https://github.com/php-memcached-dev/php-memcached",
+    "Built on this Mac",
+  ],
+  ["libmemcached", "memcached’s client library", "BSD-3-Clause", "https://launchpad.net/libmemcached", "Built on this Mac"],
+  [
+    "Imagick",
+    "PHP extension imagick, from PECL, on Homebrew’s ImageMagick",
+    "PHP-3.01",
+    "https://github.com/Imagick/imagick",
+    "Built on this Mac",
+  ],
   ["Mailpit", "Catches the mail apps send", "MIT", "https://mailpit.axllent.org", "Downloaded when used"],
   ["Versity S3 Gateway", "S3-compatible file storage", "Apache-2.0", "https://github.com/versity/versitygw", "Downloaded when used"],
   ["SILO", "S3-compatible file storage, a MinIO fork", "AGPL-3.0", "https://silo.pgsty.com", "Downloaded when used"],
@@ -1184,8 +1213,8 @@ const SOFTWARE: Software[] = (<Software[]>[
     "https://tauri.app",
     "Bundled",
   ],
-  // Python and Rust aren't on Windows yet.
-]).filter(([name]) => !windows || !["Rust (rustup)", "Python", "uv"].includes(name));
+  // Python, Rust, memcached and Imagick aren't on Windows yet.
+]).filter(([name]) => !windows || !["Rust (rustup)", "Python", "uv", "php-memcached", "libmemcached", "Imagick"].includes(name));
 
 const node = (tag: string, cls: string, ...kids: (Node | string)[]) => {
   const n = document.createElement(tag);

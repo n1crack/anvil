@@ -105,6 +105,8 @@ struct Snapshot {
     leftovers: Vec<anvil::worktrees::Leftover>,
     /// The extensions Anvil can add (`phpext::CATALOG`), for an app's Settings tab.
     php_ext_catalog: Vec<&'static str>,
+    /// What a catalog extension needs first that isn't here (`phpext::needs`), by name.
+    php_ext_needs: std::collections::BTreeMap<&'static str, &'static str>,
     /// Extensions on for every app on a version (Settings › PHP), by version.
     php_ext: std::collections::BTreeMap<String, Vec<String>>,
     /// The catalog extensions built for each version that has some turned on: one on
@@ -511,6 +513,9 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
         php_ext_catalog: anvil::phpext::offered().map(|e| e.name).collect(),
+        php_ext_needs: anvil::phpext::offered()
+            .filter_map(|e| Some((e.name, anvil::phpext::needs(e.name)?)))
+            .collect(),
         php_ext: cfg.php_ext.clone(),
         editor: cfg.editor.clone(),
         terminal: cfg.terminal.clone(),
@@ -3391,6 +3396,8 @@ struct PhpExt {
     built: bool,
     /// Being built by this app, so a window opened meanwhile says so too.
     building: bool,
+    /// What it needs first that isn't here (`phpext::needs`): it can't be turned on.
+    needs: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -3575,6 +3582,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                         on: anvil::phpext::on(&cfg, v, e.name),
                         built: anvil::phpext::built(v, e.name),
                         building: anvil::lock(&EXT_BUILDS).contains(&(v.to_string(), e.name)),
+                        needs: anvil::phpext::needs(e.name),
                     })
                     .collect(),
             })

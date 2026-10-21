@@ -1840,11 +1840,12 @@ function appExtensions(s, root) {
     const building = appExtBuilding.has(`${s.name}@${name}`);
     const on = forAll || s.ext.includes(name);
     const unbuilt = on && !!built && !built.includes(name) && !building;
+    const needs = on ? undefined : snap.php_ext_needs?.[name];
     const label = el("label", "ver-ext");
     const input = Object.assign(document.createElement("input"), {
       type: "checkbox",
       checked: on && !unbuilt,
-      disabled: forAll || building,
+      disabled: forAll || building || !!needs,
     });
     input.setAttribute("role", "switch");
     input.onchange = () => setAppExt(s.name, name, input.checked);
@@ -1852,6 +1853,7 @@ function appExtensions(s, root) {
     label.append(input, el("span", "ver-ext-name", name));
     if (building) label.append(el("span", "muted", "Building…"));
     if (unbuilt) label.append(el("span", "muted", "Not built"));
+    if (needs) label.append(el("span", "muted", needs));
     line.append(label);
   }
   cell.append(line);

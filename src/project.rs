@@ -313,9 +313,9 @@ mod tests {
 
     #[test]
     fn toml_extensions_missing_and_applied() {
-        let e = parse("extensions = [\"xdebug\", \"imagick\"]\n").unwrap_err();
+        let e = parse("extensions = [\"xdebug\", \"oci8\"]\n").unwrap_err();
         assert!(
-            e.starts_with("unknown extension imagick: use xdebug, pcov"),
+            e.starts_with("unknown extension oci8: use xdebug, pcov"),
             "{e}"
         );
         let f = parse("extensions = [\"xdebug\", \"apcu\"]\n").unwrap();

@@ -82,6 +82,8 @@ export interface Snapshot {
   leftovers: Leftover[];
   /** The extensions Anvil can add. */
   php_ext_catalog: string[];
+  /** What a catalog extension needs first that isn't here (Homebrew's ImageMagick), by name. */
+  php_ext_needs?: Record<string, string>;
   /** Extensions on for every app on a version, by version. */
   php_ext: Record<string, string[]>;
   /** The extensions built for each version that has some on; one on without a build loads nothing. */
@@ -308,7 +310,8 @@ export interface Settings {
     opcache: "builtin" | "ready" | "missing";
     opcache_building: boolean;
     /** The catalog, each on or off for every app on the version. */
-    extensions: { name: string; on: boolean; built: boolean; building: boolean }[];
+    /** `needs`: what it needs first that isn't here; it can't be turned on. */
+    extensions: { name: string; on: boolean; built: boolean; building: boolean; needs?: string | null }[];
   }[];
   ini: Record<string, string>;
   terminal: string | null;

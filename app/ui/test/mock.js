@@ -126,7 +126,11 @@ window.mockSnap = {
   http_port: 80,
   php_default: "8.4",
   php_installed: ["8.4"],
-  php_ext_catalog: ["xdebug", "pcov", "apcu", "igbinary", "msgpack"],
+  php_ext_catalog: ["xdebug", "pcov", "apcu", "igbinary", "msgpack", "mongodb", "memcached", "imagick"],
+  // A Mac without Homebrew's ImageMagick; tests set window.mockExtNeeds for another.
+  get php_ext_needs() {
+    return window.mockExtNeeds ?? { imagick: "Needs ImageMagick from Homebrew: brew install imagemagick" };
+  },
   php_ext: {},
   php_ext_built: {},
   tunnel: false,
@@ -1109,11 +1113,12 @@ const mockHandle = (cmd, a) => {
           pinned_by: window.mockPhpPins?.[version] ?? [],
           opcache: version === "8.5" ? "builtin" : (window.mockOpcache?.[version] ?? (version === "8.4" ? "ready" : "missing")),
           opcache_building: window.mockOpcacheBuilding?.includes(version) ?? false,
-          extensions: ["xdebug", "pcov", "apcu", "igbinary", "msgpack"].map((name) => ({
+          extensions: ["xdebug", "pcov", "apcu", "igbinary", "msgpack", "mongodb", "memcached", "imagick"].map((name) => ({
             name,
             on: window.mockExt?.[version]?.includes(name) ?? false,
             built: !window.mockExtUnbuilt?.includes(`${version} ${name}`),
             building: window.mockExtBuilding?.includes(`${version} ${name}`) ?? false,
+            needs: (window.mockExtNeeds ?? { imagick: "Needs ImageMagick from Homebrew: brew install imagemagick" })[name] ?? null,
           })),
         })),
         ini: { memory_limit: "512M", upload_max_filesize: "64M" },

@@ -22,7 +22,7 @@ Anvil turns the folders on your computer into running applications at local doma
 ## What you get
 
 - **An address per project.** Park a folder and every project in it answers at `<folder>.test`, with HTTPS from a local certificate authority.
-- **Versions per project.** PHP 8.1–8.5, Node.js, Go, Rust, .NET and Python, pinned per project. `php` and `node` in your terminal follow the folder you're in.
+- **Versions per project.** PHP 8.1–8.5, Node.js, Go, Rust, .NET and Python, pinned per project. `php` and `node` in your terminal follow the folder you're in. PHP extensions such as Xdebug, MongoDB and Memcached build on your Mac, per version or per app; Imagick needs Homebrew's ImageMagick.
 - **Services.** MySQL, PostgreSQL, Redis, Mailpit and S3 storage (Versity S3 Gateway or SILO), as many as you need, on the ports you pick.
 - **Dev processes.** Queue workers, Vite and other dev scripts run in the background with live output, restart and a crash alert.
 - **Branches side by side.** A Git worktree gets its own address, processes and database while main keeps running.

@@ -1,5 +1,6 @@
-//! PHP extensions from PECL (xdebug, pcov, apcu, igbinary, msgpack), built on this Mac
-//! with phpize against the source tree OPcache configured for the same exact version.
+//! PHP extensions from PECL (xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached,
+//! imagick), built on this Mac with phpize against the source tree OPcache configured for
+//! the same exact version.
 
 use crate::opcache::{install_so, installed_full, tools_error};
 use crate::{Config, fetch_tgz, home, php_dir, run};
@@ -30,7 +31,8 @@ pub struct Recipe {
     pub flags: Vec<String>,
 }
 
-/// Each builds for PHP 8.1 to 8.5. igbinary's 3.2.17RC1 is the first with 8.5 support
+/// Each builds for PHP 8.1 to 8.5 (imagick only with Homebrew's ImageMagick: `needs`).
+/// igbinary's 3.2.17RC1 is the first with 8.5 support
 /// (PECL marks it stable); 3.2.16 doesn't build there.
 pub const CATALOG: &[Ext] = &[
     Ext {
@@ -78,6 +80,34 @@ pub const CATALOG: &[Ext] = &[
         hidden: false,
         recipe: None,
     },
+    // Pinned 2026-10-21 (mongodb, memcached, imagick).
+    Ext {
+        name: "mongodb",
+        pecl: "mongodb",
+        version: "2.5.5",
+        sha256: "0eaf84ff709f73183d80597f31ff02937f6aefde01eb895a0aa19334a290cec0",
+        zend: false,
+        hidden: false,
+        recipe: Some(mongodb_recipe),
+    },
+    Ext {
+        name: "memcached",
+        pecl: "memcached",
+        version: "3.4.0",
+        sha256: "c163434eb0da97c8f45c7ad41d979d381f8b81c49402b1b90b063987fb37972e",
+        zend: false,
+        hidden: false,
+        recipe: Some(memcached_recipe),
+    },
+    Ext {
+        name: "imagick",
+        pecl: "imagick",
+        version: "3.8.1",
+        sha256: "3a3587c0a524c17d0dad9673a160b90cd776e836838474e173b549ed864352ee",
+        zend: false,
+        hidden: false,
+        recipe: Some(imagick_recipe),
+    },
     // Octane's server; loaded only into the Octane process (`octane::swoole_env`).
     Ext {
         name: "swoole",
@@ -104,9 +134,36 @@ const OPENSSL: [(&str, &str); 2] = [
     ),
 ];
 
+/// libmemcached's last release (memcached's C client; macOS has none): SHA-256 of
+/// launchpad.net's tarball as Anvil first saw it (2026-10-21). The maintained fork,
+/// libmemcached-awesome, builds only with CMake, which the Command Line Tools lack.
+const LIBMEMCACHED: (&str, &str) = (
+    "1.0.18",
+    "e22c0bb032fde08f53de9ffbc5a128233041d9f33b5de022c0978a2149885f82",
+);
+
+/// Where Homebrew keeps ImageMagick: Apple silicon's, then Intel's.
+const IMAGEMAGICK: [&str; 2] = [
+    "/opt/homebrew/opt/imagemagick",
+    "/usr/local/opt/imagemagick",
+];
+
 /// The catalog the extensions UI, `anvil php ext` and `.anvil.toml` offer.
 pub fn offered() -> impl Iterator<Item = &'static Ext> {
     CATALOG.iter().filter(|e| !e.hidden)
+}
+
+/// What `name` needs first that isn't here, as its row says it; `None` when it builds.
+/// windows.php.net's memcached and imagick come with DLLs of their own that PHP finds
+/// only next to php.exe, which Anvil doesn't do yet.
+pub fn needs(name: &str) -> Option<&'static str> {
+    match name {
+        "memcached" | "imagick" if cfg!(windows) => Some("Not on Windows yet"),
+        "imagick" if imagemagick().is_none() => {
+            Some("Needs ImageMagick from Homebrew: brew install imagemagick")
+        }
+        _ => None,
+    }
 }
 
 /// GNU m4 and autoconf, which phpize needs and the Xcode Command Line Tools lack (macOS's
@@ -181,6 +238,9 @@ pub fn build(minor: &str, name: &str) -> Result<()> {
     // Linux's builds are fully static: they load no .so at all.
     if cfg!(target_os = "linux") {
         bail!("Anvil's PHP on Linux can't load extensions yet, {name} included");
+    }
+    if let Some(why) = needs(name) {
+        bail!("{name}: {why}");
     }
     let _held = build_lock(minor, name, name)?;
     if cfg!(windows) {
@@ -580,10 +640,7 @@ fn swoole_recipe(minor: &str) -> Result<Recipe> {
         .with_context(|| format!("PHP {minor} is not installed"))?;
     let inc = openssl_headers(&String::from_utf8_lossy(&out.stdout))?;
     let inc = format!("-I{}", inc.display());
-    let path = format!(
-        "{}:/usr/bin:/bin:/usr/sbin:/sbin",
-        tools_dir().join("bin").display()
-    );
+    let path = clean_path(None);
     let env = [
         ("PATH", path.as_str()),
         ("SSL_CFLAGS", &inc),
@@ -595,6 +652,219 @@ fn swoole_recipe(minor: &str) -> Result<Recipe> {
     Ok(Recipe {
         env: env.map(|(k, v)| (k.to_string(), v.to_string())).into(),
         flags: vec!["--disable-brotli".into()],
+    })
+}
+
+/// PATH for a build: `first`, the tools, the system's; no Homebrew, whose pkg-config
+/// would bring its own libraries (brotli, another OpenSSL, zstd).
+fn clean_path(first: Option<&Path>) -> String {
+    let first = first
+        .map(|p| format!("{}:", p.display()))
+        .unwrap_or_default();
+    format!(
+        "{first}{}:/usr/bin:/bin:/usr/sbin:/sbin",
+        tools_dir().join("bin").display()
+    )
+}
+
+/// `body` as an executable shell script at `path`.
+fn script(path: &Path, body: &str) -> Result<()> {
+    fs::create_dir_all(path.parent().context("no parent folder")?)?;
+    fs::write(path, format!("#!/bin/sh\n{body}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+/// MongoDB's bundled C driver on Apple's TLS (Secure Transport) and crypto: no OpenSSL.
+/// zlib compression from its own copy; Kerberos (SASL), snappy and zstd stay off.
+fn mongodb_recipe(_: &str) -> Result<Recipe> {
+    Ok(Recipe {
+        env: vec![("PATH".into(), clean_path(None))],
+        flags: [
+            "--with-mongodb-ssl=darwin",
+            "--with-mongodb-sasl=no",
+            "--with-mongodb-snappy=no",
+            "--with-mongodb-zstd=no",
+            "--with-mongodb-zlib=bundled",
+        ]
+        .map(String::from)
+        .into(),
+    })
+}
+
+/// memcached against Anvil's libmemcached (`libmemcached`), whose pkg-config stand-in is
+/// first on PATH, and the SDK's zlib. The JSON serializer on; SASL off, as libmemcached
+/// is built without it; the igbinary and msgpack serializers would need those
+/// extensions' headers.
+fn memcached_recipe(_: &str) -> Result<Recipe> {
+    let lib = libmemcached()?;
+    let sdk = crate::platform::command("xcrun")
+        .arg("--show-sdk-path")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .context("Building memcached needs the Xcode Command Line Tools: xcode-select --install")?;
+    Ok(Recipe {
+        env: vec![("PATH".into(), clean_path(Some(&lib.join("bin"))))],
+        flags: vec![
+            format!("--with-libmemcached-dir={}", lib.display()),
+            format!("--with-zlib-dir={sdk}/usr"),
+            "--disable-memcached-sasl".into(),
+            "--enable-memcached-json".into(),
+        ],
+    })
+}
+
+/// libmemcached as a static library in `tools/libmemcached-<version>`, built once from
+/// its verified source (half a minute), with a `bin/pkg-config` that knows only it:
+/// memcached's configure asks pkg-config, which the Command Line Tools lack.
+fn libmemcached() -> Result<PathBuf> {
+    let (version, sum) = LIBMEMCACHED;
+    let dir = tools_dir().join(format!("libmemcached-{version}"));
+    if dir.join("bin/pkg-config").is_file() {
+        return Ok(dir);
+    }
+    println!("Building libmemcached {version}, which memcached needs (once)…");
+    let file = format!("libmemcached-{version}");
+    let src = home().join("build").join(&file);
+    let _ = fs::remove_dir_all(&src);
+    let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let ok = fetch_tgz(
+        &format!("https://launchpad.net/libmemcached/1.0/{version}/+download/{file}.tar.gz"),
+        &src,
+        true,
+        Some(sum),
+    )
+    .with_context(|| format!("couldn't get {file} from launchpad.net"))
+    .and_then(|()| {
+        crate::replace_dir(&dir, |d| {
+            let mut configure: Vec<String> = [
+                "./configure",
+                "--quiet",
+                "--disable-shared",
+                "--enable-static",
+                "--with-pic",
+                "--disable-sasl",
+                "--disable-dtrace",
+                "--disable-libevent",
+                "--without-memcached",
+                // macOS's htonll is a macro its check finds but its C++ can't use.
+                "ac_cv_have_htonll=no",
+            ]
+            .map(String::from)
+            .into();
+            configure.push(format!("--prefix={}", d.display()));
+            let make = |args: &[&str]| -> Vec<String> {
+                ["make", "-s"]
+                    .iter()
+                    .chain(args)
+                    .map(|s| s.to_string())
+                    .collect()
+            };
+            let jobs = format!("-j{jobs}");
+            for args in [
+                configure,
+                make(&[&jobs, "libmemcached/libmemcached.la"]),
+                make(&["install-libLTLIBRARIES", "install-nobase_includeHEADERS"]),
+            ] {
+                run(crate::platform::command(&args[0])
+                    .args(&args[1..])
+                    .env("PATH", clean_path(None))
+                    .current_dir(&src))
+                .map_err(|e| tools_error(&file, e))?;
+            }
+            // The paths it will have once in place.
+            let (lib, inc) = (dir.join("lib"), dir.join("include"));
+            script(
+                &d.join("bin/pkg-config"),
+                &format!(
+                    "for a in \"$@\"; do case $a in\n\
+                     --exists) exit 0 ;;\n\
+                     --modversion) echo {version}; exit 0 ;;\n\
+                     --variable=prefix) echo '{}'; exit 0 ;;\n\
+                     --libs) echo '-L{} -lmemcached -lc++'; exit 0 ;;\n\
+                     --cflags) echo '-I{}'; exit 0 ;;\n\
+                     esac; done\nexit 1\n",
+                    dir.display(),
+                    lib.display(),
+                    inc.display()
+                ),
+            )
+        })
+    });
+    let _ = fs::remove_dir_all(&src);
+    ok?;
+    Ok(dir)
+}
+
+/// Homebrew's ImageMagick, when it has MagickWand's pkg-config file.
+fn imagemagick() -> Option<PathBuf> {
+    IMAGEMAGICK
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.join("lib/pkgconfig/MagickWand.pc").is_file())
+}
+
+/// A pkg-config file's `Version`, `Cflags` and `Libs`, its `${variables}` filled in.
+fn pc_fields(text: &str) -> [String; 3] {
+    let fill = |s: &str, vars: &[(String, String)]| {
+        vars.iter().fold(s.trim().to_string(), |s, (k, v)| {
+            s.replace(&format!("${{{k}}}"), v)
+        })
+    };
+    let mut vars: Vec<(String, String)> = vec![];
+    let mut out: [String; 3] = Default::default();
+    for line in text.lines() {
+        if let Some(i) = ["Version:", "Cflags:", "Libs:"]
+            .iter()
+            .position(|f| line.starts_with(f))
+        {
+            out[i] = fill(&line[line.find(':').unwrap_or(0) + 1..], &vars);
+        } else if let Some((k, v)) = line.split_once('=')
+            && !k.contains([':', ' '])
+        {
+            let v = fill(v, &vars);
+            vars.push((k.to_string(), v));
+        }
+    }
+    out
+}
+
+/// imagick against Homebrew's ImageMagick. Its MagickWand-config runs Homebrew's
+/// pkg-config, which ImageMagick needs only to build and so is rarely there: a stand-in
+/// in `tools/imagemagick` answers from ImageMagick's pkg-config files instead, beside a
+/// pkg-config that knows nothing (imagick's configure only checks there is one).
+fn imagick_recipe(_: &str) -> Result<Recipe> {
+    let brew = imagemagick().context(needs("imagick").unwrap_or_default())?;
+    let pc = |n: &str| fs::read_to_string(brew.join("lib/pkgconfig").join(n));
+    let [version, cflags, wand] = pc_fields(&pc("MagickWand.pc")?);
+    let [_, _, core] = pc_fields(&pc("MagickCore.pc")?);
+    let dir = tools_dir().join("imagemagick");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(brew.join("include"), dir.join("include"))?;
+    script(
+        &dir.join("bin/MagickWand-config"),
+        &format!(
+            "for a in \"$@\"; do case $a in\n\
+             --version) echo '{version}' ;;\n\
+             --prefix) echo '{}' ;;\n\
+             --cflags|--cppflags) echo '{cflags}' ;;\n\
+             --libs|--ldflags) echo '{wand} {core}' ;;\n\
+             esac; done\n",
+            dir.display()
+        ),
+    )?;
+    script(&dir.join("bin/pkg-config"), "exit 1\n")?;
+    Ok(Recipe {
+        env: vec![("PATH".into(), clean_path(Some(&dir.join("bin"))))],
+        flags: vec![format!("--with-imagick={}", dir.display())],
     })
 }
 
@@ -711,7 +981,8 @@ pub fn ini_args(ini: &BTreeMap<String, String>, minor: &str, names: &[String]) -
         return vec![];
     };
     let mut args = vec![];
-    for ext in offered().filter(|e| names.iter().any(|n| n == e.name)) {
+    // One whose library went (imagick after `brew uninstall imagemagick`) would only warn.
+    for ext in offered().filter(|e| names.iter().any(|n| n == e.name) && needs(e.name).is_none()) {
         let so = so_path(minor, &full, ext.name);
         if !so.exists() {
             continue;
@@ -760,7 +1031,17 @@ pub(crate) mod tests {
         let names: Vec<_> = CATALOG.iter().map(|e| e.name).collect();
         assert_eq!(
             names,
-            ["xdebug", "pcov", "apcu", "igbinary", "msgpack", "swoole"]
+            [
+                "xdebug",
+                "pcov",
+                "apcu",
+                "igbinary",
+                "msgpack",
+                "mongodb",
+                "memcached",
+                "imagick",
+                "swoole"
+            ]
         );
         for e in CATALOG {
             assert!(hex(e.sha256), "{}", e.name);
@@ -768,6 +1049,7 @@ pub(crate) mod tests {
             assert_eq!(e.zend, e.name == "xdebug", "{}", e.name);
         }
         assert!(OPENSSL.iter().all(|(_, s)| hex(s)));
+        assert!(hex(LIBMEMCACHED.1));
         assert_eq!(
             GNU.map(|(n, v, _)| (n, v)),
             [("m4", "1.4.19"), ("autoconf", "2.72")]
@@ -1051,7 +1333,19 @@ pub(crate) mod tests {
         // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
         unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
         let names: Vec<_> = offered().map(|e| e.name).collect();
-        assert_eq!(names, ["xdebug", "pcov", "apcu", "igbinary", "msgpack"]);
+        assert_eq!(
+            names,
+            [
+                "xdebug",
+                "pcov",
+                "apcu",
+                "igbinary",
+                "msgpack",
+                "mongodb",
+                "memcached",
+                "imagick"
+            ]
+        );
         fake_php("8.4", "8.4.23");
         fs::write(php_dir("8.4").join("php-fpm"), "").unwrap();
         fake_so("8.4", "8.4.23", "swoole");
@@ -1064,6 +1358,63 @@ pub(crate) mod tests {
         cfg.php_ext.insert("8.4".into(), vec!["swoole".into()]);
         assert!(php_args(&cfg, "8.4").is_empty());
         assert!(ini_args(&cfg.ini, "8.4", &["swoole".into()]).is_empty());
+    }
+
+    #[test]
+    #[cfg(not(target_os = "linux"))] // Linux refuses every build first
+    fn library_recipes() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        // MongoDB on Apple's TLS, never a library Homebrew's PATH would bring.
+        let r = mongodb_recipe("8.4").unwrap();
+        assert!(r.flags.contains(&"--with-mongodb-ssl=darwin".into()));
+        let path = &r.env.iter().find(|(k, _)| k == "PATH").unwrap().1;
+        assert!(!path.contains("homebrew") && !path.contains("/usr/local"));
+        assert!(path.ends_with("/usr/bin:/bin:/usr/sbin:/sbin"), "{path}");
+        assert!(
+            clean_path(Some(Path::new("/x/bin"))).starts_with("/x/bin:"),
+            "a recipe's own tools come first"
+        );
+        assert_eq!(needs("mongodb"), None);
+        assert_eq!(needs("memcached"), None);
+        // imagick is offered exactly when Homebrew's ImageMagick is there.
+        assert_eq!(needs("imagick").is_none(), imagemagick().is_some());
+        if needs("imagick").is_some() {
+            fake_php("8.4", "8.4.23");
+            let e = build("8.4", "imagick").unwrap_err().to_string();
+            assert_eq!(
+                e,
+                "imagick: Needs ImageMagick from Homebrew: brew install imagemagick"
+            );
+            assert!(!dir.path().join("build").exists(), "nothing downloaded");
+            // Built before ImageMagick went: not loaded, so PHP doesn't warn.
+            fake_so("8.4", "8.4.23", "imagick");
+            assert!(ini_args(&BTreeMap::new(), "8.4", &["imagick".into()]).is_empty());
+        }
+    }
+
+    #[test]
+    fn pkg_config_files_are_read() {
+        let pc = "prefix=/opt/homebrew/Cellar/imagemagick/7.1.2-34\n\
+                  libdir=${prefix}/lib\n\
+                  includearchdir=${prefix}/include/ImageMagick-7\n\
+                  libname=MagickWand-7.Q16HDRI\n \n\
+                  Name: MagickWand\n\
+                  Version: 7.1.2\n\
+                  Requires: MagickCore-7.Q16HDRI\n\
+                  Cflags: -I${includearchdir} -DMAGICKCORE_HDRI_ENABLE=1 -DMAGICKCORE_QUANTUM_DEPTH=16\n\
+                  Libs: -L${libdir} -l${libname}\n\
+                  Libs.private: -L${libdir} -lz\n";
+        assert_eq!(
+            pc_fields(pc),
+            [
+                "7.1.2",
+                "-I/opt/homebrew/Cellar/imagemagick/7.1.2-34/include/ImageMagick-7 -DMAGICKCORE_HDRI_ENABLE=1 -DMAGICKCORE_QUANTUM_DEPTH=16",
+                "-L/opt/homebrew/Cellar/imagemagick/7.1.2-34/lib -lMagickWand-7.Q16HDRI",
+            ]
+        );
     }
 
     #[test]

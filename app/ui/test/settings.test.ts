@@ -150,10 +150,10 @@ describe("versions", () => {
       }));
   const extSwitch = (v: string, name: string) => line(v, name).querySelector("input") as HTMLInputElement;
 
-  test("row_shows_opcache_state: Extensions n/6 after an installed version opens its list, OPcache first", () =>
+  test("row_shows_opcache_state: Extensions n/9 after an installed version opens its list, OPcache first", () =>
     withOpcache83(async () => {
-      expect(toggle("8.5")!.textContent).toBe("Extensions 1/6›");
-      expect(toggle("8.3")!.textContent).toBe("Extensions 0/6›");
+      expect(toggle("8.5")!.textContent).toBe("Extensions 1/9›");
+      expect(toggle("8.3")!.textContent).toBe("Extensions 0/9›");
       // Not installed: nothing about extensions.
       expect(toggle("8.2")).toBeNull();
       expect(lines("8.5").length).toBe(0);
@@ -165,6 +165,9 @@ describe("versions", () => {
         "apcu",
         "igbinary",
         "msgpack",
+        "mongodb",
+        "memcached",
+        "imagick",
       ]);
       expect(line("8.5", "OPcache").textContent).toBe("OPcacheBuilt in");
       // The list slides open in place: no redraw.
@@ -202,7 +205,7 @@ describe("versions", () => {
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheBuilding… a few minutes");
       await wait(150);
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheOnRemove");
-      expect(toggle("8.3")!.textContent).toBe("Extensions 1/6›");
+      expect(toggle("8.3")!.textContent).toBe("Extensions 1/9›");
       // Remove asks in the row too, then it's Not built again.
       (line("8.3", "OPcache").querySelector(".text-act") as HTMLElement).click();
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheRemove OPcache from PHP 8.3? Building it again takes minutes.CancelRemove");
@@ -236,12 +239,23 @@ describe("versions", () => {
       w.refresh();
       await open("php");
       try {
-        expect(toggle("8.4")!.textContent).toBe("Extensions 2/6›");
+        expect(toggle("8.4")!.textContent).toBe("Extensions 2/9›");
         await openExts("8.4");
         await openExts("8.3");
         expect(exts("8.4")).toEqual(
-          ["xdebug", "pcov", "apcu", "igbinary", "msgpack"].map((name) => ({ name, on: name === "xdebug", text: name })),
+          ["xdebug", "pcov", "apcu", "igbinary", "msgpack", "mongodb", "memcached", "imagick"].map((name) => ({
+            name,
+            on: name === "xdebug",
+            text: name === "imagick" ? "imagickNeeds ImageMagick from Homebrew: brew install imagemagick" : name,
+          })),
         );
+        // Needs Homebrew's ImageMagick: held off; with it, a switch like the others.
+        expect(extSwitch("8.4", "imagick").disabled).toBe(true);
+        w.mockExtNeeds = {};
+        w.refresh();
+        await open("php");
+        expect(extSwitch("8.4", "imagick").disabled).toBe(false);
+        delete w.mockExtNeeds;
         expect(exts("8.3").every((e) => !e.on)).toBe(true);
         // Off: one call, for that version and extension.
         extSwitch("8.4", "xdebug").click();

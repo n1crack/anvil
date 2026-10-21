@@ -48,6 +48,7 @@ contain breaking changes.
 
 ### Added
 
+- PHP extensions MongoDB and Memcached, and Imagick on a Mac with Homebrew's ImageMagick: `anvil php ext add mongodb`.
 - Check for Updates… in the Anvil menu opens a Software Update window with what's new.
 - The menu bar icon's menu offers a new version when there is one.
 
