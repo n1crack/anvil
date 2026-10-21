@@ -4715,7 +4715,7 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         items.push(Box::new(Submenu::with_items(
             handle,
             "Default PHP Version",
-            true,
+            busy.is_none(),
             &refs,
         )?));
     }
@@ -4796,9 +4796,14 @@ fn on_menu(handle: &AppHandle, id: &str) {
                     Err(e) => *anvil::lock(&app.error) = Some(err(e)),
                     Ok((cfg, ())) if running(&app) => {
                         let (handle, v) = (handle.clone(), v.to_string());
+                        // Extensions may build first (minutes): the menu says so meanwhile.
+                        *anvil::lock(&TRAY_BUSY) = Some("Restarting…");
                         std::thread::spawn(move || {
-                            anvil::phpext::build_missing(&cfg, &v);
-                            start(&handle.state::<App>(), &cfg);
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                anvil::phpext::build_missing(&cfg, &v);
+                                start(&handle.state::<App>(), &cfg);
+                            }));
+                            *anvil::lock(&TRAY_BUSY) = None;
                             changed(&handle);
                         });
                     }

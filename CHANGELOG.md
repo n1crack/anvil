@@ -87,6 +87,7 @@ contain breaking changes.
 - Settings › Shortcuts lists ⌘Q as closing the windows and ⌥⌘Q as quitting, and no longer lists PHP keys the menu doesn't have.
 - Packages: in a narrow window the + list opens inside the window instead of pushing the sidebar out of view.
 - Settings › About: static-php-cli no longer breaks across two lines.
+- Menu bar menu: picking a default PHP version while Anvil runs says Restarting… until its extensions are built and the web server is back.
 
 ## [0.2.1] - 2026-10-21
 
