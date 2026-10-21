@@ -12,6 +12,7 @@
     "allow-add-path",
     "allow-clean-all-safe",
     "allow-clean-anvil",
+    "allow-composer-global-remove",
     "allow-composer-global-require",
     "allow-composer-global-updates",
     "allow-composer-globals",

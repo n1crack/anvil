@@ -4272,14 +4272,16 @@ async fn package_wait(
 /// Settings › PHP's global Composer packages (`packages::globals`).
 #[tauri::command(async)]
 fn composer_globals() -> Vec<anvil::packages::Global> {
-    anvil::packages::globals(&anvil::home().join("composer"))
+    let yours = anvil::packages::your_composer_home();
+    anvil::packages::globals(&anvil::home().join("composer"), yours.as_deref())
 }
 
 /// The same with the newer versions Packagist has.
 #[tauri::command]
 async fn composer_global_updates() -> Res<Vec<anvil::packages::Global>> {
     tauri::async_runtime::spawn_blocking(|| {
-        anvil::packages::global_updates(&anvil::home().join("composer"))
+        let yours = anvil::packages::your_composer_home();
+        anvil::packages::global_updates(&anvil::home().join("composer"), yours.as_deref())
     })
     .await
     .map_err(|e| e.to_string())
@@ -4287,11 +4289,23 @@ async fn composer_global_updates() -> Res<Vec<anvil::packages::Global>> {
 
 /// Install or update one global Composer package, once the user asked.
 #[tauri::command]
-async fn composer_global_require(name: String) -> Res<Vec<anvil::packages::Global>> {
+async fn composer_global_require(name: String, yours: bool) -> Res<Vec<anvil::packages::Global>> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = anvil::load().map_err(err)?;
-        anvil::packages::global_require(&cfg, &name).map_err(err)?;
-        Ok(anvil::packages::globals(&anvil::home().join("composer")))
+        anvil::packages::global_require(&cfg, &name, yours).map_err(err)?;
+        Ok(composer_globals())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Remove one of Anvil's own global Composer packages, once the user asked.
+#[tauri::command]
+async fn composer_global_remove(name: String) -> Res<Vec<anvil::packages::Global>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = anvil::load().map_err(err)?;
+        anvil::packages::global_remove(&cfg, &name).map_err(err)?;
+        Ok(composer_globals())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -5379,6 +5393,7 @@ fn main() {
             composer_globals,
             composer_global_updates,
             composer_global_require,
+            composer_global_remove,
             browser_status,
             mail_list,
             mail_read,

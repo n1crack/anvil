@@ -159,16 +159,16 @@ describe("versions", () => {
     await open("php");
     const rows = () => $$("#composer-globals .ver");
     expect(rows().map((r) => r.querySelector(".ver-label")?.textContent)).toEqual(["laravel/installer 5.11.2", "laravel/forge-cli"]);
-    expect(rows().map(buttons)).toEqual([["Update to 5.12.0"], ["Install"]]);
+    expect(rows().map(buttons)).toEqual([["Update to 5.12.0", "Remove"], ["Install"]]);
     expect(rows()[1].classList.contains("missing")).toBe(true);
     w.mockDelay.composer_global_require = 60;
     (rows()[0].querySelector("button") as HTMLElement).click();
     await wait(10);
     expect(rows()[0].querySelector(".ver-patch")!.textContent).toBe("Updating to 5.12.0…");
     await wait(90);
-    expect(w.mockCalls).toContainEqual(["composer_global_require", { name: "laravel/installer" }]);
+    expect(w.mockCalls).toContainEqual(["composer_global_require", { name: "laravel/installer", yours: false }]);
     expect(rows()[0].querySelector(".ver-label")!.textContent).toBe("laravel/installer 5.12.0");
-    expect(buttons(rows()[0])).toEqual([]);
+    expect(buttons(rows()[0])).toEqual(["Remove"]);
     w.mockForgeFails = true;
     try {
       (rows()[1].querySelector("button") as HTMLElement).click();
@@ -182,6 +182,36 @@ describe("versions", () => {
     } finally {
       delete w.mockForgeFails;
       delete w.mockDelay.composer_global_require;
+    }
+  });
+
+  test("Composer global packages: the user's own copy first, tagged, never removable; Anvil's copy asks, then goes", async () => {
+    const before = w.mockGlobals;
+    w.mockGlobals = [
+      { name: "laravel/forge-cli", version: "2.0.1", latest: null, yours: true },
+      { name: "laravel/forge-cli", version: "2.0.4", latest: null, yours: false },
+      { name: "laravel/installer", version: null, latest: null, yours: false },
+    ];
+    w.refresh();
+    try {
+      await open("php");
+      const rows = () => $$("#composer-globals .ver");
+      expect(rows().map((r) => r.querySelector(".ver-name")?.textContent)).toEqual([
+        "laravel/forge-cli 2.0.1Your Composer",
+        "laravel/forge-cli 2.0.4",
+        "laravel/installer",
+      ]);
+      expect(rows().map(buttons)).toEqual([[], ["Remove"], ["Install"]]);
+      (rows()[1].querySelector("button") as HTMLElement).click();
+      expect(rows()[1].textContent).toContain("Remove Anvil’s laravel/forge-cli?");
+      ([...rows()[1].querySelectorAll("button")].find((b) => b.textContent === "Remove") as HTMLElement).click();
+      await wait(30);
+      expect(w.mockCalls).toContainEqual(["composer_global_remove", { name: "laravel/forge-cli" }]);
+      expect(rows().map((r) => r.querySelector(".ver-label")?.textContent)).toEqual(["laravel/forge-cli 2.0.1", "laravel/installer"]);
+    } finally {
+      w.mockGlobals = before;
+      w.refresh();
+      await wait(60);
     }
   });
 

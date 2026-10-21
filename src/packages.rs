@@ -1331,18 +1331,57 @@ pub fn run_command(cfg: &crate::Config, site: &crate::Site, id: &str) -> anyhow:
 /// there already; their commands (`laravel`, `forge`) are shims.
 pub const GLOBAL_OFFERED: [&str; 2] = ["laravel/installer", "laravel/forge-cli"];
 
-/// A global package of Anvil's Composer: its installed version (`None` for an offered one
-/// not installed) and a newer one from Packagist once asked (`global_updates`).
+/// A global package: its installed version (`None` for an offered one not installed), a
+/// newer one from Packagist once asked (`global_updates`), and whether it is in the user's
+/// own Composer rather than Anvil's.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Global {
     pub name: String,
     pub version: Option<String>,
     pub latest: Option<String>,
+    pub yours: bool,
 }
 
-/// The packages `composer_home`'s composer.json requires, with what is installed, then the
-/// offered ones it doesn't.
-pub fn globals(composer_home: &Path) -> Vec<Global> {
+/// The user's own Composer home, where `composer global require` puts things: $COMPOSER_HOME,
+/// else ~/.config/composer or ~/.composer (macOS, Linux), %APPDATA%\Composer (Windows).
+pub fn your_composer_home() -> Option<PathBuf> {
+    let candidates: Vec<PathBuf> = match std::env::var_os("COMPOSER_HOME") {
+        Some(h) => vec![h.into()],
+        None if cfg!(windows) => std::env::var_os("APPDATA")
+            .map(|a| PathBuf::from(a).join("Composer"))
+            .into_iter()
+            .collect(),
+        None => {
+            let home = crate::user_home();
+            vec![home.join(".config/composer"), home.join(".composer")]
+        }
+    };
+    let anvil = crate::home().join("composer");
+    candidates
+        .into_iter()
+        .find(|h| *h != anvil && h.join("composer.json").is_file())
+}
+
+/// The user's own global packages (`yours`) first, then Anvil's — a package both have is
+/// listed twice, so Anvil's copy can be removed — then the offered ones neither has.
+pub fn globals(anvil_home: &Path, your_home: Option<&Path>) -> Vec<Global> {
+    let mut out = your_home.map(|h| required(h, true)).unwrap_or_default();
+    out.extend(required(anvil_home, false));
+    for n in GLOBAL_OFFERED {
+        if !out.iter().any(|g| g.name == n) {
+            out.push(Global {
+                name: n.into(),
+                version: None,
+                latest: None,
+                yours: false,
+            });
+        }
+    }
+    out
+}
+
+/// The packages `composer_home`'s composer.json requires, with what is installed.
+fn required(composer_home: &Path, yours: bool) -> Vec<Global> {
     let required: Vec<String> = json(&composer_home.join("composer.json"))
         .and_then(|v| {
             v["require"]
@@ -1359,7 +1398,7 @@ pub fn globals(composer_home: &Path) -> Vec<Global> {
             .as_str()
             .map(|v| v.trim_start_matches('v').to_string())
     };
-    let mut out: Vec<Global> = required
+    required
         .iter()
         // php and ext-… are platform requirements, not packages.
         .filter(|n| n.contains('/'))
@@ -1367,23 +1406,14 @@ pub fn globals(composer_home: &Path) -> Vec<Global> {
             name: n.clone(),
             version: version(n),
             latest: None,
+            yours,
         })
-        .collect();
-    for n in GLOBAL_OFFERED {
-        if !out.iter().any(|g| g.name == n) {
-            out.push(Global {
-                name: n.into(),
-                version: None,
-                latest: None,
-            });
-        }
-    }
-    out
+        .collect()
 }
 
 /// `globals` with the newer version of each installed one, from Packagist.
-pub fn global_updates(composer_home: &Path) -> Vec<Global> {
-    let mut list = globals(composer_home);
+pub fn global_updates(anvil_home: &Path, your_home: Option<&Path>) -> Vec<Global> {
+    let mut list = globals(anvil_home, your_home);
     std::thread::scope(|s| {
         for g in list.iter_mut().filter(|g| g.version.is_some()) {
             s.spawn(|| {
@@ -1395,17 +1425,43 @@ pub fn global_updates(composer_home: &Path) -> Vec<Global> {
     list
 }
 
-/// Install or update one of `globals` in Anvil's Composer home: `composer global require`,
-/// so it moves to the newest release Packagist has, as the list says.
-pub fn global_require(cfg: &crate::Config, name: &str) -> anyhow::Result<()> {
-    let composer_home = crate::home().join("composer");
-    if !globals(&composer_home).iter().any(|g| g.name == name) {
-        anyhow::bail!("{name} isn't one of Anvil's global Composer packages");
+/// Install or update one of `globals` where it is — the user's own Composer home for theirs,
+/// else Anvil's: `composer global require`, so it moves to the newest release Packagist
+/// has, as the list says.
+pub fn global_require(cfg: &crate::Config, name: &str, yours: bool) -> anyhow::Result<()> {
+    global_run(
+        cfg,
+        name,
+        yours,
+        &["require", name, "--with-all-dependencies"],
+    )
+}
+
+/// Remove one of Anvil's own global packages (never the user's): `composer global remove`.
+pub fn global_remove(cfg: &crate::Config, name: &str) -> anyhow::Result<()> {
+    global_run(cfg, name, false, &["remove", name])
+}
+
+/// `composer global <args>` in the home of `name`'s row: the user's own for theirs, else
+/// Anvil's; refused for a name the list doesn't have.
+fn global_run(cfg: &crate::Config, name: &str, yours: bool, args: &[&str]) -> anyhow::Result<()> {
+    let anvil_home = crate::home().join("composer");
+    let your_home = your_composer_home();
+    if !globals(&anvil_home, your_home.as_deref())
+        .iter()
+        .any(|g| g.name == name && g.yours == yours)
+    {
+        anyhow::bail!("{name} isn't one of the global Composer packages");
     }
+    let composer_home = match (yours, your_home) {
+        (true, Some(h)) => h,
+        _ => anvil_home,
+    };
     let (php, pre, env) = crate::shims::resolve_with("composer", &crate::home(), cfg, true)?;
     let out = crate::platform::command(&php)
         .args(pre)
-        .args(["global", "require", name, "--with-all-dependencies"])
+        .arg("global")
+        .args(args)
         .args(["--no-interaction", "--no-ansi"])
         .envs(env)
         .env("COMPOSER_HOME", &composer_home)
@@ -1415,7 +1471,8 @@ pub fn global_require(cfg: &crate::Config, name: &str) -> anyhow::Result<()> {
         let text = String::from_utf8_lossy(&out.stderr);
         let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
         anyhow::bail!(
-            "composer global require {name} failed: {}",
+            "composer global {} failed: {}",
+            args.join(" "),
             tail[tail.len().saturating_sub(3)..].join("\n")
         );
     }
@@ -2096,10 +2153,43 @@ renamed = { package = "real-name", version = "0.3" }
     }
 
     #[test]
+    fn your_global_package_comes_first_and_anvils_copy_after() {
+        let root = std::env::temp_dir().join(format!("anvil-pkg-yours-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for (h, v) in [("anvil", "2.0.4"), ("yours", "2.0.1")] {
+            fs::create_dir_all(root.join(h).join("vendor/composer")).unwrap();
+            fs::write(
+                root.join(h).join("composer.json"),
+                r#"{"require":{"laravel/forge-cli":"^2.0"}}"#,
+            )
+            .unwrap();
+            fs::write(
+                root.join(h).join("vendor/composer/installed.json"),
+                format!(r#"{{"packages":[{{"name":"laravel/forge-cli","version":"v{v}"}}]}}"#),
+            )
+            .unwrap();
+        }
+        let got: Vec<(String, Option<String>, bool)> =
+            globals(&root.join("anvil"), Some(&root.join("yours")))
+                .into_iter()
+                .map(|g| (g.name, g.version, g.yours))
+                .collect();
+        assert_eq!(
+            got,
+            [
+                ("laravel/forge-cli".into(), Some("2.0.1".into()), true),
+                ("laravel/forge-cli".into(), Some("2.0.4".into()), false),
+                ("laravel/installer".into(), None, false),
+            ]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn globals_are_the_required_packages_then_the_offered_ones() {
         let dir = std::env::temp_dir().join(format!("anvil-pkg-globals-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        assert_eq!(globals(&dir).len(), 2);
+        assert_eq!(globals(&dir, None).len(), 2);
         fs::create_dir_all(dir.join("vendor/composer")).unwrap();
         fs::write(
             dir.join("composer.json"),
@@ -2111,7 +2201,7 @@ renamed = { package = "real-name", version = "0.3" }
             r#"{"packages":[{"name":"laravel/installer","version":"v5.11.2"},{"name":"psy/psysh","version":"v0.12.4"}]}"#,
         )
         .unwrap();
-        let got: Vec<(String, Option<String>)> = globals(&dir)
+        let got: Vec<(String, Option<String>)> = globals(&dir, None)
             .into_iter()
             .map(|g| (g.name, g.version))
             .collect();

@@ -688,8 +688,8 @@ window.mockContainers = [
   window.mockLogPage = page;
   window.mockPackages = pk;
   window.mockGlobals = [
-    { name: "laravel/installer", version: "5.11.2", latest: "5.12.0" },
-    { name: "laravel/forge-cli", version: null, latest: null },
+    { name: "laravel/installer", version: "5.11.2", latest: "5.12.0", yours: false },
+    { name: "laravel/forge-cli", version: null, latest: null, yours: false },
   ];
   window.mockUpdates = updates;
 }
@@ -995,10 +995,13 @@ const mockHandle = (cmd, a) => {
     case "composer_global_require": {
       if (a.name === "laravel/forge-cli" && window.mockForgeFails)
         throw "composer global require laravel/forge-cli failed: Your requirements could not be resolved";
-      const g = window.mockGlobals.find((x) => x.name === a.name);
+      const g = window.mockGlobals.find((x) => x.name === a.name && x.yours === a.yours);
       Object.assign(g, { version: g.latest ?? "1.9.0", latest: null });
       return window.mockGlobals.map((x) => ({ ...x, latest: null }));
     }
+    case "composer_global_remove":
+      window.mockGlobals = window.mockGlobals.filter((x) => !(x.name === a.name && !x.yours));
+      return window.mockGlobals.map((x) => ({ ...x, latest: null }));
     case "package_audit":
       if (a.ecosystem === "npm") throw "pnpm audit failed: request to registry timed out";
       return [

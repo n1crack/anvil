@@ -314,21 +314,22 @@ fn resolve_for(
                 return Ok((php, vec![phar.display().to_string()], env));
             }
             let composer_home = h.join("composer");
-            // Laravel Forge's CLI once installed from Settings › PHP; until then the user's
-            // own `forge` (their Composer's), run with the app's PHP.
+            // Laravel Forge's CLI: the user's own (their Composer's) when they have one, run
+            // with the app's PHP; else the one Settings › PHP installs.
             if tool == "forge" {
-                let forge = composer_home.join("vendor/bin/forge");
-                if forge.exists() {
-                    env.push(("COMPOSER_HOME".into(), composer_home.display().to_string()));
-                    return Ok((forge, vec![], env));
-                }
                 let shims = h.join("shims");
                 let path = std::env::join_paths(
                     std::env::split_paths(&crate::env_path()).filter(|d| *d != shims),
                 )?;
-                let own = runtimes::which("forge", &path.to_string_lossy())
-                    .context("Laravel Forge CLI isn't installed: install it in Settings › PHP")?;
-                return Ok((own, vec![], env));
+                if let Some(own) = runtimes::which("forge", &path.to_string_lossy()) {
+                    return Ok((own, vec![], env));
+                }
+                let forge = composer_home.join("vendor/bin/forge");
+                if !forge.exists() {
+                    bail!("Laravel Forge CLI isn't installed: install it in Settings › PHP");
+                }
+                env.push(("COMPOSER_HOME".into(), composer_home.display().to_string()));
+                return Ok((forge, vec![], env));
             }
             env.push(("COMPOSER_HOME".into(), composer_home.display().to_string()));
             let laravel = composer_home.join("vendor/bin/laravel");

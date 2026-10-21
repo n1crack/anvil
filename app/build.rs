@@ -103,6 +103,7 @@ const COMMANDS: &[&str] = &[
     "composer_globals",
     "composer_global_updates",
     "composer_global_require",
+    "composer_global_remove",
     "browser_status",
     "mail_list",
     "mail_read",
