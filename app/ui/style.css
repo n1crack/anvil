@@ -3410,7 +3410,7 @@ body.activity {
 .pop-confirm span { margin-right: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 .pop-confirm button { height: 24px; padding: 0 10px; }
 /* Remove Worktree: a sentence, maybe a checkbox, then the buttons on their own line. */
-.pop-confirm.wide { flex-wrap: wrap; justify-content: flex-end; max-width: 380px; }
+.pop-confirm.wide { flex-wrap: wrap; justify-content: flex-end; max-width: 440px; }
 .pop-confirm.wide p,
 .pop-confirm.wide label { flex-basis: 100%; margin: 0; }
 

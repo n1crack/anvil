@@ -3,6 +3,8 @@
  * shows an app's (mail.ts); Settings › Features the one for mail from no app. Only
  * `invoke` comes in, so both windows use it. */
 
+import { confirmInRow } from "./confirm";
+
 type Invoke = <T = any>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
 function el(tag: string, cls?: string | null, text?: string | number | null): any {
@@ -46,7 +48,7 @@ export interface Inbox {
 export function inboxView(inbox: string, invoke: Invoke, emptyText: string): Inbox {
   const node = el("div", "logs mail");
   node.innerHTML = `
-    <div class="logs-bar mail-bar"><span class="mail-count muted"></span><button class="mail-clear" hidden>Clear</button></div>
+    <div class="logs-bar mail-bar"><span class="mail-count muted"></span><span class="actions-inline mail-clear-box"><button class="mail-clear" hidden>Clear</button></span></div>
     <p class="error mail-err" hidden></p>
     <ol class="logs-list mail-list"></ol>`;
   const list = node.querySelector(".mail-list");
@@ -250,21 +252,29 @@ export function inboxView(inbox: string, invoke: Invoke, emptyText: string): Inb
     count();
   };
 
-  clear.onclick = async () => {
+  // Asks in the bar, where Clear was.
+  clear.onclick = () => {
+    const box = clear.parentElement;
     const n = ids.length;
-    const ok = await window.__TAURI__.dialog.ask(`${n} ${n === 1 ? "mail is" : "mails are"} deleted. This can’t be undone.`, {
-      title: "Clear this inbox?",
-      kind: "warning",
-      okLabel: "Clear",
-      cancelLabel: "Cancel",
-    });
-    if (!ok) return;
-    try {
-      await invoke("mail_clear", { inbox });
-    } catch (e) {
-      fail(e);
-    }
-    load();
+    const back = () => {
+      box.classList.remove("asking");
+      box.replaceChildren(clear);
+    };
+    confirmInRow(
+      box,
+      `Delete ${n === 1 ? "1 message" : `all ${n} messages`}? This can’t be undone.`,
+      "Delete",
+      async () => {
+        try {
+          await invoke("mail_clear", { inbox });
+        } catch (e) {
+          fail(e);
+        }
+        back();
+        load();
+      },
+      back,
+    );
   };
 
   return { inbox, node, load, tick };

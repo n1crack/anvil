@@ -435,6 +435,7 @@ describe("storage", () => {
     await wait();
     expect(w.mockCalls.some(([c]) => c === "clean_all_safe")).toBe(true);
     expect($("#clean-all-box .asking")).toBeNull();
+    expect($("#clean-all-box .muted").textContent).toMatch(/^Freed \d/);
     expect($("#clean-all-safe")).not.toBeNull();
   });
 });

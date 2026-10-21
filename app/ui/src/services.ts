@@ -25,6 +25,7 @@ import {
 import { icon } from "./icons";
 import { late } from "./late";
 import { picker } from "./picker";
+import { confirmPop } from "./processes";
 
 /* Services in the main window: list in the sidebar, details on the right, and
  * the Add Service sheet. Shares $, snap, invoke, el and friends with app.js. */
@@ -183,7 +184,7 @@ async function serviceMenu(svc) {
   if (svc.running) items.push(item("Show Log in Processes", () => invoke("show_processes", { select: `service:${svc.id}` }).catch(fail)));
   items.push(
     M.PredefinedMenuItem.new({ item: "Separator" }),
-    item("Remove Service…", () => removeService(svc)),
+    item("Remove Service…", () => removeService(svc, $(`#list .item[data-name="${CSS.escape(svc.id)}"]`))),
   );
   (await M.Menu.new({ items: await Promise.all(items) })).popup();
 }
@@ -404,7 +405,7 @@ export function renderService() {
   }
   renderContents(svc, root);
   if (browsable() && (svc.kind === "mysql" || svc.kind === "postgres")) $(".svc-contents-head", root).append(browseButton(svc.id));
-  $(".svc-remove", root).onclick = () => removeService(svc);
+  $(".svc-remove", root).onclick = (e) => removeService(svc, e.currentTarget as HTMLElement);
 }
 
 /** The line under the name, as an app's: kind · version · port · data size (once
@@ -451,22 +452,24 @@ export async function copy(text, btn) {
   setTimeout(() => (btn.innerHTML = label), 1500);
 }
 
-/** Remove a service; a second question decides whether its data goes too. */
-async function removeService(svc) {
-  // One question; the default button (Return) keeps the data, Escape cancels.
+/** Remove a service: one bubble, two labelled answers. The main one (Return) keeps the data. */
+function removeService(svc, at: HTMLElement) {
   const what = { mailpit: "caught mail", redis: "saved keys", versitygw: "buckets", silo: "buckets" }[svc.kind] ?? "databases";
-  const answer = await window.__TAURI__.dialog.message(
-    `${svc.id} stops and is removed from Anvil. Keep its ${what} to find them again if you add ${svc.id} later.`,
-    {
-      title: `Remove ${svc.id}?`,
-      kind: "warning",
-      buttons: { yes: "Remove, Keep Data", no: "Remove and Delete Data", cancel: "Cancel" },
-    },
+  const used = svc.apps.length
+    ? ` ${svc.apps.join(", ")} ${svc.apps.length === 1 ? "uses" : "use"} it; ${svc.apps.length === 1 ? "its" : "their"} .env stays as it is.`
+    : "";
+  const remove = (wipe: boolean) => {
+    keptNote = wipe ? "" : `Kept ${svc.id}’s ${what} for when you add ${svc.id} again.`;
+    serviceCall("remove_service", { id: svc.id, deleteData: wipe });
+  };
+  confirmPop(
+    at,
+    `Remove ${svc.id}? It stops and leaves Anvil.${used} Keep its ${what} to find them again if you add ${svc.id} later.`,
+    "Remove, Keep Data",
+    () => remove(false),
+    [["Remove and Delete Data", () => remove(true)]],
+    "left",
   );
-  if (answer !== "Remove, Keep Data" && answer !== "Remove and Delete Data" && answer !== "Yes" && answer !== "No") return;
-  const wipe = answer === "Remove and Delete Data" || answer === "No";
-  keptNote = wipe ? "" : `Kept ${svc.id}’s ${what} for when you add ${svc.id} again.`;
-  await serviceCall("remove_service", { id: svc.id, deleteData: wipe });
 }
 
 /* ---------- Add Service sheet: kind, name, port, app and tags, like creating a container ---------- */
@@ -727,13 +730,11 @@ function drawContents(svc, root, c) {
     list.append(row);
     return row;
   };
-  const act = (label: string, fn: () => unknown, cls?: string) => {
+  const act = (label: string, fn: (b: HTMLElement) => unknown, cls?: string) => {
     const b = el("button", cls, label);
-    b.onclick = fn;
+    b.onclick = () => fn(b);
     return b;
   };
-  const confirm = (title, message, ok) =>
-    window.__TAURI__.dialog.ask(message, { title, kind: "warning", okLabel: ok, cancelLabel: "Cancel" });
 
   if (svc.kind === "mysql" || svc.kind === "postgres") {
     // The Connect lines can point at one of the databases.
@@ -754,10 +755,10 @@ function drawContents(svc, root, c) {
       const buttons: any[] = [
         act(
           "Drop…",
-          async () => {
-            if (await confirm(`Drop ${name}?`, `Every table in ${name} is deleted. This can’t be undone.`, "Drop"))
-              renderContents(svc, root, { id: svc.id, action: "drop", name });
-          },
+          (b) =>
+            confirmPop(b, `Drop ${name}? Every table in it is deleted. This can’t be undone.`, "Drop", () =>
+              renderContents(svc, root, { id: svc.id, action: "drop", name }),
+            ),
           "danger hover-only",
         ),
       ];
@@ -807,16 +808,18 @@ function drawContents(svc, root, c) {
       const rows = c.keys.map(([db, keys]) => line(db, `${keys} ${keys === 1 ? "key" : "keys"}`));
       for (const r of rows) r.classList.add("svc-sub");
       // Flush All… on the last database's row.
-      rows.at(-1).lastChild.append(
-        act(
-          "Flush All…",
-          async () => {
-            if (await confirm(`Flush ${svc.id}?`, "Every key in every database is deleted.", "Flush"))
-              renderContents(svc, root, { id: svc.id, action: "empty" });
-          },
-          "danger",
-        ),
-      );
+      rows
+        .at(-1)
+        .lastChild.append(
+          act(
+            "Flush All…",
+            (b) =>
+              confirmPop(b, `Flush ${svc.id}? Every key in every database is deleted.`, "Flush", () =>
+                renderContents(svc, root, { id: svc.id, action: "empty" }),
+              ),
+            "danger",
+          ),
+        );
     }
   } else if (svc.kind === "versitygw" || svc.kind === "silo") {
     // Buckets are folders in the data folder; make more from an app or the web console.
@@ -830,10 +833,10 @@ function drawContents(svc, root, c) {
       buttons.push(
         act(
           "Delete All…",
-          async () => {
-            if (await confirm(`Delete ${n} messages?`, `Every message caught by ${svc.id} is deleted.`, "Delete"))
-              renderContents(svc, root, { id: svc.id, action: "empty" });
-          },
+          (b) =>
+            confirmPop(b, `Delete ${n === 1 ? "1 message" : `all ${n} messages`}? This can’t be undone.`, "Delete", () =>
+              renderContents(svc, root, { id: svc.id, action: "empty" }),
+            ),
           "danger",
         ),
       );

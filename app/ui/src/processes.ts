@@ -113,13 +113,25 @@ export function procBtn(label, aria, onclick) {
   return b;
 }
 
-/** A small confirm bubble under `anchor`: Enter or Run confirms, Esc or a click elsewhere cancels. */
-export function confirmPop(anchor, text, label, onYes) {
-  const pop = el("div", "pop-confirm");
+/** A small confirm bubble under `anchor`: Enter or Run confirms, Esc or a click elsewhere cancels.
+ * `more` are other answers, each a labelled button between Cancel and the main one. A long
+ * question wraps, with the buttons on their own line. */
+export function confirmPop(anchor, text, label, onYes, more: [string, () => void][] = [], align: "left" | "right" = "right") {
+  const long = text.length > 70;
+  const pop = el("div", long ? "pop-confirm wide" : "pop-confirm");
   const yes = el("button", "primary", label);
   const no = el("button", null, "Cancel");
-  pop.append(el("span", null, text), no, yes);
-  const close = popAt(anchor, pop, yes);
+  const others = more.map(([t, fn]) => {
+    const b = el("button", null, t);
+    b.onclick = (e) => {
+      e.stopPropagation();
+      close();
+      fn();
+    };
+    return b;
+  });
+  pop.append(el(long ? "p" : "span", null, text), no, ...others, yes);
+  const close = popAt(anchor, pop, yes, align);
   yes.onclick = (e) => {
     e.stopPropagation();
     close();

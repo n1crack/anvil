@@ -1092,6 +1092,32 @@ describe("service page", () => {
     $('.modes [data-mode="apps"]').click();
     await wait(40);
   });
+
+  test("Drop and Remove ask in a bubble, no dialog; Remove's two answers are labelled", async () => {
+    await show("mysql");
+    const drop = $$(".svc-contents .svc-row").find((r) => r.querySelector(".proc-name")?.textContent === "shop")!;
+    (drop.querySelector(".danger") as HTMLElement).click();
+    await wait();
+    expect($(".pop-confirm").textContent).toContain("Drop shop?");
+    $$(".pop-confirm button")
+      .find((b) => b.textContent === "Drop")!
+      .click();
+    await wait();
+    expect(calls("service_data").at(-1)![1]).toEqual({ id: "mysql", action: "drop", name: "shop" });
+    $(".svc-remove").click();
+    await wait();
+    expect($(".pop-confirm p").textContent).toContain("shop uses it; its .env stays as it is.");
+    expect($$(".pop-confirm button").map((b) => b.textContent)).toEqual(["Cancel", "Remove and Delete Data", "Remove, Keep Data"]);
+    expect(document.activeElement?.textContent).toBe("Remove, Keep Data");
+    $$(".pop-confirm button")
+      .find((b) => b.textContent === "Remove and Delete Data")!
+      .click();
+    await wait();
+    expect(calls("remove_service").at(-1)![1]).toEqual({ id: "mysql", deleteData: true });
+    expect($(".pop-confirm")).toBeNull();
+    $('.modes [data-mode="apps"]').click();
+    await wait(40);
+  });
 });
 
 describe("logs", () => {
@@ -2138,6 +2164,35 @@ describe("share", () => {
   });
 });
 
+describe("resources", () => {
+  test("Delete Logs and Caches asks in the row, in Settings › Storage's words, then says what it freed", async () => {
+    const item = (label: string, path: string, bytes: number, safety: string) => ({ label, path, bytes, safety, note: "" });
+    w.mockResources = {
+      total: 734003200,
+      error: null,
+      processes: [],
+      services: [],
+      items: [item("Logs", "storage/logs", 12582912, "safe"), item("Sessions", "storage/framework/sessions", 2097152, "safe")],
+    };
+    try {
+      await select("shop");
+      $('.tabs [data-tab="resources"]').click();
+      await wait(80);
+      expect($(".clean-all").textContent).toBe("Delete Logs and Caches (14 MB)");
+      $(".clean-all").click();
+      expect($(".res-head .asking .muted").textContent).toBe("Delete 14 MB? Users get logged out.");
+      expect(calls("clean")).toEqual([]);
+      $$(".res-head .asking button")[1].click();
+      await wait(80);
+      expect(calls("clean").map(([, a]) => a.path)).toEqual(["storage/logs", "storage/framework/sessions"]);
+      expect($(".res-freed").textContent).toMatch(/^Freed \d/);
+    } finally {
+      delete w.mockResources;
+      $('.tabs [data-tab="overview"]').click();
+    }
+  });
+});
+
 describe("mail catcher", () => {
   const rows = () => $$(".mail-list .log");
   const cell = (r: HTMLElement, c: string) => r.querySelector(c)?.textContent;
@@ -2225,6 +2280,21 @@ describe("mail catcher", () => {
     await wait(30);
     expect(calls("mail_delete").at(-1)![1]).toEqual({ inbox: "shop", id: "1792505339198-2" });
     expect(rows().map((r) => cell(r, ".log-msg"))).toEqual(["Newest", "(no subject)"]);
+  });
+
+  test("Clear asks in the bar, no dialog; Cancel puts Clear back", async () => {
+    const saved = structuredClone(w.mockMails.shop);
+    $(".mail-clear").click();
+    expect($(".mail-clear-box .muted").textContent).toBe("Delete all 2 messages? This can’t be undone.");
+    $$(".mail-clear-box button")[0].click();
+    expect($(".mail-clear-box .asking")).toBeNull();
+    $(".mail-clear").click();
+    $$(".mail-clear-box button")[1].click();
+    await wait(30);
+    expect(calls("mail_clear").at(-1)![1]).toEqual({ inbox: "shop" });
+    expect(rows()).toEqual([]);
+    expect($(".mail-clear").hidden).toBe(true);
+    w.mockMails.shop = saved;
   });
 
   test("the switch leaves the app to its own mail setup; the line says so", async () => {

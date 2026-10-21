@@ -2,6 +2,7 @@ import { $, M, PROCESS_KINDS, ago, bytes, el, inlineError, invoke, seg, selected
 import { follower, readTail, tail, termOut } from "./console";
 import { copy } from "./services";
 import { icon } from "./icons";
+import { confirmPop } from "./processes";
 import { shown } from "./live";
 import { ansi, clean, linkify, sgr } from "./term";
 
@@ -118,7 +119,7 @@ function buildLogs(s) {
           action: () => invoke("log_open", { site: v.site, source: v.source!.id }).catch((e) => showError(String(e))),
         }),
         M.PredefinedMenuItem.new({ item: "Separator" }),
-        M.MenuItem.new({ text: `Clear ${v.source.label}…`, action: () => clearLog(v) }),
+        M.MenuItem.new({ text: `Clear ${v.source.label}…`, action: () => clearLog(v, $(".logs-menu", v.node)) }),
       ]),
     });
     menu.popup();
@@ -211,7 +212,7 @@ function showLarge(v) {
     loadLogs(v);
   };
   const clear = el("button", null, "Clear…");
-  clear.onclick = () => clearLog(v);
+  clear.onclick = () => clearLog(v, clear);
   actions.append(show, clear);
   box.append(actions);
   $(".logs-list", v.node).replaceChildren(box);
@@ -808,15 +809,17 @@ function trimEntries(v) {
   $(".logs-more", v.node).hidden = false;
 }
 
-async function clearLog(v) {
+function clearLog(v, at: HTMLElement) {
   const src = v.source;
-  const ok = await window.__TAURI__.dialog.ask(`Everything in ${tilde(src.path)} (${bytes(src.bytes)}) is deleted. This can’t be undone.`, {
-    title: `Clear ${src.label}?`,
-    kind: "warning",
-    okLabel: "Clear",
-    cancelLabel: "Cancel",
-  });
-  if (!ok) return;
+  confirmPop(
+    at,
+    `Clear ${src.label}? Everything in ${tilde(src.path)} (${bytes(src.bytes)}) is deleted. This can’t be undone.`,
+    "Clear",
+    () => clearNow(v, src),
+  );
+}
+
+async function clearNow(v, src) {
   try {
     await invoke("log_clear", { site: v.site, source: src.id });
     src.bytes = 0;

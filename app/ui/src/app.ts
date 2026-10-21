@@ -2,6 +2,7 @@ import type { Snapshot } from "./types";
 import { late } from "./late";
 import { ownError, shown } from "./live";
 import { FIELDS, control } from "./hooksform";
+import { confirmInRow } from "./confirm";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -1441,6 +1442,12 @@ export function popAt(anchor: Element, pop: HTMLElement, focus?: HTMLElement | n
       : { top: `${r.bottom + window.scrollY + 6}px`, right: `${document.documentElement.clientWidth - r.right}px` },
   );
   document.body.append(pop);
+  // A button near the left edge gets its bubble to the right instead of past the window.
+  if (align === "right" && pop.getBoundingClientRect().left < 8) Object.assign(pop.style, { right: "", left: `${Math.max(8, r.left)}px` });
+  // A button near the bottom gets it above, so its buttons aren't cut off.
+  const below = pop.getBoundingClientRect();
+  if (below.bottom > window.innerHeight - 8 && r.top - below.height - 6 > 8)
+    pop.style.top = `${r.top + window.scrollY - below.height - 6}px`;
   document.addEventListener("mousedown", outside, true);
   focus?.focus();
   return close;
@@ -2133,10 +2140,12 @@ function renderResources(name) {
   if (freed) head.append(el("span", "muted res-freed", freed));
   const safeItems = r.items.filter((i) => i.safety === "safe" && i.bytes > 0);
   if (safeItems.length) {
-    const all = el("button", "clean-all", `Clean up ${bytes(safe)}`);
+    const all = el("button", "clean-all", `Delete Logs and Caches (${bytes(safe)})`);
     all.title = `Deletes ${safeItems.map((i) => i.label.toLowerCase()).join(", ")}`;
-    all.onclick = () => cleanItems(name, safeItems);
-    head.append(all);
+    const box = el("span", "actions-inline");
+    all.onclick = () => cleanItems(name, safeItems, box);
+    box.append(all);
+    head.append(box);
   }
   body.append(head);
 
@@ -2176,7 +2185,7 @@ function renderResources(name) {
     if (i.safety !== "keep") {
       const del = el("button", "del", "Delete");
       del.setAttribute("aria-label", String(`Delete ${i.label}`));
-      del.onclick = () => cleanItems(name, [i]);
+      del.onclick = () => cleanItems(name, [i], dd);
       dd.append(del);
     } else {
       dd.append(el("span", "del-space")); // keeps the size column aligned
@@ -2239,33 +2248,35 @@ function renderResources(name) {
 
 const freedNote = new Map<string, string>(); // site -> what the last clean-up freed
 
-/** Confirm with a native dialog, then delete the items one by one. */
-async function cleanItems(name, items) {
+/** Asks in `box` (Settings › Storage's words), then deletes the items one by one. */
+function cleanItems(name, items, box: HTMLElement) {
   const total = items.reduce((a, i) => a + i.bytes, 0);
-  const what =
-    items.length === 1
-      ? `${items[0].label} (${items[0].path.startsWith("/") ? tilde(items[0].path) : items[0].path})`
-      : `${items.length} items`;
-  const how = items.length === 1 ? items[0].note : items.map((i) => `• ${i.label}: ${i.note}`).join("\n");
-  const ok = await window.__TAURI__.dialog.ask(`${how}\n\nThis frees about ${bytes(total)} and can't be undone.`, {
-    title: `Delete ${what}?`,
-    kind: "warning",
-    okLabel: "Delete",
-    cancelLabel: "Cancel",
-  });
-  if (!ok) return;
-  let freed = 0;
-  for (const i of items) {
-    try {
-      freed += await invoke("clean", { site: name, path: i.path });
-    } catch (e) {
-      showError(String(e));
-      break;
-    }
-  }
-  // Said next to Clean up, not in a toast; it stays until the next clean-up or reload.
-  if (freed) freedNote.set(name, `Freed ${bytes(freed)}`);
-  loadResources(name, true);
+  const was = [...box.childNodes];
+  const back = () => {
+    box.classList.remove("asking");
+    box.replaceChildren(...was);
+  };
+  const out = items.some((i) => i.label === "Sessions") ? " Users get logged out." : "";
+  confirmInRow(
+    box,
+    `Delete ${bytes(total)}?${out}`,
+    "Delete",
+    async () => {
+      let freed = 0;
+      for (const i of items) {
+        try {
+          freed += await invoke("clean", { site: name, path: i.path });
+        } catch (e) {
+          showError(String(e));
+          break;
+        }
+      }
+      // Said next to Delete Logs and Caches, not in a toast; it stays until the next one or reload.
+      if (freed) freedNote.set(name, `Freed ${bytes(freed)}`);
+      loadResources(name, true);
+    },
+    back,
+  );
 }
 
 export const PHP_KINDS = new Set(["laravel", "statamic", "symfony", "php"]);

@@ -904,9 +904,11 @@ const mockHandle = (cmd, a) => {
       return { text: a.from ? "" : text, end_offset: text.length };
     }
     case "services":
+    case "remove_service":
     case "service_run":
       return mockServices;
     case "service_contents":
+    case "service_data":
       return {
         databases: [
           ["shop", 52428800],
@@ -1186,6 +1188,10 @@ const mockHandle = (cmd, a) => {
     case "share_stop":
       delete mockSnap.shares[a.site];
       return mockSnap;
+    case "resources":
+      return window.mockResources ?? null;
+    case "clean":
+      return 12582912;
     case "clean_all_safe":
       return [162529280, []];
     case "agent_activity":

@@ -1,6 +1,7 @@
 import "./platform";
 import type { Settings } from "./types";
 import { ownError } from "./live";
+import { confirmInRow, textAct } from "./confirm";
 import { FIELDS, control } from "./hooksform";
 import { inboxView, type Inbox } from "./inbox";
 
@@ -136,33 +137,6 @@ function versionRow(
     row.append(extra.error);
   }
   return row;
-}
-
-/** A quiet text action at a row's end: no button frame, brighter on hover. */
-function textAct(label: string, onClick: () => void) {
-  const b = Object.assign(document.createElement("button"), { className: "text-act", textContent: label, type: "button" });
-  b.onclick = onClick;
-  return b;
-}
-
-/** Asks in the row itself, no dialog: the question, Cancel, and the action in red text. */
-function confirmInRow(box: HTMLElement, question: string, label: string, onYes: () => void, restore: () => void) {
-  const yes = textAct(label, () => {
-    yes.disabled = no.disabled = true;
-    onYes();
-  });
-  yes.classList.add("danger");
-  const no = textAct("Cancel", restore);
-  box.classList.add("asking");
-  box.replaceChildren(
-    Object.assign(document.createElement("span"), { className: "muted", textContent: question, title: question }),
-    no,
-    yes,
-  );
-  // Back to the row's actions once the mouse is elsewhere and nothing was chosen.
-  box
-    .closest(".row")
-    ?.addEventListener("mouseleave", () => no.isConnected && !no.disabled && (box.classList.remove("asking"), restore()), { once: true });
 }
 
 async function loadRuntimes() {
@@ -645,6 +619,12 @@ async function cleanAllSafe() {
   try {
     const [freed, failed] = await invoke("clean_all_safe");
     showError(failed.length ? `Freed ${bytes(freed)}. Couldn't clean: ${[...new Set(failed)].join(", ")}` : null, "clean_all_safe");
+    // Said beside the button, as on an app's Resources; it goes with the next question.
+    if (!failed.length && freed)
+      $("#clean-all-box").replaceChildren(
+        Object.assign(document.createElement("span"), { className: "muted", textContent: `Freed ${bytes(freed)}` }),
+        cleanAll,
+      );
   } catch (e) {
     showError(String(e), "clean_all_safe");
   }

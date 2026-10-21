@@ -17,6 +17,7 @@ contain breaking changes.
 - Software Update: Return presses the main button and Esc closes the window, except while an update downloads.
 - Settings › General: the menus on the right are all one width.
 - Settings › Features › Agents (MCP) shows the whole Claude Code command with its own Copy, next to `anvil mcp` for other agents.
+- Drop, Flush, Delete All, Clear inbox, Clear log, Resources' Delete and Remove Service ask in the window, not in a system dialog; Remove Service names its apps and labels both answers.
 
 ### Added
 
