@@ -1806,13 +1806,14 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   text-overflow: ellipsis;
 }
 
-/* A narrow sidebar: the name keeps its room, the kind label takes what's left and,
- * below ~260px, goes. */
+/* A narrow sidebar: the name keeps its room, the kind label (a service's tags) takes
+ * what's left and, below ~260px, goes. */
 .item:not(.child) { grid-template-columns: 32px auto minmax(0, 1fr); }
 .item:not(.child) .end { min-width: 0; justify-content: flex-end; overflow: hidden; }
 #list { container-type: inline-size; }
 @container (max-width: 260px) {
-  .item .kind { display: none; }
+  .item .kind,
+  .item .tag { display: none; }
 }
 
 /* Hidden from Anvil: dimmed, not served. */
@@ -2374,10 +2375,18 @@ kbd {
 }
 
 .item .tag {
+  min-width: 0;
   padding: 1px 6px;
+  overflow: hidden;
   color: var(--muted);
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
+/* Short of room, a service's second tag goes to a hidden second line instead of being
+ * cut; a lone tag that still doesn't fit ends in "…". */
+.item .end:has(.tag) { flex-wrap: wrap; height: 18px; }
 
 .chips {
   display: flex;

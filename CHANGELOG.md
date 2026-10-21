@@ -29,6 +29,7 @@ contain breaking changes.
 - An app's header counts a crashed Docker Compose container as crashed, not running.
 - New Worktree…, Dev's Run and the Start/Stop of all processes look like the other buttons; Run no longer looks disabled.
 - The keyboard focus ring on an app's tabs is drawn whole, not cut at the top and bottom.
+- Service tags in the sidebar line up with the apps' type labels; short of room, a tag is left out instead of cut.
 
 ## [0.2.1] - 2026-10-21
 

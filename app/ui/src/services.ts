@@ -144,11 +144,10 @@ function serviceRow(svc) {
   b.setAttribute("aria-current", String(svc.id === svcSelected));
   const text = el("span", "text");
   text.append(el("span", "name", svc.id), el("span", "sub", `${svc.name} ${svc.version} on port ${svc.port}`));
-  // As an app's row: the run state is a badge on the mark, and every row ends in the
-  // same fixed (here empty) slot, so the tags line up with the apps' kind labels.
+  // As an app's row: the run state is a badge on the mark, and the tags end where the
+  // apps' kind labels do.
   const end = el("span", "end");
   for (const t of svc.tags.slice(0, 2)) end.append(el("span", "tag", t));
-  end.append(el("span", "disclosure"));
   b.append(markBox(serviceMark(svc), svc.running ? "on" : svc.error ? "bad" : null), text, end);
   b.onclick = () => selectService(svc.id);
   return b;
