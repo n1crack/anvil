@@ -2425,6 +2425,40 @@ fn create_options(kind: String) -> Res<Vec<anvil::create::Opt>> {
     Ok(anvil::create::options(&kind, &anvil::load().map_err(err)?))
 }
 
+/// What a template needs installed and lacks: offered in the New sheet before Create.
+#[derive(Serialize)]
+struct CreateNeed {
+    id: &'static str,
+    name: &'static str,
+    version: String,
+}
+
+#[tauri::command(async)]
+fn create_needs(
+    kind: String,
+    parent: std::path::PathBuf,
+    options: Option<anvil::create::Options>,
+) -> Res<Option<CreateNeed>> {
+    let cfg = anvil::load().map_err(err)?;
+    let opts = anvil::create::resolve(&kind, &cfg, &options.unwrap_or_default()).map_err(err)?;
+    let Some(id) = anvil::create::missing(&kind, &parent, &opts) else {
+        return Ok(None);
+    };
+    let (name, version) = match id {
+        "php" => ("PHP", "8.4".to_string()),
+        "node" => ("Node.js", anvil::runtimes::node_lts().map_err(err)?),
+        rt => (
+            anvil::runtimes::name(rt),
+            anvil::runtimes::available(rt)
+                .map_err(err)?
+                .into_iter()
+                .next()
+                .ok_or("Nothing to install")?,
+        ),
+    };
+    Ok(Some(CreateNeed { id, name, version }))
+}
+
 /// The creation log of `name` from `from` on, read while `create_app` runs.
 #[tauri::command(async)]
 fn create_log(name: String, from: u64) -> Res<anvil::logs::Text> {
@@ -4716,6 +4750,7 @@ fn main() {
             link_folder,
             create_app,
             create_options,
+            create_needs,
             create_log,
             create_reveal,
             park_folder,

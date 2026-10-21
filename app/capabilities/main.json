@@ -25,6 +25,7 @@
     "allow-create-app",
     "allow-create-log",
     "allow-create-options",
+    "allow-create-needs",
     "allow-create-reveal",
     "allow-db-open",
     "allow-git-info",

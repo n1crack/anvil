@@ -53,6 +53,18 @@ pub fn needs(kind: &str) -> Option<&'static str> {
     }
 }
 
+/// `needs(kind)` when it isn't installed for an app in `parent` with `opts`: what
+/// `create` refuses on before it starts, so the New sheet can offer installing it.
+pub fn missing(kind: &str, parent: &Path, opts: &Options) -> Option<&'static str> {
+    let need = needs(kind)?;
+    let has = match need {
+        "php" => opts.contains_key("php"),
+        "node" => opts.contains_key("node") || apps::runtime_version("node", parent).is_some(),
+        rt => apps::runtime_version(rt, parent).is_some(),
+    };
+    (!has).then_some(need)
+}
+
 pub(crate) fn composer() -> Result<PathBuf> {
     let phar = home().join("bin").join("composer.phar");
     if !phar.exists() {
@@ -400,6 +412,11 @@ pub fn create(
     if dir.exists() {
         bail!("{} already exists", dir.display());
     }
+    match missing(kind, parent, opts) {
+        Some("php") => bail!("Install a PHP version first"),
+        Some(rt) => bail!("Install {0} in Settings › {0} first", runtimes::name(rt)),
+        None => {}
+    }
     fs::create_dir_all(home().join("log"))?;
     let log = fs::File::create(log_file(name))?;
     let result = build(kind, name, parent, &dir, opts, size, &log);
@@ -721,6 +738,15 @@ mod tests {
         let log = fs::read_to_string(log_file("repo")).unwrap();
         assert!(log.starts_with("==> Set up\n"), "{log}");
         assert!(log.ends_with("Done\n"), "{log}");
+        // A missing PHP or runtime is refused before there's a log: a form error, not a failed build.
+        assert_eq!(missing("laravel", &parent, &none), Some("php"));
+        let php = Options::from([("php".into(), "8.4".into())]);
+        assert_eq!(missing("laravel", &parent, &php), None);
+        assert_eq!(missing("go", &parent, &none), Some("go"));
+        assert_eq!(missing("static", &parent, &none), None);
+        let err = create("go", "svc", &parent, &none, LOG_SIZE).unwrap_err();
+        assert_eq!(err.to_string(), "Install Go in Settings › Go first");
+        assert!(!log_file("svc").exists());
         unsafe { std::env::remove_var("ANVIL_HOME") };
     }
 

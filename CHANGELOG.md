@@ -28,6 +28,7 @@ contain breaking changes.
 - Add Folder of Applications… on a folder that is one project offers to add it as one application instead of serving its subfolders, and an empty folder says it has none yet.
 - Changing an app's PHP version says which extensions it is building beside the version, and under it which ones the new version runs without.
 - Remove Link… asks first and says what goes: the app's processes stop and its settings in Anvil are deleted; its folder stays.
+- New Application says a missing PHP or runtime in the form, with an Install button, before anything is made; reopening the sheet keeps the typed name.
 
 ### Added
 

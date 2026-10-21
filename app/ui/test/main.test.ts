@@ -1988,6 +1988,33 @@ describe("new application", () => {
     expect($("#new-error").textContent).toBe("/Users/x/Sites/shop already exists");
     $("#new-cancel").click();
   });
+
+  test("a missing PHP is a form error with Install; the typed name stays on reopen", async () => {
+    await openSheet();
+    await pick("laravel");
+    fill("blog");
+    const created = calls("create_app").length;
+    w.mockNeed = { id: "php", name: "PHP", version: "8.4" };
+    submit();
+    await wait(80);
+    expect(calls("create_app").length).toBe(created);
+    expect($("#new-error").hidden).toBe(false);
+    expect($("#new-error").textContent).toBe("Laravel needs PHP, which isn't installed. Install PHP 8.4");
+    $("#new-cancel").click();
+    await openSheet();
+    expect(($("#new-name") as HTMLInputElement).value).toBe("blog");
+    submit();
+    await wait(80);
+    w.mockNeed = null;
+    ($("#new-error .inline-action") as HTMLElement).click();
+    await wait(80);
+    expect(calls("php_install").at(-1)![1]).toEqual({ version: "8.4" });
+    expect($("#new-error").hidden).toBe(true);
+    submit();
+    await wait(80);
+    expect(calls("create_app").length).toBe(created + 1);
+    $("#new-done").click();
+  });
 });
 
 describe("show hidden", () => {

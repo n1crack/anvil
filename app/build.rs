@@ -15,6 +15,7 @@ const COMMANDS: &[&str] = &[
     "link_folder",
     "create_app",
     "create_options",
+    "create_needs",
     "create_log",
     "create_reveal",
     "park_folder",

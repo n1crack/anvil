@@ -86,6 +86,7 @@ const kinds = picker({
   onPick: (id) => {
     newKind = id;
     localStorage.setItem("newKind", id);
+    $("#new-error").hidden = true; // what the last template lacked
     loadOptions(id);
   },
   none: "No templates match",
@@ -187,8 +188,8 @@ export function openNewApp() {
     }
     parent.selectedIndex = 0;
   };
+  // The name typed last stays until an app is made with it.
   const name = $("#new-name");
-  name.value = "";
   name.oninput = () => {
     name.value = name.value.toLowerCase().replace(/[^a-z0-9.-]/g, "-");
     preview();
@@ -218,15 +219,45 @@ $("#new-existing").onclick = async () => {
   if (await addAppFolder()) $("#new-app").close();
 };
 $("#new-cancel").onclick = () => $("#new-app").close();
-$("#new-form").onsubmit = (e) => {
+$("#new-form").onsubmit = async (e) => {
   e.preventDefault();
   const name = $("#new-name").value.trim();
   const parent = $("#new-parent").value;
   if (!name) return $("#new-name").focus();
   if (!parent || parent === "choose") return $("#new-parent").focus();
   if (list().querySelector(".kind-none:not([hidden])")) return; // nothing matches the search
+  // A missing PHP or runtime is said here with its Install, before anything is made.
+  const need = await invoke("create_needs", { kind: newKind, parent, options: { ...chosen } }).catch(() => null);
+  if (need) return showNeed(need);
   create(newKind, name, parent);
 };
+
+/** The form error for a template's missing PHP or runtime, with a button that installs
+ * it; once installed the error goes and Create works. */
+function showNeed(need: { id: string; name: string; version: string }) {
+  const what = `${need.name} ${need.version}`;
+  const template = TEMPLATES.find((t) => t[0] === newKind)?.[1] ?? newKind;
+  const install = el("button", "inline-action", `Install ${what}`);
+  install.type = "button";
+  install.onclick = async () => {
+    install.disabled = true;
+    install.textContent = `Installing ${what}…`;
+    try {
+      if (need.id === "php") await invoke("php_install", { version: need.version });
+      else await invoke("runtime_install", { id: need.id, version: need.version });
+      await call("state");
+      await loadOptions(newKind); // the PHP or Node select now has a version to offer
+      $("#new-error").hidden = true;
+      $("#new-create").focus();
+    } catch (e) {
+      install.disabled = false;
+      install.textContent = `Install ${what}`;
+      $("#new-error").replaceChildren(`${String(e)} `, install);
+    }
+  };
+  $("#new-error").replaceChildren(`${template} needs ${need.name}, which isn't installed. `, install);
+  $("#new-error").hidden = false;
+}
 
 /* ---------- Creating ---------- */
 
@@ -372,6 +403,7 @@ export async function create(kind: string, name: string, parent: string) {
     $("#new-done").textContent = "Close";
   } else {
     setHead("ok", `${name} is ready`);
+    $("#new-name").value = "";
     await call("state");
   }
   $("#new-done").disabled = false;
