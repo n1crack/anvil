@@ -43,7 +43,9 @@ export function updateBar(popAt: (anchor: Element, pop: HTMLElement, focus?: HTM
     const update: Release | null = st?.update ?? null;
     const relaunch = !update && !!st?.relaunch;
     bar.hidden = !update && !relaunch;
-    const toggle = el("button", "update-toggle", update ? "Update available" : "Relaunch") as HTMLButtonElement;
+    const toggle = el("button", "update-toggle", update ? "Update" : "Relaunch") as HTMLButtonElement;
+    // "available" goes in a narrow window, next to the setup buttons (style.css).
+    if (update) toggle.append(el("span", "update-more", " available"));
     toggle.title = update ? "A new version of Anvil" : "A newer build of Anvil is on disk";
     toggle.onclick = () => {
       if (wasOpen) return (wasOpen = false);

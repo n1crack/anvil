@@ -17,6 +17,7 @@ contain breaking changes.
 - Release notes in an update read as text, without markdown marks.
 - Processes: Clear log asks before it empties the log file.
 - Processes: the Status column stays readable while a log is open, also at the smallest window size.
+- The titlebar's setup and update buttons stay on one line in a small window; Update available looks like a button.
 
 ## [0.2.1] - 2026-10-21
 

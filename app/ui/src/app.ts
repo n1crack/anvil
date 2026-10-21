@@ -153,8 +153,8 @@ async function loadSetup(busy?: string) {
     bar.append(b);
   }
   if (!st.php) {
-    const b = el("button", null, busy === "php" ? "Installing PHP…" : "Install PHP 8.4");
-    b.title = "PHP for PHP applications; no password needed";
+    const b = el("button", null, busy === "php" ? "Installing PHP…" : "Install PHP");
+    b.title = "PHP 8.4 for PHP applications; no password needed";
     b.disabled = !!busy;
     b.onclick = async () => {
       loadSetup("php");

@@ -2008,9 +2008,14 @@ kbd {
   background: var(--steel-pane);
   color: var(--text);
   font-size: 12px;
+  white-space: nowrap;
 }
-.update .update-toggle { padding: 0 4px; border-color: transparent; background: none; color: var(--muted); }
-.update .update-toggle:hover, .update .update-toggle[aria-expanded="true"] { color: var(--text); }
+/* A button like the setup ones beside it, not status text. */
+.update .update-toggle:hover, .update .update-toggle[aria-expanded="true"] { background: var(--steel-hover); }
+/* The titlebar is about 480px at the smallest window: setup and update share it. */
+@media (max-width: 900px) {
+  .titlebar:has(.setup:not([hidden])) .update-more { display: none; }
+}
 .update-note { color: var(--muted); }
 .update-pop { width: 280px; }
 .update-pop .update-note { color: var(--text); }
@@ -3038,6 +3043,7 @@ a.pkg-adv-title:hover { text-decoration: underline; }
   border-radius: var(--radius-s);
   background: var(--steel-pane);
   color: var(--text);
+  white-space: nowrap;
   font-size: 12px;
 }
 .setup .setup-go {
