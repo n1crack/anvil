@@ -77,6 +77,7 @@ contain breaking changes.
 - A closed or minimized window no longer reloads after every action; it catches up when it is shown again.
 - Anvil frees the main window's memory after it has been closed for 10 minutes; opening it again shows the same app and tab.
 - Anvil uses much less CPU while it starts with many apps.
+- Less CPU while an app starts.
 
 ## [0.2.1] - 2026-10-21
 

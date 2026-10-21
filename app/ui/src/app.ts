@@ -351,13 +351,33 @@ export function toggle(name, open = collapsed.has(name)) {
 export function markBox(m, badge) {
   const box = el("span", "mark-box");
   box.append(m);
-  if (badge) {
-    const b = el("span", `run-badge ${badge}`);
-    b.title = { on: "Running", warm: "Starting", bad: "Failed to start" }[badge];
-    box.append(b);
-    box.classList.add("running");
-  }
+  setBadge(box, badge);
   return box;
+}
+
+function setBadge(box, badge) {
+  $(".run-badge", box)?.remove();
+  box.classList.toggle("running", !!badge);
+  if (!badge) return;
+  const b = el("span", `run-badge ${badge}`);
+  b.title = { on: "Running", warm: "Starting", bad: "Failed to start" }[badge];
+  box.append(b);
+}
+
+const BADGES = { running: "on", starting: "warm", crashed: "bad" };
+const STATE_TITLES = { running: "Running", starting: "Starting", crashed: "A process crashed" };
+
+/** An app row's dot: green while anything of the app runs, amber while its server starts,
+ * red after a crash. */
+function appBadge(box, state) {
+  setBadge(box, state && BADGES[state]);
+  if (state === "crashed") $(".run-badge", box).title = STATE_TITLES.crashed;
+}
+
+/** A worktree row's branch glyph, coloured as an app's dot. */
+function wtState(m, state) {
+  m.className = `wt-glyph ${BADGES[state] ?? ""}`;
+  m.title = STATE_TITLES[state] ?? "Stopped";
 }
 
 /** The names linked to one folder: the app is the parked one, else the first by name, as
@@ -386,10 +406,9 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   // A worktree: a bare branch glyph on the tree line, no mark of its own (that's an app's);
   // green while it runs, amber while it starts, red after a crash.
   const childMark = () => {
-    const state = snap.app_states[s.name];
-    const m = el("span", `wt-glyph ${{ running: "on", starting: "warm", crashed: "bad" }[state] ?? ""}`);
+    const m = el("span");
     m.innerHTML = BRANCH;
-    m.title = { running: "Running", starting: "Starting", crashed: "A process crashed" }[state] ?? "Stopped";
+    wtState(m, snap.app_states[s.name]);
     return m;
   };
   const text = document.createElement("span");
@@ -455,10 +474,8 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   }
   if (child) b.append(childMark(), text, end);
   else {
-    const state = s.hiddenApp ? undefined : snap.app_states[s.name];
-    // Green while anything of the app runs, amber while its server starts, red after a crash.
-    const box = markBox(mark(s), state && { running: "on", starting: "warm", crashed: "bad" }[state]);
-    if (state === "crashed") $(".run-badge", box).title = "A process crashed";
+    const box = markBox(mark(s), null);
+    appBadge(box, s.hiddenApp ? undefined : snap.app_states[s.name]);
     b.append(box, text, end);
   }
   b.onclick = () => select(s.name);
@@ -2566,25 +2583,41 @@ function renderRunSettings(s, root) {
   auto.onchange = () => call("set_app", { site: s.name, autostart: auto.checked });
 }
 
-// While an app is starting, check back until its port answers. Only the list dots
-// and the run box change, so nothing the user is typing gets redrawn.
+// While an app is starting, check back until its port answers: the dots and run errors
+// alone (`run_states`, no scan). Only the dots that changed and the run box are
+// redrawn, so nothing the user is typing or hovering is.
 let starting = false; // that check on its way
-setInterval(async () => {
+export async function checkStarting() {
   if (starting || !shown() || mode !== "apps" || !snap || !Object.values(snap.app_states).includes("starting")) return;
   starting = true;
+  const asked = snapAsked;
+  let next;
   try {
-    if (!(await askSnap("state"))) return;
+    next = await invoke("run_states");
   } catch {
     return;
   } finally {
     starting = false;
   }
-  if (mode !== "apps") return;
-  renderList();
+  // A whole snapshot asked for since is newer.
+  if (mode !== "apps" || snapShown > asked) return;
+  const before = snap.app_states;
+  Object.assign(snap, next);
+  const changed = new Set([...Object.keys(before), ...Object.keys(snap.app_states)].filter((k) => before[k] !== snap.app_states[k]));
+  // "Running only" may take a row out or put one in.
+  if (changed.size && filterOf("apps").running) renderList();
+  else
+    for (const b of document.querySelectorAll<HTMLElement>("#list .item:not(.hidden-app)"))
+      if (changed.has(b.dataset.name!)) {
+        const state = snap.app_states[b.dataset.name!];
+        if (b.classList.contains("child")) wtState($(".wt-glyph", b), state);
+        else appBadge($(".mark-box", b), state);
+      }
   const s = snap.sites.find((x) => x.name === selected);
   const root = $("#site");
   if (s && PROCESS_KINDS.has(s.kind) && $(".run-box", root)) renderRunState(s, root);
-}, 1500);
+}
+setInterval(checkStarting, 1500);
 
 /** Focus a sidebar row, scrolling only when it is out of view. */
 export function focusRow(row: HTMLElement | null) {

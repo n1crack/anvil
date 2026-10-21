@@ -3,6 +3,7 @@
 // ui/test/permissions.test.ts checks the lists match.
 const COMMANDS: &[&str] = &[
     "state",
+    "run_states",
     "performance",
     "activity",
     "agent_activity",

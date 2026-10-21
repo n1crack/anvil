@@ -389,22 +389,44 @@ fn notify_crashes(handle: &AppHandle, new: &[(String, anvil::apps::Exit)]) {
     }
 }
 
-fn snapshot(app: &App) -> Res<Snapshot> {
-    let cfg = anvil::load().map_err(err)?;
-    let https_port = anvil::public_https_port(&cfg);
-    let http_port = anvil::public_http_port(&cfg);
-    // Always a new scan: the app list shows a folder added or removed at once.
-    let sites: Vec<Site> = scan_sites(&cfg).to_vec();
+/// Each app's sidebar dot (`app_states`) as it is now.
+fn states_of(app: &App, sites: &[Site]) -> std::collections::BTreeMap<String, &'static str> {
     let (live, crashed) = {
         let mut apps = anvil::lock(&app.apps);
         let live: Vec<String> = apps.list().into_iter().map(|(k, _, _)| k).collect();
         let crashed: Vec<String> = apps.crashed().into_iter().map(|(k, _)| k).collect();
         (live, crashed)
     };
-    let (up, broken) = compose_states(&sites);
-    let app_states = app_states(&sites, &live, &crashed, (&up, &broken), anvil::port_answers);
+    let (up, broken) = compose_states(sites);
+    app_states(sites, &live, &crashed, (&up, &broken), anvil::port_answers)
+}
+
+/// The dots and run errors alone, for the list's check while an app starts.
+#[derive(Serialize)]
+struct RunStates {
+    app_states: std::collections::BTreeMap<String, &'static str>,
+    app_errors: std::collections::BTreeMap<String, String>,
+}
+
+/// `state`'s `app_states` and `app_errors` without its scan: from the last one, which is
+/// what the list shows (a change that adds an app or moves a port clears it, `changed`).
+#[tauri::command(async)]
+fn run_states(app: State<App>) -> Res<RunStates> {
+    let cfg = anvil::load().map_err(err)?;
+    Ok(RunStates {
+        app_states: states_of(&app, &last_sites(&cfg)),
+        app_errors: anvil::lock(&app.app_errors).clone(),
+    })
+}
+
+fn snapshot(app: &App) -> Res<Snapshot> {
+    let cfg = anvil::load().map_err(err)?;
+    let https_port = anvil::public_https_port(&cfg);
+    let http_port = anvil::public_http_port(&cfg);
+    // Always a new scan: the app list shows a folder added or removed at once.
+    let sites: Vec<Site> = scan_sites(&cfg).to_vec();
     Ok(Snapshot {
-        app_states,
+        app_states: states_of(app, &sites),
         app_errors: anvil::lock(&app.app_errors).clone(),
         kinds: anvil::apps::KINDS
             .iter()
@@ -940,6 +962,17 @@ fn sites_of(cfg: &Config) -> std::sync::Arc<Vec<Site>> {
     let key = serde_json::to_string(cfg).unwrap_or_default();
     if let Some((at, k, all)) = &*anvil::lock(&SITES)
         && at.elapsed() < SITES_FOR
+        && *k == key
+    {
+        return all.clone();
+    }
+    scan_sites(cfg)
+}
+
+/// The last scan of this config however old, else a new one.
+fn last_sites(cfg: &Config) -> std::sync::Arc<Vec<Site>> {
+    let key = serde_json::to_string(cfg).unwrap_or_default();
+    if let Some((_, k, all)) = &*anvil::lock(&SITES)
         && *k == key
     {
         return all.clone();
@@ -4765,6 +4798,7 @@ fn main() {
         .manage(App::default())
         .invoke_handler(tauri::generate_handler![
             state,
+            run_states,
             performance,
             activity,
             agent_activity,

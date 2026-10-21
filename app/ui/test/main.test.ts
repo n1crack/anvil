@@ -324,6 +324,33 @@ describe("sidebar", () => {
     await wait(80);
     expect(badge("shop")).toBeNull();
   });
+
+  test("while an app starts only the dots are asked for and redrawn, until it answers", async () => {
+    w.mockSnap.app_states = { vuefinder: "starting" };
+    await wait(550);
+    w.refresh();
+    await wait(80);
+    const { checkStarting } = await import("../src/app");
+    const badge = (name: string) => $(`#list [data-name="${name}"] .run-badge`);
+    const shopRow = $('#list [data-name="shop"]');
+    const states = calls("state").length;
+    w.mockSnap.app_states = { vuefinder: "running", shop: "crashed" };
+    await checkStarting();
+    expect(calls("run_states").length).toBeGreaterThan(0);
+    expect(calls("state").length).toBe(states);
+    expect(badge("vuefinder").className).toBe("run-badge on");
+    expect([badge("shop").className, badge("shop").title]).toEqual(["run-badge bad", "A process crashed"]);
+    // The rows themselves stay: nothing else of the list is drawn again.
+    expect($('#list [data-name="shop"]')).toBe(shopRow);
+    // Nothing starts any more: no more asking.
+    const asked = calls("run_states").length;
+    await checkStarting();
+    expect(calls("run_states").length).toBe(asked);
+    w.mockSnap.app_states = {};
+    await wait(550);
+    w.refresh();
+    await wait(80);
+  });
 });
 
 describe("overview", () => {

@@ -714,6 +714,8 @@ const mockHandle = (cmd, a) => {
   const ov = a?.site && mockOv[a.site];
   if (window.mockFail?.[cmd]) throw window.mockFail[cmd];
   switch (cmd) {
+    case "run_states":
+      return { app_states: mockSnap.app_states, app_errors: mockSnap.app_errors };
     case "state":
     case "app_run":
     case "worktree_adopt":
