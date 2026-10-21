@@ -308,6 +308,8 @@ export interface Settings {
     installed: boolean;
     default: boolean;
     pinned_by: string[];
+    /** The installed patch release, "8.4.23". */
+    full: string | null;
     opcache: "builtin" | "ready" | "missing";
     opcache_building: boolean;
     /** The catalog, each on or off for every app on the version. */

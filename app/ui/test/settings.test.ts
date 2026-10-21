@@ -70,7 +70,7 @@ describe("versions", () => {
   test("PHP: the default is marked, missing versions are muted with Install only", async () => {
     await open("php");
     const rows = $$("#versions .ver");
-    expect(rows.map((r) => r.querySelector(".ver-label")?.textContent)).toEqual(["PHP 8.5", "PHP 8.4", "PHP 8.3", "PHP 8.2", "PHP 8.1"]);
+    expect(rows.map((r) => r.querySelector(".ver-label")?.textContent)).toEqual(["PHP 8.5.8", "PHP 8.4.23", "PHP 8.3", "PHP 8.2", "PHP 8.1"]);
     const def = rows[1];
     expect(def.classList.contains("is-default")).toBe(true);
     expect(def.querySelector(".ver-mark svg")).not.toBeNull();
@@ -114,7 +114,7 @@ describe("versions", () => {
     await wait(150);
   });
 
-  const phpRow = (v: string) => $$("#versions .ver").find((r) => r.querySelector(".ver-label")?.textContent === `PHP ${v}`)!;
+  const phpRow = (v: string) => $$("#versions .ver").find((r) => r.querySelector(".ver-label")?.textContent?.match(/^PHP (\d+\.\d+)/)?.[1] === v)!;
   const buttons = (r: HTMLElement) => [...r.querySelectorAll("button")].map((b) => b.textContent);
   async function withOpcache83(run: () => Promise<void>) {
     w.mockPhpInstalled = ["8.5", "8.4", "8.3"];

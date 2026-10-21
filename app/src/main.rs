@@ -3473,6 +3473,8 @@ fn open_url(url: String) -> Res<()> {
 struct PhpVersion {
     version: &'static str,
     installed: bool,
+    /// The installed patch release, "8.4.23".
+    full: Option<String>,
     default: bool,
     /// Apps pinned to it: it can't be uninstalled until they are unpinned.
     pinned_by: Vec<String>,
@@ -3685,6 +3687,11 @@ fn settings(handle: AppHandle) -> Res<Settings> {
             .map(|v| PhpVersion {
                 version: v,
                 installed: installed.iter().any(|i| i == v),
+                full: installed
+                    .iter()
+                    .any(|i| i == v)
+                    .then(|| anvil::opcache::installed_full(v).ok())
+                    .flatten(),
                 default: cfg.php.as_deref() == Some(*v),
                 pinned_by: anvil::pinned_to(&cfg, "php", v),
                 opcache: anvil::opcache::state(v),

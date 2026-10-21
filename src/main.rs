@@ -1823,12 +1823,11 @@ fn run() -> Result<()> {
                     opcache::State::Missing => dim(format!("no opcache (anvil php opcache {v})")),
                 };
                 let patch = match updates.iter().find(|(m, ..)| *m == v) {
-                    Some((_, have, new)) => {
-                        format!("  {have} · {new} available (anvil php update {v})")
-                    }
+                    Some((_, _, new)) => format!("  {new} available (anvil php update {v})"),
                     None => String::new(),
                 };
-                println!("{v}  {opcache}{mark}{patch}");
+                let full = opcache::installed_full(&v).unwrap_or_else(|_| v.clone());
+                println!("{full}  {opcache}{mark}{patch}");
             }
         }
         Cmd::Use { version } => {

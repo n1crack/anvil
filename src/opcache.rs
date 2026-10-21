@@ -241,7 +241,7 @@ pub fn prune_sources() {
 }
 
 /// The exact version (`8.4.23`) of the installed PHP `minor`.
-pub(crate) fn installed_full(minor: &str) -> Result<String> {
+pub fn installed_full(minor: &str) -> Result<String> {
     let out = crate::platform::command(crate::php_bin(minor))
         .args(["-n", "-r", "echo PHP_VERSION;"])
         .output()

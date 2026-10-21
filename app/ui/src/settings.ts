@@ -771,7 +771,7 @@ export function render() {
   $("#versions").replaceChildren(
     ...s.php.map((v) =>
       versionRow(
-        `PHP ${v.version}`,
+        `PHP ${v.full ?? v.version}`,
         v,
         installing.has(`php@${v.version}`),
         phpBusy,
@@ -802,7 +802,7 @@ export function render() {
   }
 }
 
-/** A version's newer patch after its name: "8.4.23 · 8.4.27 available" with Update,
+/** A version's newer patch after its name: "8.4.27 available" with Update,
  * "Updating to 8.4.27…" while it installs, then "Updated to 8.4.27". */
 function phpPatch(v: Settings["php"][number]) {
   if (!v.installed) return undefined;
@@ -819,7 +819,7 @@ function phpPatch(v: Settings["php"][number]) {
       installing.delete(`update@${v.version}`);
       render();
     });
-    box.append(`${v.available[0]} · ${v.available[1]} available`, update);
+    box.append(`${v.available[1]} available`, update);
   } else if (v.updated) {
     box.textContent = `Updated to ${v.updated}`;
   } else return undefined;
