@@ -34,6 +34,25 @@ pub fn pick_cli(exe: &Path, user_home: &Path, exists: impl Fn(&Path) -> bool) ->
 
 use crate::user_home;
 
+/// `cli`, or when it lies inside a Linux AppImage (`appdir`, its mount, gone once the app
+/// quits) a copy of it in `<home>/bin` the shims can still run, made anew each time so
+/// an updated AppImage brings its CLI.
+#[cfg(unix)]
+fn lasting_cli(cli: PathBuf, appdir: Option<&Path>, home: &Path) -> Result<PathBuf> {
+    if !appdir.is_some_and(|d| cli.starts_with(d)) {
+        return Ok(cli);
+    }
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin)?;
+    // Beside it first, then renamed over: a shim running the old copy keeps it.
+    let tmp = bin.join(".anvil.new");
+    fs::copy(&cli, &tmp)?;
+    crate::platform::set_mode(&tmp, 0o755)?;
+    let lasting = bin.join("anvil");
+    fs::rename(&tmp, &lasting)?;
+    Ok(lasting)
+}
+
 /// Write the shims into `<home>/shims`.
 #[cfg(windows)]
 pub fn install(home: &Path) -> Result<()> {
@@ -75,6 +94,8 @@ pub fn install(home: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let exe = std::env::current_exe().unwrap_or_default();
     let cli = pick_cli(&exe, &user_home(), Path::exists);
+    let appdir = std::env::var_os("APPDIR").map(PathBuf::from);
+    let cli = lasting_cli(cli, appdir.as_deref(), home)?;
     let dir = home.join("shims");
     fs::create_dir_all(&dir)?;
     for tool in TOOLS {
@@ -589,6 +610,27 @@ mod tests {
         assert_eq!(shell_rc_files(&d), vec![d.join(first)]);
         fs::write(d.join(other), "").unwrap();
         assert_eq!(shell_rc_files(&d), vec![d.join(first), d.join(other)]);
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_appimage_cli_is_copied_where_it_lasts() {
+        let d = tmp("appimage");
+        let mount = d.join("mount/usr/bin");
+        fs::create_dir_all(&mount).unwrap();
+        fs::write(mount.join("anvil"), "cli").unwrap();
+        let home = d.join("home");
+        let cli = lasting_cli(mount.join("anvil"), Some(&d.join("mount")), &home).unwrap();
+        assert_eq!(cli, home.join("bin/anvil"));
+        assert_eq!(fs::read_to_string(&cli).unwrap(), "cli");
+        // Outside an AppImage the CLI is used where it is.
+        let own = Path::new("/usr/bin/anvil").to_path_buf();
+        assert_eq!(lasting_cli(own.clone(), None, &home).unwrap(), own);
+        assert_eq!(
+            lasting_cli(own.clone(), Some(&d.join("mount")), &home).unwrap(),
+            own
+        );
         fs::remove_dir_all(d).unwrap();
     }
 

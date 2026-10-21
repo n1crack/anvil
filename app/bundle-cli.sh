@@ -21,7 +21,8 @@ build() {
     ;;
   *)
     cargo build --release --locked -p anvil --target "$1"
-    cp "target/$1/release/anvil" "app/binaries/anvil-$1"
+    target=${CARGO_TARGET_DIR:-target}
+    cp "$target/$1/release/anvil" "app/binaries/anvil-$1"
     ;;
   esac
 }
