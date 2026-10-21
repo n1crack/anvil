@@ -1038,7 +1038,7 @@ button.proc-name:hover { text-decoration: underline; }
   .dev-cmds-head > span { display: none; }
   .dev-cmds-head { justify-content: flex-end; }
 }
-.dev-cmds-head .dev-run { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 22px; padding: 0 8px; font-size: 12px; font-weight: 400; white-space: nowrap; }
+.dev-cmds-head .dev-run { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 22px; padding: 0 8px; color: var(--text); font-size: 12px; font-weight: 400; white-space: nowrap; }
 .dev-cmds-head .dev-chevron { font-size: 10px; }
 .dev-cmds-head .dev-run svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .dev-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; font-size: 12px; }
@@ -1720,7 +1720,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .page input::placeholder { color: var(--muted); }
 
-.below { margin-top: 8px; }
+.below { display: flex; gap: 8px; margin-top: 8px; }
 
 .page .row code {
   font: 12px ui-monospace, "SF Mono", Menlo, monospace;
@@ -3140,7 +3140,11 @@ a.pkg-adv-title:hover { text-decoration: underline; }
 .dev-bar button,
 .dev-conf-foot button,
 .dev-conf-draft button:not(.dev-conf-remove),
-.git-btn {
+.git-btn,
+.git-new,
+/* One class, so the Dev list's own smaller size for these two wins. */
+.dev-run,
+.dev-all {
   height: 26px;
   padding: 0 12px;
   border: 1px solid var(--edge);
@@ -3156,7 +3160,10 @@ a.pkg-adv-title:hover { text-decoration: underline; }
 .clean-all:hover,
 .dev-bar button:hover,
 .dev-conf-foot button:hover,
-.git-btn:hover { border-color: var(--cold); }
+.git-btn:hover,
+.git-new:hover,
+.dev-run:hover,
+.dev-all:hover:not(:disabled) { border-color: var(--cold); }
 
 /* ---------- Processes window ---------- */
 

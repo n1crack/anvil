@@ -91,7 +91,7 @@ function drawGit(name) {
       actions.append(btn);
     }
     if (worktrees) {
-      const add = el("button", null, "New Worktree…");
+      const add = el("button", "git-new", "New Worktree…");
       add.onclick = () => late.newWorktree(s);
       actions.append(add);
     }
