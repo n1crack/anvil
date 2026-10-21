@@ -232,9 +232,10 @@ function noSourcesText(s) {
   return "No logs yet. PHP errors show up here once a PHP version serves this app.";
 }
 
-function showEmpty(v, text) {
+/** The list's one line: why it is empty, or (`error`) why it couldn't be read. */
+function showEmpty(v, text, error = false) {
   textMode(v, false);
-  $(".logs-list", v.node).replaceChildren(el("li", "empty", text));
+  $(".logs-list", v.node).replaceChildren(el("li", error ? "empty error-text" : "empty", text));
   $(".logs-status", v.node).textContent = "";
   $(".logs-more", v.node).hidden = true;
 }
@@ -253,7 +254,7 @@ async function loadLogs(v, keepScroll = false) {
   try {
     page = await fetchPage(v, null);
   } catch (e) {
-    if (token === v.token) showEmpty(v, String(e));
+    if (token === v.token) showEmpty(v, String(e), true);
     return;
   }
   if (token !== v.token) return;

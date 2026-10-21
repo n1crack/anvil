@@ -2860,6 +2860,11 @@ button.log-file:hover { text-decoration-color: currentColor; }
 }
 
 .logs-list .empty { margin: 24px 8px; }
+/* A log or the requests that couldn't be read: said in red, selectable to copy. */
+.logs-list .empty.error-text { color: var(--danger); overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+/* A tab whose content couldn't be read: the error box in the tab's own column. */
+.pkg-body > .error,
+.res-body > .error { margin: 0 0 12px; }
 
 /* Requests: the Logs list's rows, in aligned columns; status colour as text only. */
 .req-bar select { flex: none; }

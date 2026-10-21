@@ -79,6 +79,7 @@ contain breaking changes.
 - Anvil uses much less CPU while it starts with many apps.
 - Less CPU while an app starts.
 - Less CPU while the Requests tab is open and no requests come in.
+- Logs and Requests say in red when a log can't be read, instead of looking empty; Packages' and Resources' errors line up with the tab.
 
 ## [0.2.1] - 2026-10-21
 

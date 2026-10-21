@@ -93,7 +93,7 @@ async function load(v) {
   try {
     page = await invoke("requests_read", { site: v.site, filter: filter(v), before: null });
   } catch (e) {
-    if (token === v.token) empty(v, String(e));
+    if (token === v.token) empty(v, String(e), true);
     return;
   }
   if (token !== v.token) return;
@@ -108,8 +108,8 @@ async function load(v) {
   $(".req-more", v.node).hidden = !page.truncated;
 }
 
-function empty(v, text) {
-  $(".req-list", v.node).replaceChildren(el("li", "empty", text));
+function empty(v, text, error = false) {
+  $(".req-list", v.node).replaceChildren(el("li", error ? "empty error-text" : "empty", text));
   $(".req-more", v.node).hidden = true;
 }
 
