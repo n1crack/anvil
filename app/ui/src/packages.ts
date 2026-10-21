@@ -244,7 +244,7 @@ export function drawPackages(name) {
     return body.append(el("p", "muted", "No composer.json, package.json, Cargo.toml, go.mod or .csproj in this folder."));
   }
   body.append(pinsLine(name, p));
-  body.append(el("p", "muted pkg-hint", "Key packages at a glance: + pins another installed package, × takes one off."));
+  body.append(el("p", "muted pkg-hint", "The packages that matter most, with their versions. + adds one, × removes it from this list."));
 
   // The two checks, set apart from the badges; what they last found under them.
   const up = updatesOf(name);
