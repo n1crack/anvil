@@ -41,14 +41,15 @@ jobs:
         working-directory: tap
         run: |
           mkdir -p Casks Formula
-          base="https://github.com/${{ github.repository }}/releases/download/v#{version}"
+          # A formula reads its body top to bottom: #{version} in url would still be
+          # empty, so the formula gets the version written out (and infers it from the url).
+          base="https://github.com/${{ github.repository }}/releases/download/v$VERSION"
           cat > Casks/anvil.rb <<EOF
           cask "anvil" do
             version "$VERSION"
             sha256 "$DMG"
 
-            url "$base/Anvil_#{version}_universal.dmg",
-                verified: "github.com/${{ github.repository }}/"
+            url "https://github.com/${{ github.repository }}/releases/download/v#{version}/Anvil_#{version}_universal.dmg"
             name "Anvil"
             desc "Local development environment for web projects"
             homepage "https://anvil.tr/"
@@ -64,8 +65,7 @@ jobs:
           class Anvil < Formula
             desc "Local development environment for web projects"
             homepage "https://anvil.tr/"
-            url "$base/anvil-#{version}-universal-apple-darwin.tar.gz"
-            version "$VERSION"
+            url "$base/anvil-$VERSION-universal-apple-darwin.tar.gz"
             sha256 "$CLI"
             license "GPL-3.0-only"
 
