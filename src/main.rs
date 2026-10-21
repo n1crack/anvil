@@ -2190,9 +2190,20 @@ fn run() -> Result<()> {
         Cmd::Tld { tld } => {
             if let Some(t) = tld {
                 edit(&mut cfg, |c| set_tld(c, &t))?;
+                // A new site's scheme, with the port when it isn't the standard one.
+                let (scheme, port, standard) = if cfg.https_default == Some(true) {
+                    ("https", anvil::public_https_port(&cfg), 443)
+                } else {
+                    ("http", anvil::public_http_port(&cfg), 80)
+                };
+                let port = if port == standard {
+                    String::new()
+                } else {
+                    format!(":{port}")
+                };
                 println!(
                     "Applications now answer at {}",
-                    cyan(format!("https://<name>.{}", cfg.tld))
+                    cyan(format!("{scheme}://<name>.{}{port}", cfg.tld))
                 );
                 if !setup_status(&cfg).resolver {
                     print_resolver_step(&cfg);
