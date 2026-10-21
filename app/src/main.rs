@@ -4359,8 +4359,8 @@ fn open(site: String, target: String) -> Res<()> {
 #[tauri::command(async)]
 fn icon(site: String) -> Option<String> {
     use base64::Engine;
-    let cfg = anvil::load().ok()?;
-    let s = anvil::sites(&cfg).into_iter().find(|s| s.name == site)?;
+    // From the last scan: the list asks for every app's icon at once.
+    let s = find_site(&site).ok()?;
     let path = anvil::icon(&s)?;
     let mime = match path.extension()?.to_str()? {
         "svg" => "image/svg+xml",
@@ -4380,11 +4380,7 @@ fn icon(site: String) -> Option<String> {
 /// When the app's code last changed (unix seconds), for "edited 2 h ago".
 #[tauri::command(async)]
 fn touched(site: String) -> Res<Option<u64>> {
-    let cfg = anvil::load().map_err(err)?;
-    let s = anvil::sites(&cfg)
-        .into_iter()
-        .find(|s| s.name == site)
-        .ok_or_else(|| format!("No application named {site}"))?;
+    let s = find_site(&site).map_err(|_| format!("No application named {site}"))?;
     Ok(anvil::resources::touched(&s.path))
 }
 
