@@ -530,7 +530,26 @@ fn changed(handle: &AppHandle) {
     if let (Some(tray), Ok(menu)) = (handle.tray_by_id("anvil"), menu(handle)) {
         let _ = tray.set_menu(Some(menu));
     }
-    for w in handle.webview_windows().values() {
+    // A refresh reads the whole state and the setup's checks: a window that can't be seen
+    // gets it once it is focused again (`refresh_if_stale`).
+    for (label, w) in handle.webview_windows() {
+        if w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false) {
+            let _ = w.eval("window.refresh && window.refresh()");
+        } else {
+            anvil::lock(&STALE).insert(label);
+        }
+    }
+}
+
+/// Windows that missed a `changed` while hidden or minimized.
+static STALE: Mutex<std::collections::BTreeSet<String>> =
+    Mutex::new(std::collections::BTreeSet::new());
+
+/// A window shown again catches up with what changed meanwhile.
+fn refresh_if_stale(w: &tauri::Window) {
+    if anvil::lock(&STALE).remove(w.label())
+        && let Some(w) = w.app_handle().get_webview_window(w.label())
+    {
         let _ = w.eval("window.refresh && window.refresh()");
     }
 }
@@ -4823,9 +4842,12 @@ fn main() {
                     update_dock(w.app_handle());
                 }
                 WindowEvent::Destroyed => update_dock(w.app_handle()),
-                // A local build replaced the binary: offer Relaunch when the user comes back.
-                WindowEvent::Focused(true) if rebuilt() => {
-                    let _ = w.app_handle().emit("update", ());
+                WindowEvent::Focused(true) => {
+                    refresh_if_stale(w);
+                    // A local build replaced the binary: offer Relaunch when the user comes back.
+                    if rebuilt() {
+                        let _ = w.app_handle().emit("update", ());
+                    }
                 }
                 _ => {}
             }

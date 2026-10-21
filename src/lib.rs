@@ -2189,12 +2189,19 @@ pub struct Setup {
     pub node: bool,
 }
 
-/// Whether `git` runs here.
+/// Whether `git` runs here. Once it has, it is not asked again: every window refresh
+/// asks (`setup_status`). Until then it is, so an install shows at once.
 pub fn git_installed() -> bool {
-    platform::command("git")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
+    static FOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    use std::sync::atomic::Ordering::Relaxed;
+    FOUND.load(Relaxed) || {
+        let ok = platform::command("git")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        FOUND.store(ok, Relaxed);
+        ok
+    }
 }
 
 /// Windows: Git for Windows, through winget (Windows asks once when its installer goes
@@ -2393,8 +2400,25 @@ pub fn setup_status(cfg: &Config) -> Setup {
 }
 
 /// Whether the system trusts `root`: the Mac's `security verify-cert`; on Windows, the
-/// certificate is in the user's or the machine's Root store.
+/// certificate is in the user's or the machine's Root store. A yes is kept for the same
+/// file (its size and time): every window refresh asks, and on Windows that is a
+/// PowerShell. A new certificate, or a no, is asked again.
+// ponytail: trust removed by hand in Keychain Access shows after a relaunch.
 fn cert_trusted(root: &Path) -> bool {
+    static TRUSTED: std::sync::Mutex<Option<(PathBuf, u64, Option<std::time::SystemTime>)>> =
+        std::sync::Mutex::new(None);
+    let id = fs::metadata(root)
+        .ok()
+        .map(|m| (root.to_path_buf(), m.len(), m.modified().ok()));
+    if id.is_some() && *lock(&TRUSTED) == id {
+        return true;
+    }
+    let ok = cert_trusted_now(root);
+    *lock(&TRUSTED) = if ok { id } else { None };
+    ok
+}
+
+fn cert_trusted_now(root: &Path) -> bool {
     if cfg!(windows) {
         let script = "$c = New-Object Security.Cryptography.X509Certificates.X509Certificate2 $env:ANVIL_CERT; \
              if ((Test-Path \"Cert:\\CurrentUser\\Root\\$($c.Thumbprint)\") -or (Test-Path \"Cert:\\LocalMachine\\Root\\$($c.Thumbprint)\")) { exit 0 } else { exit 1 }";
