@@ -72,25 +72,31 @@ async function check() {
     sub.textContent = String(e);
     sub.classList.add("error-text");
     $("#upd-retry").hidden = false;
+    $("#upd-retry").focus();
     return;
   }
   if (!found) {
     title.textContent = "Anvil is up to date";
     sub.textContent = `Version ${current}`;
     $("#upd-close").textContent = "Close";
+    $("#upd-close").focus();
     return;
   }
   title.textContent = `Anvil ${found.version} is available`;
   sub.textContent = `You have ${current}. Anvil restarts; the apps running now start again.`;
   $("#upd-close").textContent = "Later";
   go.hidden = false;
+  go.focus();
   if (found.notes) {
     notes.replaceChildren(...renderNotes(found.notes));
     notes.hidden = false;
   }
 }
 
-$("#upd-close").onclick = () => window.__TAURI__.window.getCurrentWindow().close();
+const close = () => window.__TAURI__.window.getCurrentWindow().close();
+$("#upd-close").onclick = close;
+// Esc closes, as Close does, but not while the update downloads.
+document.addEventListener("keydown", (e) => e.key === "Escape" && !busy && close());
 $("#upd-go").onclick = async () => {
   busy = true;
   $("#upd-close").disabled = true;

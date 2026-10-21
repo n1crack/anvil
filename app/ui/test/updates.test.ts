@@ -13,6 +13,7 @@ beforeAll(async () => {
   document.documentElement.innerHTML = html.replace(/<!doctype html>/i, "").replace(/<script[\s\S]*?<\/script>|<link[^>]*>/g, "");
   await import("./mock.js");
   w.__TAURI__.app = { getVersion: async () => "0.2.1" };
+  w.__TAURI__.window = { getCurrentWindow: () => ({ close: () => (w.closed = (w.closed ?? 0) + 1) }) };
   w.__TAURI__.event.listen = async (name: string, f: () => void) => {
     if (name === "update-recheck") recheck = f;
     return () => {};
@@ -27,6 +28,7 @@ test("up to date: the version, Close, no Restart", () => {
   expect($("#upd-close").textContent).toBe("Close");
   expect($("#upd-go").hidden).toBe(true);
   expect($("#upd-notes").hidden).toBe(true);
+  expect(document.activeElement).toBe($("#upd-close"));
 });
 
 test("a newer release: what's new as headings and bullets, Later and Restart to update", async () => {
@@ -39,6 +41,7 @@ test("a newer release: what's new as headings and bullets, Later and Restart to 
   expect($("#upd-title").textContent).toBe("Anvil 0.2.2 is available");
   expect($("#upd-close").textContent).toBe("Later");
   expect($("#upd-go").hidden).toBe(false);
+  expect(document.activeElement).toBe($("#upd-go"));
   const notes = $("#upd-notes");
   expect(notes.hidden).toBe(false);
   expect([...notes.children].map((c) => c.tagName)).toEqual(["P", "H2", "UL", "H2", "UL"]);
@@ -63,10 +66,28 @@ test("a failed check: the reason under the title, Try Again checks again", async
   expect($("#upd-status").textContent).toBe("");
   expect($("#upd-retry").hidden).toBe(false);
   expect($("#upd-go").hidden).toBe(true);
+  expect(document.activeElement).toBe($("#upd-retry"));
   Object.defineProperty(w, "mockUpdate", { configurable: true, writable: true, value: null });
   $("#upd-retry").click();
   await wait();
   expect($("#upd-title").textContent).toBe("Anvil is up to date");
   expect($("#upd-sub").classList.contains("error-text")).toBe(false);
   expect($("#upd-retry").hidden).toBe(true);
+});
+
+test("Esc closes the window, but not while the update downloads", async () => {
+  const esc = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  w.closed = 0;
+  w.mockUpdate = { version: "0.2.2", notes: null };
+  recheck();
+  await wait();
+  w.mockDelay = { update_install: 80 };
+  $("#upd-go").click();
+  await wait(10);
+  esc();
+  expect(w.closed).toBe(0);
+  await wait(120);
+  w.mockDelay = {};
+  esc();
+  expect(w.closed).toBe(1);
 });
