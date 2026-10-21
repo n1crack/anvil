@@ -80,7 +80,12 @@ describe("state in words", () => {
     await wait(80);
     const badges = $$("#list .run-badge");
     expect(badges.length).toBeGreaterThan(0);
-    for (const b of badges) expect([b.getAttribute("role"), b.getAttribute("aria-label")]).toEqual(["img", "Running"]);
+    // A server elsewhere isn't run: its badge says it answers.
+    for (const b of badges)
+      expect([b.getAttribute("role"), b.getAttribute("aria-label")]).toEqual([
+        "img",
+        b.closest('[data-name="shared-db"]') ? "Answers" : "Running",
+      ]);
     $('[data-mode="apps"]').click();
     await wait(80);
   });

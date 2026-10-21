@@ -350,10 +350,10 @@ export function toggle(name, open = collapsed.has(name)) {
 
 /** A sidebar mark with its run state as a badge on the corner: `on`, `warm` (starting)
  * or `bad` (failed); none when stopped. Apps and services both use it. */
-export function markBox(m, badge) {
+export function markBox(m, badge, title?: string) {
   const box = el("span", "mark-box");
   box.append(m);
-  setBadge(box, badge);
+  setBadge(box, badge, title);
   return box;
 }
 

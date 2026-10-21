@@ -288,6 +288,15 @@ interface ServiceInfo {
   log: string;
   suggested_port: number | null;
   suggested_web_port: number | null;
+  /** Its kind, or an external one's: mysql, postgres, redis or other. */
+  speaks: string;
+  /** External: the host it is reached at. */
+  host: string | null;
+  /** Docker: the container, and whether it was there before Anvil. */
+  container: string | null;
+  adopted: boolean;
+  /** Why its state can't be known (Docker isn't running). */
+  problem: string | null;
 }
 
 export interface ServiceRow extends ServiceInfo {

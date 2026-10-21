@@ -35,7 +35,11 @@ export let services: ServiceRow[] = [];
 let svcSelected = localStorage.getItem("service");
 // After a removal that kept the data: a muted line over the list says where it is.
 let keptNote = "";
-const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp", versitygw: "S3", silo: "Si" };
+const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp", versitygw: "S3", silo: "Si", docker: "Dk", other: "Ex" };
+/** Not a program of Anvil's: a Docker container, a server elsewhere. */
+const outside = (svc) => svc.kind === "docker" || svc.kind === "external";
+/** A server elsewhere: no Start or Stop, its dot says whether it answers. */
+const external = (svc) => svc.kind === "external";
 
 // A service's last failed action, by id: said on its page, under its name.
 const svcErrors = new Map<string, string>();
@@ -149,7 +153,9 @@ export function renderModes() {
 for (const b of document.querySelectorAll<HTMLElement>(".modes [role=tab]")) b.onclick = () => setMode(b.dataset.mode);
 
 function serviceMark(svc, cls = "mark") {
-  const m = el("span", `${cls} svc-mark svc-${svc.kind}`, ABBR[svc.kind] ?? "?");
+  // An external one by what it speaks: My, Pg, Rd or Ex.
+  const kind = external(svc) ? svc.speaks : svc.kind;
+  const m = el("span", `${cls} svc-mark svc-${kind}`, ABBR[kind] ?? "?");
   m.setAttribute("aria-hidden", "true");
   return m;
 }
@@ -159,12 +165,13 @@ function serviceRow(svc) {
   b.dataset.name = svc.id;
   b.setAttribute("aria-current", String(svc.id === svcSelected));
   const text = el("span", "text");
-  text.append(el("span", "name", svc.id), el("span", "sub", `${svc.name} ${svc.version} on port ${svc.port}`));
+  text.append(el("span", "name", svc.id), el("span", "sub", subLine(svc)));
   // As an app's row: the run state is a badge on the mark, and the tags end where the
   // apps' kind labels do.
   const end = el("span", "end");
   for (const t of svc.tags.slice(0, 2)) end.append(el("span", "tag", t));
-  b.append(markBox(serviceMark(svc), svc.running ? "on" : svc.error ? "bad" : null), text, end);
+  const badge = svc.running ? "on" : svc.error ? "bad" : null;
+  b.append(markBox(serviceMark(svc), badge, external(svc) && svc.running ? "Answers" : undefined), text, end);
   b.onclick = () => selectService(svc.id);
   b.oncontextmenu = (e) => {
     e.preventDefault();
@@ -174,24 +181,81 @@ function serviceRow(svc) {
   return b;
 }
 
-/** A service row's menu: what its page offers, Remove last. */
+/** The line under a row's name: kind, version and port; a Docker one's image; where an
+ * external one is. */
+function subLine(svc) {
+  if (external(svc)) return `${svc.name} at ${svc.host}:${svc.port}`;
+  if (svc.kind === "docker") return svc.port ? `${svc.version} on port ${svc.port}` : svc.version;
+  return `${svc.name} ${svc.version} on port ${svc.port}`;
+}
+
+/** A service row's menu: what its page offers, Rename and Remove last. An external one
+ * has nothing to start, a Docker one no data folder or log of Anvil's. */
 async function serviceMenu(svc) {
   const item = (text, action) => M.MenuItem.new({ text, action });
   const fail = (e) => showError(String(e));
-  const items = [
-    item(svc.running ? "Stop" : "Start", () => serviceCall("service_run", { id: svc.id, action: svc.running ? "stop" : "start" })),
-    M.PredefinedMenuItem.new({ item: "Separator" }),
-    ...svc.clients.map((c) => item(`Open in ${c}`, () => openClient(svc, c, chosenDb[svc.id]))),
-  ];
+  const run = (action) => () => serviceCall("service_run", { id: svc.id, action });
+  const state: any[] = [];
+  if (!external(svc)) {
+    state.push(item(svc.running ? "Stop" : "Start", run(svc.running ? "stop" : "start")));
+    if (svc.running) state.push(item("Restart", run("restart")));
+  }
+  const open = svc.clients.map((c) => item(`Open in ${c}`, () => openClient(svc, c, chosenDb[svc.id])));
   if (svc.web && svc.running)
-    items.push(item(svc.kind === "mailpit" ? "Open Inbox" : "Open Web Console", () => invoke("open_url", { url: svc.web }).catch(fail)));
-  items.push(item(`Show Data in ${fileManager}`, () => invoke("open_service", { id: svc.id, what: "data" }).catch(fail)));
-  if (svc.running) items.push(item("Show Log in Processes", () => invoke("show_processes", { select: `service:${svc.id}` }).catch(fail)));
-  items.push(
-    M.PredefinedMenuItem.new({ item: "Separator" }),
-    item("Remove Service…", () => removeService(svc, $(`#list .item[data-name="${CSS.escape(svc.id)}"]`))),
-  );
+    open.push(item(svc.kind === "mailpit" ? "Open Inbox" : "Open Web Console", () => invoke("open_url", { url: svc.web }).catch(fail)));
+  if (!outside(svc)) {
+    open.push(item(`Show Data in ${fileManager}`, () => invoke("open_service", { id: svc.id, what: "data" }).catch(fail)));
+    if (svc.running) open.push(item("Show Log in Processes", () => invoke("show_processes", { select: `service:${svc.id}` }).catch(fail)));
+  }
+  const row = () => $(`#list .item[data-name="${CSS.escape(svc.id)}"]`);
+  const last = [item("Rename…", () => renameService(svc)), item("Remove Service…", () => removeService(svc, row()))];
+  const items = [state, open, last]
+    .filter((g) => g.length)
+    .flatMap((g, i) => (i ? [M.PredefinedMenuItem.new({ item: "Separator" }), ...g] : g));
   (await M.Menu.new({ items: await Promise.all(items) })).popup();
+}
+
+/** Rename…: the page's name becomes a field; Return or leaving it saves, Esc keeps the name. */
+function renameService(svc) {
+  const head = $("#site .site-name");
+  if (!head || $("#site").dataset.service !== svc.id) return;
+  const input = el("input", "site-name-edit") as HTMLInputElement;
+  input.value = svc.id;
+  input.spellcheck = false;
+  input.setAttribute("aria-label", `New name for ${svc.id}`);
+  input.oninput = () => (input.value = input.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"));
+  let done = false;
+  const finish = async (save: boolean) => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    // The heading back first: a focused field would hold off the redraw.
+    input.replaceWith(head);
+    if (!save || !name || name === svc.id) return;
+    try {
+      services = await invoke("rename_service", { id: svc.id, name });
+      svcErrors.delete(svc.id);
+      svcSelected = name;
+      localStorage.setItem("service", name);
+    } catch (e) {
+      // Said under the name, where it was typed.
+      svcErrors.set(svc.id, String(e));
+    }
+    renderServiceList();
+    delete $("#site").dataset.service;
+    renderService();
+    renderModes();
+  };
+  input.onkeydown = (e) => {
+    if (e.key === "Enter" || e.key === "Escape") {
+      e.preventDefault();
+      finish(e.key === "Enter");
+    }
+  };
+  input.onblur = () => finish(true);
+  head.replaceWith(input);
+  input.focus();
+  input.select();
 }
 
 export function renderServiceList() {
@@ -273,7 +337,7 @@ export function renderService() {
       el(
         "p",
         "muted",
-        "Add MySQL, PostgreSQL, Redis, Mailpit or S3 storage. Each one gets its own name, port and data, and you can add as many as you need.",
+        "Add MySQL, PostgreSQL, Redis, Mailpit or S3 storage. Each one gets its own name, port and data, and you can add as many as you need. A Docker container or a server elsewhere can be added too.",
       ),
       add,
     );
@@ -291,14 +355,16 @@ export function renderService() {
   drawServiceMeta(svc, root);
 
   $(".run-box .dot", root).className = `dot ${svc.running ? "on" : svc.error ? "bad" : ""}`;
-  $(".state-text", root).textContent = svc.running ? "Running" : "Stopped";
-  $('[data-svc="start"]', root).hidden = svc.running;
-  $('[data-svc="stop"]', root).hidden = !svc.running;
+  // An external one isn't run: whether it answers.
+  const ext = external(svc);
+  $(".state-text", root).textContent = ext ? (svc.running ? "Answers" : "Not answering") : svc.running ? "Running" : "Stopped";
+  $('[data-svc="start"]', root).hidden = svc.running || ext;
+  $('[data-svc="stop"]', root).hidden = !svc.running || ext;
   for (const b of root.querySelectorAll("[data-svc]")) {
     b.onclick = () => serviceCall("service_run", { id: svc.id, action: b.dataset.svc });
   }
   const err = $(".run-error", root);
-  const failed = svcErrors.get(svc.id) ?? svc.error;
+  const failed = svcErrors.get(svc.id) ?? svc.error ?? svc.problem;
   err.textContent = failed ?? "";
   err.hidden = !failed;
 
@@ -321,6 +387,8 @@ export function renderService() {
   log.setAttribute("aria-label", svc.running ? `Show the log of ${svc.id} in Processes` : "Log: not running");
   log.setAttribute("aria-disabled", String(!svc.running));
   log.onclick = () => svc.running && invoke("show_processes", { select: `service:${svc.id}` }).catch((e) => showError(String(e)));
+  // Docker keeps a container's data and log; an external one's are where it runs.
+  data.hidden = log.hidden = outside(svc);
   // One database app: an icon beside the folder; several: a row of them under the contents.
   const one = $('[data-svc-open="client"]', root);
   one.hidden = svc.clients.length !== 1;
@@ -339,6 +407,8 @@ export function renderService() {
     };
   };
   portInput("#svc-port-edit", svc.port, false);
+  // Set where it runs: the line under the name says it.
+  $("#svc-port-edit", root).closest(".row").hidden = outside(svc);
   $(".svc-web", root).hidden = !svc.web_port;
   if (svc.kind !== "mailpit") $('label[for="svc-web-edit"]', root).textContent = "Console port";
   if (svc.web_port) portInput("#svc-web-edit", svc.web_port, true);
@@ -396,6 +466,8 @@ export function renderService() {
   const env = envFor(svc);
   $(".svc-env", root).textContent = env;
   $(".svc-copy", root).onclick = (e) => copy(env, e.currentTarget);
+  // Nothing to connect with (a Docker container, an "other" server): no Connect.
+  $(".connect-head", root).hidden = $(".env", root).hidden = $(".svc-apps-hint", root).hidden = !env;
   drawWrite(svc, root);
 
   const clients = $(".svc-clients", root);
@@ -419,7 +491,7 @@ const written = new Map<string, string>(); // "service/app" -> what the last wri
 /** Under Connect: write its lines into each listed app's .env, asked first with the keys. */
 function drawWrite(svc, root) {
   const box = $(".svc-write", root);
-  const apps = svc.apps.filter((a) => snap.sites.some((s) => s.name === a));
+  const apps = svc.env ? svc.apps.filter((a) => snap.sites.some((s) => s.name === a)) : [];
   box.hidden = !apps.length;
   box.replaceChildren();
   const keys = envFor(svc)
@@ -456,6 +528,14 @@ function drawWrite(svc, root) {
 /** The line under the name, as an app's: kind · version · port · data size (once
  * an app's Resources measured it) · what is notable about its state. */
 function drawServiceMeta(svc, root) {
+  if (outside(svc)) {
+    const parts = external(svc)
+      ? [`External ${svc.name === "External" ? "server" : svc.name}`, `${svc.host}:${svc.port}`]
+      : [svc.adopted ? "Docker container" : "Docker image", svc.version, svc.port ? `port ${svc.port}` : "no published port"];
+    if (svc.kind === "docker") parts.push(svc.adopted ? "Anvil never deletes it" : svc.enabled ? "starts with Anvil" : "");
+    $(".meta", root).replaceChildren(...metaParts(parts.filter(Boolean).map((t) => el("span", null, t))));
+    return;
+  }
   const parts = [svc.name, svc.version, `port ${svc.port}`];
   const use = [...resCache.values()].flatMap((r) => r?.services ?? []).find((u) => u.anvil === svc.id && u.data_bytes != null);
   if (use) parts.push(`data ${bytes(use.data_bytes)}`);
@@ -499,10 +579,24 @@ export async function copy(text, btn) {
 
 /** Remove a service: one bubble, two labelled answers. The main one (Return) keeps the data. */
 function removeService(svc, at: HTMLElement) {
-  const what = { mailpit: "caught mail", redis: "saved keys", versitygw: "buckets", silo: "buckets" }[svc.kind] ?? "databases";
+  const what =
+    { mailpit: "caught mail", redis: "saved keys", versitygw: "buckets", silo: "buckets", docker: "data" }[svc.kind] ?? "databases";
   const used = svc.apps.length
     ? ` ${svc.apps.join(", ")} ${svc.apps.length === 1 ? "uses" : "use"} it; ${svc.apps.length === 1 ? "its" : "their"} .env stays as it is.`
     : "";
+  // Not Anvil's to delete: it only leaves the list.
+  if (svc.adopted || external(svc)) {
+    const stays = svc.adopted ? `Its container stays in Docker as it is.` : `The server isn’t touched.`;
+    confirmPop(
+      at,
+      `Remove ${svc.id} from Anvil? ${stays}${used}`,
+      "Remove",
+      () => serviceCall("remove_service", { id: svc.id, deleteData: false }),
+      [],
+      "left",
+    );
+    return;
+  }
   const remove = (wipe: boolean) => {
     keptNote = wipe ? "" : `Kept ${svc.id}’s ${what} for when you add ${svc.id} again.`;
     serviceCall("remove_service", { id: svc.id, deleteData: wipe });
@@ -529,8 +623,27 @@ const SVC_ICONS: Record<string, string> = {
   redis: "M12 3 3 7.5l9 4.5 9-4.5L12 3Zm-9 9 9 4.5 9-4.5M3 16.5 12 21l9-4.5",
   mailpit: "M3.5 6.5h17v11h-17zM3.5 7l8.5 6.5L20.5 7",
   versitygw: "M4 6c0-1.4 3.6-2.5 8-2.5s8 1.1 8 2.5-3.6 2.5-8 2.5S4 7.4 4 6Zm0 0 2 13c.2 1 2.8 1.5 6 1.5s5.8-.5 6-1.5l2-13",
+  // A box for a container, a globe for a server elsewhere.
+  docker: "M12 3 4 7v10l8 4 8-4V7l-8-4Zm-8 4 8 4 8-4M12 11v10",
+  external: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-9 9h18M12 3c2.4 2.5 3.6 5.5 3.6 9s-1.2 6.5-3.6 9c-2.4-2.5-3.6-5.5-3.6-9S9.6 5.5 12 3Z",
 };
 SVC_ICONS.silo = SVC_ICONS.versitygw;
+SVC_ICONS.adopt = SVC_ICONS.docker;
+
+/** What the Add sheet offers besides Anvil's own programs. */
+const OUTSIDE_KINDS = [
+  { kind: "docker", name: "Docker image", category: "Docker" },
+  { kind: "adopt", name: "Docker container", category: "Docker" },
+  { kind: "external", name: "External server", category: "External" },
+].map((k) => ({ ...k, versions: [], installed_versions: [], licenses: [], unsupported: {} }));
+const isOutside = (kind: string) => OUTSIDE_KINDS.some((k) => k.kind === kind);
+/** The usual port of what an external server speaks. */
+const EXT_PORT: Record<string, number> = { mysql: 3306, postgres: 5432, redis: 6379 };
+const OUTSIDE_NOTE: Record<string, string> = {
+  docker: "Pulled the first time; its data stays in Docker volumes.",
+  adopt: "Anvil starts and stops it, and never deletes it.",
+  external: "Anvil doesn’t run it; its dot is green while it answers.",
+};
 const svcIcon = (kind: string) =>
   `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="${SVC_ICONS[kind] ?? SVC_ICONS.db}"/></svg>`;
 const SVC_ABOUT: Record<string, string> = {
@@ -540,6 +653,9 @@ const SVC_ABOUT: Record<string, string> = {
   mailpit: "Catches the mail apps send",
   versitygw: "S3-compatible file storage",
   silo: "S3-compatible file storage",
+  docker: "Runs an image, like mongo:7",
+  adopt: "One that is there already",
+  external: "A server Anvil doesn’t run",
 };
 
 const svcPicker = picker({
@@ -567,7 +683,7 @@ function kindAbout(k) {
 /** The add-service sheet; `want` starts it on a kind and version (a project's .anvil.toml). */
 export async function openAddService(want?: { kind: string; version: string }) {
   try {
-    svcKinds = await invoke("service_kinds");
+    svcKinds = [...(await invoke("service_kinds")), ...OUTSIDE_KINDS];
   } catch (e) {
     showError(String(e));
     return;
@@ -624,6 +740,12 @@ function drawLicense() {
 
 /** Add waits for the license, unless it was accepted before. */
 function syncAdd() {
+  // Docker's: once Docker answers (and for a container, one is picked).
+  if (isOutside(svcKind)) {
+    ($("#svc-create") as HTMLButtonElement).disabled =
+      (svcKind !== "external" && dockerProblem !== "") || (svcKind === "adopt" && !$("#svc-container").value);
+    return;
+  }
   const k = svcKinds.find((x) => x.kind === svcKind);
   const accepted = k?.licenses?.find((l) => l[0] === $("#svc-version").value)?.[2];
   ($("#svc-create") as HTMLButtonElement).disabled =
@@ -634,6 +756,22 @@ $("#svc-license-check").onchange = syncAdd;
 function fillService() {
   const k = svcKinds.find((x) => x.kind === svcKind) ?? svcKinds[0];
   svcKind = k.kind;
+  // Each kind's own fields: Anvil's programs have a version, Docker an image, a server a host.
+  const group = isOutside(k.kind) ? k.kind : "anvil";
+  for (const f of document.querySelectorAll<HTMLElement>("#svc-form [data-svc-for]"))
+    f.hidden = !f.dataset.svcFor!.split(" ").includes(group);
+  $("#svc-name").required = group === "anvil";
+  $("#svc-name").placeholder = group === "anvil" ? "" : "Optional";
+  $("#svc-port-note").textContent = "";
+  if (group !== "anvil") {
+    $("#svc-name").value = "";
+    $("#svc-port").value = k.kind === "external" ? String(EXT_PORT[$("#svc-ext-kind").value] ?? "") : "";
+    $("#svc-error").hidden = true;
+    noteService();
+    drawLicense();
+    if (k.kind !== "external") checkDocker(k.kind);
+    return;
+  }
   $("#svc-name").value = k.suggested_name;
   const ver = $("#svc-version");
   ver.replaceChildren();
@@ -656,6 +794,10 @@ function fillService() {
 
 /** One quiet line under the name: what gets downloaded, the port and where data goes. */
 function noteService() {
+  if (isOutside(svcKind)) {
+    $("#svc-note").textContent = OUTSIDE_NOTE[svcKind];
+    return;
+  }
   const k = svcKinds.find((x) => x.kind === svcKind);
   const v = $("#svc-version").value;
   const name = $("#svc-name").value || "…";
@@ -672,13 +814,83 @@ function noteService() {
   $("#svc-error").hidden = !why;
 }
 
+// Why Docker can't be used, said in the sheet ("" once it answered, null while asked).
+let dockerProblem: string | null = null;
+// The containers Docker listed, for the Container choice.
+let dockerSeen: any[] = [];
+
+/** Ask Docker for its containers: the Container choice, or inline why Docker can't be
+ * used. Anvil never installs it. */
+async function checkDocker(kind: string) {
+  dockerProblem = null;
+  syncAdd();
+  const err = $("#svc-error");
+  const pick = $("#svc-container") as HTMLSelectElement;
+  try {
+    dockerSeen = await invoke("docker_containers");
+    dockerProblem = "";
+  } catch (e) {
+    const why = String(e);
+    dockerSeen = [];
+    dockerProblem = /installed/.test(why)
+      ? "Docker isn’t installed. Anvil uses the Docker on this computer and doesn’t install it."
+      : /running/.test(why)
+        ? "Docker isn’t running. Start it, then pick this again."
+        : why;
+  }
+  if (svcKind !== kind) return;
+  pick.replaceChildren(...dockerSeen.map((c) => new Option(`${c.name} (${c.image}, ${c.state})`, c.name)));
+  const none = kind === "adopt" && !dockerProblem && !dockerSeen.length;
+  err.textContent = dockerProblem || (none ? "Docker has no container that isn’t a service already." : "");
+  err.hidden = !err.textContent;
+  syncAdd();
+}
+$("#svc-ext-kind").onchange = () => ($("#svc-port").value = String(EXT_PORT[$("#svc-ext-kind").value] ?? ""));
+
+/** What the sheet sends for the chosen kind, or why it can't yet. */
+function addArgs(name: string | null, port: number, apps: string[]): [string, Record<string, unknown>] | string {
+  const val = (sel: string) => ($(sel) as HTMLInputElement).value.trim();
+  const portOk = (lowest: number) => port >= lowest && port <= 65535;
+  if (svcKind === "docker") {
+    if (!val("#svc-image")) return "Give the image to run, like mongo:7.";
+    if (!portOk(1024)) return "Use a port between 1024 and 65535.";
+    const inside = Number.parseInt(val("#svc-cport"), 10);
+    const env = val("#svc-env")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const image = val("#svc-image");
+    return ["add_docker_service", { name, image, container: null, port, containerPort: Number.isNaN(inside) ? null : inside, env, apps }];
+  }
+  if (svcKind === "adopt") {
+    const c = dockerSeen.find((x) => x.name === val("#svc-container"));
+    if (!c) return "Pick a container.";
+    return ["add_docker_service", { name, image: null, container: c.name, port: c.port, containerPort: c.container_port, env: [], apps }];
+  }
+  if (svcKind === "external") {
+    if (!val("#svc-host")) return "Give the host, like db.example.com.";
+    if (!portOk(1)) return "Use a port between 1 and 65535.";
+    const opt = (sel: string) => val(sel) || null;
+    const password = ($("#svc-password") as HTMLInputElement).value || null;
+    const kind = val("#svc-ext-kind");
+    return [
+      "add_external_service",
+      { name, kind, host: val("#svc-host"), port, user: opt("#svc-user"), password, database: opt("#svc-database"), apps },
+    ];
+  }
+  if (!portOk(1024)) return "Use a port between 1024 and 65535.";
+  const version = $("#svc-version").value || null;
+  const acceptLicense = ($("#svc-license-check") as HTMLInputElement).checked;
+  return ["add_service", { kind: svcKind, name, port, version, tags: [], apps, acceptLicense }];
+}
+
 let progressTimer: ReturnType<typeof setInterval> | undefined;
 
 function setServiceBusy(on) {
   $("#svc-create").disabled = on;
   if (!on) syncAdd();
   $("#svc-create").textContent = on ? "Adding…" : "Add";
-  for (const i of $("#svc-form").querySelectorAll("input, select")) i.disabled = on;
+  for (const i of $("#svc-form").querySelectorAll("input, select, textarea")) i.disabled = on;
   // A first add downloads (Redis builds) for a while: what it is at, beside the buttons.
   clearInterval(progressTimer);
   $("#svc-progress").textContent = "";
@@ -711,28 +923,24 @@ $("#svc-form").onsubmit = async (e) => {
   e.preventDefault();
   const name = $("#svc-name").value.trim();
   const app = $("#svc-app").value;
-  // Ports below 1024 need root; above 65535 don't exist. Say so before anything is installed.
+  // Ports below 1024 need root (an external server's may be anything); above 65535 don't
+  // exist. Said before anything is installed.
   const port = Number.parseInt($("#svc-port").value, 10);
-  if (!(port >= 1024 && port <= 65535)) {
-    $("#svc-error").textContent = "Use a port between 1024 and 65535.";
+  const ask = addArgs(name || null, port, app ? [app] : []);
+  if (typeof ask === "string") {
+    $("#svc-error").textContent = ask;
     $("#svc-error").hidden = false;
     return;
   }
   setServiceBusy(true);
+  // A name left empty is picked by Anvil: the new one is the one that wasn't there.
+  const before = new Set(services.map((s) => s.id));
   try {
-    services = await invoke("add_service", {
-      kind: svcKind,
-      name: name || null,
-      port,
-      version: $("#svc-version").value || null,
-      tags: [],
-      apps: app ? [app] : [],
-      acceptLicense: ($("#svc-license-check") as HTMLInputElement).checked,
-    });
+    services = await invoke(...ask);
     $("#new-service").close();
     keptNote = "";
-    svcSelected = name;
-    localStorage.setItem("service", name);
+    svcSelected = services.find((s) => !before.has(s.id))?.id ?? name;
+    localStorage.setItem("service", svcSelected ?? "");
     if (mode !== "services") setMode("services");
     else renderMain();
     renderModes();
@@ -745,6 +953,19 @@ $("#svc-form").onsubmit = async (e) => {
 
 renderModes();
 window.loadServices();
+
+/** Docker and external services change outside Anvil (a container stopped in a terminal, a
+ * server going down): while services show, asked again every 5 s, redrawn only when
+ * something changed. Anvil answers from what it last saw, so this stays cheap. */
+export async function pollOutside() {
+  if (document.hidden || mode !== "services" || !services.some(outside)) return;
+  const next = await invoke("services").catch(() => null);
+  if (!next || JSON.stringify(next) === JSON.stringify(services)) return;
+  services = next;
+  renderMain();
+  renderModes();
+}
+setInterval(pollOutside, 5000);
 
 /* ---------- What's inside: databases, keys, messages ---------- */
 
@@ -782,6 +1003,12 @@ async function renderContents(svc, root, action?) {
   // Only a database list needs its heading; keys and messages say what they are.
   $(".svc-contents-head", root).hidden = !svc.running || !["mysql", "postgres"].includes(svc.kind);
   const box = $(".svc-contents", root);
+  // Anvil doesn't look inside what it doesn't run.
+  if (outside(svc)) {
+    $(".svc-contents-head", root).hidden = true;
+    box.replaceChildren();
+    return;
+  }
   if (!svc.running) {
     box.replaceChildren(el("p", "procs-note", `Start ${svc.id} to see what’s inside.`));
     contents.delete(svc.id);

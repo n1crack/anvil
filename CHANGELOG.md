@@ -9,9 +9,12 @@ contain breaking changes.
 
 ### Added
 
-- PHP keeps itself on the newest patch release (Settings › PHP › Keep PHP up to date); off, Settings offers Update, and `anvil php update` does it from the CLI.
+- PHP keeps itself on the newest patch release (Settings › PHP › Update automatically); off, a version offers Update to the new one, and `anvil php update` does it from the CLI.
 - Packages tab: Install and Update for Composer and the app's JS package manager, with the output in Dev.
 - Settings › PHP lists Composer's global packages with Update, and installs Laravel Forge's CLI (`forge`) on request.
+- Docker services: Anvil runs an image for you or adds a container you already have, and starts, stops and restarts it (`anvil service add --docker mongo:7 --port 27017:27017`).
+- External services: a MySQL, PostgreSQL or Redis server elsewhere, with its .env lines and database apps; its dot is green while it answers (`anvil service add --external db.lan:3306 --kind mysql`).
+- A service's right-click menu has Restart and Rename….
 
 ## [0.3.0] - 2026-10-21
 

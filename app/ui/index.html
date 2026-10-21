@@ -339,19 +339,61 @@
       </div>
       <div id="svc-kinds" class="kind-list" role="listbox" tabindex="0" aria-label="Service"></div>
       <div class="picker-side">
+      <label class="field" data-svc-for="docker">
+        <span>Image</span>
+        <input id="svc-image" placeholder="mongo:7" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field" data-svc-for="adopt">
+        <span>Container</span>
+        <select id="svc-container"></select>
+      </label>
+      <label class="field" data-svc-for="external">
+        <span>Kind</span>
+        <select id="svc-ext-kind">
+          <option value="mysql">MySQL</option>
+          <option value="postgres">PostgreSQL</option>
+          <option value="redis">Redis</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
       <label class="field">
         <span>Name</span>
         <input id="svc-name" required autocomplete="off" spellcheck="false">
         <small id="svc-note"></small>
       </label>
-      <label class="field">
+      <label class="field" data-svc-for="anvil">
         <span>Version</span>
         <select id="svc-version"></select>
       </label>
-      <label class="field">
+      <label class="field" data-svc-for="external">
+        <span>Host</span>
+        <input id="svc-host" placeholder="db.example.com" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field" data-svc-for="anvil docker external">
         <span>Port</span>
         <input id="svc-port" inputmode="numeric" autocomplete="off" spellcheck="false" aria-describedby="svc-port-note">
         <small id="svc-port-note"></small>
+      </label>
+      <label class="field" data-svc-for="docker">
+        <span>Inside</span>
+        <input id="svc-cport" inputmode="numeric" placeholder="Container port; the same if empty" autocomplete="off" spellcheck="false" aria-label="Container port">
+      </label>
+      <label class="field" data-svc-for="docker">
+        <span>Variables</span>
+        <textarea id="svc-env" rows="2" placeholder="MONGO_INITDB_ROOT_PASSWORD=secret" spellcheck="false" aria-describedby="svc-env-note"></textarea>
+        <small id="svc-env-note">One KEY=value per line, like a root password.</small>
+      </label>
+      <label class="field" data-svc-for="external">
+        <span>User</span>
+        <input id="svc-user" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field" data-svc-for="external">
+        <span>Password</span>
+        <input id="svc-password" type="password" autocomplete="off">
+      </label>
+      <label class="field" data-svc-for="external">
+        <span>Database</span>
+        <input id="svc-database" autocomplete="off" spellcheck="false">
       </label>
       <label class="field">
         <span>Application</span>

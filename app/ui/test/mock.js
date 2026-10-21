@@ -404,6 +404,69 @@ window.mockServices = [
     clients: [],
   },
 ];
+// Docker and external services, as services::info shows them.
+const outsideRow = (o) => ({
+  web: null,
+  web_port: null,
+  installed: true,
+  enabled: false,
+  running: false,
+  tags: [],
+  apps: [],
+  env: "",
+  log: "/x",
+  suggested_port: null,
+  suggested_web_port: null,
+  clients: [],
+  host: null,
+  container: null,
+  adopted: false,
+  problem: null,
+  ...o,
+});
+window.mockServices.push(
+  outsideRow({
+    id: "mongo",
+    kind: "docker",
+    speaks: "docker",
+    name: "Docker",
+    category: "Docker",
+    version: "mongo:7",
+    port: 27017,
+    enabled: true,
+    running: true,
+    container: "anvil-mongo",
+  }),
+  outsideRow({
+    id: "legacy-db",
+    kind: "docker",
+    speaks: "docker",
+    name: "Docker",
+    category: "Docker",
+    version: "mariadb:11",
+    port: 3307,
+    container: "legacy-db",
+    adopted: true,
+  }),
+  outsideRow({
+    id: "shared-db",
+    kind: "external",
+    speaks: "mysql",
+    name: "MySQL",
+    category: "External",
+    version: "",
+    port: 3306,
+    running: true,
+    host: "db.example.com",
+    apps: ["shop"],
+    env: "DB_CONNECTION=mysql\nDB_HOST=db.example.com\nDB_PORT=3306\nDB_USERNAME=app\nDB_PASSWORD=secret\nDATABASE_URL=mysql://app:secret@db.example.com:3306/",
+    clients: ["TablePlus"],
+  }),
+);
+window.mockContainers = [
+  { name: "queue-redis", image: "redis:7-alpine", state: "running", port: 6380, container_port: 6379 },
+  { name: "old-mysql", image: "mysql:5.7", state: "exited", port: null, container_port: null },
+];
 // Logs and packages of a Laravel shop, close to a real one.
 {
   const now = Date.now();
@@ -957,9 +1020,37 @@ const mockHandle = (cmd, a) => {
       return { text: a.from ? "" : text, end_offset: text.length };
     }
     case "services":
+    case "add_service":
     case "remove_service":
     case "service_run":
       return mockServices;
+    case "docker_containers":
+      if (window.mockDockerError) throw window.mockDockerError;
+      return window.mockContainers;
+    case "add_docker_service":
+    case "add_external_service": {
+      const ext = cmd === "add_external_service";
+      const id = a.name ?? (ext ? `${a.kind}-swift-ember` : "mongo-swift-ember");
+      mockServices.push(
+        outsideRow({
+          id,
+          kind: ext ? "external" : "docker",
+          speaks: ext ? a.kind : "docker",
+          name: ext ? "MySQL" : "Docker",
+          category: ext ? "External" : "Docker",
+          version: ext ? "" : (a.image ?? "redis:7-alpine"),
+          port: a.port,
+          host: ext ? a.host : null,
+          adopted: !ext && !a.image,
+        }),
+      );
+      return mockServices;
+    }
+    case "rename_service": {
+      if (mockServices.some((s) => s.id === a.name)) throw `There's already a service called ${a.name}`;
+      mockServices.find((s) => s.id === a.id).id = a.name;
+      return mockServices;
+    }
     case "service_contents":
     case "service_data":
       return {

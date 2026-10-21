@@ -3196,7 +3196,7 @@ fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
         .into_iter()
         .map(|info| ServiceRow {
             error: errors.get(&info.id).cloned(),
-            clients: anvil::databases::clients(info.kind),
+            clients: anvil::databases::clients(info.speaks),
             info,
         })
         .collect())
@@ -3205,15 +3205,14 @@ fn services(app: State<App>) -> Res<Vec<ServiceRow>> {
 /// Start a service with `services` locked only around the bookkeeping: `launch` takes
 /// at least 300 ms, a first MySQL init much longer.
 fn start_service(app: &App, cfg: &Config, id: &str) {
-    let begun = anvil::lock(&app.services).begin(cfg, id);
-    let result = match begun {
-        Ok(true) => {
-            let launched = anvil::services::launch(cfg, id);
-            anvil::lock(&app.services).finish(id, launched)
+    let result = anvil::services::outside_run(cfg, id, "start").unwrap_or_else(|| {
+        match anvil::lock(&app.services).begin(cfg, id) {
+            Ok(true) => {}
+            begun => return begun.map(drop),
         }
-        Ok(false) => Ok(()),
-        Err(e) => Err(e),
-    };
+        let launched = anvil::services::launch(cfg, id);
+        anvil::lock(&app.services).finish(id, launched)
+    });
     let mut errors = anvil::lock(&app.service_errors);
     match result {
         Ok(()) => errors.remove(id),
@@ -3258,6 +3257,17 @@ fn service_run(
     } else {
         edit(|c| anvil::services::set_enabled(c, &id, action == "start"))?
     };
+    // A Docker container: docker does all three.
+    if let Some(done) = anvil::services::outside_run(&cfg, &id, &action) {
+        let mut errors = anvil::lock(&app.service_errors);
+        match done {
+            Ok(()) => errors.remove(&id),
+            Err(e) => errors.insert(id.clone(), err(e)),
+        };
+        drop(errors);
+        changed(&handle);
+        return services(app);
+    }
     if action != "start" {
         stop_service(&app, &id);
         anvil::lock(&app.service_errors).remove(&id);
@@ -3373,7 +3383,8 @@ fn db_open(name: String, database: Option<String>) -> Res<()> {
 #[tauri::command(async)]
 fn open_in_client(id: String, client: String, database: Option<String>) -> Res<()> {
     let cfg = anvil::load().map_err(err)?;
-    let kind = anvil::services::kind_of(&cfg, &id).map_err(err)?;
+    anvil::services::kind_of(&cfg, &id).map_err(err)?;
+    let kind = anvil::services::speaks(&cfg, &id);
     if !anvil::databases::clients(kind).contains(&client.as_str()) {
         return Err(format!("{client} isn't installed"));
     }
@@ -3448,7 +3459,134 @@ fn remove_service(
     // Stop first so the data folder isn't in use when it's deleted.
     stop_service(&app, &id);
     anvil::lock(&app.service_errors).remove(&id);
+    // A container Anvil made goes first (docker stops it, up to a minute); one that was
+    // there before stays.
+    let cfg = anvil::load().map_err(err)?;
+    anvil::services::drop_container(&cfg, &id, delete_data).map_err(err)?;
     edit(|c| anvil::services::remove(c, &id, delete_data))?;
+    changed(&handle);
+    services(app)
+}
+
+/// Add a Docker service: an `image` Anvil runs (pulled now, then started), or a
+/// `container` that is there already, which is only shown until it is started.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // one per field of the Add service sheet
+async fn add_docker_service(
+    handle: AppHandle,
+    name: Option<String>,
+    image: Option<String>,
+    container: Option<String>,
+    port: Option<u16>,
+    container_port: Option<u16>,
+    env: Vec<String>,
+    apps: Vec<String>,
+) -> Res<Vec<ServiceRow>> {
+    let (job_cfg, id) = edit(|c| {
+        let id = anvil::services::add_docker(
+            c,
+            name.as_deref(),
+            image.as_deref(),
+            container.as_deref(),
+            port,
+            container_port,
+            &env,
+        )?;
+        anvil::services::set_apps(c, &id, &apps)?;
+        Ok(id)
+    })?;
+    if image.is_some() {
+        let (h, job_id) = (handle.clone(), id.clone());
+        let started = tauri::async_runtime::spawn_blocking(move || {
+            anvil::services::ensure_installed(&job_cfg, &job_id)?;
+            let (cfg, ()) = anvil::update(|c| anvil::services::set_enabled(c, &job_id, true))?;
+            start_service(&h.state::<App>(), &cfg, &job_id);
+            anyhow::Ok(())
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        // A failed pull: the service goes again, as a failed install does.
+        if let Err(e) = started {
+            edit(|c| anvil::services::remove(c, &id, false))?;
+            return Err(err(e));
+        }
+    }
+    changed(&handle);
+    services(handle.state::<App>())
+}
+
+/// Add an external service: a server at `host` and `port` that Anvil connects apps to.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)] // one per field of the Add service sheet
+fn add_external_service(
+    handle: AppHandle,
+    app: State<App>,
+    name: Option<String>,
+    kind: String,
+    host: String,
+    port: u16,
+    user: Option<String>,
+    password: Option<String>,
+    database: Option<String>,
+    apps: Vec<String>,
+) -> Res<Vec<ServiceRow>> {
+    let ext = anvil::services::External {
+        kind,
+        host,
+        user,
+        password,
+        database,
+    };
+    edit(|c| {
+        let id = anvil::services::add_external(c, name.as_deref(), ext, port)?;
+        anvil::services::set_apps(c, &id, &apps)
+    })?;
+    changed(&handle);
+    services(app)
+}
+
+/// Containers the Add sheet can add, those already added left out; an error says
+/// Docker isn't installed or running.
+#[tauri::command(async)]
+fn docker_containers() -> Res<Vec<anvil::services::Container>> {
+    let cfg = anvil::load().map_err(err)?;
+    let added: Vec<&str> = cfg
+        .services
+        .values()
+        .filter_map(|s| Some(s.docker.as_ref()?.container.as_str()))
+        .collect();
+    let all = anvil::services::containers().map_err(err)?;
+    Ok(all
+        .into_iter()
+        .filter(|c| !added.contains(&c.name.as_str()))
+        .collect())
+}
+
+/// Rename a service; one of Anvil's that runs is stopped for it and started again.
+#[tauri::command(async)]
+fn rename_service(
+    handle: AppHandle,
+    app: State<App>,
+    id: String,
+    name: String,
+) -> Res<Vec<ServiceRow>> {
+    let was_running = anvil::lock(&app.services).running(&id);
+    stop_service(&app, &id);
+    let renamed = edit(|c| anvil::services::rename(c, &id, &name));
+    let (cfg, now) = match &renamed {
+        Ok((cfg, ())) => (cfg, name.as_str()),
+        Err(_) => (&anvil::load().map_err(err)?, id.as_str()),
+    };
+    {
+        let mut errors = anvil::lock(&app.service_errors);
+        if let Some(e) = errors.remove(&id) {
+            errors.insert(now.into(), e);
+        }
+    }
+    if was_running {
+        start_service(&app, cfg, now);
+    }
+    renamed?;
     changed(&handle);
     services(app)
 }
@@ -5246,6 +5384,10 @@ fn main() {
             service_installing,
             open_service,
             add_service,
+            add_docker_service,
+            add_external_service,
+            docker_containers,
+            rename_service,
             remove_service,
             open_url,
             app_run,

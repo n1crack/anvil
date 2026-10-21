@@ -1157,31 +1157,119 @@ describe("service page", () => {
     expect(calls("show_processes")).toHaveLength(n);
   });
 
-  test("a service row's right-click menu: Stop or Start, its client, data, log, Remove last", async () => {
-    await show("cache");
-    const texts = () => (w.mockMenu as any[]).map((i) => i.text ?? i.item);
-    $('#list [data-name="mysql"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+  const texts = () => (w.mockMenu as any[]).map((i) => i.text ?? i.item);
+  const rightClick = async (id: string) => {
+    $(`#list [data-name="${id}"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     await wait();
+  };
+  const menuItem = (text: string) => (w.mockMenu as any[]).find((i) => i.text === text);
+
+  test("a service row's right-click menu: Stop or Start, Restart, its client, data, log, Rename and Remove last", async () => {
+    await show("cache");
+    await rightClick("mysql");
     expect($('#list [data-name="mysql"]').getAttribute("aria-current")).toBe("true");
     expect(texts()).toEqual([
       "Stop",
+      "Restart",
       "Separator",
       "Open in TablePlus",
       "Show Data in Finder",
       "Show Log in Processes",
       "Separator",
+      "Rename…",
       "Remove Service…",
     ]);
-    (w.mockMenu as any[]).find((i) => i.text === "Show Log in Processes").action();
+    menuItem("Show Log in Processes").action();
     await wait();
     expect(calls("show_processes").at(-1)![1]).toEqual({ select: "service:mysql" });
-    // A stopped one: Start, and no log.
-    $('#list [data-name="postgres"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    menuItem("Restart").action();
     await wait();
-    expect(texts()).toEqual(["Start", "Separator", "Show Data in Finder", "Separator", "Remove Service…"]);
+    expect(calls("service_run").at(-1)![1]).toEqual({ id: "mysql", action: "restart" });
+    // A stopped one: Start, no Restart and no log.
+    await rightClick("postgres");
+    expect(texts()).toEqual(["Start", "Separator", "Show Data in Finder", "Separator", "Rename…", "Remove Service…"]);
     (w.mockMenu as any[])[0].action();
     await wait();
     expect(calls("service_run").at(-1)![1]).toEqual({ id: "postgres", action: "start" });
+    // A Docker container: run by docker, no data folder or log of Anvil's.
+    await rightClick("mongo");
+    expect(texts()).toEqual(["Stop", "Restart", "Separator", "Rename…", "Remove Service…"]);
+    // A server elsewhere: nothing to start; its database app.
+    await rightClick("shared-db");
+    expect(texts()).toEqual(["Open in TablePlus", "Separator", "Rename…", "Remove Service…"]);
+  });
+
+  test("Rename… makes the name a field: Return renames, a taken name says why under it", async () => {
+    await show("cache");
+    await rightClick("cache");
+    menuItem("Rename…").action();
+    const field = $("#site .site-name-edit") as HTMLInputElement;
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe("cache");
+    field.value = "Queue Store";
+    field.dispatchEvent(new Event("input"));
+    expect(field.value).toBe("queue-store");
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await wait(60);
+    expect(calls("rename_service").at(-1)![1]).toEqual({ id: "cache", name: "queue-store" });
+    expect($('#list [data-name="queue-store"]').getAttribute("aria-current")).toBe("true");
+    expect($("#site .site-name").textContent).toBe("queue-store");
+    // Esc keeps the name; a taken one is said where the name is.
+    await rightClick("queue-store");
+    menuItem("Rename…").action();
+    ($("#site .site-name-edit") as HTMLInputElement).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait();
+    expect($("#site .site-name").textContent).toBe("queue-store");
+    menuItem("Rename…").action();
+    const again = $("#site .site-name-edit") as HTMLInputElement;
+    again.value = "mysql";
+    again.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await wait(60);
+    expect($("#site .site-name").textContent).toBe("queue-store");
+    expect($("#site .run-error").textContent).toBe("There's already a service called mysql");
+    w.mockServices.find((s) => s.id === "queue-store").id = "cache";
+    w.loadServices();
+    await wait();
+  });
+
+  test("an external server: no Start or Stop, green while it answers, its .env lines", async () => {
+    await show("shared-db");
+    const row = $('#list [data-name="shared-db"]');
+    expect(row.querySelector(".sub")!.textContent).toBe("MySQL at db.example.com:3306");
+    expect(row.querySelector(".run-badge.on")).not.toBeNull();
+    expect($(".state-text").textContent).toBe("Answers");
+    expect([$('[data-svc="start"]').hidden, $('[data-svc="stop"]').hidden]).toEqual([true, true]);
+    expect([$('[data-svc-open="data"]').hidden, $('[data-svc-open="log"]').hidden]).toEqual([true, true]);
+    expect(($("#svc-port-edit").closest(".row") as HTMLElement).hidden).toBe(true);
+    expect($(".svc-env").textContent).toContain("DB_HOST=db.example.com");
+    expect($(".svc-write button").textContent).toBe("Write to shop’s .env…");
+    expect($(".svc-contents").textContent).toBe("");
+    // It stops answering: the next poll greys the dot.
+    const svc = w.mockServices.find((s) => s.id === "shared-db");
+    svc.running = false;
+    const { pollOutside } = await import("../src/services");
+    await pollOutside();
+    expect($('#list [data-name="shared-db"] .run-badge')).toBeNull();
+    expect($(".state-text").textContent).toBe("Not answering");
+    svc.running = true;
+    await pollOutside();
+    // A Docker one: the image and port under its name; Start and Stop as Anvil's own.
+    await show("mongo");
+    expect($('#list [data-name="mongo"] .sub').textContent).toBe("mongo:7 on port 27017");
+    expect($(".meta").textContent).toContain("Docker image");
+    expect($('[data-svc="stop"]').hidden).toBe(false);
+    expect(($(".connect-head") as HTMLElement).hidden).toBe(true);
+    // Removing an adopted container only forgets it.
+    await show("legacy-db");
+    $(".svc-remove").click();
+    await wait();
+    expect($(".pop-confirm > :first-child").textContent).toBe("Remove legacy-db from Anvil? Its container stays in Docker as it is.");
+    expect($$(".pop-confirm button").map((b) => b.textContent)).toEqual(["Cancel", "Remove"]);
+    $$(".pop-confirm button")
+      .find((b) => b.textContent === "Cancel")!
+      .click();
+    $('.modes [data-mode="apps"]').click();
+    await wait(40);
   });
 
   test("Redis: keys and memory on one line that opens to the keys", async () => {
@@ -2234,7 +2322,7 @@ describe("show hidden", () => {
     await openAddService();
     await wait(30);
     const names = $$("#svc-kinds .kind-item .kind-name").map((n) => n.textContent);
-    expect(names).toEqual(["MySQL", "Redis"]);
+    expect(names).toEqual(["MySQL", "Redis", "Docker image", "Docker container", "External server"]);
     ($("#svc-kinds-mysql") as HTMLElement).click();
     expect($("#svc-license-text").textContent).toContain("GPL-2.0 with the Universal FOSS Exception");
     const add = $("#svc-create") as HTMLButtonElement;
@@ -2272,6 +2360,110 @@ describe("show hidden", () => {
     await wait(500);
     expect(calls("add_service").at(-1)![1]).toMatchObject({ kind: "redis", version: "7.2.16", acceptLicense: true });
     ($("#new-service") as HTMLDialogElement).close();
+  });
+
+  test("Add service: a Docker image, a container that is there, a server elsewhere; no Docker said inline", async () => {
+    const { openAddService } = await import("../src/services");
+    const shown = (id: string) => !($(id).closest(".field") as HTMLElement).hidden;
+    const add = $("#svc-create") as HTMLButtonElement;
+    const submit = async () => {
+      ($("#svc-form") as HTMLFormElement).requestSubmit();
+      await wait(60);
+    };
+    const n = w.mockServices.length;
+    try {
+      await openAddService();
+      await wait(30);
+      // An image: its own fields, no version or license; Add once Docker answered.
+      ($("#svc-kinds-docker") as HTMLElement).click();
+      await wait();
+      expect([shown("#svc-image"), shown("#svc-cport"), shown("#svc-env"), shown("#svc-version"), shown("#svc-host")]).toEqual([
+        true,
+        true,
+        true,
+        false,
+        false,
+      ]);
+      expect(($(".svc-license") as HTMLElement).hidden).toBe(true);
+      expect($("#svc-note").textContent).toBe("Pulled the first time; its data stays in Docker volumes.");
+      expect(add.disabled).toBe(false);
+      await submit();
+      expect($("#svc-error").textContent).toBe("Give the image to run, like mongo:7.");
+      ($("#svc-image") as HTMLInputElement).value = "redis:7-alpine";
+      ($("#svc-port") as HTMLInputElement).value = "46379";
+      ($("#svc-env") as HTMLTextAreaElement).value = "A=b\n\n C=d ";
+      await submit();
+      expect(calls("add_docker_service").at(-1)![1]).toMatchObject({
+        name: null,
+        image: "redis:7-alpine",
+        container: null,
+        port: 46379,
+        containerPort: null,
+        env: ["A=b", "C=d"],
+      });
+      // The name Anvil picked is the one shown.
+      expect($('#list [aria-current="true"]').dataset.name).toBe("mongo-swift-ember");
+
+      // A container that is there: picked from Docker's list, its port with it.
+      await openAddService();
+      ($("#svc-kinds-adopt") as HTMLElement).click();
+      await wait();
+      expect([shown("#svc-container"), shown("#svc-port"), shown("#svc-image")]).toEqual([true, false, false]);
+      expect($$("#svc-container option").map((o) => o.textContent)).toEqual([
+        "queue-redis (redis:7-alpine, running)",
+        "old-mysql (mysql:5.7, exited)",
+      ]);
+      ($("#svc-name") as HTMLInputElement).value = "queue";
+      await submit();
+      expect(calls("add_docker_service").at(-1)![1]).toMatchObject({
+        name: "queue",
+        image: null,
+        container: "queue-redis",
+        port: 6380,
+        containerPort: 6379,
+        env: [],
+      });
+
+      // No Docker: said in the sheet, and Add waits.
+      w.mockDockerError = "Docker isn't running";
+      await openAddService();
+      ($("#svc-kinds-docker") as HTMLElement).click();
+      await wait();
+      expect($("#svc-error").hidden).toBe(false);
+      expect($("#svc-error").textContent).toBe("Docker isn’t running. Start it, then pick this again.");
+      expect(add.disabled).toBe(true);
+      // A server elsewhere needs no Docker: its kind's port, a host, the login.
+      ($("#svc-kinds-external") as HTMLElement).click();
+      await wait();
+      expect($("#svc-error").hidden).toBe(true);
+      expect(add.disabled).toBe(false);
+      expect(($("#svc-port") as HTMLInputElement).value).toBe("3306");
+      const kind = $("#svc-ext-kind") as HTMLSelectElement;
+      kind.value = "postgres";
+      kind.dispatchEvent(new Event("change"));
+      expect(($("#svc-port") as HTMLInputElement).value).toBe("5432");
+      ($("#svc-host") as HTMLInputElement).value = "db.lan";
+      ($("#svc-user") as HTMLInputElement).value = "app";
+      ($("#svc-password") as HTMLInputElement).value = "s3cret";
+      await submit();
+      expect(calls("add_external_service").at(-1)![1]).toMatchObject({
+        name: null,
+        kind: "postgres",
+        host: "db.lan",
+        port: 5432,
+        user: "app",
+        password: "s3cret",
+        database: null,
+      });
+    } finally {
+      delete w.mockDockerError;
+      w.mockServices.splice(n);
+      if (($("#new-service") as HTMLDialogElement).open) ($("#new-service") as HTMLDialogElement).close();
+      ($("#svc-kinds-mysql") as HTMLElement)?.click();
+      w.loadServices();
+      $('.modes [data-mode="apps"]').click();
+      await wait(40);
+    }
   });
 
   test("Add service on a Mac too old for MySQL: says why in the sheet and Add stays off", async () => {
