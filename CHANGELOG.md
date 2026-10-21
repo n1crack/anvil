@@ -91,6 +91,7 @@ contain breaking changes.
 - Settings › Shortcuts lists ⌘Q as closing the windows and ⌥⌘Q as quitting, and no longer lists PHP keys the menu doesn't have.
 - Packages: in a narrow window the + list opens inside the window instead of pushing the sidebar out of view.
 - Settings › About: static-php-cli no longer breaks across two lines.
+- Settings › Shortcuts: ← → show or hide an app's worktrees, as they do; it said linked domains.
 - Menu bar menu: picking a default PHP version while Anvil runs says Restarting… until its extensions are built and the web server is back.
 - `anvil unlink` and `anvil forget` say what they did, and fail for a name or folder Anvil doesn't serve; `anvil forget` works for a deleted folder.
 - CLI errors for an unknown app all read "No app named …" and point to `anvil sites`; "Anvil isn't running" is an error like the others.
