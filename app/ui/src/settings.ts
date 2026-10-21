@@ -200,7 +200,7 @@ function renderLanguages() {
           {
             install: () => installRuntime(rt.id, v),
             uninstall: () => uninstallRuntime(rt, v),
-            note: "Apps on it switch to another version.",
+            note: "Applications on it switch to another version.",
           },
           { error: verError(`${rt.id}@${v}`) },
         ),
@@ -263,7 +263,7 @@ function renderPackageManagers() {
       row.className = `row pm${pm.apps ? "" : " missing"}`;
       const name = Object.assign(document.createElement("span"), { className: "pm-name", textContent: pm.name });
       const where = Object.assign(document.createElement("span"), { className: "pm-where" });
-      where.append(Object.assign(found("Apps", pm.apps), { className: "pm-from" }));
+      where.append(Object.assign(found("Applications", pm.apps), { className: "pm-from" }));
       if (!pm.same && (pm.apps || pm.terminal)) where.append(Object.assign(found("Terminal", pm.terminal), { className: "pm-term" }));
       const error = pmErrors.get(pm.name);
       if (error) where.append(Object.assign(document.createElement("span"), { className: "pm-error", textContent: error }));
@@ -284,8 +284,8 @@ function renderPackageManagers() {
               confirmInRow(
                 actions,
                 pm.name === "pnpm"
-                  ? "Uninstall? An app that needs pnpm gets it again."
-                  : "Uninstall? Apps find the next one on their PATH.",
+                  ? "Uninstall? An application that needs pnpm gets it again."
+                  : "Uninstall? Applications find the next one on their PATH.",
                 "Uninstall",
                 () => pmAction(pm.name, "package_manager_uninstall", "Uninstalling…"),
                 idle,
@@ -336,13 +336,6 @@ function sizeColor(n) {
 }
 
 const SAFETY_LABEL = { safe: "Safe to delete", rebuild: "Rebuildable", keep: "Keep" };
-
-/** The button at a storage row's end, in a slot as wide on every row so the sizes line up. */
-function slot(b?: HTMLElement) {
-  const box = Object.assign(document.createElement("span"), { className: "act-slot" });
-  if (b) box.append(b);
-  return box;
-}
 
 async function loadAnvilStorage() {
   let st;
@@ -408,7 +401,8 @@ function drawAnvilItem(list, i, withNote) {
   size.textContent = bytes(i.bytes);
   size.style.color = sizeColor(i.bytes);
   const tags = [...actions.childNodes];
-  const idle = () => actions.replaceChildren(...tags, size, slot(i.safety === "safe" ? button("Delete", ask) : undefined));
+  // The size ends every row, so sizes line up at the right edge; Delete goes before it.
+  const idle = () => actions.replaceChildren(...tags, ...(i.safety === "safe" ? [button("Delete", ask)] : []), size);
   // Asks in the row; what it is stays said beside it.
   const ask = () =>
     confirmInRow(
@@ -471,13 +465,11 @@ async function loadPnpmStore() {
     );
   } else {
     actions.append(
+      button("Prune…", () => {
+        pnpmState = { asking: true };
+        loadPnpmStore();
+      }),
       Object.assign(document.createElement("span"), { className: "size", textContent: bytes(st.bytes) }),
-      slot(
-        button("Prune…", () => {
-          pnpmState = { asking: true };
-          loadPnpmStore();
-        }),
-      ),
     );
   }
   const list = document.createElement("div");
@@ -556,10 +548,10 @@ async function scanApps() {
   drawSizes();
 }
 
-// In a narrow window "in All Apps" and the size go (style.css); the hint under it has the size.
+// In a narrow window "in All Applications" and the size go (style.css); the hint under it has the size.
 const DELETE_ALL = (size = "") => [
   "Delete Logs and Caches",
-  Object.assign(document.createElement("span"), { className: "wide-only", textContent: ` in All Apps${size}` }),
+  Object.assign(document.createElement("span"), { className: "wide-only", textContent: ` in All Applications${size}` }),
 ];
 const cleanAll = $("#clean-all-safe"); // kept while its confirm stands in its place
 
@@ -783,7 +775,7 @@ export function render() {
           },
           makeDefault: () => phpAct(v.version, "set_default_php"),
           uninstall: () => phpAct(v.version, "php_uninstall"),
-          note: "Apps asking for it use the default.",
+          note: "Applications asking for it use the default.",
         },
         {
           ...phpParts(v),
@@ -1170,7 +1162,7 @@ $("#mail-catcher").onchange = (e) => call("set_mail_catcher", { on: e.target.che
 /** A feature that is on has a page of its own under Features in the sidebar; turned off
  * while it's shown, the list of features takes its place. */
 function pluginPages() {
-  const on = { "plugin-mcp": s.mcp, "plugin-tunnel": s.tunnel, "plugin-mail": s.mail_catcher, "plugin-db": s.db_viewer || !!dbViewerBusy };
+  const on = { "plugin-mcp": s.mcp, "plugin-mail": s.mail_catcher, "plugin-db": s.db_viewer || !!dbViewerBusy };
   for (const [page, shown] of Object.entries(on)) {
     const b = $(`.nav [data-page="${page}"]`);
     b.hidden = !shown;
@@ -1224,7 +1216,7 @@ function renderMailCatcher() {
     return;
   }
   if (!other) {
-    other = inboxView("_other", invoke, "No messages from outside your apps.");
+    other = inboxView("_other", invoke, "No messages from outside your applications.");
     box.append(other.node);
   }
   other.load().then(() => (box.hidden = !other!.node.querySelector(".mail-item")));
@@ -1265,23 +1257,29 @@ type Software = [string, string, string, string, string];
 const SOFTWARE: Software[] = (<Software[]>[
   ["Caddy", "Web server and HTTPS certificates", "Apache-2.0", "https://caddyserver.com", "Downloaded when used"],
   windows
-    ? ["PHP", "PHP apps, in windows.php.net’s builds; PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded when used"]
+    ? ["PHP", "PHP applications, in windows.php.net’s builds; PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded when used"]
     : [
         "PHP",
-        "PHP apps, in Anvil’s builds of php.net’s releases (github.com/n1crack/anvil-php, made with static-php-cli); PHP 8.1–8.5, 8.6 as a preview",
+        "PHP applications, in Anvil’s builds of php.net’s releases (github.com/n1crack/anvil-php, made with static-php-cli); PHP 8.1–8.5, 8.6 as a preview",
         "PHP-3.01",
         "https://www.php.net",
         "Downloaded when used",
       ],
   ["Composer", "PHP packages", "MIT", "https://getcomposer.org", "Downloaded when used"],
-  ["Node.js", "JavaScript apps", "MIT", "https://nodejs.org", "Downloaded when used"],
+  ["Node.js", "JavaScript applications", "MIT", "https://nodejs.org", "Downloaded when used"],
   ["pnpm", "JavaScript packages", "MIT", "https://pnpm.io", "Downloaded when used"],
   ["Yarn", "JavaScript packages (Yarn 1)", "BSD-2-Clause", "https://classic.yarnpkg.com", "Downloaded when used"],
   ["Bun", "JavaScript packages; links JavaScriptCore, which is LGPL-2.0", "MIT", "https://bun.sh", "Downloaded when used"],
-  ["Go", "Go apps", "BSD-3-Clause", "https://go.dev", "Downloaded when used"],
-  ["Rust (rustup)", "Rust apps", "MIT OR Apache-2.0", "https://rustup.rs", "Downloaded when used"],
-  [".NET SDK", ".NET apps", "MIT", "https://dotnet.microsoft.com", "Downloaded when used"],
-  ["Python", "Python apps, in python-build-standalone’s builds (MPL-2.0)", "PSF-2.0", "https://www.python.org", "Downloaded when used"],
+  ["Go", "Go applications", "BSD-3-Clause", "https://go.dev", "Downloaded when used"],
+  ["Rust (rustup)", "Rust applications", "MIT OR Apache-2.0", "https://rustup.rs", "Downloaded when used"],
+  [".NET SDK", ".NET applications", "MIT", "https://dotnet.microsoft.com", "Downloaded when used"],
+  [
+    "Python",
+    "Python applications, in python-build-standalone’s builds (MPL-2.0)",
+    "PSF-2.0",
+    "https://www.python.org",
+    "Downloaded when used",
+  ],
   ["uv", "Installs Python and its packages", "MIT OR Apache-2.0", "https://docs.astral.sh/uv", "Downloaded when used"],
   [
     "MySQL",
@@ -1339,7 +1337,7 @@ const SOFTWARE: Software[] = (<Software[]>[
     "https://github.com/Imagick/imagick",
     "Built on this Mac",
   ],
-  ["Mailpit", "Catches the mail apps send", "MIT", "https://mailpit.axllent.org", "Downloaded when used"],
+  ["Mailpit", "Catches the mail applications send", "MIT", "https://mailpit.axllent.org", "Downloaded when used"],
   ["Versity S3 Gateway", "S3-compatible file storage", "Apache-2.0", "https://github.com/versity/versitygw", "Downloaded when used"],
   ["SILO", "S3-compatible file storage, a MinIO fork", "AGPL-3.0", "https://silo.pgsty.com", "Downloaded when used"],
   [
@@ -1476,7 +1474,6 @@ notices.addEventListener("toggle", () => {
 window.__TAURI__.app?.getVersion().then((v) => ($("#version").textContent = `Version ${v}`));
 
 $("#update-check").onclick = () => invoke("show_updates");
-$("#open-config").onclick = () => invoke("open_config_dir").catch((e) => showError(String(e)));
 
 for (const input of document.querySelectorAll<HTMLInputElement>("[data-ini]")) {
   input.onchange = async () => {

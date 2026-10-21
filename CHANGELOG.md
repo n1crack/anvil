@@ -20,6 +20,7 @@ contain breaking changes.
 ### Changed
 
 - PHP comes from Anvil's own builds of php.net's releases, so new patch releases arrive within a day; OPcache, mysqli, intl and sodium are built in.
+- Settings: "Features" in the sidebar, Tunnel explained in its row instead of a page of its own, "Applications" throughout, and storage sizes lined up; an npm or yarn app's Packages line offers Switch to pnpm beside Install and Update.
 
 ### Fixed
 

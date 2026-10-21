@@ -1292,7 +1292,7 @@ const mockHandle = (cmd, a) => {
         item("MySQL", "services/mysql", 318767104, "Services", "keep", "The program, shared by every service of this kind"),
         item("Node.js", "runtimes/node", 196083712, "Languages", "keep", "Remove versions in Settings › Node.js"),
         item("composer cache", "cache/composer", 88080384, "Cache", "safe", "Downloaded again when a build needs it"),
-        item("Web server", "bin", 47185920, "Anvil", "keep", "Needed to serve your apps"),
+        item("Web server", "bin", 47185920, "Anvil", "keep", "Needed to serve your applications"),
         item("Logs", "log", 12582912, "Logs", "safe", "Only history; new lines keep coming"),
         item("redis data", "data/redis", 2097152, "Data", "keep", "Your databases and mail"),
         item("Certificates", "data/caddy", 65536, "Anvil", "keep", "Your local HTTPS certificates"),

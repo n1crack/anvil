@@ -1183,7 +1183,7 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
         h.join("bin"),
         "Anvil",
         Safety::Keep,
-        "Needed to serve your apps",
+        "Needed to serve your applications",
     ));
     entries.push((
         "Certificates".into(),

@@ -52,10 +52,10 @@ describe("sidebar", () => {
       "Rust",
       ".NET",
       "Python",
-      "All features",
+      "Features",
       "About",
     ]);
-    expect(text(".nav-head")).toEqual(["Languages", "Features"]);
+    expect(text(".nav-head")).toEqual(["Languages", ""]); // the empty one only spaces Features apart
     expect($$(".nav button").every((b) => b.querySelector("svg"))).toBe(true);
     expect($("[data-page='languages']")).toBeNull();
     // Each language its own glyph, drawn in currentColor by the stylesheet (no fill of its own).
@@ -85,7 +85,9 @@ describe("versions", () => {
     expect([...rows[0].querySelectorAll(".actions-inline button")].map((b) => b.textContent)).toEqual(["Make default", "Uninstall"]);
     // Uninstall asks in the row, no dialog; Cancel puts the actions back.
     (rows[0].querySelectorAll(".actions-inline button")[1] as HTMLElement).click();
-    expect(rows[0].querySelector(".actions-inline")!.textContent).toBe("Uninstall? Apps asking for it use the default.CancelUninstall");
+    expect(rows[0].querySelector(".actions-inline")!.textContent).toBe(
+      "Uninstall? Applications asking for it use the default.CancelUninstall",
+    );
     (rows[0].querySelectorAll(".actions-inline button")[0] as HTMLElement).click();
     expect([...rows[0].querySelectorAll(".actions-inline button")].map((b) => b.textContent)).toEqual(["Make default", "Uninstall"]);
     for (const r of rows.slice(2)) {
@@ -503,13 +505,13 @@ describe("Node.js package managers", () => {
     await open("node");
     const rows = $$("#pms .pm");
     expect(rows.map((r) => r.querySelector(".pm-name")?.textContent)).toEqual(["npm", "pnpm", "yarn", "bun"]);
-    expect(rows[0].querySelector(".pm-from")?.textContent).toBe("Apps: Bundled with Node.js 24 11.6.2");
+    expect(rows[0].querySelector(".pm-from")?.textContent).toBe("Applications: Bundled with Node.js 24 11.6.2");
     expect(rows[0].querySelector(".pm-term")?.textContent).toBe("Terminal: Homebrew (Node.js 26) 11.12.1");
     expect((rows[0].querySelector(".pm-term .pm-src") as HTMLElement).title).toBe("/opt/homebrew/bin/npm");
-    expect(rows[1].querySelector(".pm-from")?.textContent).toBe("Apps: Homebrew 12.14.0");
+    expect(rows[1].querySelector(".pm-from")?.textContent).toBe("Applications: Homebrew 12.14.0");
     expect(rows[1].querySelector(".pm-term")).toBeNull();
     expect(rows[2].classList.contains("missing")).toBe(true);
-    expect(rows[2].querySelector(".pm-from")?.textContent).toBe("Apps: Not found");
+    expect(rows[2].querySelector(".pm-from")?.textContent).toBe("Applications: Not found");
     expect([...rows[2].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Install"]);
     expect((rows[3].querySelector(".pm-from .pm-src") as HTMLElement).title).toBe("~/.anvil/runtimes/bun/bin/bun");
     expect(rows[3].querySelector(".on-hover button")?.textContent).toBe("Uninstall");
@@ -554,7 +556,7 @@ describe("storage", () => {
     expect(scan.classList.contains("spinning")).toBe(true);
     expect($("#measured").textContent).toBe("Measuring…");
     expect(del.disabled).toBe(true);
-    expect(del.textContent).toBe("Delete Logs and Caches in All Apps");
+    expect(del.textContent).toBe("Delete Logs and Caches in All Applications");
     expect($$("#app-sizes .placeholder").length).toBe(6);
     expect($("#apps-hint").textContent).toBe("Measuring every application…");
     await wait(250);
@@ -562,7 +564,7 @@ describe("storage", () => {
     expect(scan.disabled).toBe(false);
     expect($("#measured").textContent).toBe("Measured 2 min ago");
     expect(del.disabled).toBe(false);
-    expect(del.textContent).toBe("Delete Logs and Caches in All Apps (100 MB)");
+    expect(del.textContent).toBe("Delete Logs and Caches in All Applications (100 MB)");
     expect($$("#app-sizes .placeholder").length).toBe(0);
     expect($$("#app-sizes .row").length).toBe(2);
   });
@@ -580,23 +582,23 @@ describe("storage", () => {
     delete w.mockDelay.storage_apps;
   });
 
-  test("Delete asks in the row, no dialog; every size sits before a slot as wide", async () => {
+  test("Delete asks in the row, no dialog; every row ends with its size", async () => {
     const rows = $$("#anvil-items .row");
-    expect(rows.every((r) => r.querySelector(".size")?.nextElementSibling?.classList.contains("act-slot"))).toBe(true);
+    expect(rows.every((r) => r.querySelector(".actions-inline")?.lastElementChild?.classList.contains("size"))).toBe(true);
     const logs = rows.find((r) => r.textContent?.startsWith("Logs"))!;
-    (logs.querySelector(".act-slot button") as HTMLElement).click();
+    (logs.querySelector(".actions-inline button") as HTMLElement).click();
     expect(logs.querySelector(".asking .muted")?.textContent).toBe("Delete 12 MB?");
     const [no] = logs.querySelectorAll<HTMLElement>(".asking button");
     no.click();
     expect(logs.querySelector(".asking")).toBeNull();
-    expect(logs.querySelector(".act-slot button")?.textContent).toBe("Delete");
-    (logs.querySelector(".act-slot button") as HTMLElement).click();
+    expect(logs.querySelector(".actions-inline button")?.textContent).toBe("Delete");
+    (logs.querySelector(".actions-inline button") as HTMLElement).click();
     logs.querySelectorAll<HTMLElement>(".asking button")[1].click();
     await wait();
     expect(w.mockCalls.some(([c, a]) => c === "clean_anvil" && a.path.endsWith("/log"))).toBe(true);
   });
 
-  test("Delete Logs and Caches in All Apps asks in the toolbar", async () => {
+  test("Delete Logs and Caches in All Applications asks in the toolbar", async () => {
     // The mock's measurement counts no app: one is put in by hand.
     const { sizes } = await import("../src/settings");
     sizes.set("shop", { name: "shop", kind: "laravel", total: 524288000, safe: 104857600, rebuild: 0 });
@@ -632,7 +634,7 @@ describe("general", () => {
     await open("general");
     const advanced = $("#general details.advanced") as HTMLDetailsElement;
     expect(advanced.open).toBe(false);
-    for (const id of ["#tld", "#ports", "#open-config"]) expect(advanced.querySelector(id)).not.toBeNull();
+    for (const id of ["#tld", "#ports", "#config-dir"]) expect(advanced.querySelector(id)).not.toBeNull();
     expect($("#ports").textContent).toBe("HTTP 80, DNS 53");
     expect($("#address").closest("details")).toBeNull();
     const tld = $("#tld") as HTMLSelectElement;
@@ -687,17 +689,17 @@ describe("plugins", () => {
     expect($("#mcp-line").hidden).toBe(true);
   });
 
-  test("a plugin that is on gets its page under Features; turned off while shown, All features takes its place", async () => {
+  test("a plugin that is on gets its page under Features; turned off while shown, Features takes its place", async () => {
     await open("plugins");
     const nav = () => text(".nav button.plugin-nav:not([hidden])");
     expect(nav()).toEqual([]);
-    const box = $("#tunnel") as HTMLInputElement;
+    const box = $("#mail-catcher") as HTMLInputElement;
     box.checked = true;
     box.dispatchEvent(new Event("change"));
     await wait();
-    expect(nav()).toEqual(["Tunnel"]);
-    await open("plugin-tunnel");
-    expect($("#plugin-tunnel").hidden).toBe(false);
+    expect(nav()).toEqual(["Mail catcher"]);
+    await open("plugin-mail");
+    expect($("#plugin-mail").hidden).toBe(false);
     box.checked = false;
     box.dispatchEvent(new Event("change"));
     await wait();
@@ -715,6 +717,8 @@ describe("plugins", () => {
     await wait();
     expect(w.mockCalls.at(-1)).toEqual(["set_tunnel", { on: true }]);
     expect(box.checked).toBe(true);
+    // No page of its own: how to share is in its row.
+    expect($(".nav button.plugin-nav:not([hidden])")).toBeNull();
   });
 
   test("Mail catcher: its address while on, a taken port inline, and mail from no app below", async () => {

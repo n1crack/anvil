@@ -1894,6 +1894,36 @@ describe("packages", () => {
     expect(calls("open_url").at(-1)![1].url).toBe("https://github.com/advisories/GHSA-v5mv-p594-2x33");
   });
 
+  test("an npm app's one line: npm, Install, Update… and Switch to pnpm…, which asks in the line", async () => {
+    const pkgs = w.mockPackages;
+    const reread = async () => {
+      await select("notes");
+      await select("shop");
+      $('.tabs [data-tab="packages"]').click();
+      await wait(80);
+    };
+    try {
+      w.mockPackages = {
+        ...pkgs,
+        ecosystems: pkgs.ecosystems.map((e: any) => (e.id === "npm" ? { ...e, lock: "package-lock.json", manager: "npm 11.6.2" } : e)),
+        commands: pkgs.commands.map(([id, c]: [string, string]) => [id, c.replace("pnpm", "npm")]),
+      };
+      await reread();
+      const js = $('.pkg-run-line[data-eco="js"]');
+      expect(js.textContent).toBe("npmInstallUpdate…Switch to pnpm…");
+      expect($$(".pkg-switch-line")).toHaveLength(0);
+      (js.querySelector(".pkg-switch") as HTMLElement).click();
+      expect(js.textContent).toContain("Replace package-lock.json with pnpm-lock.yaml");
+      ([...js.querySelectorAll("button")].find((b) => b.textContent === "Cancel") as HTMLElement).click();
+      expect(js.textContent).toBe("npmInstallUpdate…Switch to pnpm…");
+      expect(calls("switch_to_pnpm")).toHaveLength(0);
+    } finally {
+      w.mockPackages = pkgs;
+      await reread();
+    }
+    expect($('.pkg-run-line[data-eco="js"]').textContent).toBe("pnpmInstallUpdate…");
+  });
+
   test("Install runs at once, Update asks in the line; either shows in Dev, then the packages are read again", async () => {
     const line = (eco: string) => $(`.pkg-run-line[data-eco="${eco}"]`);
     const act = (eco: string, text: string) => [...line(eco).querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;

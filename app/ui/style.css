@@ -2101,7 +2101,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-variant-numeric: tabular-nums;
 }
 /* Delete or Prune… after the size, as wide on every row, so the sizes form one column. */
-.act-slot { display: flex; flex: none; justify-content: flex-end; width: 72px; }
 
 .res-sub {
   margin: 20px 0 8px;

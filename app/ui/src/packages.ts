@@ -145,9 +145,10 @@ async function runPkg(name, eco, id, command) {
   if (updatesOf(name)?.at) checkUpdates(name);
 }
 
-/** A manager's Install and Update…; Update asks in the line first. Running, the line says
- * so; after, how it went. Either way its output is a click away in Dev. */
-function runLine(name, eco, cmds: [string, string][]) {
+/** A manager's Install and Update…, and from `extra` what else it offers (Switch to pnpm…);
+ * Update asks in the line first. Running, the line says so; after, how it went. Either way
+ * its output is a click away in Dev. */
+function runLine(name, eco, cmds: [string, string][], extra?: (line: HTMLElement, idle: () => void) => HTMLElement[]) {
   const key = `${name}:${eco}`;
   const label = eco === "composer" ? "Composer" : cmds[0][1].split(" ")[0];
   const line = el("div", "pkg-checks pkg-run-line");
@@ -179,7 +180,7 @@ function runLine(name, eco, cmds: [string, string][]) {
       };
       return b;
     });
-    line.replaceChildren(el("span", "pkg-label", label), ...acts);
+    line.replaceChildren(el("span", "pkg-label", label), ...acts, ...(extra?.(line, idle) ?? []));
   };
   if (going) {
     const command = cmds.find(([id]) => id === going)?.[1] ?? label;
@@ -206,6 +207,30 @@ function versionOf(p, key) {
     if (locked) return locked[1];
   }
   return null;
+}
+
+/** An npm or yarn app can move to pnpm, only when asked and confirmed in its manager's line. */
+function switchOffer(name, p) {
+  const js = p.ecosystems.find((e) => e.id === "npm");
+  const lock = js?.lock === "package-lock.json" || js?.lock === "yarn.lock" ? js.lock : null;
+  if (!lock) return undefined;
+  return (line: HTMLElement, idle: () => void) => {
+    if (busy.has(`${name}:pnpm`)) return [el("span", "muted", "Switching to pnpm…")];
+    const b = el("button", "pkg-btn pkg-switch", "Switch to pnpm…");
+    b.onclick = () => {
+      const no = el("button", "text-act", "Cancel");
+      no.onclick = idle;
+      const yes = el("button", "text-act danger", "Switch");
+      yes.onclick = () => switchToPnpm(name);
+      line.classList.add("asking");
+      line.replaceChildren(
+        el("span", "muted", `Replace ${lock} with pnpm-lock.yaml and install node_modules again? Test the app afterwards.`),
+        no,
+        yes,
+      );
+    };
+    return [b];
+  };
 }
 
 export function drawPackages(name) {
@@ -239,39 +264,12 @@ export function drawPackages(name) {
     bar.append(security);
   }
   body.append(bar);
-  // An npm or yarn app can move to pnpm, only when asked and confirmed in the line.
-  const js = p.ecosystems.find((e) => e.id === "npm");
-  const lock = js?.lock === "package-lock.json" || js?.lock === "yarn.lock" ? js.lock : null;
-  if (lock) {
-    const line = el("div", "pkg-checks pkg-switch-line");
-    const going = busy.has(`${name}:pnpm`);
-    const idle = () => {
-      line.classList.remove("asking");
-      const b = el("button", "pkg-btn pkg-switch", "Switch to pnpm…");
-      b.onclick = () => {
-        const no = el("button", "text-act", "Cancel");
-        no.onclick = idle;
-        const yes = el("button", "text-act danger", "Switch");
-        yes.onclick = () => switchToPnpm(name);
-        line.classList.add("asking");
-        line.replaceChildren(
-          el("span", "muted", `Replace ${lock} with pnpm-lock.yaml and install node_modules again? Test the app afterwards.`),
-          no,
-          yes,
-        );
-      };
-      line.replaceChildren(el("span", "pkg-label", `Installs with ${lock === "yarn.lock" ? "yarn" : "npm"}`), b);
-    };
-    if (going) line.replaceChildren(el("span", "pkg-label", "Switching to pnpm…"));
-    else idle();
-    body.append(line);
+  for (const eco of ["composer", "js"]) {
+    const cmds = p.commands.filter(([id]) => id.startsWith(`pkg-${eco}-`));
+    if (cmds.length) body.append(...runLine(name, eco, cmds, eco === "js" ? switchOffer(name, p) : undefined));
   }
   const sw = switched.get(name);
   if (sw) body.append(el("p", sw.ok ? "muted pkg-checked" : "pkg-error", sw.text));
-  for (const eco of ["composer", "js"]) {
-    const cmds = p.commands.filter(([id]) => id.startsWith(`pkg-${eco}-`));
-    if (cmds.length) body.append(...runLine(name, eco, cmds));
-  }
 
   const errors = [up?.error, ...audited.map((e) => audits[e.id]?.error)].filter(Boolean);
   if (errors.length) {

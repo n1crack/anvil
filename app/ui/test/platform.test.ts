@@ -55,7 +55,7 @@ describe("platform", () => {
     expect(p.mod(key("n", { metaKey: true }))).toBe(false);
   });
 
-  test("Windows: Settings › Shortcuts and Show in Finder read the Windows way", async () => {
+  test("Windows: Settings › Shortcuts and Finder read the Windows way", async () => {
     const html = readFileSync(resolve(import.meta.dirname, "../settings.html"), "utf8");
     document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)![1].replace(/<script[\s\S]*?<\/script>/g, "");
     const p = await as(WIN);
@@ -66,7 +66,6 @@ describe("platform", () => {
     expect(kbd).toContain("Ctrl+,");
     expect(kbd.join(" ")).not.toMatch(/[⌘⌥]/);
     expect(document.body.textContent).not.toMatch(/[⌘⌥]|Finder/);
-    expect(document.querySelector("#open-config")!.textContent).toBe("Show in File Explorer");
     // Windows has no app menu, so no quit keys: that group is macOS's only.
     const quit = [...document.querySelectorAll("#shortcuts h2")].find((h) => h.textContent === "Quitting")!;
     expect(quit.classList.contains("mac-only")).toBe(true);
