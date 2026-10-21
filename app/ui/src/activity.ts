@@ -84,6 +84,8 @@ export function head(text, cls) {
  * says what it hides on the same line: "2 running · dev, docs:dev". */
 function appHead(a) {
   const tr = head("", "act-app");
+  tr.dataset.head = a.site;
+  tr.tabIndex = -1;
   const open = !folded.has(a.site);
   tr.setAttribute("aria-expanded", String(open));
   (tr.firstChild as HTMLElement).innerHTML =
@@ -146,8 +148,9 @@ export async function act(key, action?) {
 
 export const M = window.__TAURI__.menu;
 
-/** Right-click: Restart, Stop (Dismiss once it crashed) and Open in Browser, by row state. */
-async function rowMenu(r) {
+/** Right-click: Restart, Stop (Dismiss once it crashed) and Open in Browser, by row state.
+ * From the keyboard it opens under the row (`at`). */
+async function rowMenu(r, at?: DOMRect) {
   const items: any[] = [];
   if (r.actions && !busy.has(r.key)) {
     if (!r.key.includes("#")) items.push(M.MenuItem.new({ text: "Restart", action: () => act(r.key, "restart") }));
@@ -159,7 +162,9 @@ async function rowMenu(r) {
       M.MenuItem.new({ text: "Open in Browser", action: () => invoke("open_url", { url: r.web }).catch((e) => showError(String(e))) }),
     );
   }
-  if (items.length) (await M.Menu.new({ items: await Promise.all(items) })).popup();
+  const dpi = (window.__TAURI__ as any).dpi;
+  const pos = at && dpi ? new dpi.LogicalPosition(at.left + 24, at.bottom) : undefined;
+  if (items.length) (await M.Menu.new({ items: await Promise.all(items) })).popup(pos);
 }
 
 const cpuText = (r) => (r.cpu == null ? "" : `${r.cpu.toFixed(1)}%`);
@@ -170,12 +175,15 @@ export function row(r, inner?: boolean) {
   tr.className = `act-row ${r.state}${inner ? " inner" : ""}`;
   tr.setAttribute("aria-selected", String(r.key === selected));
   tr.dataset.key = r.key;
+  tr.tabIndex = -1;
   // Control-click is a right-click on macOS: the menu only, the selection stays.
   tr.onclick = (e) => !e.ctrlKey && select(r.key);
   tr.oncontextmenu = (e) => {
     e.preventDefault();
-    rowMenu(r).catch((err) => showError(String(err)));
+    // The menu key may also send a contextmenu event: its keydown opened the menu already.
+    if (Date.now() - keyMenuAt > 500) rowMenu(r).catch((err) => showError(String(err)));
   };
+  (tr as any).menu = () => rowMenu(r, tr.getBoundingClientRect()).catch((err) => showError(String(err)));
   const name = td(r.name, "act-name");
   if (r.detail && r.state !== "crashed") {
     const d = document.createElement("span");
@@ -235,10 +243,42 @@ export function render() {
       if (!folded.has(a.site)) out.push(...a.rows.map((r) => row(r, true)));
     }
   }
+  // One row takes Tab (the focused one, else the selected, else the first); the arrows
+  // move between them. A redraw keeps the keyboard where it was.
+  const id = (t) => t?.dataset.key ?? `head:${t?.dataset.head}`;
+  const had = (document.activeElement as HTMLElement | null)?.closest?.("#rows tr");
   $("#rows").replaceChildren(...out);
+  const cur = out.find((t) => had && id(t) === id(had)) ?? out.find((t) => t.dataset.key === selected) ?? out[0];
+  if (cur) cur.tabIndex = 0;
+  if (had) cur?.focus();
   $("#empty").hidden = rows[tab].length > 0;
   $("#procs").hidden = !rows[tab].length;
 }
+
+let keyMenuAt = 0;
+// The keyboard on the rows: up and down move (the open log follows), Enter or Space is a
+// click, the menu key or Shift+F10 opens the row's menu.
+$("#rows").addEventListener("keydown", (e: KeyboardEvent) => {
+  const tr = (e.target as HTMLElement).closest("tr") as HTMLElement | null;
+  if (!tr) return;
+  const trs = [...$("#rows").children] as HTMLElement[];
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    const next = trs[trs.indexOf(tr) + (e.key === "ArrowDown" ? 1 : -1)];
+    e.preventDefault();
+    if (!next) return;
+    tr.tabIndex = -1;
+    next.tabIndex = 0;
+    next.focus();
+    if (selected && next.dataset.key) select(next.dataset.key);
+  } else if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    tr.click();
+  } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+    e.preventDefault();
+    keyMenuAt = Date.now();
+    (tr as any).menu?.();
+  }
+});
 
 /** "Claude Code restarted api", its app and time; a failure says why, inline. Not a link. */
 function agentRow(a: AgentAction) {

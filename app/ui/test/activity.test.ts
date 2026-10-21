@@ -85,6 +85,35 @@ describe("processes window", () => {
     await wait();
     expect(document.querySelector('tr[data-key="vuefinder@dev"]')).not.toBeNull();
   });
+
+  test("the keyboard: one row takes Tab, arrows move, Enter opens the log, Shift+F10 the menu", async () => {
+    const key = (k: string, o = {}) =>
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...o }));
+    const tabbable = () => [...document.querySelectorAll<HTMLElement>("#rows tr")].filter((t) => t.tabIndex === 0);
+    expect(tabbable().map((t) => t.dataset.key)).toEqual(["shop@queue"]);
+    $("#log-close").click();
+    await wait();
+    $('tr[data-key="shop@queue"]').focus();
+    key("ArrowDown"); // the vuefinder header
+    key("ArrowDown");
+    expect(document.activeElement).toBe($('tr[data-key="vuefinder@dev"]'));
+    expect($("#pane").hidden).toBe(true);
+    key("Enter");
+    await wait();
+    expect($('tr[data-key="vuefinder@dev"]').getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe($('tr[data-key="vuefinder@dev"]'));
+    key("ArrowDown"); // with the log open, it follows
+    await wait();
+    expect($('tr[data-key="vuefinder@docs-dev"]').getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe($('tr[data-key="vuefinder@docs-dev"]'));
+    expect(tabbable().map((t) => t.dataset.key)).toEqual(["vuefinder@docs-dev"]);
+    w.mockMenu = null;
+    key("F10", { shiftKey: true });
+    await wait();
+    expect(w.mockMenu.map((i) => i.text)).toContain("Restart");
+    $("#log-close").click();
+    await wait();
+  });
 });
 
 describe("processes tabs", () => {

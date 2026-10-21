@@ -12,6 +12,7 @@ contain breaking changes.
 - Settings › Plugins is now Settings › Features: they come with Anvil and only need turning on.
 - Settings › Features › Request log: on as before; off, the web server keeps no request logs and apps lose the Requests tab.
 - Unfinished setup is one titlebar button; it lists each step and says which one asks for your password before anything runs.
+- Processes works from the keyboard: arrows move between rows, Enter opens a row's log, Shift+F10 its menu.
 
 ### Added
 

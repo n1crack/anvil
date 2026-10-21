@@ -3300,6 +3300,8 @@ body.activity {
 
 .act-row:hover { background: var(--steel-hover); }
 .act-row[aria-selected="true"] { background: var(--selected); }
+/* The keyboard's row (activity.ts): the ring inside the table, which clips. */
+#rows tr:focus-visible { outline-offset: -2px; }
 .act-status .dot { display: inline-block; margin-right: 7px; vertical-align: 0; }
 .act-status .dot.amber { background: var(--amber); }
 .act-row.running .act-status { color: var(--ok-text); }
