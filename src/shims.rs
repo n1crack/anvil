@@ -471,13 +471,20 @@ pub fn setup() -> Result<Vec<PathBuf>> {
     Ok(vec![])
 }
 
-/// The shims are written and some shell rc file puts them on PATH.
+/// The shims are written and some shell rc file puts this home's shims on PATH; a
+/// block left by another ANVIL_HOME doesn't count, so setup rewrites it.
 #[cfg(not(windows))]
 pub fn ready() -> bool {
+    let block = path_block(&home(), &user_home());
     home().join("shims/php").exists()
         && shell_rc_files(&user_home())
             .iter()
-            .any(|f| has_path_block(f))
+            .any(|f| has_this_block(f, &block))
+}
+
+#[cfg(any(not(windows), test))]
+fn has_this_block(file: &Path, block: &str) -> bool {
+    fs::read_to_string(file).is_ok_and(|t| t.contains(block))
 }
 
 /// Write the shims and put them on PATH in every shell rc file.
@@ -533,6 +540,7 @@ mod tests {
         let text = fs::read_to_string(&rc).unwrap();
         assert_eq!(text.matches(BLOCK_START).count(), 1);
         assert!(text.contains("/opt/an"));
+        assert!(has_this_block(&rc, &other) && !has_this_block(&rc, &block));
         remove_path_block(&rc).unwrap();
         assert_eq!(fs::read_to_string(&rc).unwrap(), original);
         remove_path_block(&rc).unwrap();

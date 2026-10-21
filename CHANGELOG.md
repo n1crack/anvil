@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Terminal setup is offered again when the shell's PATH line points to another Anvil folder.
+
 ## [0.2.0] - 2026-10-21
 
 The first public release, a beta for macOS: a desktop app that carries the `anvil` CLI.
