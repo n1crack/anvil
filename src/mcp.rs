@@ -1206,8 +1206,10 @@ mod tests {
         app(&h, "shop", "folder");
         // Caddy on 80 itself: the address is the same whether or not this machine
         // forwards 80 (macOS's pf daemon), and on Linux, which has none.
+        // .test whatever a new config starts on (Linux's is .localhost).
         crate::update(|c| {
             c.http_port = 80;
+            c.tld = "test".into();
             Ok(())
         })
         .unwrap();

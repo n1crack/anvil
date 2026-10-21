@@ -376,9 +376,19 @@ pub fn user_home() -> PathBuf {
 pub fn load() -> Result<Config> {
     match fs::read_to_string(home().join("config.toml")) {
         Ok(s) => toml::from_str(&s).context("config.toml is invalid"),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(first_config()),
         Err(e) => Err(e).context("couldn't read config.toml"),
     }
+}
+
+/// The config before there is a config.toml. Linux starts on .localhost: it can't
+/// send .test to Anvil's DNS yet, and .localhost needs no setup.
+fn first_config() -> Config {
+    let mut cfg = Config::default();
+    if cfg!(target_os = "linux") {
+        cfg.tld = "localhost".into();
+    }
+    cfg
 }
 
 /// Load, change and save the config with no other change in between: one lock for
@@ -2438,6 +2448,9 @@ pub fn site_url(cfg: &Config, site: &Site) -> String {
 pub fn setup_status(cfg: &Config) -> Setup {
     let (file, want) = resolver_file(cfg);
     let root = root_cert();
+    // ponytail: Linux can't forward 80/443 or trust the authority yet; offering those
+    // steps would only refuse, so they count as done until it can.
+    let linux = cfg!(target_os = "linux");
     Setup {
         resolver: !needs_resolver(cfg)
             || if cfg!(windows) {
@@ -2446,9 +2459,9 @@ pub fn setup_status(cfg: &Config) -> Setup {
                 fs::read_to_string(file)
                     .is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace()))
             },
-        trusted: !root.exists() || cert_trusted(&root),
+        trusted: linux || !root.exists() || cert_trusted(&root),
         php: !installed_php().is_empty(),
-        ports: ports_forwarded(cfg),
+        ports: linux || ports_forwarded(cfg),
         shims: shims::ready(),
         git: git_installed(),
         node: !runtimes::installed("node").is_empty()
