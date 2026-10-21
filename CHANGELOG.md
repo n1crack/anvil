@@ -27,6 +27,7 @@ contain breaking changes.
 - Worktree settings say in plain sentences what a new worktree gets; Customize… edits files, env keys and commands as rows with plain choices instead of text boxes.
 - Add Folder of Applications… on a folder that is one project offers to add it as one application instead of serving its subfolders, and an empty folder says it has none yet.
 - Changing an app's PHP version says which extensions it is building beside the version, and under it which ones the new version runs without.
+- Remove Link… asks first and says what goes: the app's processes stop and its settings in Anvil are deleted; its folder stays.
 
 ### Added
 

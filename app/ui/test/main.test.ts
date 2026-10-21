@@ -149,6 +149,29 @@ describe("https", () => {
     expect($("#app-https")).toBeNull();
   });
 
+  test("Remove Link… asks in a bubble, naming the settings that go, before it removes", async () => {
+    const { snap } = await import("../src/app");
+    const linked = w.mockSite("blog", "laravel", { linked: true, path: "/Users/x/Code/blog", parked_in: null });
+    w.mockSnap.sites.push(linked);
+    snap.sites.push(structuredClone(linked));
+    $("#search").dispatchEvent(new Event("input"));
+    await wait();
+    $(`#list [data-name="blog"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait(80);
+    (w.mockMenu as any[]).find((i) => i.text === "Remove Link…").action();
+    await wait();
+    expect(calls("remove_site")).toEqual([]);
+    expect($(".pop-confirm p").textContent).toContain(
+      "its settings here are deleted: PHP version, HTTPS, php.ini and extensions. Its folder stays.",
+    );
+    ($(".pop-confirm .primary") as HTMLElement).click();
+    await wait(80);
+    expect(calls("remove_site")).toEqual([["remove_site", { site: "blog" }]]);
+    expect($(`#list [data-name="blog"]`)).toBeNull();
+    // Later tests count remove_site from none.
+    w.mockCalls.splice(0, Infinity, ...w.mockCalls.filter(([c]) => c !== "remove_site"));
+  });
+
   test("the row shows a spinner while HTTPS is turned on or off", async () => {
     w.mockDelay = { set_secure: 200 };
     $(`#list [data-name="shop"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));

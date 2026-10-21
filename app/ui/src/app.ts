@@ -807,14 +807,28 @@ async function siteMenu(s) {
   }
   items.push(
     await M.MenuItem.new({
-      text: s.linked ? "Remove Link" : "Hide from Anvil",
+      text: s.linked ? "Remove Link…" : "Hide from Anvil",
       action: async () => {
-        if (!s.linked) {
-          justHid.set(s.name, s);
-          setTimeout(() => {
-            if (justHid.delete(s.name) && mode === "apps") renderList();
-          }, 6000);
+        // Hide keeps the app's settings and has Undo; removing a link deletes them: asked first.
+        if (s.linked) {
+          const anchor = $(`#list [data-name="${CSS.escape(s.name)}"]`) ?? $("#site .site-name");
+          const pop = el("div", "pop-confirm wide");
+          const no = el("button", null, "Cancel");
+          const yes = el("button", "primary", "Remove");
+          const said = `Remove ${s.name} from Anvil? Its processes stop and its settings here are deleted: PHP version, HTTPS, php.ini and extensions. Its folder stays.`;
+          pop.append(el("p", null, said), no, yes);
+          const close = popAt(anchor, pop, yes);
+          no.onclick = close;
+          yes.onclick = () => {
+            close();
+            call("remove_site", { site: s.name });
+          };
+          return;
         }
+        justHid.set(s.name, s);
+        setTimeout(() => {
+          if (justHid.delete(s.name) && mode === "apps") renderList();
+        }, 6000);
         await call("remove_site", { site: s.name });
       },
     }),
