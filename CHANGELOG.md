@@ -44,6 +44,7 @@ contain breaking changes.
 - `anvil apps` lists the applications; `anvil sites` still works.
 - Git tab: a branch that tracks the same name on its remote shows only the remote ("origin"), not the branch twice.
 - Settings › PHP and the other language pages: a failed Install, Uninstall or Make default says why in its version's row, not at the top of the page.
+- Settings › Node.js: the note under Package managers is two short sentences, and says node_modules come from the app's lockfile manager.
 
 ### Added
 

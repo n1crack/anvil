@@ -68,10 +68,8 @@ for (const [id, name, note] of LANGS) {
     page.insertAdjacentHTML(
       "beforeend",
       `<h2>Package managers</h2><div id="pms" class="group pms"><div class="row"><span class="muted">Looking…</span></div></div>` +
-        `<p class="hint note">Anvil starts a detected Node app with npm install (when node_modules is missing) and npm run, using the npm bundled with the app’s Node.js. ` +
-        `An app’s PATH is that Node.js (shown here for the newest), then yarn and bun installed here (~/.anvil/runtimes), then the PATH Anvil started with plus your login shell’s, then Anvil’s pnpm: a pnpm of yours comes first. ` +
-        `pnpm is its standalone build, pinned and checked against its SHA-256; Anvil fetches it the first time an app needs pnpm and finds none. ` +
-        `Install uses Anvil’s npm for yarn, and bun’s official release checked against its published SHA-256. Your terminal is left alone.</p>`,
+        `<p class="hint note">An app missing node_modules gets them from the manager its lockfile names (npm without one). ` +
+        `Apps find yarn and bun installed here first, and your own pnpm before Anvil’s, which is downloaded when an app needs it; your terminal is left alone.</p>`,
     );
   }
   $("#storage").before(page);
