@@ -121,10 +121,11 @@ button, select, input { font: inherit; color: inherit; }
   outline-offset: 2px;
 }
 
-/* Inside clipped containers (list groups, grouped rows) the ring is drawn inward. */
+/* Inside clipped containers (list groups, grouped rows, the scrolling tab bar) the ring is drawn inward. */
 .rows :focus-visible,
 .group :focus-visible,
-.logs-list :focus-visible { outline-offset: -2px; }
+.logs-list :focus-visible,
+.tabs :focus-visible { outline-offset: -2px; }
 
 .visually-hidden {
   position: absolute;
@@ -782,8 +783,11 @@ button, select, input { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: 20px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid var(--line);
+  /* Room inside the scroll's clip for a tab's focus ring; the margins keep the layout,
+   * and the line under the tabs stays within the content's width. */
+  margin: -3px -6px 14px;
+  padding: 0 6px;
+  background: linear-gradient(var(--line), var(--line)) bottom / 100% 1px no-repeat content-box;
   /* Narrow panes scroll the tabs instead of cutting the last one. */
   overflow-x: auto;
   scrollbar-width: none;
@@ -793,7 +797,8 @@ button, select, input { font: inherit; color: inherit; }
 
 .tabs [role="tab"] {
   position: relative;
-  padding: 0 0 8px;
+  margin: 0 -6px;
+  padding: 3px 6px 9px;
   border: 0;
   background: none;
   color: var(--muted);
@@ -807,9 +812,9 @@ button, select, input { font: inherit; color: inherit; }
 .tabs [role="tab"][aria-selected="true"]::after {
   content: "";
   position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
+  right: 6px;
+  bottom: 0;
+  left: 6px;
   height: 2px;
   border-radius: 1px;
   background: var(--heat);
@@ -818,8 +823,8 @@ button, select, input { font: inherit; color: inherit; }
 /* Out of the flow, so the tab bar keeps its height on Resources. */
 .tabs .res-reload {
   position: absolute;
-  top: -4px;
-  right: 0;
+  top: -1px;
+  right: 6px;
   width: 24px;
   height: 24px;
 }
