@@ -2906,6 +2906,8 @@ button.log-file:hover { text-decoration-color: currentColor; }
 .mail-views { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .mail-actions { display: flex; gap: 8px; }
 .mail-actions button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: none; color: var(--muted); font-size: 12px; }
+.mail-actions.asking { align-items: baseline; white-space: nowrap; }
+.mail-actions .text-act { height: 24px; padding: 0 2px; border: 0; }
 .mail-actions button:hover { color: var(--text); border-color: var(--cold); }
 .mail-files-list { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 8px; font-size: 12px; }
 /* A mail is drawn for white paper, as mail apps show it, in either theme. */

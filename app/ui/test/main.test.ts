@@ -2454,7 +2454,7 @@ describe("mail catcher", () => {
     expect(files[0].textContent).toBe("invoice.pdf 13 B Saved to ~/Downloads/invoice.pdf");
   });
 
-  test("new mail comes in on top while the tab is shown; Delete takes one out", async () => {
+  test("new mail comes in on top while the tab is shown; Delete asks in place, then takes one out", async () => {
     const mail = await import("../src/mail");
     mail.poll(false); // ticks by hand
     w.mockMails.shop.unshift({ ...w.mockMails.shop[1], id: "1792505400000-9", subject: "Newest" });
@@ -2463,7 +2463,15 @@ describe("mail catcher", () => {
     expect(rows().length).toBe(3);
     // The open one stays open.
     expect(rows()[1].querySelector(".log-detail")).not.toBeNull();
+    const n = calls("mail_delete").length;
     (rows()[1].querySelector(".mail-delete") as HTMLElement).click();
+    const ask = rows()[1].querySelector(".mail-actions.asking") as HTMLElement;
+    expect(ask.querySelector(".muted")!.textContent).toBe("Delete this message?");
+    (ask.querySelectorAll("button")[0] as HTMLElement).click(); // Cancel
+    expect(rows()[1].querySelector(".mail-actions.asking")).toBeNull();
+    expect(calls("mail_delete").length).toBe(n);
+    (rows()[1].querySelector(".mail-delete") as HTMLElement).click();
+    (rows()[1].querySelectorAll(".mail-actions button")[1] as HTMLElement).click();
     await wait(30);
     expect(calls("mail_delete").at(-1)![1]).toEqual({ inbox: "shop", id: "1792505339198-2" });
     expect(rows().map((r) => cell(r, ".log-msg"))).toEqual(["Newest", "(no subject)"]);

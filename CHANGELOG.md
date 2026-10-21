@@ -33,6 +33,7 @@ contain breaking changes.
 - Dev: a server whose port doesn't answer yet has an amber dot, a crashed process says its exit code, and dismissing a crash is ✕, not ■.
 - Worktrees: Create says Creating… while it works, and a worktree being removed says Removing… in its row; a failed removal is said under its name.
 - Storage and Resources mark what is safe to delete in grey instead of orange.
+- Mail tab: deleting one message asks first, in its row, as Clear does.
 
 ### Added
 
