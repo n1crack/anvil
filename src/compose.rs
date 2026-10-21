@@ -347,6 +347,27 @@ pub fn running(max_age: Duration) -> Result<Vec<(PathBuf, Container)>> {
     running_with(&docker_bin(), max_age)
 }
 
+/// How old a `docker ps` answer the Processes window takes: `TICK` while a compose
+/// container runs (or nothing has been asked yet), else `IDLE`, so Docker isn't woken
+/// every 2 s with nothing to show. An action from Anvil drops the answer (`forget`), so
+/// what it starts shows at the next poll; one started in a terminal within `IDLE`.
+pub fn poll_age() -> Duration {
+    let quiet = crate::lock(&LISTED).as_ref().is_some_and(|(_, _, a)| {
+        a.as_ref().is_ok_and(|all| {
+            !all.iter().any(|(_, c)| {
+                matches!(
+                    c.state.as_str(),
+                    "running" | "paused" | "restarting" | "created"
+                )
+            })
+        })
+    });
+    if quiet { IDLE } else { TICK }
+}
+
+/// `poll_age` when no compose container runs.
+pub const IDLE: Duration = Duration::from_secs(15);
+
 /// After an action the next look asks docker again.
 fn forget() {
     *crate::lock(&LISTED) = None;
@@ -739,6 +760,29 @@ mod tests {
             !crate::alive(plugin)
         });
         assert!(gone, "the compose plugin outlived the timeout");
+    }
+
+    #[test]
+    fn the_processes_poll_backs_off_while_nothing_runs() {
+        let _l = crate::lock(&LISTED_LOCK);
+        let c = |state: &str| Container {
+            service: "db".into(),
+            state: state.into(),
+            health: None,
+            ports: vec![],
+            exit_code: None,
+            oneoff: false,
+        };
+        let answer = |a| *crate::lock(&LISTED) = Some((PathBuf::new(), Instant::now(), a));
+        forget();
+        assert_eq!(poll_age(), TICK, "never asked");
+        answer(Ok(vec![(PathBuf::from("/a"), c("exited"))]));
+        assert_eq!(poll_age(), IDLE);
+        answer(Ok(vec![(PathBuf::from("/a"), c("running"))]));
+        assert_eq!(poll_age(), TICK);
+        answer(Err("Docker isn't running".into()));
+        assert_eq!(poll_age(), TICK, "an error shows when Docker is back");
+        forget();
     }
 
     #[test]

@@ -1014,7 +1014,7 @@ fn activity(app: State<App>) -> Res<Activity> {
         .iter()
         .any(|s| anvil::compose::file(&s.path).is_some())
     {
-        match anvil::compose::running(anvil::compose::TICK) {
+        match anvil::compose::running(anvil::compose::poll_age()) {
             Ok(c) => (c, None),
             Err(e) => (vec![], Some(err(e))),
         }

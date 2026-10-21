@@ -34,6 +34,7 @@ contain breaking changes.
 - The line under an app's or service's name wraps without a stray "·" at a line's start or end.
 - Stopping an app also ends the processes it started in the background, such as Next.js's telemetry flusher, which were left running.
 - Less CPU while an app's Dev, Requests or Overview tab, or the Processes window, is open.
+- The Processes window asks Docker every 15 s instead of every 2 s while no container runs.
 
 ## [0.2.1] - 2026-10-21
 
