@@ -271,7 +271,7 @@ fn config_round_trip() {
     assert_eq!(env.config().paths, std::slice::from_ref(&parked));
 
     let kinds = |env: &Env| -> Vec<(String, String)> {
-        env.ok(&["sites"])
+        env.ok(&["apps"])
             .lines()
             .map(|l| {
                 let mut w = l.split_whitespace();
@@ -301,16 +301,16 @@ fn config_round_trip() {
     let out = env.run_in(&other, &["link", "Extra.test"]);
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(env.config().links["extra"], other);
-    assert!(env.ok(&["sites"]).contains("extra.test"));
+    assert!(env.ok(&["apps"]).contains("extra.test"));
     env.ok(&["unlink", "extra"]);
     assert!(env.config().links.is_empty());
-    assert!(!env.ok(&["sites"]).contains("extra.test"));
+    assert!(!env.ok(&["apps"]).contains("extra.test"));
     assert!(other.is_dir(), "unlink never deletes the folder");
 
     // app type
     env.ok(&["app", "type", "plain", "vite"]);
     assert_eq!(env.config().sites["plain"].kind.as_deref(), Some("vite"));
-    assert!(env.ok(&["sites"]).contains("Vite"));
+    assert!(env.ok(&["apps"]).contains("Vite"));
     env.fails(&["app", "type", "plain", "cobol"]);
     env.ok(&["app", "type", "plain"]);
     assert_eq!(env.config().sites["plain"].kind, None);
@@ -351,7 +351,7 @@ fn config_round_trip() {
     env.ok(&["app", "root", "shop", "web/"]);
     assert_eq!(env.config().sites["shop"].root.as_deref(), Some("web"));
     assert!(env.ok(&["app", "root", "shop"]).starts_with("web ("));
-    assert!(env.ok(&["sites"]).contains("shop/web"));
+    assert!(env.ok(&["apps"]).contains("shop/web"));
     for bad in ["dist", "../front", "/tmp", "we\"b"] {
         env.fails(&["app", "root", "shop", bad]);
     }
@@ -374,7 +374,7 @@ fn config_round_trip() {
     // forget
     env.ok(&["forget", parked.to_str().unwrap()]);
     assert!(env.config().paths.is_empty());
-    assert_eq!(env.ok(&["sites"]), "");
+    assert_eq!(env.ok(&["apps"]), "");
 }
 
 /// What the fake app saw: `(method, client, params)`.

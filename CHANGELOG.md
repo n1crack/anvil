@@ -41,6 +41,7 @@ contain breaking changes.
 - A failed New Application's "Show in Finder" is "Show Log in Finder", which is what it shows.
 - Changing a running app's type, start command, port or version says beside the field that it restarts the app; Start with Anvil no longer restarts it.
 - `anvil --help` and each command's help explain every argument and flag, with examples, and say "application" where they said "site".
+- `anvil apps` lists the applications; `anvil sites` still works.
 
 ### Added
 
