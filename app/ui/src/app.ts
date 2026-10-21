@@ -41,6 +41,7 @@ function lockOf(secure: boolean) {
   return lock;
 }
 
+const CHEVRON = `<svg class="chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const FOLDER_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h3.5l1.5 1.5h5.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
 const STACK_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.75 14.25 5 8 8.25 1.75 5z"/><path d="m1.75 8 6.25 3.25L14.25 8M1.75 11 8 14.25 14.25 11"/></svg>`;
 /** In a lock's place for what Anvil doesn't serve: a grey folder, or a stack for Compose. */
@@ -292,7 +293,8 @@ export function listSection(key, title, rows, count) {
   const open = !!filter || !folded.has(key);
   const head = el("button", "section-head");
   head.setAttribute("aria-expanded", String(open));
-  head.append(el("span", "chevron", "›"), el("span", null, title), el("span", "section-count", count));
+  head.insertAdjacentHTML("beforeend", CHEVRON);
+  head.append(el("span", null, title), el("span", "section-count", count));
   const box = el("div", "rows");
   box.append(...rows);
   const inner = el("div");
@@ -420,7 +422,7 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
     const open = !collapsed.has(s.name);
     b.setAttribute("aria-expanded", String(open));
     d.title = open ? "Hide worktrees" : "Show worktrees";
-    d.innerHTML = `${BRANCH}<span class="count"></span><span class="chevron" aria-hidden="true">›</span>`;
+    d.innerHTML = `${BRANCH}<span class="count"></span>${CHEVRON}`;
     $(".count", d).textContent = kids;
     d.onclick = (e) => {
       e.stopPropagation();

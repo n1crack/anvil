@@ -21,6 +21,7 @@ import {
   showTab,
   snap,
 } from "./app";
+import { icon } from "./icons";
 import { late } from "./late";
 import { picker } from "./picker";
 
@@ -207,7 +208,8 @@ export function chips(root, values, label, save) {
       c.classList.add("link");
       c.onclick = v.onclick;
     }
-    const x = el("button", null, "×");
+    const x = el("button");
+    x.append(icon("x"));
     x.setAttribute("aria-label", String(`Remove ${v.text ?? v}`));
     x.onclick = (e) => {
       e.stopPropagation();
@@ -522,8 +524,10 @@ function drawLicense() {
   $("#svc-license-accept").hidden = !!accepted;
   $("#svc-license-done").hidden = !accepted;
   if (accepted)
-    $("#svc-license-done").textContent =
-      `✓ Accepted on ${new Date(accepted).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+    $("#svc-license-done").replaceChildren(
+      icon("check"),
+      ` Accepted on ${new Date(accepted).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`,
+    );
   check.checked = false;
   syncAdd();
 }

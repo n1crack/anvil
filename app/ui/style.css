@@ -229,9 +229,9 @@ button, select, input { font: inherit; color: inherit; }
 .section-head:hover { color: var(--text); }
 
 .section-head .chevron {
-  width: 8px;
-  font-size: 13px;
-  line-height: 1;
+  flex: none;
+  width: 9px;
+  height: 9px;
   transform: rotate(90deg);
   transition: transform 0.2s ease;
 }
@@ -460,8 +460,6 @@ button, select, input { font: inherit; color: inherit; }
   justify-content: center;
   width: 10px;
   height: 10px;
-  font-size: 14px;
-  line-height: 1;
   transform-origin: 50% 50%;
   transition: transform 0.22s ease;
 }
@@ -915,6 +913,10 @@ button, select, input { font: inherit; color: inherit; }
 .proc-actions { display: flex; align-items: center; gap: 6px; }
 .proc-actions button:disabled { opacity: 0.4; }
 .proc-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   height: 24px;
   min-width: 28px;
   padding: 0 10px;
@@ -1113,7 +1115,7 @@ button.proc-name:hover { text-decoration: underline; }
   .dev-item .dev-all { width: 22px; justify-content: center; padding: 0; }
   .dev-item .dev-all > span:not(.spin-dot) { display: none; }
 }
-.dev-dismiss { flex: none; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 13px; line-height: 1; }
+.dev-dismiss { display: grid; flex: none; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted); }
 .dev-dismiss:hover { color: var(--text); }
 .dev-item:not(:hover) .dev-dismiss:not(:focus-visible) { visibility: hidden; }
 .dev-head .dev-exit { flex: none; margin-right: 4px; } .dev-head .dev-exit.bad { color: #ff7b72; }
@@ -1128,7 +1130,7 @@ button.proc-name:hover { text-decoration: underline; }
 @container (max-width: 460px) {
   .dev-keys { text-align: right; }
   .dev-keys-full { display: none; }
-  .dev-keys-short { display: inline; }
+  .dev-keys-short { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
 }
 /* ⌨ Keys' card: above the line, at the pane's right, in the console's colors. */
 .dev-keys-card { position: absolute; right: 10px; bottom: calc(100% + 6px); z-index: 5; display: grid; grid-template-columns: auto auto; gap: 4px 12px; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: #1b1f24; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); text-align: left; }
@@ -1145,7 +1147,7 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-empty[hidden] { display: none; }
 /* The compose file can't be read: its error and hint, wrapped in the pane. */
 .dev-empty.is-error { right: 14px; display: block; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
-.dev-empty button { height: 20px; padding: 0 7px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: rgba(255, 255, 255, 0.08); color: #e8ebee; font-size: 10px; }
+.dev-empty button { display: inline-grid; place-items: center; height: 20px; padding: 0 7px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: rgba(255, 255, 255, 0.08); color: #e8ebee; font-size: 10px; }
 .dev-line { display: flex; }
 .dev-tag { flex: none; white-space: pre; }
 .dev-text { min-width: 0; }
@@ -1195,6 +1197,7 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-conf-input::placeholder { color: var(--muted); }
 .dev-conf-table td:nth-child(1) .dev-conf-input { font-family: inherit; }
 .dev-conf-remove { width: 22px; height: 22px; color: var(--muted); }
+.dev-conf-remove svg { width: 12px; height: 12px; }
 .dev-conf-error { margin: 8px 0 0; font-size: 12px; }
 .dev-conf-foot { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
 .dev-conf-foot .spacer,
@@ -1986,7 +1989,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   height: 22px;
   background: none;
   color: inherit;
-  font-size: 16px;
 }
 
 .toast {
@@ -2427,6 +2429,7 @@ kbd {
 }
 
 .chips .chip button:hover { color: var(--text); }
+.chip button svg { width: 10px; height: 10px; }
 .chips .chip.link { cursor: pointer; color: var(--text); }
 .chips .chip.link:hover { text-decoration: underline; }
 .row .chips input { width: 140px; }
@@ -2891,7 +2894,7 @@ button.log-file:hover { text-decoration-color: currentColor; }
   color: var(--muted);
   font-size: 12px;
 }
-.pkg-pin-add { width: 22px; padding: 0; border: 1px solid var(--edge); border-radius: 10px; font-size: 14px; line-height: 1; }
+.pkg-pin-add { display: inline-grid; place-items: center; width: 22px; padding: 0; border: 1px solid var(--edge); border-radius: 10px; }
 .pkg-pin-reset { padding: 0 4px; }
 .pkg-pin-add:hover,
 .pkg-pin-reset:hover { color: var(--text); }
@@ -3163,7 +3166,6 @@ a.pkg-adv-title:hover { text-decoration: underline; }
 
 .logs-status:empty { display: none; }
 
-.logs-menu { font-size: 16px; line-height: 1; }
 
 /* One secondary button, defined here only: every plain action in the app and service
    panes looks the same. The sheets' own buttons and the setup buttons are styled apart. */
@@ -3434,6 +3436,7 @@ body.activity {
 .new-sheet .picker-side > .field { grid-template-columns: 80px minmax(0, 1fr); }
 .svc-license-text,
 #svc-license-done { margin: 0; }
+#svc-license-done svg { vertical-align: -1px; }
 .svc-license-text a { color: inherit; }
 /* A note with nothing to say takes no room. */
 .field small:empty { display: none; }

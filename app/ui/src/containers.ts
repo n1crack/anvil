@@ -1,6 +1,7 @@
 import type { Container } from "./types";
 import { $, M, el, invoke, selected, showError, showTab, snap, tab } from "./app";
-import { COLORS, barBtn, icon } from "./dev";
+import { COLORS, barBtn } from "./dev";
+import { icon } from "./icons";
 import { line, streamPane } from "./stream";
 import { late } from "./late";
 import { DOT, containerRun, containerState, procBtn, procBusy, procCache } from "./processes";
@@ -220,9 +221,9 @@ export function drawContainers(name: string) {
     const actions = pane.heading(one.name, one.busy ?? detail(one));
     if (!one.busy && up(one)) {
       actions.append(procBtn("Restart", `Restart ${one.name}`, () => runOne(name, one, "restart")));
-      actions.append(procBtn("■", `Stop ${one.name}`, () => runOne(name, one, "stop")));
+      actions.append(procBtn(icon("stop"), `Stop ${one.name}`, () => runOne(name, one, "stop")));
     } else if (!one.busy) {
-      const start = procBtn("▶ Start", `Start ${one.name}`, () => runOne(name, one, "start"));
+      const start = procBtn([icon("start"), "Start"], `Start ${one.name}`, () => runOne(name, one, "start"));
       start.classList.add("dev-head-start");
       actions.append(start);
     }

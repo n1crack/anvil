@@ -101,8 +101,10 @@ export async function containerRun(name, services, action, service?: string) {
   if (selected === name) drawProcs(name);
 }
 
+/** A button: `label` is its text, an icon or both ([icon, text]). */
 export function procBtn(label, aria, onclick) {
-  const b = el("button", null, label);
+  const b = el("button");
+  b.append(...[label].flat());
   b.setAttribute("aria-label", String(aria));
   b.onclick = (e) => {
     e.stopPropagation();

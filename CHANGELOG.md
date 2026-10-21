@@ -38,6 +38,7 @@ contain breaking changes.
 - Service tags in the sidebar line up with the apps' type labels; short of room, a tag is left out instead of cut.
 - The line under an app's or service's name wraps without a stray "·" at a line's start or end.
 - Stopping an app also ends the processes it started in the background, such as Next.js's telemetry flusher, which were left running.
+- The main window's small buttons and marks (close, remove, more, keys, start, stop, done, failed) use the same outline icons as the rest of Anvil.
 - Less CPU while an app's Dev, Requests or Overview tab, or the Processes window, is open.
 - The Processes window asks Docker every 15 s instead of every 2 s while no container runs.
 - A closed or minimized window no longer reloads after every action; it catches up when it is shown again.

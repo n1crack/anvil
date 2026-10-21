@@ -3,6 +3,7 @@ import { $, M, PHP_KINDS, PROCESS_KINDS, ask, call, el, invoke, popAt, seg, sele
 import { type Item as Proc, apply, items, labelSpan, plan } from "./confplan";
 import { type Tail, readTail, tail } from "./console";
 import { late } from "./late";
+import { icon } from "./icons";
 import { askProcs, confirmPop, devAll, devRows, drawProcs, loadProcs, procBtn, procCache } from "./processes";
 import { type Sgr, sgr } from "./term";
 import { line, streamPane } from "./stream";
@@ -207,7 +208,7 @@ async function itemMenu(name: string, x: Item, at: HTMLElement) {
 }
 
 function entry(name: string, x: Item) {
-  // The status column: a process's dot; a run's spinner, then ✓ or ✕.
+  // The status column: a process's dot; a run's spinner, then a check or a cross.
   let status: HTMLElement;
   if (!x.run) status = el("span", `dot ${x.running ? "on" : x.crashed ? "bad" : ""}`);
   else if (x.running) {
@@ -216,7 +217,8 @@ function entry(name: string, x: Item) {
     status.title = "Running";
   } else {
     const ok = x.run.exit?.code === 0;
-    status = el("span", `dev-status ${ok ? "ok" : "bad"}`, ok ? "✓" : "✕");
+    status = el("span", `dev-status ${ok ? "ok" : "bad"}`);
+    status.append(icon(ok ? "check" : "x"));
     status.title = ok ? "Succeeded" : exitText(x.run);
   }
   const label =
@@ -236,7 +238,7 @@ function entry(name: string, x: Item) {
   }
   if (x.run) {
     const c = x.run;
-    const x2 = procBtn("×", c.running ? `Stop and dismiss ${c.name}` : `Dismiss ${c.name}`, () => dismiss(name, c));
+    const x2 = procBtn(icon("x"), c.running ? `Stop and dismiss ${c.name}` : `Dismiss ${c.name}`, () => dismiss(name, c));
     x2.className = "dev-dismiss";
     x2.title = c.running ? "Stop and dismiss" : "Dismiss";
     parts.push(x2);
@@ -293,21 +295,6 @@ function runMenu(name: string, btn: HTMLElement) {
   Object.assign(pop.style, { right: "", left: `${left + window.scrollX}px` });
 }
 
-// Outline icons, 14px, drawn in the label's color.
-const ICONS = {
-  run: '<path d="M2.5 4.5 6 8l-3.5 3.5M7.5 12h6"/>',
-  configure: '<path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/>',
-  start: '<path d="M4.5 3v10l8.5-5z"/>',
-  stop: '<rect x="4" y="4" width="8" height="8" rx="1"/>',
-  chevron: '<path d="M4.5 6.5 8 10l3.5-3.5"/>',
-};
-export function icon(name: keyof typeof ICONS) {
-  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  s.setAttribute("viewBox", "0 0 16 16");
-  s.setAttribute("aria-hidden", "true");
-  s.innerHTML = ICONS[name];
-  return s;
-}
 export const barBtn = (cls: string, ico: Element, label: string) => {
   const b = el("button", cls);
   b.append(ico, el("span", null, label));
@@ -422,9 +409,9 @@ export function drawDev(name: string) {
     const c = one.run;
     const bad = c.exit && !c.running && c.exit.code !== 0 ? [el("span", "dev-exit bad", exitText(c))] : [];
     const actions = pane.heading(c.name, scriptLabel(c), ...bad);
-    if (c.running) actions.append(procBtn("■ Stop", `Stop ${scriptLabel(c)}`, () => dismiss(name, c)));
+    if (c.running) actions.append(procBtn([icon("stop"), "Stop"], `Stop ${scriptLabel(c)}`, () => dismiss(name, c)));
     else {
-      const again = procBtn("↻ Run again", `Run ${scriptLabel(c)} again`, () =>
+      const again = procBtn([icon("again"), "Run again"], `Run ${scriptLabel(c)} again`, () =>
         confirmPop(again, `Run ${scriptLabel(c)}?`, "Run", () => runScript(name, c)),
       );
       actions.append(again);
@@ -434,9 +421,9 @@ export function drawDev(name: string) {
     const actions = pane.heading(r.name, r.command);
     if (r.running || r.crashed) {
       actions.append(procBtn("Restart", `Restart ${r.name}`, () => runProc(name, one, "restart")));
-      actions.append(procBtn("■", r.running ? `Stop ${r.name}` : `Dismiss ${r.name}`, () => runProc(name, one, "stop")));
+      actions.append(procBtn(icon("stop"), r.running ? `Stop ${r.name}` : `Dismiss ${r.name}`, () => runProc(name, one, "stop")));
     } else {
-      const start = procBtn("▶ Start", `Start ${r.name}`, () => runProc(name, one, "start"));
+      const start = procBtn([icon("start"), "Start"], `Start ${r.name}`, () => runProc(name, one, "start"));
       start.classList.add("dev-head-start");
       actions.append(start);
     }
@@ -753,7 +740,7 @@ function drawConf(name: string, force = false) {
     }
     const remove = main
       ? ""
-      : procBtn("×", `Remove ${x.name}`, () => {
+      : procBtn(icon("x"), `Remove ${x.name}`, () => {
           e.items = e.items.filter((y) => y !== x);
           drawConf(name, true);
         });
@@ -801,7 +788,7 @@ function drawConf(name: string, force = false) {
         if (ev.key === "Escape") drop();
       };
     const addBtn = procBtn("Add", "Add the process", add);
-    const cancel = procBtn("×", "Cancel adding", drop);
+    const cancel = procBtn(icon("x"), "Cancel adding", drop);
     cancel.className = "icon-btn dev-conf-remove";
     tr.append(cell(n), cell(c), cell(), cell(), cell(addBtn, cancel));
     body.append(tr);

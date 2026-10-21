@@ -369,12 +369,12 @@ describe("dev", () => {
     // The runs sit in a box of their own below the processes.
     expect($$(".dev-list > .dev-card").length).toBe(2);
     expect($(".dev-cmds").contains(item("once:test"))).toBe(true);
-    // A run's status sits in the dot column: a spinner, then ✓ or ✕ (the code in its tooltip).
+    // A run's status sits in the dot column: a spinner, then a check or a cross (the code in its tooltip).
     expect(item("once:test").querySelector(".dev-status .spin-dot")).not.toBeNull();
     expect(item("once:preview").firstElementChild!.className).toBe("dev-status ok");
-    expect(item("once:preview").firstElementChild!.textContent).toBe("✓");
+    expect(item("once:preview").querySelector(".dev-status svg")).not.toBeNull();
     const bad = item("once:format").firstElementChild as HTMLElement;
-    expect([bad.textContent, bad.className, bad.title]).toEqual(["✕", "dev-status bad", "Exited with code 1"]);
+    expect([bad.className, bad.title]).toEqual(["dev-status bad", "Exited with code 1"]);
     expect(item("app").firstElementChild!.className).toContain("dot");
   });
 
@@ -631,7 +631,7 @@ describe("dev", () => {
         .map(([, a]) => [a.name, a.action]);
     const list = $(".dev-list");
     const out = $(".dev-out");
-    // The line, and when the pane is too narrow for it ⌨ Keys, which opens them as a card.
+    // The line, and when the pane is too narrow for it Keys, which opens them as a card.
     expect($(".dev-keys .dev-keys-full").textContent).toBe("↑↓ select · s start · x stop · r restart · q stop all · c clear");
     const card = $(".dev-keys-card") as HTMLElement;
     expect(card.hidden).toBe(true);

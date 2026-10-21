@@ -1,6 +1,7 @@
 import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, seg, selected, showError, showTab, snap, tab, tilde } from "./app";
 import { follower, readTail, tail, termOut } from "./console";
 import { copy } from "./services";
+import { icon } from "./icons";
 import { shown } from "./live";
 import { ansi, clean, linkify, sgr } from "./term";
 
@@ -60,7 +61,7 @@ function buildLogs(s) {
     <div class="logs-bar">
       <input class="logs-search" type="search" placeholder="Search this log" aria-label="Search this log" spellcheck="false">
       <button class="logs-follow icon-btn" aria-pressed="false" title="Follow: show new entries as they are written" aria-label="Follow">${FOLLOW_ICON}</button>
-      <button class="logs-menu icon-btn" title="More" aria-label="More">⋯</button>
+      <button class="logs-menu icon-btn" title="More" aria-label="More">${icon("more").outerHTML}</button>
     </div>
     <p class="logs-status muted"></p>
     <ol class="logs-list"></ol>
@@ -108,7 +109,7 @@ function buildLogs(s) {
     follow(v.follow);
   };
 
-  // Less frequent actions wait behind ⋯.
+  // Less frequent actions wait behind More.
   $(".logs-menu", node).onclick = async () => {
     const menu = await M.Menu.new({
       items: await Promise.all([

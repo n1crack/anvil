@@ -1,5 +1,6 @@
 import { el, mode, selected, tab } from "./app";
 import { termOut } from "./console";
+import { icon } from "./icons";
 import { shown } from "./live";
 import { loadProcs, procBtn, procLoading } from "./processes";
 import { listSplitter } from "./split";
@@ -42,7 +43,7 @@ export function streamPane(o: {
   const term = termOut("console-out dev-out");
   const empty = el("div", "dev-empty");
   term.out.tabIndex = 0;
-  // The keys (see main.onkeydown), said once; a narrow pane shows ⌨ Keys, which opens
+  // The keys (see main.onkeydown), said once; a narrow pane shows a Keys button, which opens
   // them as a small card (again, outside or Esc closes it).
   const KEYS: [string, string][] = [
     ["↑↓", "select"],
@@ -53,7 +54,8 @@ export function streamPane(o: {
     ["c", "clear"],
   ];
   const keysHint = el("p", "dev-keys");
-  const keysBtn = el("button", "dev-keys-short", "⌨ Keys");
+  const keysBtn = el("button", "dev-keys-short");
+  keysBtn.append(icon("keys"), "Keys");
   keysBtn.setAttribute("aria-expanded", "false");
   const card = el("div", "dev-keys-card");
   card.setAttribute("role", "dialog");
@@ -146,7 +148,7 @@ export function streamPane(o: {
   function notice(text: string, start?: { name: string; run: () => void }) {
     empty.replaceChildren(el("span", null, text));
     if (start) {
-      const go = procBtn("▶", `Start ${start.name}`, start.run);
+      const go = procBtn(icon("start"), `Start ${start.name}`, start.run);
       go.title = `Start ${start.name}`;
       empty.append(go);
     }

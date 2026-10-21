@@ -1,4 +1,5 @@
 import { $, ago, call, el, invoke, popAt, renderMain, seg, selected, showError, snap } from "./app";
+import { icon } from "./icons";
 
 /* Packages tab: the app's key packages as badges (pinned per app, the detected ones by
  * default), then Check outdated and Check security. What a check finds shows as a notice
@@ -268,13 +269,15 @@ function pinsLine(name, p) {
     if (label !== k) c.title = k;
     const v = versionOf(p, k);
     if (v) c.append(el("b", null, v));
-    const x = el("button", null, "×");
+    const x = el("button");
+    x.append(icon("x"));
     x.setAttribute("aria-label", `Unpin ${label}`);
     x.onclick = () => save(pins.filter((o) => o !== k));
     c.append(x);
     line.append(c);
   }
-  const add = el("button", "pkg-pin-add", "+");
+  const add = el("button", "pkg-pin-add");
+  add.append(icon("plus"));
   add.title = "Pin a package";
   add.setAttribute("aria-label", "Pin a package");
   add.onclick = () => pinPop(add, p, pins, save);
