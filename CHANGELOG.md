@@ -26,6 +26,7 @@ contain breaking changes.
 - Software Update: a failed check shows why under its title and offers Try Again; without release notes the window's content sits in the middle.
 - Settings › Storage: Applications no longer says it is measuring and that no applications take space at the same time.
 - Settings › Storage: a language's row points to its own Settings page, not the former Languages page.
+- In a narrow window every tab of an app fits, Settings included, the header stays short and Dev's output keeps its room.
 - An app's header counts a crashed Docker Compose container as crashed, not running.
 - New Worktree…, Dev's Run and the Start/Stop of all processes look like the other buttons; Run no longer looks disabled.
 - The keyboard focus ring on an app's tabs is drawn whole, not cut at the top and bottom.
