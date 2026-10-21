@@ -679,16 +679,21 @@ pub fn package_managers() -> Vec<PackageManager> {
             .map(|(_, v)| v.clone())
             .unwrap_or_default(),
     );
-    let login = without_shims(&crate::login_path().unwrap_or(base));
+    let login_raw = crate::login_path().unwrap_or(base);
+    let login = without_shims(&login_raw);
+    let shims = home().join("shims");
     let mine = [root("pm"), root("bun"), root("pnpm")];
     ["npm", "pnpm", "yarn", "bun"]
         .into_iter()
         .map(|name| {
             let apps = find(name, &apps_path, &apps_env);
             let apps_real = apps.as_ref().map(|(_, r)| r.clone());
+            // A terminal that runs Anvil's shim first gets what apps get.
+            let shimmed = which(name, &login_raw).is_some_and(|b| b.parent() == Some(&*shims));
             let term_real =
                 which(name, &login).map(|b| crate::platform::canonicalize(&b).unwrap_or(b));
-            let same = term_real.is_some() && term_real == apps_real;
+            let same =
+                apps.is_some() && (shimmed || (term_real.is_some() && term_real == apps_real));
             PackageManager {
                 name,
                 anvil: apps_real.is_some_and(|r| mine.iter().any(|d| r.starts_with(d))),
