@@ -807,7 +807,7 @@ fn site_at(
 pub fn link(cfg: &mut Config, name: &str, path: PathBuf) -> Result<String> {
     let name = site_name(name.trim().trim_end_matches(&format!(".{}", cfg.tld)));
     if name.is_empty() || name.starts_with('.') || name.ends_with('.') {
-        bail!("\"{name}\" is not a valid site name");
+        bail!("\"{name}\" is not a valid app name");
     }
     cfg.hidden.retain(|h| h != &name);
     cfg.links.insert(name.clone(), path);
@@ -1421,12 +1421,16 @@ pub fn set_default_php(cfg: &mut Config, version: &str) -> Result<()> {
 /// Pin a site to a PHP version, or back to the default with `None`.
 /// A setting for an app Anvil doesn't know would only leave an empty entry behind.
 fn known_site(cfg: &Config, site: &str) -> Result<()> {
+    find_site(cfg, site).map(drop)
+}
+
+/// The app named `site`, or an error that names it.
+pub fn find_site(cfg: &Config, site: &str) -> Result<Site> {
     let name = site_name(site);
-    if sites(cfg).iter().any(|s| s.name == name) {
-        Ok(())
-    } else {
-        bail!("No site named {site}")
-    }
+    sites(cfg)
+        .into_iter()
+        .find(|s| s.name == name)
+        .with_context(|| format!("No app named {site}"))
 }
 
 pub fn set_site_php(cfg: &mut Config, site: &str, version: Option<String>) -> Result<()> {
@@ -1745,10 +1749,7 @@ pub fn set_site_root(cfg: &mut Config, site: &str, dir: Option<&str>) -> Result<
     let root = match dir {
         None => None,
         Some(d) => {
-            let s = sites(cfg)
-                .into_iter()
-                .find(|s| s.name == name)
-                .with_context(|| format!("No site named {site}"))?;
+            let s = find_site(cfg, site)?;
             has_web_root(&s)?;
             let rel = web_root(d)?;
             if !s.path.join(&rel).is_dir() {
@@ -4117,7 +4118,7 @@ mod tests {
         // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
         unsafe { std::env::set_var("ANVIL_HOME", dir.path().join("home")) };
         let mut cfg = Config::default();
-        let no = "No site named ghost";
+        let no = "No app named ghost";
         assert_eq!(
             set_site_php(&mut cfg, "ghost", None)
                 .unwrap_err()

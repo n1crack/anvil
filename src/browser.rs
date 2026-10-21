@@ -100,7 +100,7 @@ pub fn doc_route(port: u16) -> String {
 pub fn set(cfg: &mut crate::Config, site: &str, on: bool) -> Result<()> {
     let name = crate::site_name(site);
     let Some(s) = crate::sites(cfg).into_iter().find(|s| s.name == name) else {
-        anyhow::bail!("No site named {site}");
+        anyhow::bail!("No app named {site}");
     };
     if on && !apps::is_php(&s.kind) && !apps::runs_process(&s.kind) {
         anyhow::bail!(

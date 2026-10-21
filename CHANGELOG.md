@@ -90,6 +90,9 @@ contain breaking changes.
 - Packages: in a narrow window the + list opens inside the window instead of pushing the sidebar out of view.
 - Settings › About: static-php-cli no longer breaks across two lines.
 - Menu bar menu: picking a default PHP version while Anvil runs says Restarting… until its extensions are built and the web server is back.
+- `anvil unlink` and `anvil forget` say what they did, and fail for a name or folder Anvil doesn't serve; `anvil forget` works for a deleted folder.
+- CLI errors for an unknown app all read "No app named …" and point to `anvil sites`; "Anvil isn't running" is an error like the others.
+- Warnings and hints the CLI writes to stderr have no color codes when stderr isn't a terminal.
 
 ## [0.2.1] - 2026-10-21
 

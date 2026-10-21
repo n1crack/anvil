@@ -755,6 +755,32 @@ enum ExtCmd {
     },
 }
 
+/// `anvil forget`: a folder that isn't parked is an error that lists the parked ones.
+fn forget(cfg: &mut Config, p: &std::path::Path) -> Result<()> {
+    if !cfg.paths.iter().any(|x| x == p) {
+        let parked: Vec<_> = cfg.paths.iter().map(|x| x.display().to_string()).collect();
+        match parked.is_empty() {
+            true => bail!("{} isn't parked; no folder is", p.display()),
+            false => bail!(
+                "{} isn't parked; these are: {}",
+                p.display(),
+                parked.join(", ")
+            ),
+        }
+    }
+    cfg.paths.retain(|x| x != p);
+    Ok(())
+}
+
+/// `anvil unlink`: the name as `anvil link` saved it (`blog.test` works too).
+fn unlink(cfg: &mut Config, name: &str) -> Result<String> {
+    let name = site_name(name.trim().trim_end_matches(&format!(".{}", cfg.tld)));
+    if cfg.links.remove(&name).is_none() {
+        bail!("No linked app named {name}; `anvil sites` lists the applications");
+    }
+    Ok(name)
+}
+
 fn dir_or_cwd(p: Option<PathBuf>) -> Result<PathBuf> {
     let p = p.map_or_else(std::env::current_dir, Ok)?;
     anvil::platform::canonicalize(&p).with_context(|| format!("{} not found", p.display()))
@@ -804,7 +830,7 @@ fn start(cfg: &Config) -> Result<()> {
         );
     }
     for c in site_name_clashes(cfg) {
-        eprintln!("  {}", yellow(c));
+        eprintln!("  {}", style::warn(c));
     }
     match &server.mail_error {
         Some(e) => eprintln!("  {}", style::error(e)),
@@ -1149,6 +1175,10 @@ fn main() -> ExitCode {
     // Same output as returning the Result, with `Error:` in red on a terminal.
     if let Err(e) = run() {
         eprintln!("{} {e:?}", style::error("Error:"));
+        // Every lookup by app name fails with this one message; the list is a command away.
+        if e.to_string().starts_with("No app named ") {
+            eprintln!("{}", style::note("`anvil sites` lists the applications."));
+        }
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
@@ -1181,15 +1211,10 @@ fn edit<T>(cfg: &mut Config, f: impl FnOnce(&mut Config) -> Result<T>) -> Result
     Ok(out)
 }
 
-/// Asks the running app, which owns every process; exits 1 when none runs.
+/// Asks the running app, which owns every process; an error when none runs.
 fn ask_app(method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
-    match control::request(method, params, "Terminal")? {
-        Some(v) => Ok(v),
-        None => {
-            eprintln!("Anvil isn't running. Open it, then try again.");
-            std::process::exit(1)
-        }
-    }
+    control::request(method, params, "Terminal")?
+        .context("Anvil isn't running. Open the Anvil app, then try again.")
 }
 
 /// `name: running` for each row `keep` picks from the app's reply.
@@ -1303,16 +1328,13 @@ fn share(cfg: &Config, site: &str) -> Result<()> {
     if !cfg.tunnel {
         bail!("{}", tunnel::TURNED_OFF);
     }
-    let s = sites(cfg)
-        .into_iter()
-        .find(|s| s.name == site_name(site))
-        .with_context(|| format!("No app named {site}"))?;
+    let s = find_site(cfg, site)?;
     let (tx, rx) = std::sync::mpsc::channel();
     let stop = tx.clone();
     ctrlc::set_handler(move || {
         let _ = stop.send(());
     })?;
-    eprintln!("{}", dim("Opening a tunnel…"));
+    eprintln!("{}", style::note("Opening a tunnel…"));
     let mut shares = tunnel::Shares::default();
     shares.start(cfg, &s, move || {
         let _ = tx.send(());
@@ -1322,10 +1344,10 @@ fn share(cfg: &Config, site: &str) -> Result<()> {
         Some(State::Ready { url }) => {
             println!("{}", cyan(&url));
             if let Some(note) = tunnel::note(&s) {
-                eprintln!("{}", yellow(note));
+                eprintln!("{}", style::warn(note));
             }
-            eprintln!("{}", dim(tunnel::LIMITS));
-            eprintln!("{}", dim("Ctrl-C stops it."));
+            eprintln!("{}", style::note(tunnel::LIMITS));
+            eprintln!("{}", style::note("Ctrl-C stops it."));
         }
         Some(State::Failed { error }) => bail!(error),
         _ => return Ok(()), // Ctrl-C while it opened; dropping `shares` stops it
@@ -1401,11 +1423,13 @@ fn run() -> Result<()> {
             println!("Parked {}", p.display());
         }
         Cmd::Forget { path } => {
-            let p = dir_or_cwd(path)?;
-            edit(&mut cfg, |c| {
-                c.paths.retain(|x| x != &p);
-                Ok(())
-            })?;
+            // A parked folder that was deleted can still be forgotten.
+            let p = match dir_or_cwd(path.clone()) {
+                Ok(p) => p,
+                Err(_) => std::path::absolute(path.unwrap_or_default())?,
+            };
+            edit(&mut cfg, |c| forget(c, &p))?;
+            println!("Forgot {}", p.display());
         }
         Cmd::Link { name } => {
             let p = dir_or_cwd(None)?;
@@ -1418,10 +1442,8 @@ fn run() -> Result<()> {
             );
         }
         Cmd::Unlink { name } => {
-            edit(&mut cfg, |c| {
-                c.links.remove(&name);
-                Ok(())
-            })?;
+            let name = edit(&mut cfg, |c| unlink(c, &name))?;
+            println!("Unlinked {name}");
         }
         Cmd::Sites => {
             let all = sites(&cfg);
@@ -1451,7 +1473,7 @@ fn run() -> Result<()> {
                 );
             }
             for c in site_name_clashes(&cfg) {
-                eprintln!("{}", yellow(c));
+                eprintln!("{}", style::warn(c));
             }
         }
         Cmd::Worktree { cmd } => {
@@ -1642,10 +1664,7 @@ fn run() -> Result<()> {
             paths,
             safe,
         } => {
-            let s = sites(&cfg)
-                .into_iter()
-                .find(|s| s.name == site_name(&site))
-                .with_context(|| format!("No app named {site}"))?;
+            let s = find_site(&cfg, &site)?;
             let running = apps::running_anywhere(&s.name);
             let mut targets = paths;
             if safe {
@@ -1841,10 +1860,7 @@ fn run() -> Result<()> {
                 dir: None,
                 reset: false,
             } => {
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No site named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 has_web_root(&s)?;
                 match &s.root_custom {
                     Some(dir) => println!("{dir} {}", dim(format!("({})", s.root.display()))),
@@ -1881,10 +1897,7 @@ fn run() -> Result<()> {
                 edit(&mut cfg, |c| set_site_runtime(c, &site, version))?
             }
             AppCmd::Pnpm { site } => {
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No site named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 let lock = anvil::packages::switch_to_pnpm(&cfg, &s)?;
                 println!("{} uses pnpm now; {lock} is gone. Test the app.", s.name);
             }
@@ -1902,10 +1915,7 @@ fn run() -> Result<()> {
             AppCmd::Restart { site, process } => run_in_app(site, process, "restart")?,
             AppCmd::Share { site } => share(&cfg, &site)?,
             AppCmd::Mail { site, open, n } => {
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No site named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 if anvil::mail::caught(&cfg, &s.name) {
                     let dir = anvil::mail::root().join(&s.name);
                     match open {
@@ -1966,10 +1976,7 @@ fn run() -> Result<()> {
                 if !cfg.request_log {
                     bail!("{}", requests::TURNED_OFF);
                 }
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No app named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 let filter = requests::Filter {
                     status,
                     method,
@@ -2003,10 +2010,7 @@ fn run() -> Result<()> {
                 if on || off {
                     edit(&mut cfg, |c| browser::set(c, &site, on))?;
                 }
-                let s = sites(&cfg)
-                    .into_iter()
-                    .find(|s| s.name == site_name(&site))
-                    .with_context(|| format!("No app named {site}"))?;
+                let s = find_site(&cfg, &site)?;
                 if on || off {
                     println!(
                         "Browser errors {} for {}{}",
@@ -2120,10 +2124,7 @@ fn run() -> Result<()> {
             }
         }
         Cmd::Usage { site: Some(site) } => {
-            let s = sites(&cfg)
-                .into_iter()
-                .find(|s| s.name == site_name(&site))
-                .with_context(|| format!("No app named {site}"))?;
+            let s = find_site(&cfg, &site)?;
             let (total, items) = resources::disk(&s);
             let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
             println!(
@@ -2161,13 +2162,7 @@ fn run() -> Result<()> {
         }
         Cmd::Git { site } => {
             let dir = match site {
-                Some(site) => {
-                    sites(&cfg)
-                        .into_iter()
-                        .find(|s| s.name == site_name(&site))
-                        .with_context(|| format!("No app named {site}"))?
-                        .path
-                }
+                Some(site) => find_site(&cfg, &site)?.path,
                 None => dir_or_cwd(None)?,
             };
             let g = git::info(&dir).context("Not a git repository")?;
@@ -2220,10 +2215,7 @@ fn run() -> Result<()> {
             n,
             level,
         } => {
-            let s = sites(&cfg)
-                .into_iter()
-                .find(|s| s.name == site_name(&site))
-                .with_context(|| format!("No app named {site}"))?;
+            let s = find_site(&cfg, &site)?;
             let src = match source {
                 Some(id) => logs::find(&s, &id)?,
                 None => logs::sources(&s)
@@ -2349,10 +2341,7 @@ fn run() -> Result<()> {
             }
         }
         Cmd::Https { site, off } => {
-            let s = sites(&cfg)
-                .into_iter()
-                .find(|s| s.name == site_name(&site))
-                .with_context(|| format!("No site named {site}"))?;
+            let s = find_site(&cfg, &site)?;
             if !apps::serves(&s.kind) {
                 bail!(
                     "{} is a {} app, which Anvil doesn't serve, so it has no HTTPS",
@@ -2484,6 +2473,26 @@ fn find_worktree<'a>(all: &'a [Site], name: &str) -> Result<&'a Site> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forget_and_unlink_refuse_what_isnt_there() {
+        let mut cfg = Config {
+            paths: vec![PathBuf::from("/sites")],
+            ..Config::default()
+        };
+        cfg.links.insert("blog".into(), PathBuf::from("/blog"));
+        let e = forget(&mut cfg, std::path::Path::new("/nope")).unwrap_err();
+        assert_eq!(e.to_string(), "/nope isn't parked; these are: /sites");
+        forget(&mut cfg, std::path::Path::new("/sites")).unwrap();
+        assert!(cfg.paths.is_empty());
+        let e = forget(&mut cfg, std::path::Path::new("/sites")).unwrap_err();
+        assert_eq!(e.to_string(), "/sites isn't parked; no folder is");
+
+        let tld = cfg.tld.clone();
+        assert!(unlink(&mut cfg, "ghost").is_err());
+        assert_eq!(unlink(&mut cfg, &format!("blog.{tld}")).unwrap(), "blog");
+        assert!(cfg.links.is_empty());
+    }
 
     fn flags(args: &[&str]) -> NewOpts {
         let argv = ["anvil", "new", "laravel", "shop"].iter().chain(args);

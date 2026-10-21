@@ -86,6 +86,14 @@ pub fn red(s: impl Display) -> String {
 pub fn error(s: impl Display) -> String {
     paint(&tone((0xe0, 0x6c, 0x75), 168), s, true)
 }
+/// Warnings on stderr.
+pub fn warn(s: impl Display) -> String {
+    paint(&tone((0xe5, 0xc0, 0x7b), 180), s, true)
+}
+/// Hints and progress on stderr.
+pub fn note(s: impl Display) -> String {
+    paint(&tone((0x7f, 0x84, 0x8e), 245), s, true)
+}
 
 /// A message with each `command` in it highlighted.
 pub fn commands(s: &str) -> String {
