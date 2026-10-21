@@ -1,9 +1,10 @@
 name: Release
 
 # Push a tag like v0.1.0 (see CONTRIBUTING.md, "Releases"). This builds the
-# macOS app and the anvil CLI and creates a DRAFT GitHub Release; review and
-# publish it by hand. Run it by hand (Actions › Release › Run workflow) for a
-# dry run: the same signed, notarized build and its checks, no release.
+# macOS and Windows apps and the anvil CLI and creates a DRAFT GitHub Release;
+# review and publish it by hand. Run it by hand (Actions › Release › Run
+# workflow) for a dry run: the same signed, notarized build and its checks, no
+# release.
 
 on:
   push:
@@ -20,8 +21,6 @@ jobs:
   macos:
     name: macOS app and CLI
     runs-on: macos-latest
-    permissions:
-      contents: write # create the draft release and upload its assets
     env:
       TAG: ${{ github.ref_name }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
@@ -37,20 +36,6 @@ jobs:
             test "$TAG" = "v$version" || { echo "Tag $TAG does not match Cargo.toml version $version"; exit 1; }
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
-
-      - name: Release notes from CHANGELOG.md
-        run: |
-          # Everything between "## [<version>]" and the next "## [" heading,
-          # without the link definitions at the end of the file.
-          awk -v v="$VERSION" '
-            index($0, "## [" v "]") == 1 { on = 1; next }
-            on && /^## \[/ { exit }
-            on && !/^\[[^]]*\]: / { print }
-          ' CHANGELOG.md > notes.md
-          if ! grep -q '[^[:space:]]' notes.md; then
-            [ "$DRY_RUN" = true ] || { echo "CHANGELOG.md has no section for $VERSION"; exit 1; }
-            echo "Dry run of $VERSION." > notes.md
-          fi
 
       - name: Install Rust
         run: |
@@ -132,24 +117,152 @@ jobs:
           cp LICENSE README.md CHANGELOG.md "$stage/"
           tar -czf "dist/$stage.tar.gz" "$stage"
 
-      - name: Collect assets and checksums
+      - name: Collect assets
         run: |
           cp target/universal-apple-darwin/release/bundle/dmg/*.dmg dist/
-          # The updater's archive and latest.json: one universal app for both
-          # architectures. The URL works once the draft is published.
+          # The updater's archive: one universal app for both architectures.
           bundle=target/universal-apple-darwin/release/bundle/macos
-          archive="Anvil-$VERSION-universal.app.tar.gz"
-          cp "$bundle/Anvil.app.tar.gz" "dist/$archive"
-          url="https://github.com/${{ github.repository }}/releases/download/$TAG/$archive"
-          jq -n --arg v "$VERSION" --rawfile notes notes.md --rawfile sig "$bundle/Anvil.app.tar.gz.sig" \
-            --arg url "$url" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          cp "$bundle/Anvil.app.tar.gz" "dist/Anvil-$VERSION-universal.app.tar.gz"
+          cp "$bundle/Anvil.app.tar.gz.sig" "dist/Anvil-$VERSION-universal.app.tar.gz.sig"
+          ls -l dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos
+          path: dist/
+          if-no-files-found: error
+
+  windows:
+    name: Windows app and CLI
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check the tag matches the Cargo version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "anvil") | .version')
+          if [ "$DRY_RUN" = true ]; then
+            echo "TAG=v$version" >> "$GITHUB_ENV"
+          else
+            test "$TAG" = "v$version" || { echo "Tag $TAG does not match Cargo.toml version $version"; exit 1; }
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: Install the UI's dependencies
+        working-directory: app/ui
+        run: |
+          npm install --global pnpm@12.14.0
+          pnpm install --frozen-lockfile
+
+      # The CLI first (bundle-cli.sh, which tauri.cli.conf.json would run through
+      # cmd.exe), then the per-user NSIS installer with anvil.exe next to
+      # anvil-app.exe. createUpdaterArtifacts signs the installer itself: the
+      # updater runs it. The installer isn't code-signed yet, so SmartScreen
+      # asks before the first run.
+      - name: Build the app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo "TAURI_SIGNING_PRIVATE_KEY is not set"; exit 1; }
+          TAURI_ENV_TARGET_TRIPLE=x86_64-pc-windows-msvc sh app/bundle-cli.sh
+          cd app
+          cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis --config tauri.cli.conf.json \
+            --config '{"build":{"beforeBuildCommand":{"script":"pnpm build","cwd":"ui"}},"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: Collect assets
+        run: |
+          mkdir -p dist
+          nsis=target/x86_64-pc-windows-msvc/release/bundle/nsis
+          cp "$nsis/Anvil_${VERSION}_x64-setup.exe" "$nsis/Anvil_${VERSION}_x64-setup.exe.sig" dist/
+          stage="anvil-$VERSION-x86_64-pc-windows-msvc"
+          mkdir -p "$stage"
+          cp app/binaries/anvil-x86_64-pc-windows-msvc.exe "$stage/anvil.exe"
+          cp LICENSE README.md CHANGELOG.md "$stage/"
+          7z a -tzip "dist/$stage.zip" "$stage" > /dev/null
+          ls -l dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release and upload its assets
+    env:
+      TAG: ${{ github.ref_name }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "anvil") | .version')
+          [ "$DRY_RUN" = true ] && echo "TAG=v$version" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          # Everything between "## [<version>]" and the next "## [" heading,
+          # without the link definitions at the end of the file.
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on && !/^\[[^]]*\]: / { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            [ "$DRY_RUN" = true ] || { echo "CHANGELOG.md has no section for $VERSION"; exit 1; }
+            echo "Dry run of $VERSION." > notes.md
+          fi
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # latest.json: where installed apps find this version. One universal macOS
+      # app for both architectures; on Windows the updater runs the installer.
+      # The URLs work once the draft is published.
+      - name: Updater manifest and checksums
+        run: |
+          base="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          mac="Anvil-$VERSION-universal.app.tar.gz"
+          win="Anvil_${VERSION}_x64-setup.exe"
+          jq -n --arg v "$VERSION" --rawfile notes notes.md --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --rawfile macsig "dist/$mac.sig" --arg mac "$base/$mac" \
+            --rawfile winsig "dist/$win.sig" --arg win "$base/$win" \
             '{version: $v, notes: $notes, pub_date: $date, platforms: {
-              "darwin-aarch64": {signature: $sig, url: $url},
-              "darwin-x86_64": {signature: $sig, url: $url}}}' > dist/latest.json
+              "darwin-aarch64": {signature: $macsig, url: $mac},
+              "darwin-x86_64": {signature: $macsig, url: $mac},
+              "windows-x86_64": {signature: $winsig, url: $win}}}' > dist/latest.json
+          rm dist/*.sig
           cd dist
-          shasum -a 256 -- * > SHA256SUMS.txt
+          sha256sum -- * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # A draft left by an earlier run of this tag gets this run's assets; a
+      # published release is never touched.
       - name: Create the draft release
         if: env.DRY_RUN != 'true'
         env:
@@ -157,5 +270,13 @@ jobs:
         run: |
           flags=""
           case "$VERSION" in *-*) flags="--prerelease" ;; esac
-          gh release create "$TAG" dist/* --draft $flags --verify-tag \
-            --title "Anvil $VERSION (beta)" --notes-file notes.md
+          draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || true)
+          if [ "$draft" = true ]; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          elif [ -n "$draft" ]; then
+            echo "$TAG is already published"; exit 1
+          else
+            gh release create "$TAG" dist/* --draft $flags --verify-tag \
+              --title "Anvil $VERSION (beta)" --notes-file notes.md
+          fi

@@ -59,8 +59,34 @@ jobs:
           got=$(cargo run -q --locked -- --version)
           test "$got" = "anvil $want" || { echo "anvil --version printed '$got', expected 'anvil $want'"; exit 1; }
 
-  # The core library and CLI only use Unix APIs, so they build and test on
-  # Linux too. The Tauri app is macOS-only and is not built here.
+  # The app and the CLI for Windows: clippy over both. The tests use Unix
+  # APIs and run on macOS and Linux.
+  windows:
+    name: Windows (clippy)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      # The app crate embeds app/ui/dist.
+      - name: UI
+        working-directory: app/ui
+        run: |
+          npm install --global pnpm@12.14.0
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Clippy
+        run: cargo clippy --workspace --locked -- -D warnings
+
+  # The core library and CLI build and test on Linux too. The app isn't built
+  # for Linux yet.
   linux:
     name: Linux (anvil crate)
     runs-on: ubuntu-latest
