@@ -7,10 +7,15 @@ contain breaking changes.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-21
+
+Anvil for Windows, in beta, next to macOS.
+
 ### Added
 
 - Windows (beta): the app and the CLI for Windows 10 and 11, with a per-user installer. `.test` addresses, HTTPS, PHP, Node.js, Go, .NET, MySQL, PostgreSQL, Redis (Garnet), Mailpit, S3 storage, dev processes and worktrees; Python and Rust come later.
 - Settings › Performance on Windows: whether your projects are on a Dev Drive, which antivirus scanning slows down less.
+- Install Node.js in the bar at the top when an app needs it (a Node.js app, or one with a package.json) and none is installed.
 
 ### Fixed
 
@@ -19,6 +24,7 @@ contain breaking changes.
 - New application: the steps' spinner no longer starts over while the app is created.
 - Dev › Configure: Add and × of a new process sit side by side.
 - `anvil uninstall` run a second time no longer says `~/.anvil` is kept.
+- Settings › About › Credits says "Downloaded when used": Anvil fetches each the first time it's needed.
 
 ## [0.2.0] - 2026-10-21
 
@@ -88,5 +94,6 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/n1crack/anvil/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/n1crack/anvil/releases/tag/v0.2.0
