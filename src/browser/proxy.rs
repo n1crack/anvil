@@ -796,14 +796,19 @@ mod tests {
         let body = out.split_once("\r\n\r\n").unwrap().1;
         assert!(body.starts_with("<html><head><script"), "{body}");
         assert!(body.ends_with("</head><body></body>"), "{body}");
-        // The page's start came before its end did.
+        // The page's start came before its end did: the app sends them 300 ms apart.
+        // Measured against each other, not the clock, so a slow machine still passes.
         let first = parts
             .iter()
             .find(|(_, b)| b.windows(6).any(|w| w == b"<head>"))
             .unwrap()
             .0;
-        assert!(first < Duration::from_millis(250), "{first:?}");
-        assert!(parts.last().unwrap().0 >= Duration::from_millis(300));
+        let last = parts.last().unwrap().0;
+        assert!(last >= Duration::from_millis(300), "{last:?}");
+        assert!(
+            last - first >= Duration::from_millis(150),
+            "{first:?} {last:?}"
+        );
     }
 
     #[test]
