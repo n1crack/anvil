@@ -2184,6 +2184,9 @@ pub struct Setup {
     pub shims: bool,
     /// `git` runs. macOS brings it with the Xcode tools; Windows doesn't (`install_git`).
     pub git: bool,
+    /// A Node.js is installed, or no app needs one: none is a Node.js app or has a
+    /// package.json (a Laravel app's Vite).
+    pub node: bool,
 }
 
 /// Whether `git` runs here.
@@ -2382,6 +2385,10 @@ pub fn setup_status(cfg: &Config) -> Setup {
         ports: ports_forwarded(cfg),
         shims: shims::ready(),
         git: git_installed(),
+        node: !runtimes::installed("node").is_empty()
+            || !sites(cfg).iter().any(|s| {
+                apps::runtime(&s.kind) == Some("node") || s.path.join("package.json").is_file()
+            }),
     }
 }
 

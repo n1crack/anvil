@@ -130,7 +130,7 @@ async function loadSetup(busy?: string) {
   const bar = $("#setup");
   const machine = SETUP_FIELDS.some((f) => !st[f]);
   // `git` is false only where Anvil can install it (Windows).
-  bar.hidden = !machine && st.php && st.git !== false;
+  bar.hidden = !machine && st.php && st.git !== false && st.node !== false;
   bar.replaceChildren();
   if (machine) {
     const b = el("button", "setup-go", busy === "all" ? "Setting up…" : "Set up Anvil");
@@ -160,6 +160,23 @@ async function loadSetup(busy?: string) {
       loadSetup("php");
       try {
         await invoke("setup_fix", { step: "php" });
+      } catch (e) {
+        showError(String(e));
+      }
+      loadSetup();
+    };
+    bar.append(b);
+  }
+  // Only when an app needs it: a Node.js app, or a package.json (a Laravel app's Vite).
+  if (st.node === false) {
+    const b = el("button", null, busy === "node" ? "Installing Node.js…" : "Install Node.js");
+    if (busy === "node") b.prepend(el("span", "spin-dot"));
+    b.title = "The newest long-term support Node.js, for your apps' npm, Vite and Node.js servers; no password needed";
+    b.disabled = !!busy;
+    b.onclick = async () => {
+      loadSetup("node");
+      try {
+        await invoke("setup_fix", { step: "node" });
       } catch (e) {
         showError(String(e));
       }

@@ -151,6 +151,22 @@ pub fn available(id: &str) -> Result<Vec<String>> {
     })
 }
 
+/// The newest Node.js major with a long-term support release, from the official index.
+pub fn node_lts() -> Result<String> {
+    let list: Vec<serde_json::Value> = crate::fetch_json("https://nodejs.org/dist/index.json")?;
+    newest_lts(&list).context("nodejs.org lists no LTS release")
+}
+
+/// The index is newest first; `lts` is false or the line's name.
+fn newest_lts(list: &[serde_json::Value]) -> Option<String> {
+    list.iter()
+        .filter(|v| v["lts"].is_string())
+        .filter_map(|v| v["version"].as_str())
+        .filter_map(|v| v.trim_start_matches('v').split('.').next())
+        .find(|m| m.parse::<u32>().is_ok())
+        .map(String::from)
+}
+
 fn uv() -> PathBuf {
     root("uv").join("uv")
 }
@@ -497,7 +513,17 @@ pub fn info(id: &'static str, with_available: bool) -> RuntimeInfo {
 /// Where Anvil puts the package managers it installs: pnpm and yarn as npm
 /// globals (`<pm>/bin`), bun as its standalone binary (`<bun>/bin`).
 fn pm_dirs() -> [PathBuf; 2] {
-    [root("pm").join("bin"), root("bun").join("bin")]
+    [pm_bin(&root("pm")), root("bun").join("bin")]
+}
+
+/// Where `npm install -g --prefix <pm>` puts its commands: `bin` on Unix, the prefix
+/// itself on Windows.
+fn pm_bin(pm: &Path) -> PathBuf {
+    if cfg!(windows) {
+        pm.to_path_buf()
+    } else {
+        pm.join("bin")
+    }
 }
 
 /// `path` with Anvil's package managers in front, and Anvil's pnpm last: a pnpm of the
@@ -646,21 +672,28 @@ pub fn apps_env() -> Vec<(String, String)> {
 pub fn package_managers() -> Vec<PackageManager> {
     let base = crate::env_path();
     let apps_env = apps_env();
-    let apps_path = apps_env
-        .iter()
-        .find(|(k, _)| k == "PATH")
-        .map(|(_, v)| v.clone())
-        .unwrap_or_default();
-    let login = crate::login_path().unwrap_or(base);
+    let apps_path = without_shims(
+        &apps_env
+            .iter()
+            .find(|(k, _)| k == "PATH")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default(),
+    );
+    let login_raw = crate::login_path().unwrap_or(base);
+    let login = without_shims(&login_raw);
+    let shims = home().join("shims");
     let mine = [root("pm"), root("bun"), root("pnpm")];
     ["npm", "pnpm", "yarn", "bun"]
         .into_iter()
         .map(|name| {
             let apps = find(name, &apps_path, &apps_env);
             let apps_real = apps.as_ref().map(|(_, r)| r.clone());
+            // A terminal that runs Anvil's shim first gets what apps get.
+            let shimmed = which(name, &login_raw).is_some_and(|b| b.parent() == Some(&*shims));
             let term_real =
                 which(name, &login).map(|b| crate::platform::canonicalize(&b).unwrap_or(b));
-            let same = term_real.is_some() && term_real == apps_real;
+            let same =
+                apps.is_some() && (shimmed || (term_real.is_some() && term_real == apps_real));
             PackageManager {
                 name,
                 anvil: apps_real.is_some_and(|r| mine.iter().any(|d| r.starts_with(d))),
@@ -676,12 +709,28 @@ pub fn package_managers() -> Vec<PackageManager> {
         .collect()
 }
 
-/// The first executable `name` in a PATH string.
+/// The first executable `name` in a PATH string. On Windows `name.exe`, else `name.cmd`
+/// (npm, npx and yarn are batch files there).
 pub(crate) fn which(name: &str, path: &str) -> Option<PathBuf> {
+    let files = if cfg!(windows) {
+        vec![crate::platform::exe(name), format!("{name}.cmd")]
+    } else {
+        vec![name.to_string()]
+    };
     path.split(crate::platform::PATH_SEP)
         .filter(|d| !d.is_empty())
-        .map(|d| Path::new(d).join(crate::platform::exe(name)))
+        .flat_map(|d| files.iter().map(move |f| Path::new(d).join(f)))
         .find(|p| fs::metadata(p).is_ok_and(|m| crate::platform::is_executable(p, &m)))
+}
+
+/// `path` without Anvil's shims: they run the tools by the folder they're in, so a
+/// package manager's own file and version are found past them.
+fn without_shims(path: &str) -> String {
+    let shims = home().join("shims");
+    path.split(crate::platform::PATH_SEP)
+        .filter(|d| Path::new(d) != shims)
+        .collect::<Vec<_>>()
+        .join(&crate::platform::PATH_SEP.to_string())
 }
 
 /// Where a program (its resolved path) comes from.
@@ -690,8 +739,10 @@ fn source_of(real: &Path, anvil: &Path, user_home: &Path) -> String {
     if s.contains("/corepack/") {
         return "Corepack".into();
     }
-    // npm itself, bundled with Anvil's Node.js or Homebrew's (node, node@22).
-    if s.contains("/lib/node_modules/npm/") {
+    // npm itself, bundled with Anvil's Node.js or Homebrew's (node, node@22); on
+    // Windows npm.cmd beside node.exe.
+    let npm_cmd = cfg!(windows) && real.file_stem().is_some_and(|f| f == "npm");
+    if s.contains("/lib/node_modules/npm/") || npm_cmd {
         if let Ok(rest) = real.strip_prefix(anvil.join("runtimes").join("node"))
             && let Some(v) = rest.iter().next()
         {
@@ -756,8 +807,13 @@ fn install_pm_in(name: &str, anvil: &Path, runner: Runner) -> Result<()> {
                 .into_iter()
                 .next()
                 .with_context(|| format!("{name} is installed with npm: install Node.js first"))?;
+            let npm = if cfg!(windows) {
+                node.join(&v).join("npm.cmd")
+            } else {
+                node.join(&v).join("bin").join("npm")
+            };
             runner(
-                crate::platform::command(node.join(&v).join("bin").join("npm"))
+                crate::platform::command(npm)
                     .args(["install", "-g", "--prefix"])
                     .arg(runtimes.join("pm"))
                     .arg(name)
@@ -766,7 +822,7 @@ fn install_pm_in(name: &str, anvil: &Path, runner: Runner) -> Result<()> {
         }
         "bun" => {
             let (_, plat) = platform()?;
-            let asset = bun_asset(plat.starts_with("mac"), plat.ends_with("arm64"));
+            let asset = bun_asset(plat);
             // ponytail: "latest" for both files; a release landing in between fails the checksum, never installs.
             let base = "https://github.com/oven-sh/bun/releases/latest/download/";
             let sum = published_sum(&format!("{base}SHASUMS256.txt"), &format!("{asset}.zip"))?;
@@ -789,18 +845,31 @@ fn install_pm_in(name: &str, anvil: &Path, runner: Runner) -> Result<()> {
     }
 }
 
-/// bun's release asset for a platform.
-fn bun_asset(mac: bool, arm: bool) -> &'static str {
-    match (mac, arm) {
-        (true, true) => "bun-darwin-aarch64",
-        (true, false) => "bun-darwin-x64",
-        (false, true) => "bun-linux-aarch64",
-        (false, false) => "bun-linux-x64",
+/// bun's release asset for a platform (`platform()`'s second part).
+fn bun_asset(plat: &str) -> &'static str {
+    match plat {
+        "mac_arm64" => "bun-darwin-aarch64",
+        "mac_amd64" => "bun-darwin-x64",
+        "linux_arm64" => "bun-linux-aarch64",
+        "windows_amd64" => "bun-windows-x64",
+        _ => "bun-linux-x64",
     }
 }
 
-/// Only the `bun` binary out of the release zip, straight into `bin`.
+/// Only the `bun` binary out of the release zip, straight into `bin`. Windows has no
+/// unzip; its own tar (bsdtar) reads zip.
 fn unzip_bun(zip: &Path, asset: &str, bin: &Path) -> Command {
+    if cfg!(windows) {
+        let system = std::env::var_os("SystemRoot").map_or("C:\\Windows".into(), PathBuf::from);
+        let mut c = crate::platform::command(system.join("System32").join("tar.exe"));
+        c.arg("-xf")
+            .arg(zip)
+            .arg("-C")
+            .arg(bin)
+            .arg("--strip-components=1")
+            .arg(format!("{asset}/bun.exe"));
+        return c;
+    }
     let mut c = crate::platform::command("unzip");
     c.args(["-q", "-j"])
         .arg(zip)
@@ -830,15 +899,30 @@ fn uninstall_pm_in(name: &str, anvil: &Path) -> Result<()> {
         }
         "pnpm" | "yarn" => {
             let pm = runtimes.join("pm");
-            let pkg = pm.join("lib").join("node_modules").join(name);
+            let pkg = if cfg!(windows) {
+                pm.join("node_modules").join(name)
+            } else {
+                pm.join("lib").join("node_modules").join(name)
+            };
             if !pkg.is_dir() {
                 bail!(missing());
             }
-            // npm's links in bin point into the package: ../lib/node_modules/pnpm/…
+            // npm's links in bin point into the package: ../lib/node_modules/pnpm/…; on
+            // Windows its .cmd, .ps1 and sh files beside the prefix name it in their text.
             let inside = format!("node_modules/{name}/");
-            for e in fs::read_dir(pm.join("bin")).into_iter().flatten().flatten() {
-                if fs::read_link(e.path()).is_ok_and(|t| t.to_string_lossy().contains(&inside)) {
-                    fs::remove_file(e.path())?;
+            for e in fs::read_dir(pm_bin(&pm)).into_iter().flatten().flatten() {
+                let p = e.path();
+                let ours = match fs::read_link(&p) {
+                    Ok(t) => t.to_string_lossy().contains(&inside),
+                    Err(_) => {
+                        cfg!(windows)
+                            && p.is_file()
+                            && fs::read_to_string(&p)
+                                .is_ok_and(|t| t.replace('\\', "/").contains(&inside))
+                    }
+                };
+                if ours {
+                    fs::remove_file(p)?;
                 }
             }
             Ok(fs::remove_dir_all(pkg)?)
@@ -1015,7 +1099,13 @@ mod tests {
                 "yarn".into(),
             ]]
         );
-        assert_eq!(bun_asset(true, true), "bun-darwin-aarch64");
+        let index: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[{"version":"v26.1.0","lts":false},{"version":"v24.11.0","lts":"Krypton"},{"version":"v22.9.0","lts":"Jod"}]"#,
+        )
+        .unwrap();
+        assert_eq!(newest_lts(&index).as_deref(), Some("24"));
+        assert_eq!(bun_asset("mac_arm64"), "bun-darwin-aarch64");
+        assert_eq!(bun_asset("windows_amd64"), "bun-windows-x64");
         let unzip = unzip_bun(
             Path::new("/b/x.zip"),
             "bun-darwin-aarch64",

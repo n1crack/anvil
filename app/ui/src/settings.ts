@@ -1063,32 +1063,51 @@ $("#open-config-about").onclick = () => invoke("open_config_dir").catch((e) => s
 
 /* ---------- About › Credits ---------- */
 
-/** What Anvil downloads onto the Mac or ships, hand-kept: name, what it's for, license
+/** What Anvil downloads (when an app or a setting first needs it) or ships, hand-kept: name, what it's for, license
  * (SPDX where one exists), homepage, how it gets here. Each license was read from the
  * project's own LICENSE file (October 2026); check again when a source or version changes. */
 const windows = document.documentElement.classList.contains("windows");
 
-const SOFTWARE: [string, string, string, string, string][] = [
-  ["Caddy", "Web server and HTTPS certificates", "Apache-2.0", "https://caddyserver.com", "Downloaded"],
+type Software = [string, string, string, string, string];
+const SOFTWARE: Software[] = (<Software[]>[
+  ["Caddy", "Web server and HTTPS certificates", "Apache-2.0", "https://caddyserver.com", "Downloaded when used"],
   windows
-    ? ["PHP", "PHP apps, in windows.php.net’s builds; PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded"]
-    : ["PHP", "PHP apps, in static-php-cli’s builds (MIT); PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded"],
-  ["Composer", "PHP packages", "MIT", "https://getcomposer.org", "Downloaded"],
-  ["Node.js", "JavaScript apps", "MIT", "https://nodejs.org", "Downloaded"],
-  ["pnpm", "JavaScript packages", "MIT", "https://pnpm.io", "Downloaded"],
-  ["Yarn", "JavaScript packages (Yarn 1)", "BSD-2-Clause", "https://classic.yarnpkg.com", "Downloaded"],
-  ["Bun", "JavaScript packages; links JavaScriptCore, which is LGPL-2.0", "MIT", "https://bun.sh", "Downloaded"],
-  ["Go", "Go apps", "BSD-3-Clause", "https://go.dev", "Downloaded"],
-  ["Rust (rustup)", "Rust apps", "MIT OR Apache-2.0", "https://rustup.rs", "Downloaded"],
-  [".NET SDK", ".NET apps", "MIT", "https://dotnet.microsoft.com", "Downloaded"],
-  ["Python", "Python apps, in python-build-standalone’s builds (MPL-2.0)", "PSF-2.0", "https://www.python.org", "Downloaded"],
-  ["uv", "Installs Python and its packages", "MIT OR Apache-2.0", "https://docs.astral.sh/uv", "Downloaded"],
-  ["MySQL", "Database (Community Server), with the Universal FOSS Exception", "GPL-2.0-only", "https://www.mysql.com", "Downloaded"],
-  ["PostgreSQL", "Database, in theseus-rs’s builds (PostgreSQL license)", "PostgreSQL", "https://www.postgresql.org", "Downloaded"],
+    ? ["PHP", "PHP apps, in windows.php.net’s builds; PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded when used"]
+    : ["PHP", "PHP apps, in static-php-cli’s builds (MIT); PHP 8.1–8.5", "PHP-3.01", "https://www.php.net", "Downloaded when used"],
+  ["Composer", "PHP packages", "MIT", "https://getcomposer.org", "Downloaded when used"],
+  ["Node.js", "JavaScript apps", "MIT", "https://nodejs.org", "Downloaded when used"],
+  ["pnpm", "JavaScript packages", "MIT", "https://pnpm.io", "Downloaded when used"],
+  ["Yarn", "JavaScript packages (Yarn 1)", "BSD-2-Clause", "https://classic.yarnpkg.com", "Downloaded when used"],
+  ["Bun", "JavaScript packages; links JavaScriptCore, which is LGPL-2.0", "MIT", "https://bun.sh", "Downloaded when used"],
+  ["Go", "Go apps", "BSD-3-Clause", "https://go.dev", "Downloaded when used"],
+  ["Rust (rustup)", "Rust apps", "MIT OR Apache-2.0", "https://rustup.rs", "Downloaded when used"],
+  [".NET SDK", ".NET apps", "MIT", "https://dotnet.microsoft.com", "Downloaded when used"],
+  ["Python", "Python apps, in python-build-standalone’s builds (MPL-2.0)", "PSF-2.0", "https://www.python.org", "Downloaded when used"],
+  ["uv", "Installs Python and its packages", "MIT OR Apache-2.0", "https://docs.astral.sh/uv", "Downloaded when used"],
+  [
+    "MySQL",
+    "Database (Community Server), with the Universal FOSS Exception",
+    "GPL-2.0-only",
+    "https://www.mysql.com",
+    "Downloaded when used",
+  ],
+  [
+    "PostgreSQL",
+    "Database, in theseus-rs’s builds (PostgreSQL license)",
+    "PostgreSQL",
+    "https://www.postgresql.org",
+    "Downloaded when used",
+  ],
   ...((windows
     ? [
-        ["Garnet", "Cache, Redis-compatible: Redis has no Windows build", "MIT", "https://microsoft.github.io/garnet", "Downloaded"],
-        [".NET Runtime", "Runs Garnet", "MIT", "https://dotnet.microsoft.com", "Downloaded"],
+        [
+          "Garnet",
+          "Cache, Redis-compatible: Redis has no Windows build",
+          "MIT",
+          "https://microsoft.github.io/garnet",
+          "Downloaded when used",
+        ],
+        [".NET Runtime", "Runs Garnet", "MIT", "https://dotnet.microsoft.com", "Downloaded when used"],
       ]
     : [
         [
@@ -1099,9 +1118,9 @@ const SOFTWARE: [string, string, string, string, string][] = [
           "Built on this Mac",
         ],
       ]) as [string, string, string, string, string][]),
-  ["Mailpit", "Catches the mail apps send", "MIT", "https://mailpit.axllent.org", "Downloaded"],
-  ["Versity S3 Gateway", "S3-compatible file storage", "Apache-2.0", "https://github.com/versity/versitygw", "Downloaded"],
-  ["SILO", "S3-compatible file storage, a MinIO fork", "AGPL-3.0", "https://silo.pgsty.com", "Downloaded"],
+  ["Mailpit", "Catches the mail apps send", "MIT", "https://mailpit.axllent.org", "Downloaded when used"],
+  ["Versity S3 Gateway", "S3-compatible file storage", "Apache-2.0", "https://github.com/versity/versitygw", "Downloaded when used"],
+  ["SILO", "S3-compatible file storage, a MinIO fork", "AGPL-3.0", "https://silo.pgsty.com", "Downloaded when used"],
   [
     "Tauri",
     windows ? "The app’s windows and tray icon" : "The app’s windows and menu bar",
@@ -1109,7 +1128,8 @@ const SOFTWARE: [string, string, string, string, string][] = [
     "https://tauri.app",
     "Bundled",
   ],
-];
+  // Python and Rust aren't on Windows yet.
+]).filter(([name]) => !windows || !["Rust (rustup)", "Python", "uv"].includes(name));
 
 const node = (tag: string, cls: string, ...kids: (Node | string)[]) => {
   const n = document.createElement(tag);
