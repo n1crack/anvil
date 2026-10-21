@@ -1194,6 +1194,7 @@ const mockHandle = (cmd, a) => {
       };
       return mockSnap;
     case "share_stop":
+      if (window.mockShareStopFail) throw window.mockShareStopFail;
       delete mockSnap.shares[a.site];
       return mockSnap;
     case "service_write_env":

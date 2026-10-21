@@ -2194,6 +2194,25 @@ describe("share", () => {
       await state();
     }
   });
+
+  test("a Stop that failed says why on the line, the address still shown", async () => {
+    w.mockSnap.tunnel = true;
+    w.mockSnap.shares = { shop: { state: "ready", url: "https://quiet-river.trycloudflare.com", note: null } };
+    w.mockShareStopFail = "cloudflared didn't stop";
+    try {
+      await state();
+      await select("shop");
+      ([...row().querySelectorAll("button")].at(-1) as HTMLButtonElement).click();
+      await wait(40);
+      expect(row().querySelector(".share-error")!.textContent).toBe("cloudflared didn't stop");
+      expect(row().querySelector("a")!.textContent).toBe("https://quiet-river.trycloudflare.com");
+    } finally {
+      w.mockSnap.tunnel = false;
+      w.mockShareStopFail = null;
+      w.mockSnap.shares = {};
+      await state();
+    }
+  });
 });
 
 describe("resources", () => {

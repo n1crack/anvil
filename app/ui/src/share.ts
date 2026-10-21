@@ -7,7 +7,7 @@ import { copy } from "./services";
 
 const LIMITS = "The address is temporary and changes every time; Cloudflare gives no uptime guarantee.";
 const opening = new Set<string>(); // apps whose share_start hasn't answered (the first one downloads cloudflared)
-const failed = new Map<string, string>(); // app -> why share_start refused
+const failed = new Map<string, string>(); // app -> why share_start or share_stop refused
 
 async function share(site: string) {
   opening.add(site);
@@ -45,8 +45,19 @@ window.renderShare = (s, root) => {
     const c = el("button", "inline-action", "Copy");
     c.onclick = () => copy(t.url, c);
     const stop = el("button", "inline-action", "Stop");
-    stop.onclick = () => callOrThrow("share_stop", { site: s.name }).catch((err) => failed.set(s.name, String(err)));
+    stop.onclick = async () => {
+      failed.delete(s.name);
+      try {
+        await callOrThrow("share_stop", { site: s.name });
+      } catch (err) {
+        failed.set(s.name, String(err));
+      }
+      render();
+    };
     const parts = [link, " ", c, stop];
+    // A refused Stop: said here, as a refused Share is.
+    const why = failed.get(s.name);
+    if (why) parts.push(el("small", "share-error", why));
     if (t.note) parts.push(el("small", "share-note muted", t.note));
     return dd.replaceChildren(...parts);
   }
