@@ -1970,9 +1970,9 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; }
 .swatch.keep { background: var(--cold); }
-/* Orange marks what Clean up removes; rebuildable is neutral, not an alarm. */
+/* Greys from keep to safe to delete: no state's color (amber is starting), no brand orange. */
 .swatch.rebuild { background: color-mix(in srgb, var(--muted) 55%, transparent); }
-.swatch.safe { background: var(--heat); }
+.swatch.safe { background: color-mix(in srgb, var(--text) 80%, transparent); }
 
 .res-bar {
   display: flex;
@@ -1987,7 +1987,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .res-bar .seg { flex-basis: 0; min-width: 3px; }
 .res-bar .keep { background: var(--cold); }
 .res-bar .rebuild { background: color-mix(in srgb, var(--muted) 55%, transparent); }
-.res-bar .safe { background: var(--heat); }
+.res-bar .safe { background: color-mix(in srgb, var(--text) 80%, transparent); }
 
 .res-list .row { grid-template-columns: 1fr auto; }
 
@@ -2028,7 +2028,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-weight: 600;
 }
 
-.safety.safe { background: color-mix(in srgb, var(--heat) 16%, transparent); color: var(--heat-text); }
+.safety.safe { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text); }
 .safety.rebuild { background: var(--steel-raised); color: var(--text); }
 .safety.keep { background: var(--steel-raised); color: var(--muted); }
 

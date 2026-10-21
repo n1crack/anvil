@@ -32,6 +32,7 @@ contain breaking changes.
 - A new app's Open is Open in Browser and opens it there, and selects it in the sidebar as before; with the web server stopped it is Show.
 - Dev: a server whose port doesn't answer yet has an amber dot, a crashed process says its exit code, and dismissing a crash is ✕, not ■.
 - Worktrees: Create says Creating… while it works, and a worktree being removed says Removing… in its row; a failed removal is said under its name.
+- Storage and Resources mark what is safe to delete in grey instead of orange.
 
 ### Added
 
