@@ -608,7 +608,8 @@ function renderList() {
   const f = filterOf("apps");
   const hit = (s) =>
     (!f.kind || s.kind === f.kind) &&
-    (!f.running || ["running", "starting"].includes(snap.app_states[s.name])) &&
+    // A crashed app may still run its other processes, and it wants a look: it stays.
+    (!f.running || ["running", "starting", "crashed"].includes(snap.app_states[s.name])) &&
     // Name, folder or type: "django" finds every Django app.
     (!q || `${s.host} ${s.path} ${kindLabel(s.kind)}`.toLowerCase().includes(q));
   let count = 0;

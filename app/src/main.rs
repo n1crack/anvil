@@ -206,11 +206,11 @@ fn worktree_view(
 
 type Res<T> = Result<T, String>;
 
-/// The sidebar's dot per app: "starting" while its own server's port doesn't answer
-/// yet, "running" when anything of it runs (its server, a dev process `<site>@…`, a
-/// container), "crashed" when one ended on its own and nothing runs, or, as in the
-/// app's header, when one of its containers exited with an error. One-off scripts
-/// (`<site>#…`) don't count.
+/// The sidebar's dot per app, as its header: "crashed" when one of its processes ended
+/// on its own or one of its containers exited with an error, even while others run;
+/// else "starting" while its own server's port doesn't answer yet, "running" when
+/// anything of it runs (its server, a dev process `<site>@…`, a container). One-off
+/// scripts (`<site>#…`) don't count.
 fn app_states(
     sites: &[Site],
     live: &[String],
@@ -241,14 +241,12 @@ fn app_states(
         .iter()
         .filter_map(|s| {
             let server = live.contains(&s.name);
-            let state = if server && !s.port.is_some_and(&answers) {
-                "starting"
-            } else if has(s, broken, &down) {
+            let state = if has(s, broken, &down) || mine(s, crashed) {
                 "crashed"
+            } else if server && !s.port.is_some_and(&answers) {
+                "starting"
             } else if mine(s, live) || has(s, containers, &up) {
                 "running"
-            } else if mine(s, crashed) {
-                "crashed"
             } else {
                 return None;
             };
@@ -5110,7 +5108,7 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_dot_says_whether_anything_of_the_app_runs() {
+    fn sidebar_dot_says_whether_anything_of_the_app_runs_or_crashed() {
         let dir = std::env::temp_dir().join(format!("anvil-states-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut vite = site("vuefinder", "vite", std::path::Path::new("/x/vuefinder"));
@@ -5137,7 +5135,8 @@ mod tests {
             (std::slice::from_ref(&dir), &[]),
             up,
         );
-        assert_eq!(states.get("ozdemir.be"), Some(&"running"));
+        // Its queue runs but its vite crashed: crashed, as in its header.
+        assert_eq!(states.get("ozdemir.be"), Some(&"crashed"));
         assert_eq!(states.get("vuefinder"), Some(&"running"));
         assert_eq!(states.get("elpida"), Some(&"running"));
         assert_eq!(states.get("shop"), Some(&"crashed"));

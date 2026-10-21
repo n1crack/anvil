@@ -29,6 +29,7 @@ contain breaking changes.
 
 ### Fixed
 
+- The sidebar shows an app red when one of its processes crashed, even while others run, as its header does.
 - Release notes in an update read as text, without markdown marks.
 - Processes: Clear log asks before it empties the log file.
 - Processes: the Status column stays readable while a log is open, also at the smallest window size.
