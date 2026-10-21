@@ -9,9 +9,12 @@ contain breaking changes.
 
 ## [0.3.0] - 2026-10-21
 
-WordPress, more PHP extensions, and a round of polish and speed across the app and the CLI. Still a beta.
+Anvil for Linux, in beta; WordPress, more PHP extensions, and a round of polish and speed across the app and the CLI. Still a beta.
 
 ### Added
+
+- Linux (beta): the app and the CLI for x86_64 Linux with glibc 2.35 or later (Ubuntu 22.04+, Debian 12+, Fedora, Arch), as an AppImage that updates itself, a .deb, and the CLI alone. Apps answer at `http://<name>.localhost:8080`; `.test` addresses, ports 80/443 and HTTPS trust come in a later release. PHP, Node.js, Go, Rust, .NET, Python, MySQL, PostgreSQL, Redis, Mailpit, S3 storage, every app template, worktrees and Octane work; OPcache comes with PHP 8.5, and PHP extensions can't be added yet. MySQL and Redis are built in part from source the first time, so they need gcc and make.
+- Linux: Settings finds your editor, terminal and git app (from PATH and Flatpak), and opens files at the line in them.
 
 - WordPress: existing sites are recognised, and New Application creates one on a MySQL service, with PHP's mysqli built when it's missing.
 - PHP extensions MongoDB and Memcached, and Imagick on a Mac with Homebrew's ImageMagick: `anvil php ext add mongodb`.
@@ -23,6 +26,7 @@ WordPress, more PHP extensions, and a round of polish and speed across the app a
 
 ### Changed
 
+- Windows: Ctrl+1–9 open the app's tabs as they show, a hidden tab (Git, Dev, Mail) not counted.
 - Anvil needs macOS 12 or later. MySQL (macOS 14), PostgreSQL (15), Mailpit (13) and Node.js 24 or later (13.5) say so before downloading on an older Mac.
 - Settings › Plugins is now Settings › Features: they come with Anvil and only need turning on.
 - Worktree settings say in plain sentences what a new worktree gets; Customize… edits files, env keys and commands as rows with plain choices.
