@@ -2869,16 +2869,23 @@ fn set_runtime(
     snapshot(&app)
 }
 
+/// php.ini overrides for `site`, each `[key, value]` (None unsets it). Several at once
+/// restart the web server once.
 #[tauri::command(async)]
 fn set_site_ini(
     handle: AppHandle,
     app: State<App>,
     site: String,
-    key: String,
-    value: Option<String>,
+    values: Vec<(String, Option<String>)>,
 ) -> Res<Snapshot> {
-    let (cfg, ()) = edit(|c| anvil::set_site_ini(c, &site, &key, value.as_deref()))?;
+    // The ones before a refused value are saved, so they are served too.
+    let (cfg, refused) = edit(|c| {
+        Ok(values
+            .iter()
+            .try_for_each(|(key, value)| anvil::set_site_ini(c, &site, key, value.as_deref())))
+    })?;
     sites_changed(&handle, &app, &cfg);
+    refused.map_err(err)?;
     snapshot(&app)
 }
 

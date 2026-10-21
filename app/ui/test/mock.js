@@ -1013,6 +1013,14 @@ const mockHandle = (cmd, a) => {
     case "set_mail_catcher":
       window.mockMailCatcher = a.on;
       return mockHandle("settings", {});
+    case "set_site_ini": {
+      const ini = mockSnap.sites.find((x) => x.name === a.site).ini;
+      for (const [k, v] of a.values) {
+        if (v == null) delete ini[k];
+        else ini[k] = v;
+      }
+      return mockSnap;
+    }
     case "set_mail_caught": {
       const c = mockSnap.catcher;
       c.caught = a.on ? [...c.caught, a.site] : c.caught.filter((n) => n !== a.site);

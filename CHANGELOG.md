@@ -20,6 +20,7 @@ contain breaking changes.
 - Drop, Flush, Delete All, Clear inbox, Clear log, Resources' Delete and Remove Service ask in the window, not in a system dialog; Remove Service names its apps and labels both answers.
 - A service's Applications says it changes no .env, can list linked apps, and offers "Write to <app>'s .env…" with the keys it sets.
 - Settings › General: removing an application folder asks first, in its row.
+- An app's php.ini fields restart the web server once per change and say so beside the field while it restarts.
 
 ### Added
 

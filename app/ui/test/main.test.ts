@@ -2341,6 +2341,37 @@ describe("mail catcher", () => {
   });
 });
 
+describe("php.ini fields", () => {
+  test("the upload limit sets both limits in one restart, said beside the field", async () => {
+    await select("shop");
+    $('.tabs [data-tab="settings"]').click();
+    await wait(60);
+    const n = calls("set_site_ini").length;
+    const input = $("#ini-upload") as HTMLInputElement;
+    input.value = "200M";
+    input.dispatchEvent(new Event("change"));
+    expect($(".ini-note").textContent).toBe("Restarting the web server…");
+    await wait(60);
+    expect(calls("set_site_ini").slice(n)).toEqual([
+      [
+        "set_site_ini",
+        {
+          site: "shop",
+          values: [
+            ["upload_max_filesize", "200M"],
+            ["post_max_size", "200M"],
+          ],
+        },
+      ],
+    ]);
+    expect($(".ini-note").textContent).toBe("Applied; the web server restarted.");
+    input.value = "";
+    input.dispatchEvent(new Event("change"));
+    await wait(60);
+    $('.tabs [data-tab="overview"]').click();
+  });
+});
+
 describe("run settings", () => {
   test("a .NET app has no version picker: dotnet picks the SDK from global.json", async () => {
     w.mockSnap.sites.push(w.mockSite("api", "dotnet", { runtime_version: "10.0" }));

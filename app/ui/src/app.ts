@@ -1594,10 +1594,18 @@ export function renderSite() {
     const key = input.dataset.ini;
     input.value = s.ini[key] ?? "";
     input.placeholder = `${snap.ini[key] ?? base[key]} (default)`;
-    input.onchange = async () => {
+    iniNote(input, `${s.name}/${key}`);
+    input.onchange = () => {
       const value = input.value.trim() || null;
-      await call("set_site_ini", { site: s.name, key, value });
-      if (key === "upload_max_filesize") await call("set_site_ini", { site: s.name, key: "post_max_size", value });
+      // The upload limit is also the largest form a POST may send: both in one restart.
+      const values =
+        key === "upload_max_filesize"
+          ? [
+              [key, value],
+              ["post_max_size", value],
+            ]
+          : [[key, value]];
+      setIni(s, input, key, values);
     };
   }
   const known = new Set([...Object.keys(base), "post_max_size"]);
@@ -1606,18 +1614,20 @@ export function renderSite() {
     .filter(([k]) => !known.has(k))
     .map(([k, v]) => `${k} = ${v}`)
     .join("\n");
-  extra.onchange = async () => {
+  iniNote(extra, `${s.name}/extra`);
+  extra.onchange = () => {
     const wanted = new Map();
     for (const line of extra.value.split("\n")) {
       const m = line.match(/^\s*([^=\s]+)\s*=\s*(.*?)\s*$/);
       if (m) wanted.set(m[1], m[2]);
     }
-    for (const k of Object.keys(s.ini)) {
-      if (!known.has(k) && !wanted.has(k)) await call("set_site_ini", { site: s.name, key: k, value: null });
-    }
-    for (const [k, v] of wanted) {
-      if (s.ini[k] !== v) await call("set_site_ini", { site: s.name, key: k, value: v });
-    }
+    const values = [
+      ...Object.keys(s.ini)
+        .filter((k) => !known.has(k) && !wanted.has(k))
+        .map((k) => [k, null]),
+      ...[...wanted].filter(([k, v]) => s.ini[k] !== v),
+    ];
+    if (values.length) setIni(s, extra, "extra", values);
   };
 
   // Resources (also feeds the Overview's disk and services rows)
@@ -1631,6 +1641,31 @@ export function renderSite() {
   window.renderShare?.(s, root);
   window.renderPackages?.(s, root);
   if (mayHaveWorktrees(s)) renderHooks(s, root);
+}
+
+// A php.ini field's change restarts the web server (when it serves): said beside the
+// field while it does, then that it's done. By `<app>/<field>`.
+const iniNotes = new Map<string, [string, boolean]>(); // what was said, whether it failed
+
+function iniNote(field: HTMLElement, at: string) {
+  field.parentElement?.querySelector(".ini-note")?.remove();
+  const said = iniNotes.get(at);
+  if (said) field.after(el("small", `ini-note ${said[1] ? "error" : "muted"}`, said[0]));
+}
+
+async function setIni(s, field: HTMLElement, name: string, values: (string | null)[][]) {
+  const at = `${s.name}/${name}`;
+  if (snap.running) iniNotes.set(at, ["Restarting the web server…", false]);
+  iniNote(field, at);
+  try {
+    await callOrThrow("set_site_ini", { site: s.name, values });
+    if (snap.running) iniNotes.set(at, ["Applied; the web server restarted.", false]);
+    else iniNotes.delete(at);
+  } catch (e) {
+    iniNotes.set(at, [String(e), true]);
+  }
+  if (field.isConnected) iniNote(field, at);
+  else render();
 }
 
 const rootErrors = new Map<string, [string, string]>(); // app -> [what was typed, why refused]
