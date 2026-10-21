@@ -2143,6 +2143,24 @@ describe("show hidden", () => {
     ($('#site .tabs [data-tab="overview"]') as HTMLElement).click();
   });
 
+  test("Git tab: an upstream of the same name says only its remote", async () => {
+    const branchRow = async (git: object) => {
+      w.mockGit = git;
+      await select("shop");
+      await select("vuefinder");
+      ($('#site .tabs [data-tab="git"]') as HTMLElement).click();
+      await wait(80);
+      return $$('[data-panel="git"] .row')
+        .find((r) => r.querySelector("dt")!.textContent === "Branch")!
+        .querySelector("dd")!.textContent;
+    };
+    expect(await branchRow({ branch: "feature/x", upstream: "origin/feature/x" })).toBe("feature/x origin");
+    expect(await branchRow({ branch: "feature/x", upstream: "origin/main" })).toBe("feature/x origin/main");
+    expect(await branchRow({ branch: "main", upstream: null })).toBe("main");
+    w.mockGit = undefined;
+    ($('#site .tabs [data-tab="overview"]') as HTMLElement).click();
+  });
+
   test("Add service: two columns, and Add waits for the license unless it was accepted before", async () => {
     w.mockRedisAccepted = { "8.10.2": "2026-10-01" };
     const { openAddService } = await import("../src/services");

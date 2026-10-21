@@ -1006,6 +1006,7 @@ const mockHandle = (cmd, a) => {
         upstream: null,
         commit: null,
         remote: null,
+        ...window.mockGit,
       };
     case "unhide_site": {
       const h = mockSnap.hidden.find((x) => x.name === a.site);

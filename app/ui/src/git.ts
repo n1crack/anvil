@@ -61,7 +61,9 @@ function drawGit(name) {
   let branch = g.detached ? `Detached at ${g.branch}` : g.branch;
   if (g.ahead) branch += ` ↑${g.ahead}`;
   if (g.behind) branch += ` ↓${g.behind}`;
-  row("Branch", branch, ...(g.upstream ? [" ", el("span", "muted", g.upstream)] : []));
+  // "origin" for origin/<same branch>; an upstream of another name is said whole.
+  const up = g.upstream?.endsWith(`/${g.branch}`) ? g.upstream.slice(0, -g.branch.length - 1) : g.upstream;
+  row("Branch", branch, ...(up ? [" ", el("span", "muted", up)] : []));
   row("Changes", g.changed ? `${g.changed} changed file${g.changed === 1 ? "" : "s"}` : "Clean");
   if (g.commit) {
     const c = g.commit;

@@ -42,6 +42,7 @@ contain breaking changes.
 - Changing a running app's type, start command, port or version says beside the field that it restarts the app; Start with Anvil no longer restarts it.
 - `anvil --help` and each command's help explain every argument and flag, with examples, and say "application" where they said "site".
 - `anvil apps` lists the applications; `anvil sites` still works.
+- Git tab: a branch that tracks the same name on its remote shows only the remote ("origin"), not the branch twice.
 
 ### Added
 
