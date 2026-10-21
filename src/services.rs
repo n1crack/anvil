@@ -1321,6 +1321,14 @@ pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
         // Left by an Anvil from before `svc-` (an `app-` one is the app's to clean up).
         kill_orphans(&legacy_pid_file(id), false);
     }
+    // PostgreSQL refuses an administrator's token (an elevated terminal or "Run as
+    // administrator"); its log would only say so in the system's language.
+    #[cfg(windows)]
+    if kind == "postgres" && crate::platform::elevated() {
+        bail!(
+            "PostgreSQL doesn't run with administrator rights: start Anvil (or the terminal running `anvil start`) without \"Run as administrator\""
+        );
+    }
     let port = port(cfg, id);
     for p in [Some(port), web_port(cfg, id)].into_iter().flatten() {
         if in_use(p) {
