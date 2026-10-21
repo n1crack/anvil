@@ -215,7 +215,8 @@ export interface CommandChip {
   name: string;
   id: string;
   command: string;
-  source: "package.json" | "composer.json";
+  /** `Packages`: the Packages tab's Install and Update, listed once they ran. */
+  source: "package.json" | "composer.json" | "Packages";
   running: boolean;
   exit: Exit | null;
 }

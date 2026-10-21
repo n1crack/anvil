@@ -140,6 +140,36 @@ describe("versions", () => {
       await wait(60);
     }
   });
+  test("Composer global packages: Update to the newer one, Install the Forge CLI, a failure in its row", async () => {
+    await open("php");
+    const rows = () => $$("#composer-globals .ver");
+    expect(rows().map((r) => r.querySelector(".ver-label")?.textContent)).toEqual(["laravel/installer 5.11.2", "laravel/forge-cli"]);
+    expect(rows().map(buttons)).toEqual([["Update to 5.12.0"], ["Install"]]);
+    expect(rows()[1].classList.contains("missing")).toBe(true);
+    w.mockDelay.composer_global_require = 60;
+    (rows()[0].querySelector("button") as HTMLElement).click();
+    await wait(10);
+    expect(rows()[0].querySelector(".ver-patch")!.textContent).toBe("Updating to 5.12.0…");
+    await wait(90);
+    expect(w.mockCalls).toContainEqual(["composer_global_require", { name: "laravel/installer" }]);
+    expect(rows()[0].querySelector(".ver-label")!.textContent).toBe("laravel/installer 5.12.0");
+    expect(buttons(rows()[0])).toEqual([]);
+    w.mockForgeFails = true;
+    try {
+      (rows()[1].querySelector("button") as HTMLElement).click();
+      await wait(90);
+      expect(rows()[1].querySelector(".ver-error")!.textContent).toContain("could not be resolved");
+      delete w.mockForgeFails;
+      (rows()[1].querySelector("button") as HTMLElement).click();
+      await wait(90);
+      expect(rows()[1].querySelector(".ver-label")!.textContent).toBe("laravel/forge-cli 1.9.0");
+      expect(rows()[1].querySelector(".ver-error")).toBeNull();
+    } finally {
+      delete w.mockForgeFails;
+      delete w.mockDelay.composer_global_require;
+    }
+  });
+
   async function withOpcache83(run: () => Promise<void>) {
     w.mockPhpInstalled = ["8.5", "8.4", "8.3"];
     w.mockOpcache = {};

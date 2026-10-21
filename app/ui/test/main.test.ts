@@ -1749,7 +1749,7 @@ describe("packages", () => {
 
   test("nothing below the checks until one runs; Check outdated: the notice, then a tab per manager", async () => {
     expect(calls("package_updates")).toHaveLength(0);
-    expect($$(".pkg-checks button").map((b) => b.textContent)).toEqual(["Outdated packages", "Security advisories"]);
+    expect($$(".pkg-checks:not(.pkg-run-line) button").map((b) => b.textContent)).toEqual(["Outdated packages", "Security advisories"]);
     expect($$(".pkg-notice, .pkg-results, .pkg-checked")).toHaveLength(0);
     $(".pkg-check-outdated").click();
     expect($(".pkg-check-outdated").textContent).toBe("Checking outdated…");
@@ -1804,6 +1804,48 @@ describe("packages", () => {
     (adv.querySelector("a") as HTMLElement).click();
     await wait(30);
     expect(calls("open_url").at(-1)![1].url).toBe("https://github.com/advisories/GHSA-v5mv-p594-2x33");
+  });
+
+  test("Install runs at once, Update asks in the line; either shows in Dev, then the packages are read again", async () => {
+    const line = (eco: string) => $(`.pkg-run-line[data-eco="${eco}"]`);
+    const act = (eco: string, text: string) => [...line(eco).querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;
+    expect($$(".pkg-run-line").map((l) => l.textContent)).toEqual(["ComposerInstallUpdate…", "pnpmInstallUpdate…"]);
+    act("composer", "Update…").click();
+    expect(line("composer").textContent).toContain("Run composer update?");
+    act("composer", "Cancel").click();
+    expect(line("composer").textContent).toBe("ComposerInstallUpdate…");
+    expect(calls("package_run")).toHaveLength(0);
+    act("composer", "Update…").click();
+    act("composer", "Update").click();
+    await wait(30);
+    expect(calls("package_run").at(-1)![1]).toEqual({ site: "shop", id: "pkg-composer-update" });
+    expect(line("composer").textContent).toBe("ComposerRunning composer update…Output");
+    const reads = calls("packages").length;
+    const checks = calls("package_updates").length;
+    w.mockPackageExit({ code: 1, at: 1 });
+    await wait(80);
+    expect($(".pkg-ran").textContent).toBe("composer update failed (exit code 1). Output");
+    expect($(".pkg-ran").classList.contains("pkg-error")).toBe(true);
+    // The list is read again and, checked before, the outdated ones too.
+    expect(calls("packages").length).toBeGreaterThan(reads);
+    expect(calls("package_updates")).toHaveLength(checks + 1);
+
+    act("js", "Install").click();
+    await wait(30);
+    expect(calls("package_run").at(-1)![1].id).toBe("pkg-js-install");
+    w.mockPackageExit({ code: 0, at: 2 });
+    await wait(80);
+    const done = $$(".pkg-ran").find((p) => p.textContent!.startsWith("pnpm install"))!;
+    expect(done.textContent).toBe("pnpm install finished. Output");
+    // Output: Dev, at the run, which Run ▾ doesn't offer.
+    (done.querySelector(".pkg-output") as HTMLElement).click();
+    await wait(30);
+    expect($('.tabs [data-tab="dev"]').getAttribute("aria-selected")).toBe("true");
+    expect($('.dev-item[data-key="once:pkg-js-install"]').getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelector('.dev-item[data-key="once:pkg-composer-update"]')).not.toBeNull();
+    w.mockOv.shop.commands = w.mockOv.shop.commands.filter((c: any) => c.source !== "Packages");
+    $('.tabs [data-tab="packages"]').click();
+    await wait(30);
   });
 });
 

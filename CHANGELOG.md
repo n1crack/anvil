@@ -10,6 +10,8 @@ contain breaking changes.
 ### Added
 
 - PHP keeps itself on the newest patch release (Settings › PHP › Keep PHP up to date); off, Settings offers Update, and `anvil php update` does it from the CLI.
+- Packages tab: Install and Update for Composer and the app's JS package manager, with the output in Dev.
+- Settings › PHP lists Composer's global packages with Update, and installs Laravel Forge's CLI (`forge`) on request.
 
 ## [0.3.0] - 2026-10-21
 

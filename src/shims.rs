@@ -1,4 +1,4 @@
-//! Terminal shims: `php`, `composer`, `laravel`, `node`, `npm`, `npx` and `pnpm` in
+//! Terminal shims: `php`, `composer`, `laravel`, `forge`, `node`, `npm`, `npx` and `pnpm` in
 //! `~/.anvil/shims` run `anvil shim <tool>`, which picks the version of the site
 //! the current folder belongs to.
 
@@ -7,7 +7,9 @@ use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const TOOLS: [&str; 7] = ["php", "composer", "laravel", "node", "npm", "npx", "pnpm"];
+pub const TOOLS: [&str; 8] = [
+    "php", "composer", "laravel", "forge", "node", "npm", "npx", "pnpm",
+];
 
 const BLOCK_START: &str = "# Anvil: php, composer, laravel and node follow each site's versions";
 const BLOCK_END: &str = "# Anvil end";
@@ -282,7 +284,7 @@ fn resolve_for(
 ) -> Result<Resolved> {
     let h = home();
     match tool {
-        "php" | "composer" | "laravel" => {
+        "php" | "composer" | "laravel" | "forge" => {
             // From the config: a site that serves no PHP itself still has its pin.
             let installed = installed_php();
             let pinned = site
@@ -313,6 +315,14 @@ fn resolve_for(
             }
             let composer_home = h.join("composer");
             env.push(("COMPOSER_HOME".into(), composer_home.display().to_string()));
+            // Laravel Forge's CLI only once installed from Settings › PHP.
+            if tool == "forge" {
+                let forge = composer_home.join("vendor/bin/forge");
+                if !forge.exists() {
+                    bail!("Laravel Forge CLI isn't installed: install it in Settings › PHP");
+                }
+                return Ok((forge, vec![], env));
+            }
             let laravel = composer_home.join("vendor/bin/laravel");
             if fetch && !laravel.exists() {
                 run(crate::platform::command(&php)

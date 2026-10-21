@@ -163,9 +163,9 @@ enum Cmd {
     /// Download the web server, put the terminal shims on PATH and print the
     /// one-time system setup command
     Setup,
-    /// The program `php`, `composer`, `laravel`, `node`, `npm`, `npx` or `pnpm` runs in this folder
+    /// The program `php`, `composer`, `laravel`, `forge`, `node`, `npm`, `npx` or `pnpm` runs in this folder
     Which {
-        /// php, composer, laravel, node, npm, npx or pnpm
+        /// php, composer, laravel, forge, node, npm, npx or pnpm
         tool: String,
     },
     /// What an app's .anvil.toml asks for (PHP, Node.js, services) and what's missing

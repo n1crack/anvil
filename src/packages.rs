@@ -18,6 +18,8 @@ pub struct Packages {
     /// name, then the platform facts by their label, e.g. ("laravel/framework", "Laravel").
     pub defaults: Vec<(String, String)>,
     pub ecosystems: Vec<Ecosystem>,
+    /// The Install and Update the tab offers (`runs`) as (id, command).
+    pub commands: Vec<(String, String)>,
 }
 
 #[derive(Serialize, Clone, Default, Debug)]
@@ -118,6 +120,7 @@ pub fn read(dir: &Path) -> Packages {
         highlights,
         defaults,
         ecosystems,
+        commands: runs(dir).into_iter().map(|s| (s.id, s.name)).collect(),
     }
 }
 
@@ -1259,6 +1262,166 @@ fn switch_in(
     Ok(lock)
 }
 
+/* ---------- Install and Update ---------- */
+
+/// The Packages tab's Install and Update of the app's Composer and JS packages, as
+/// one-off runs (`Apps::run_once`) whose output the Dev tab shows; `run_command` fills
+/// in `run`. yarn 2+ has no update within the ranges, so it gets Install only.
+pub fn runs(dir: &Path) -> Vec<crate::processes::Script> {
+    let mut out = vec![];
+    let mut add = |id: &str, name: String| {
+        out.push(crate::processes::Script {
+            id: format!("pkg-{id}"),
+            text: name.clone(),
+            name,
+            source: "Packages",
+            run: String::new(),
+        })
+    };
+    if dir.join("composer.json").is_file() {
+        add("composer-install", "composer install".into());
+        add("composer-update", "composer update".into());
+    }
+    if dir.join("package.json").is_file() {
+        let m = crate::apps::js_manager(dir);
+        add("js-install", format!("{m} install"));
+        let berry = m == "yarn"
+            && fs::read_to_string(dir.join("yarn.lock"))
+                .is_ok_and(|t| t.lines().any(|l| l == "__metadata:"));
+        match m {
+            _ if berry => {}
+            "yarn" => add("js-update", "yarn upgrade".into()),
+            _ => add("js-update", format!("{m} update")),
+        }
+    }
+    out
+}
+
+/// What one of `runs` runs: Composer on the app's PHP (downloaded when missing), or the
+/// app's package manager as a missing node_modules gets installed (`apps::js_install`,
+/// shared store included), `update` in place of `install`.
+pub fn run_command(cfg: &crate::Config, site: &crate::Site, id: &str) -> anyhow::Result<String> {
+    let dir = &site.path;
+    if let Some(action) = id.strip_prefix("pkg-composer-") {
+        crate::create::composer()?;
+        let (php, pre, _) = crate::shims::resolve_with("composer", dir, cfg, false)?;
+        let q = crate::platform::shell_quote;
+        return Ok(format!(
+            "{} {} {action} --no-interaction",
+            q(&php.display().to_string()),
+            q(&pre[0])
+        ));
+    }
+    let m = crate::apps::js_manager(dir);
+    if m == "pnpm" {
+        crate::runtimes::pnpm_ready(&crate::processes::env(cfg, site, false)?)?;
+    }
+    let install = crate::apps::js_install(m, site.shared_deps == Some(true));
+    Ok(match id {
+        "pkg-js-install" => install,
+        "pkg-js-update" if m == "yarn" => install.replacen(" install", " upgrade", 1),
+        "pkg-js-update" => install.replacen(" install", " update", 1),
+        _ => anyhow::bail!("Anvil has no package command {id}"),
+    })
+}
+
+/* ---------- Composer's global packages ---------- */
+
+/// What Settings › PHP offers to install into Anvil's own Composer home besides what is
+/// there already; their commands (`laravel`, `forge`) are shims.
+pub const GLOBAL_OFFERED: [&str; 2] = ["laravel/installer", "laravel/forge-cli"];
+
+/// A global package of Anvil's Composer: its installed version (`None` for an offered one
+/// not installed) and a newer one from Packagist once asked (`global_updates`).
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Global {
+    pub name: String,
+    pub version: Option<String>,
+    pub latest: Option<String>,
+}
+
+/// The packages `composer_home`'s composer.json requires, with what is installed, then the
+/// offered ones it doesn't.
+pub fn globals(composer_home: &Path) -> Vec<Global> {
+    let required: Vec<String> = json(&composer_home.join("composer.json"))
+        .and_then(|v| {
+            v["require"]
+                .as_object()
+                .map(|m| m.keys().cloned().collect())
+        })
+        .unwrap_or_default();
+    let installed = json(&composer_home.join("vendor/composer/installed.json"));
+    let version = |name: &str| {
+        installed.as_ref()?["packages"]
+            .as_array()?
+            .iter()
+            .find(|p| p["name"] == name)?["version"]
+            .as_str()
+            .map(|v| v.trim_start_matches('v').to_string())
+    };
+    let mut out: Vec<Global> = required
+        .iter()
+        // php and ext-… are platform requirements, not packages.
+        .filter(|n| n.contains('/'))
+        .map(|n| Global {
+            name: n.clone(),
+            version: version(n),
+            latest: None,
+        })
+        .collect();
+    for n in GLOBAL_OFFERED {
+        if !out.iter().any(|g| g.name == n) {
+            out.push(Global {
+                name: n.into(),
+                version: None,
+                latest: None,
+            });
+        }
+    }
+    out
+}
+
+/// `globals` with the newer version of each installed one, from Packagist.
+pub fn global_updates(composer_home: &Path) -> Vec<Global> {
+    let mut list = globals(composer_home);
+    std::thread::scope(|s| {
+        for g in list.iter_mut().filter(|g| g.version.is_some()) {
+            s.spawn(|| {
+                let current = g.version.as_deref().unwrap_or_default();
+                g.latest = latest("composer", &g.name).filter(|l| level(current, l).is_some());
+            });
+        }
+    });
+    list
+}
+
+/// Install or update one of `globals` in Anvil's Composer home: `composer global require`,
+/// so it moves to the newest release Packagist has, as the list says.
+pub fn global_require(cfg: &crate::Config, name: &str) -> anyhow::Result<()> {
+    let composer_home = crate::home().join("composer");
+    if !globals(&composer_home).iter().any(|g| g.name == name) {
+        anyhow::bail!("{name} isn't one of Anvil's global Composer packages");
+    }
+    let (php, pre, env) = crate::shims::resolve_with("composer", &crate::home(), cfg, true)?;
+    let out = crate::platform::command(&php)
+        .args(pre)
+        .args(["global", "require", name, "--with-all-dependencies"])
+        .args(["--no-interaction", "--no-ansi"])
+        .envs(env)
+        .env("COMPOSER_HOME", &composer_home)
+        .stdin(std::process::Stdio::null())
+        .output()?;
+    if !out.status.success() {
+        let text = String::from_utf8_lossy(&out.stderr);
+        let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        anyhow::bail!(
+            "composer global require {name} failed: {}",
+            tail[tail.len().saturating_sub(3)..].join("\n")
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1893,6 +2056,74 @@ renamed = { package = "real-name", version = "0.3" }
         let mut none = |_: &str| -> anyhow::Result<()> { panic!("ran") };
         let e = switch_in(&dir, "pnpm install", &mut none).unwrap_err();
         assert!(e.to_string().contains("yarn@4.5.0"), "{e}");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn install_and_update_per_manager_none_for_yarn_berry_update() {
+        let dir = std::env::temp_dir().join(format!("anvil-pkg-runs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let names = || runs(&dir).into_iter().map(|s| s.name).collect::<Vec<_>>();
+        assert!(names().is_empty());
+        fs::write(dir.join("composer.json"), "{}").unwrap();
+        fs::write(dir.join("package.json"), "{}").unwrap();
+        fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
+        assert_eq!(
+            names(),
+            [
+                "composer install",
+                "composer update",
+                "pnpm install",
+                "pnpm update"
+            ]
+        );
+        fs::remove_file(dir.join("pnpm-lock.yaml")).unwrap();
+        fs::write(dir.join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
+        assert_eq!(names()[3], "yarn upgrade");
+        fs::write(dir.join("yarn.lock"), "__metadata:\n  version: 8\n").unwrap();
+        assert_eq!(names().len(), 3);
+        // The JS ones run as a missing node_modules is installed, update for install.
+        let site = crate::tests::site("shop", &dir.display().to_string(), None);
+        fs::remove_file(dir.join("yarn.lock")).unwrap();
+        fs::write(dir.join("bun.lock"), "").unwrap();
+        let cfg = crate::Config::default();
+        assert_eq!(
+            run_command(&cfg, &site, "pkg-js-update").unwrap(),
+            "bun update"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn globals_are_the_required_packages_then_the_offered_ones() {
+        let dir = std::env::temp_dir().join(format!("anvil-pkg-globals-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(globals(&dir).len(), 2);
+        fs::create_dir_all(dir.join("vendor/composer")).unwrap();
+        fs::write(
+            dir.join("composer.json"),
+            r#"{"require":{"php":">=8.2","laravel/installer":"^5.11","psy/psysh":"^0.12"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("vendor/composer/installed.json"),
+            r#"{"packages":[{"name":"laravel/installer","version":"v5.11.2"},{"name":"psy/psysh","version":"v0.12.4"}]}"#,
+        )
+        .unwrap();
+        let got: Vec<(String, Option<String>)> = globals(&dir)
+            .into_iter()
+            .map(|g| (g.name, g.version))
+            .collect();
+        let v = |s: &str| Some(s.to_string());
+        assert_eq!(
+            got,
+            [
+                ("laravel/installer".into(), v("5.11.2")),
+                ("psy/psysh".into(), v("0.12.4")),
+                ("laravel/forge-cli".into(), None),
+            ]
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 }

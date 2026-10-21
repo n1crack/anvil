@@ -1072,9 +1072,9 @@ mod tests {
                 );
             }
         }
-        // start_app, command_run, start_process (process_run's and process_settings' too),
-        // CLI start.
-        assert_eq!(calls, 4, "a start path was added or the scan lost one");
+        // start_app, command_run, package_run, start_process (process_run's and
+        // process_settings' too), CLI start.
+        assert_eq!(calls, 5, "a start path was added or the scan lost one");
     }
 
     #[test]

@@ -860,7 +860,7 @@ pub struct Script {
     pub id: String,
     /// The script as written in its file.
     pub text: String,
-    /// `package.json` or `composer.json`.
+    /// `package.json`, `composer.json`, or `Packages` (`packages::runs`).
     pub source: &'static str,
     /// What runs it.
     #[serde(skip)]

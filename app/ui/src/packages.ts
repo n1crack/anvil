@@ -1,5 +1,7 @@
 import { $, ago, call, el, invoke, popAt, renderMain, seg, selected, showError, snap } from "./app";
 import { icon } from "./icons";
+import { showRun } from "./dev";
+import { askProcs, drawProcs, loadProcs } from "./processes";
 
 /* Packages tab: the app's key packages as badges (pinned per app, the detected ones by
  * default), then Check outdated and Check security. What a check finds shows as a notice
@@ -109,6 +111,87 @@ async function switchToPnpm(name) {
   if (s && selected === name) window.renderPackages(s);
 }
 
+// "site:composer" or "site:js" -> the Install or Update running (its id), then how it went.
+const running = new Map<string, string>();
+const ran = new Map<string, { ok: boolean; text: string; id: string }>();
+
+/** Run Install or Update as Dev runs a script, then read the packages (and, when they
+ * were checked, the outdated ones) again. */
+async function runPkg(name, eco, id, command) {
+  const key = `${name}:${eco}`;
+  running.set(key, id);
+  ran.delete(key);
+  drawPackages(name);
+  let started = false;
+  let result;
+  try {
+    await askProcs(name, "package_run", { id });
+    started = true;
+    if (selected === name) drawProcs(name); // Dev lists the run from now on
+    const exit = await invoke("package_wait", { site: name, id });
+    result = !exit
+      ? { ok: false, text: `${command} was stopped.`, id }
+      : exit.code === 0
+        ? { ok: true, text: `${command} finished.`, id }
+        : { ok: false, text: `${command} failed (${exit.code == null ? "ended by a signal" : `exit code ${exit.code}`}).`, id };
+  } catch (e) {
+    result = { ok: false, text: String(e), id: started ? id : "" };
+  }
+  await loadProcs(name);
+  running.delete(key);
+  ran.set(key, result);
+  const s = snap.sites.find((x) => x.name === name);
+  if (s && selected === name) await window.renderPackages(s);
+  if (updatesOf(name)?.at) checkUpdates(name);
+}
+
+/** A manager's Install and Update…; Update asks in the line first. Running, the line says
+ * so; after, how it went. Either way its output is a click away in Dev. */
+function runLine(name, eco, cmds: [string, string][]) {
+  const key = `${name}:${eco}`;
+  const label = eco === "composer" ? "Composer" : cmds[0][1].split(" ")[0];
+  const line = el("div", "pkg-checks pkg-run-line");
+  line.dataset.eco = eco;
+  const output = (id) => {
+    const b = el("button", "text-act pkg-output", "Output");
+    b.onclick = () => showRun(name, id);
+    return b;
+  };
+  const going = running.get(key);
+  const idle = () => {
+    line.classList.remove("asking");
+    const acts = cmds.map(([id, command]) => {
+      const update = id.endsWith("-update");
+      const b = el("button", `pkg-btn ${update ? "pkg-update" : "pkg-install"}`, update ? "Update…" : "Install");
+      b.title = command;
+      b.onclick = () => {
+        if (!update) return runPkg(name, eco, id, command);
+        const no = el("button", "text-act", "Cancel");
+        no.onclick = idle;
+        const yes = el("button", "text-act danger", "Update");
+        yes.onclick = () => runPkg(name, eco, id, command);
+        line.classList.add("asking");
+        line.replaceChildren(
+          el("span", "muted", `Run ${command}? Packages move to the newest versions their constraints allow, and the lock file changes.`),
+          no,
+          yes,
+        );
+      };
+      return b;
+    });
+    line.replaceChildren(el("span", "pkg-label", label), ...acts);
+  };
+  if (going) {
+    const command = cmds.find(([id]) => id === going)?.[1] ?? label;
+    line.replaceChildren(el("span", "pkg-label", label), el("span", "spin-dot"), el("span", "muted", `Running ${command}…`), output(going));
+  } else idle();
+  const done = ran.get(key);
+  if (!done) return [line];
+  const msg = el("p", done.ok ? "muted pkg-checked pkg-ran" : "pkg-error pkg-ran", done.text);
+  if (done.id) msg.append(" ", output(done.id));
+  return [line, msg];
+}
+
 /** The manager's name for a section: Composer, or pnpm/npm/yarn/bun for npm packages. */
 const managerLabel = (e) => (e.id === "npm" && e.manager ? e.manager.split(" ")[0] : e.label);
 
@@ -185,6 +268,10 @@ export function drawPackages(name) {
   }
   const sw = switched.get(name);
   if (sw) body.append(el("p", sw.ok ? "muted pkg-checked" : "pkg-error", sw.text));
+  for (const eco of ["composer", "js"]) {
+    const cmds = p.commands.filter(([id]) => id.startsWith(`pkg-${eco}-`));
+    if (cmds.length) body.append(...runLine(name, eco, cmds));
+  }
 
   const errors = [up?.error, ...audited.map((e) => audits[e.id]?.error)].filter(Boolean);
   if (errors.length) {

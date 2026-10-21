@@ -605,6 +605,12 @@ window.mockServices = [
       ["Node", "Node"],
     ],
     ecosystems: [composer, npm],
+    commands: [
+      ["pkg-composer-install", "composer install"],
+      ["pkg-composer-update", "composer update"],
+      ["pkg-js-install", "pnpm install"],
+      ["pkg-js-update", "pnpm update"],
+    ],
   };
   const updates = [
     { ecosystem: "composer", name: "laravel/framework", latest: "12.4.0", level: "major" },
@@ -618,6 +624,10 @@ window.mockServices = [
   window.mockLogSources = sources;
   window.mockLogPage = page;
   window.mockPackages = pk;
+  window.mockGlobals = [
+    { name: "laravel/installer", version: "5.11.2", latest: "5.12.0" },
+    { name: "laravel/forge-cli", version: null, latest: null },
+  ];
   window.mockUpdates = updates;
 }
 // The Processes window: the web server, two apps and two services.
@@ -900,6 +910,32 @@ const mockHandle = (cmd, a) => {
       return window.mockPackages;
     case "package_updates":
       return window.mockUpdates;
+    case "package_run": {
+      const name = window.mockPackages.commands.find(([id]) => id === a.id)[1];
+      ov.commands = ov.commands.filter((c) => c.id !== a.id);
+      ov.commands.push({ name, id: a.id, command: name, source: "Packages", running: true, exit: null });
+      return ov;
+    }
+    case "package_wait":
+      // A test ends the run with window.mockPackageExit({ code, at }); it stays running until then.
+      return new Promise((done) => (window.mockPackageExit = done)).then((exit) => {
+        Object.assign(
+          ov.commands.find((c) => c.id === a.id),
+          { running: false, exit },
+        );
+        return exit;
+      });
+    case "composer_globals":
+      return window.mockGlobals.map((g) => ({ ...g, latest: null }));
+    case "composer_global_updates":
+      return window.mockGlobals;
+    case "composer_global_require": {
+      if (a.name === "laravel/forge-cli" && window.mockForgeFails)
+        throw "composer global require laravel/forge-cli failed: Your requirements could not be resolved";
+      const g = window.mockGlobals.find((x) => x.name === a.name);
+      Object.assign(g, { version: g.latest ?? "1.9.0", latest: null });
+      return window.mockGlobals.map((x) => ({ ...x, latest: null }));
+    }
     case "package_audit":
       if (a.ecosystem === "npm") throw "pnpm audit failed: request to registry timed out";
       return [
@@ -1276,7 +1312,7 @@ window.__TAURI__ = {
       mockCalls.push([cmd, args]);
       const ms = window.mockDelay?.[cmd];
       if (ms) await new Promise((r) => setTimeout(r, ms));
-      return structuredClone(mockHandle(cmd, args));
+      return structuredClone(await mockHandle(cmd, args));
     },
   },
   event: { listen: async () => () => {} },

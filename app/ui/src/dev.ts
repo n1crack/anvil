@@ -43,7 +43,17 @@ const runItems = (name: string): Item[] =>
   (procCache.get(name)?.commands ?? [])
     .filter((c) => c.running || c.exit)
     .map((c) => ({ key: `once:${c.id}`, name: c.name, color: "", running: c.running, crashed: !c.running && c.exit?.code !== 0, run: c }));
-const scriptLabel = (c: CommandChip) => (c.source === "composer.json" ? `composer ${c.name}` : `npm run ${c.name}`);
+const scriptLabel = (c: CommandChip) =>
+  c.source === "Packages" ? c.name : c.source === "composer.json" ? `composer ${c.name}` : `npm run ${c.name}`;
+/** The scripts Run ▾ offers: not the Packages tab's Install and Update. */
+const scripts = (name: string) => (procCache.get(name)?.commands ?? []).filter((c) => c.source !== "Packages");
+
+/** Dev with a run's output, `once:<id>` (the Packages tab's Install and Update). */
+export function showRun(name: string, id: string) {
+  devSel.set(name, `once:${id}`);
+  showTab($("#site"), "dev");
+  drawDev(name);
+}
 const exitText = (exit: { code: number | null } | null) => (exit?.code == null ? "Ended by a signal" : `Exited with code ${exit.code}`);
 
 const pane = streamPane({
@@ -272,7 +282,7 @@ function procAct(name: string, x: Item) {
 /** Run ▾: the app's one-off scripts by name, under where they come from (the script
  * itself is the tooltip); choosing one asks first. */
 function runMenu(name: string, btn: HTMLElement) {
-  const cmds = procCache.get(name)?.commands ?? [];
+  const cmds = scripts(name);
   const pop = el("div", "dev-run-menu");
   pop.setAttribute("role", "menu");
   const sources = [...new Set(cmds.map((c) => c.source))];
@@ -352,7 +362,7 @@ function drawBar(name: string) {
 /** Below the processes, a small box of their own for one-off scripts: Run ▾ and each
  * run with how it went. */
 function commandsBox(name: string, runs: Item[]) {
-  const cmds = procCache.get(name)?.commands ?? [];
+  const cmds = scripts(name);
   if (!cmds.length && !runs.length) return null;
   const card = el("div", "group procs-list dev-card dev-cmds");
   const head = el("div", "dev-cmds-head");

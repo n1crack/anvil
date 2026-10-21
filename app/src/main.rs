@@ -712,7 +712,7 @@ struct CommandChip {
     id: String,
     /// The script as its file has it.
     command: String,
-    /// `package.json` or `composer.json`.
+    /// `package.json`, `composer.json`, or `Packages` for the Packages tab's Install and Update.
     source: &'static str,
     running: bool,
     /// How the last run ended, once it has.
@@ -912,8 +912,17 @@ fn overview(app: &App, cfg: &Config, site: &Site) -> Overview {
     let one_off = anvil::processes::one_off_scripts(site);
     let commands = {
         let mut apps = anvil::lock(&app.apps);
+        // The Packages tab's Install and Update show once they ran, for their output.
+        let ran: Vec<_> = anvil::packages::runs(&site.path)
+            .into_iter()
+            .filter(|s| {
+                let key = anvil::processes::once_key(&site.name, &s.id);
+                apps.running(&key) || apps.finished(&key).is_some()
+            })
+            .collect();
         one_off
             .into_iter()
+            .chain(ran)
             .map(|s| {
                 let key = anvil::processes::once_key(&site.name, &s.id);
                 let running = apps.running(&key);
@@ -4055,6 +4064,82 @@ async fn switch_to_pnpm(handle: AppHandle, site: String) -> Res<String> {
     .map_err(|e| e.to_string())?
 }
 
+/// The Packages tab's Install or Update (`packages::runs`), run once like a script so its
+/// output shows in Dev as `once:<id>`; `package_wait` says when it ended.
+#[tauri::command(async)]
+fn package_run(
+    app: State<App>,
+    site: String,
+    id: String,
+    columns: Option<u16>,
+    lines: Option<u16>,
+) -> Res<Overview> {
+    let (cfg, s) = find_site_cfg(&site)?;
+    set_size(&app, &s.name, columns, lines);
+    let mut script = anvil::packages::runs(&s.path)
+        .into_iter()
+        .find(|c| c.id == id)
+        .ok_or_else(|| format!("{site} has no package command {id}"))?;
+    script.run = anvil::packages::run_command(&cfg, &s, &id).map_err(err)?;
+    prepare(&app, &s).map_err(err)?;
+    anvil::lock(&app.apps)
+        .run_once(&s, &script, &cfg)
+        .map_err(err)?;
+    Ok(overview(&app, &cfg, &s))
+}
+
+/// Wait for a `package_run` to end: how it ended, `None` when it was stopped.
+#[tauri::command]
+async fn package_wait(
+    handle: AppHandle,
+    site: String,
+    id: String,
+) -> Res<Option<anvil::apps::Exit>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = anvil::processes::once_key(&site, &id);
+        let app = handle.state::<App>();
+        loop {
+            {
+                let mut apps = anvil::lock(&app.apps);
+                if !apps.running(&key) {
+                    return Ok(apps.finished(&key));
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Settings › PHP's global Composer packages (`packages::globals`).
+#[tauri::command(async)]
+fn composer_globals() -> Vec<anvil::packages::Global> {
+    anvil::packages::globals(&anvil::home().join("composer"))
+}
+
+/// The same with the newer versions Packagist has.
+#[tauri::command]
+async fn composer_global_updates() -> Res<Vec<anvil::packages::Global>> {
+    tauri::async_runtime::spawn_blocking(|| {
+        anvil::packages::global_updates(&anvil::home().join("composer"))
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Install or update one global Composer package, once the user asked.
+#[tauri::command]
+async fn composer_global_require(name: String) -> Res<Vec<anvil::packages::Global>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = anvil::load().map_err(err)?;
+        anvil::packages::global_require(&cfg, &name).map_err(err)?;
+        Ok(anvil::packages::globals(&anvil::home().join("composer")))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// An app's browser errors for its Overview and Settings: how many, since when, and
 /// whether its CSP keeps the script out.
 #[tauri::command]
@@ -5132,6 +5217,11 @@ fn main() {
             set_browser,
             set_shared_deps,
             switch_to_pnpm,
+            package_run,
+            package_wait,
+            composer_globals,
+            composer_global_updates,
+            composer_global_require,
             browser_status,
             mail_list,
             mail_read,

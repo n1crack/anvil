@@ -827,6 +827,85 @@ function phpPatch(v: Settings["php"][number]) {
   return box;
 }
 
+/* PHP › Composer global packages: Anvil's own Composer home, with laravel/installer and
+ * Laravel Forge's CLI offered. Install, or Update to the newer release Packagist has,
+ * asked once per window; a failure under its row. */
+type Global = { name: string; version: string | null; latest: string | null };
+let globals: Global[] | null = null;
+let globalsChecked = false;
+const globalBusy = new Set<string>();
+const globalErrors = new Map<string, string>();
+
+/** The list now (a file read), then once the newer versions (Packagist). */
+export async function loadGlobals() {
+  try {
+    globals = keepLatest(await invoke("composer_globals"));
+  } catch (e) {
+    showError(String(e), "composer_globals");
+  }
+  renderGlobals();
+  if (globalsChecked) return;
+  globalsChecked = true;
+  try {
+    globals = await invoke("composer_global_updates");
+    renderGlobals();
+  } catch {}
+}
+
+/** A fresh list keeps the newer versions found, unless one is now installed. */
+const keepLatest = (list: Global[]) =>
+  list.map((g) => {
+    const old = globals?.find((o) => o.name === g.name)?.latest;
+    return { ...g, latest: old && old !== g.version ? old : g.latest };
+  });
+
+async function requireGlobal(name: string) {
+  globalBusy.add(name);
+  globalErrors.delete(name);
+  renderGlobals();
+  try {
+    globals = keepLatest(await invoke("composer_global_require", { name }));
+  } catch (e) {
+    globalErrors.set(name, String(e));
+  }
+  globalBusy.delete(name);
+  renderGlobals();
+}
+
+function renderGlobals() {
+  const list = $("#composer-globals");
+  if (!list || !globals) return;
+  list.replaceChildren(
+    ...globals.map((g) => {
+      const row = Object.assign(document.createElement("div"), { className: `row ver${g.version ? "" : " missing"}` });
+      const name = Object.assign(document.createElement("span"), { className: "ver-name" });
+      name.append(
+        // An empty check column, so the names line up with the versions above.
+        Object.assign(document.createElement("span"), { className: "ver-mark" }),
+        Object.assign(document.createElement("span"), {
+          className: "ver-label",
+          textContent: g.version ? `${g.name} ${g.version}` : g.name,
+        }),
+      );
+      const slot = Object.assign(document.createElement("span"), { className: "ver-patch" });
+      if (globalBusy.has(g.name)) {
+        slot.innerHTML = `<span class="spin-dot"></span>`;
+        slot.append(g.version ? `Updating to ${g.latest}…` : "Installing…");
+      } else if (!g.version) slot.append(button("Install", () => requireGlobal(g.name)));
+      else if (g.latest) slot.append(button(`Update to ${g.latest}`, () => requireGlobal(g.name)));
+      row.append(name, slot);
+      const reason = globalErrors.get(g.name);
+      if (reason) {
+        row.classList.add("has-error");
+        const error = Object.assign(document.createElement("div"), { className: "ver-error" });
+        error.append(Object.assign(document.createElement("span"), { textContent: reason }));
+        row.append(error);
+      }
+      return row;
+    }),
+  );
+}
+
 const opcacheErrors = new Map<string, string>();
 const extErrors = new Map<string, string>(); // version -> why its last extension change failed
 
@@ -1401,6 +1480,7 @@ for (const b of document.querySelectorAll<HTMLElement>("[data-page]")) {
     for (const page of document.querySelectorAll<HTMLElement>(".page")) page.hidden = page.id !== b.dataset.page;
     if (LANGS.some(([id]) => id === b.dataset.page) && !runtimes) loadRuntimes();
     if (b.dataset.page === "node") loadPackageManagers();
+    if (b.dataset.page === "php") loadGlobals();
     if (b.dataset.page === "about") loadCredits();
     if (b.dataset.page === "performance") loadPerformance();
     if (b.dataset.page === "storage") {
