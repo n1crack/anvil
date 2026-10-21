@@ -36,9 +36,17 @@ describe("Windows main window", () => {
     expect(press(document.body, "f", { metaKey: true }).defaultPrevented).toBe(false);
     expect(press(document.body, "f", { ctrlKey: true }).defaultPrevented).toBe(true);
     expect(document.activeElement).toBe($("#search"));
-    press(document.body, "4", { ctrlKey: true });
-    await wait(60);
-    expect($("#site .tabs .on, #site .tabs [aria-selected='true']")?.dataset.tab).toBe("logs");
+  });
+
+  test("Ctrl+1–9 are the tabs as they show, hidden ones not counted", async () => {
+    const tabs = [...document.querySelectorAll<HTMLElement>("#site .tabs [data-tab]")];
+    const shown = tabs.filter((t) => !t.hidden).map((t) => t.dataset.tab);
+    expect(tabs.some((t) => t.hidden)).toBe(true);
+    for (const n of [2, 3, 4]) {
+      press(document.body, String(n), { ctrlKey: true });
+      await wait(60);
+      expect($("#site .tabs .on, #site .tabs [aria-selected='true']")?.dataset.tab).toBe(shown[n - 1]);
+    }
   });
 
   test("in a text field, Ctrl+A/C/V/X/Z are left to editing", () => {

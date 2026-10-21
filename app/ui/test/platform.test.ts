@@ -62,7 +62,7 @@ describe("platform", () => {
     p.sayInPage();
     const kbd = [...document.querySelectorAll("#shortcuts kbd")].map((k) => k.textContent);
     expect(kbd).toContain("Ctrl+N");
-    expect(kbd).toContain("Ctrl+1 … Ctrl+7");
+    expect(kbd).toContain("Ctrl+1 … Ctrl+9");
     expect(kbd).toContain("Ctrl+,");
     expect(kbd.join(" ")).not.toMatch(/[⌘⌥]/);
     expect(document.body.textContent).not.toMatch(/[⌘⌥]|Finder/);

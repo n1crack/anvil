@@ -6,7 +6,7 @@ export const linux = !windows && navigator.userAgent.includes("Linux");
 if (windows) document.documentElement.classList.add("windows");
 else if (linux) document.documentElement.classList.add("linux");
 /** macOS: ⌘ and Finder. Windows and Linux say Ctrl and their own file manager. */
-const mac = !windows && !linux;
+export const mac = !windows && !linux;
 
 /** The key shortcuts are held with: ⌘ on macOS, Ctrl elsewhere (Linux's Super key
  * belongs to the window manager). */
