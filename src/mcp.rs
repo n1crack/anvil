@@ -683,6 +683,9 @@ fn call(name: &str, args: &Value, client: &str) -> Result<Value> {
             )
         }
         "requests" => {
+            if !cfg.request_log {
+                bail!("{}", requests::TURNED_OFF);
+            }
             let s = site(&cfg, args)?;
             let path = requests::file(&s.name);
             if let Some(id) = args.get("id").filter(|v| !v.is_null()) {

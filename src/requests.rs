@@ -8,6 +8,9 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+/// What a reader gets while Settings › Features › Request log is off.
+pub const TURNED_OFF: &str = "Turn on Request log in Settings › Features";
+
 #[derive(Serialize, Debug, Clone, PartialEq, Default)]
 pub struct Request {
     /// Where its line starts in the log: the row's id for `at`.

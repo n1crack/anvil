@@ -1466,8 +1466,8 @@ export function renderSite() {
   for (const el of root.querySelectorAll(".php-only")) el.hidden = process;
   for (const el of root.querySelectorAll(".process-only")) el.hidden = !process;
 
-  // Caddy serves neither a compose project nor a plain folder.
-  $('.tabs [data-tab="requests"]', root).hidden = s.kind === "compose" || s.kind === "folder";
+  // Caddy serves neither a compose project nor a plain folder; Request log off keeps none.
+  $('.tabs [data-tab="requests"]', root).hidden = !snap.request_log || s.kind === "compose" || s.kind === "folder";
   // Only while the mail catcher is on (Settings › Features); its switch lives in the tab.
   $('.tabs [data-tab="mail"]', root).hidden = !snap.catcher || s.kind === "compose" || s.kind === "folder";
   hideEmptyTabs(s, root);

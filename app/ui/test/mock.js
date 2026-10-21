@@ -130,6 +130,7 @@ window.mockSnap = {
   php_ext: {},
   php_ext_built: {},
   tunnel: false,
+  request_log: true,
   shares: {},
   mail: { shop: "mailpit" },
   catcher: null,
@@ -1000,6 +1001,9 @@ const mockHandle = (cmd, a) => {
     case "set_tunnel":
       window.mockTunnel = a.on;
       return mockHandle("settings", {});
+    case "set_request_log":
+      window.mockRequestLog = a.on;
+      return mockHandle("settings", {});
     case "set_mail_catcher":
       window.mockMailCatcher = a.on;
       return mockHandle("settings", {});
@@ -1037,6 +1041,7 @@ const mockHandle = (cmd, a) => {
       return {
         mcp: window.mockMcp ?? false,
         tunnel: window.mockTunnel ?? false,
+        request_log: window.mockRequestLog ?? true,
         mail_catcher: window.mockMailCatcher ?? false,
         mail_port: 2525,
         mail_error: window.mockMailError ?? null,

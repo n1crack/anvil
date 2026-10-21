@@ -10,6 +10,7 @@ contain breaking changes.
 ### Changed
 
 - Settings › Plugins is now Settings › Features: they come with Anvil and only need turning on.
+- Settings › Features › Request log: on as before; off, the web server keeps no request logs and apps lose the Requests tab.
 
 ### Added
 

@@ -703,6 +703,7 @@ export function render() {
   $("#mcp").checked = s.mcp;
   $("#mcp-line").hidden = !s.mcp;
   $("#tunnel").checked = s.tunnel;
+  $("#request-log").checked = s.request_log;
   pluginPages();
   renderMailCatcher();
   renderDbViewer();
@@ -982,6 +983,7 @@ $("#https-default").onchange = (e) => call("set_https_default", { on: e.target.c
 $("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.checked ? "copy" : "empty" });
 $("#mcp").onchange = (e) => call("set_mcp", { on: e.target.checked });
 $("#tunnel").onchange = (e) => call("set_tunnel", { on: e.target.checked });
+$("#request-log").onchange = (e) => call("set_request_log", { on: e.target.checked });
 $("#mail-catcher").onchange = (e) => call("set_mail_catcher", { on: e.target.checked });
 
 /** A feature that is on has a page of its own under Features in the sidebar; turned off

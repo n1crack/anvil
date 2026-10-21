@@ -47,6 +47,7 @@
     "allow-set-mail-catcher",
     "allow-set-mcp",
     "allow-set-notifications",
+    "allow-set-request-log",
     "allow-set-terminal",
     "allow-set-theme",
     "allow-set-tld",

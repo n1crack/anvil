@@ -86,6 +86,8 @@ export interface Snapshot {
   php_ext_built: Record<string, string[]>;
   /** Settings › Features › Tunnel: Overview offers Share. */
   tunnel: boolean;
+  /** Settings › Features › Request log: apps' Requests tabs. */
+  request_log: boolean;
   /** Shared apps' tunnels, by app; `note` says what links the app builds point to. */
   shares: Record<string, Share>;
   /** Settings › Features › Database viewer while it's on: why it isn't served, and each
@@ -319,6 +321,8 @@ export interface Settings {
   mcp: boolean;
   /** Settings › Features › Tunnel. */
   tunnel: boolean;
+  /** Settings › Features › Request log. */
+  request_log: boolean;
   /** Settings › Features › Mail catcher, its port and why it isn't listening. */
   mail_catcher: boolean;
   mail_port: number;

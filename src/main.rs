@@ -1754,6 +1754,9 @@ fn run() -> Result<()> {
                 assets,
                 follow,
             } => {
+                if !cfg.request_log {
+                    bail!("{}", requests::TURNED_OFF);
+                }
                 let s = sites(&cfg)
                     .into_iter()
                     .find(|s| s.name == site_name(&site))

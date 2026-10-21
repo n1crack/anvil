@@ -139,6 +139,10 @@ pub struct Config {
     /// Settings › Features › Database viewer (`dbviewer`): Adminer at db.<tld>. Stored only when on.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub db_viewer: bool,
+    /// Settings › Features › Request log: Caddy writes each app's requests (`requests`)
+    /// for its Requests tab. On unless turned off; stored only when off.
+    #[serde(skip_serializing_if = "is_true")]
+    pub request_log: bool,
     /// The catcher's SMTP port; unset is `mail::DEFAULT_PORT`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mail_port: Option<u16>,
@@ -257,6 +261,7 @@ impl Default for Config {
             https_default: Some(false),
             trim_app_logs: true,
             notifications: true,
+            request_log: true,
             accepted_licenses: BTreeMap::new(),
             // The owner's "default off": a new worktree gets an empty database of its own.
             worktree_db: worktrees::DbChoice::Empty,
@@ -1776,7 +1781,7 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
         format!(
             "\n{} {{\n{}\tredir https://{{host}}{https_port}{{uri}}\n}}\n",
             http.join(", "),
-            access_log(&site.name)
+            access_log(cfg, &site.name)
         )
     };
     // A site without HTTPS only answers http://, so Caddy makes no certificate for it.
@@ -1795,7 +1800,11 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
     };
     // A block's addresses and opening brace, then where it logs its requests.
     let open = |site: &Site, names: &[String]| {
-        format!("{} {{\n{}", addresses(site, names), access_log(&site.name))
+        format!(
+            "{} {{\n{}",
+            addresses(site, names),
+            access_log(cfg, &site.name)
+        )
     };
     // Caddy refuses a whole Caddyfile that has one address twice, so each host goes to one
     // block: sites (with their aliases) first, then dev-server rows, then old-host redirects.
@@ -2032,15 +2041,20 @@ fn php_versions(cfg: &Config, sites: &[Site]) -> BTreeSet<String> {
 /// part starting with a dot (`.env`, `.git/config`), answered 404 by a file server that
 /// hides everything. `hide .*` would also match the folders of the web root's own path
 /// (`.output/public`, a project in `~/.sites`), hiding every file.
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
 const HIDDEN: &str = "\t@hidden path */.*\n";
 
 /// A site block's access log: JSON, one file per app (its server rows and redirects too),
 /// rolled by Caddy at 2 MiB with one older copy kept a day, so an app holds at most ~4 MB.
 /// Caddy writes Cookie, Set-Cookie, Authorization and Proxy-Authorization as REDACTED.
-/// A home whose path would break out of the quotes gets no log.
-fn access_log(site: &str) -> String {
+/// A home whose path would break out of the quotes gets no log, nor does any app while
+/// Request log is off.
+fn access_log(cfg: &Config, site: &str) -> String {
     let path = caddy_path(&requests::file(site));
-    if path.contains(['"', '\\', '\n', '\r']) {
+    if !cfg.request_log || path.contains(['"', '\\', '\n', '\r']) {
         return String::new();
     }
     format!(
@@ -4906,6 +4920,13 @@ mod tests {
         vf.kind = "vite".into();
         vf.port = Some(41001);
         let shop = site("shop", dir.path().to_str().unwrap(), Some("8.4"));
+        // Request log off: no app gets a log.
+        let off = Config {
+            request_log: false,
+            ..Config::default()
+        };
+        let quiet = super::caddyfile(&off, &[vf.clone(), shop.clone()]);
+        assert!(!quiet.contains("\tlog {"), "{quiet}");
         let out = super::caddyfile(&Config::default(), &[vf, shop]);
         let log = |name: &str| {
             format!(

@@ -87,6 +87,7 @@ const COMMANDS: &[&str] = &[
     "share_stop",
     "set_mail_catcher",
     "set_db_viewer",
+    "set_request_log",
     "set_mail_caught",
     "set_browser",
     "set_shared_deps",

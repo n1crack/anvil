@@ -187,7 +187,7 @@
     </section>
     <section id="plugins" class="page" hidden>
       <h1>Features</h1>
-      <p class="hint">Off until you turn them on. One that is on gets its own page under Features.</p>
+      <p class="hint">Turn on only what you use. One with settings of its own gets its page under Features when it is on.</p>
       <div class="group">
         <label class="row">
           <span>Agents (MCP)<small>AI agents such as Claude Code see your apps, start and stop their processes and services, read logs and caught mail, add worktrees and change app settings. Nothing that can’t be undone is offered.</small></span>
@@ -204,6 +204,10 @@
         <label class="row">
           <span>Database viewer<small>Adminer at db.<span class="db-tld">test</span>, logged in to your MySQL and PostgreSQL services and your apps’ SQLite files with no password. Services and apps get Browse. Downloads Adminer (about 420 KB) when turned on.</small></span>
           <input id="db-viewer" type="checkbox" role="switch">
+        </label>
+        <label class="row">
+          <span>Request log<small>Each app’s requests, kept for its Requests tab: the web server writes one small log per app, at most about 4 MB. Off, nothing is written and the tab goes away.</small></span>
+          <input id="request-log" type="checkbox" role="switch">
         </label>
       </div>
     </section>

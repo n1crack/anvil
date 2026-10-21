@@ -2003,6 +2003,20 @@ describe("mail", () => {
 describe("share", () => {
   const row = () => $('[data-panel="overview"] .share-row');
   const state = async () => (await import("../src/app")).call("state");
+  test("Request log off in Settings › Features: no Requests tab", async () => {
+    w.mockSnap.request_log = false;
+    try {
+      await state();
+      await select("shop");
+      expect(($('.tabs [data-tab="requests"]') as HTMLElement).hidden).toBe(true);
+    } finally {
+      w.mockSnap.request_log = true;
+      await state();
+    }
+    await select("shop");
+    expect(($('.tabs [data-tab="requests"]') as HTMLElement).hidden).toBe(false);
+  });
+
   test("off in Settings › Features: no Share line", async () => {
     await select("shop");
     expect(row().hidden).toBe(true);

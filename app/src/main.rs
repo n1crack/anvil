@@ -116,6 +116,8 @@ struct Snapshot {
     shares: std::collections::BTreeMap<String, ShareView>,
     /// Settings › Features › Database viewer, while it's on.
     db_viewer: Option<DbViewer>,
+    /// Settings › Features › Request log: apps' Requests tabs.
+    request_log: bool,
 }
 
 /// What Browse buttons need: why the viewer isn't served, and each app's database it opens.
@@ -452,6 +454,7 @@ fn snapshot(app: &App) -> Res<Snapshot> {
             })
             .collect(),
         tunnel: cfg.tunnel,
+        request_log: cfg.request_log,
         shares: {
             let states = anvil::lock(&app.shares).states();
             states
@@ -3247,6 +3250,7 @@ struct Settings {
     mail_error: Option<String>,
     /// Settings › Features › Database viewer, where it answers, and why it isn't served.
     db_viewer: bool,
+    request_log: bool,
     db_viewer_host: String,
     db_viewer_problem: Option<String>,
     /// Settings › Worktrees: each preset as it applies.
@@ -3422,6 +3426,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
             .then(|| mail_error(&handle.state::<App>()))
             .flatten(),
         db_viewer: cfg.db_viewer,
+        request_log: cfg.request_log,
         db_viewer_host,
         db_viewer_problem,
         worktree_presets,
@@ -3634,6 +3639,20 @@ fn set_tunnel(handle: AppHandle, app: State<App>, on: bool) -> Res<Settings> {
             Ok(())
         },
         false,
+    )
+}
+
+/// Settings › Features › Request log: the web server restarts with or without each
+/// app's access log.
+#[tauri::command(async)]
+fn set_request_log(handle: AppHandle, on: bool) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.request_log = on;
+            Ok(())
+        },
+        true,
     )
 }
 
@@ -4708,6 +4727,7 @@ fn main() {
             share_stop,
             set_mail_catcher,
             set_db_viewer,
+            set_request_log,
             set_mail_caught,
             set_browser,
             set_shared_deps,

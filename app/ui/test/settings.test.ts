@@ -418,6 +418,16 @@ describe("about", () => {
 });
 
 describe("plugins", () => {
+  test("Request log starts on; its switch turns it off", async () => {
+    await open("plugins");
+    const box = $("#request-log") as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    await wait();
+    expect(w.mockCalls.at(-1)).toEqual(["set_request_log", { on: false }]);
+  });
+
   test("plugins_switch_shows_the_line: anvil mcp and Copy only while Agents (MCP) is on", async () => {
     await open("plugins");
     const box = $("#mcp") as HTMLInputElement;
