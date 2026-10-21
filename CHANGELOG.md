@@ -83,6 +83,7 @@ contain breaking changes.
 - Requests: the filters wrap onto a second line in a narrow window instead of running off the edge; their reset reads Clear Filters, so it isn't mistaken for deleting the log.
 - Processes: a row says Restarting… or Stopping… while its Restart or Stop runs, instead of looking unchanged.
 - Processes: a log with nothing in it says No output yet instead of an empty black pane.
+- Menu bar menu: Start, Stop and Restart say Starting…, Stopping… or Restarting… until done; "1 application" is singular; Quit reads Quit Anvil and Stop Everything with ⌥⌘Q, as in the Anvil menu, since ⌘Q only closes the windows.
 
 ## [0.2.1] - 2026-10-21
 

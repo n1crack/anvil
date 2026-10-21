@@ -4634,14 +4634,20 @@ fn on_app_menu(handle: &AppHandle, id: &str) {
     }
 }
 
+/// The tray's Start, Stop or Restart while it runs: "Starting…" and the like.
+static TRAY_BUSY: Mutex<Option<&'static str>> = Mutex::new(None);
+
 fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let app = handle.state::<App>();
     let on = running(&app);
     let cfg = anvil::load().unwrap_or_default();
     // One scan of the folders serves the whole menu.
     let all = scan_sites(&cfg);
+    let busy = *anvil::lock(&TRAY_BUSY);
 
-    let status = if on {
+    let status = if let Some(doing) = busy {
+        doing.into()
+    } else if on {
         // Aliases share their app's folder; count each app once.
         let parked: std::collections::HashSet<_> =
             all.iter().filter(|s| !s.linked).map(|s| &s.path).collect();
@@ -4649,7 +4655,7 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
             .iter()
             .filter(|s| !s.linked || !parked.contains(&s.path))
             .count();
-        format!("Serving {n} applications")
+        format!("Serving {n} application{}", if n == 1 { "" } else { "s" })
     } else if anvil::lock(&app.error).is_some() {
         "Stopped, open Anvil for details".into()
     } else {
@@ -4682,10 +4688,10 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         Box::new(item(
             if on { "stop" } else { "start" },
             if on { "Stop" } else { "Start" },
-            true,
+            busy.is_none(),
             None,
         )?),
-        Box::new(item("restart", "Restart", on, None)?),
+        Box::new(item("restart", "Restart", on && busy.is_none(), None)?),
         Box::new(sep()?),
     ]);
     // PHP versions in one submenu, so the menu doesn't grow with every install.
@@ -4713,12 +4719,33 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
             &refs,
         )?));
     }
+    // As the app menu says them; Windows has no app menu, so no keys to show there.
+    let mac = cfg!(target_os = "macos");
     items.extend([
         Box::new(sep()?) as Box<dyn IsMenuItem<Wry>>,
-        Box::new(item("logs", "Show Anvil Logs in Finder", true, None)?),
-        Box::new(item("settings", "Settings", true, Some("CmdOrCtrl+,"))?),
+        Box::new(item(
+            "logs",
+            if mac {
+                "Show Anvil Logs in Finder"
+            } else {
+                "Show Anvil Logs in File Explorer"
+            },
+            true,
+            None,
+        )?),
+        Box::new(item(
+            "settings",
+            "Settings…",
+            true,
+            mac.then_some("CmdOrCtrl+,"),
+        )?),
         Box::new(sep()?),
-        Box::new(item("quit", "Quit Anvil", true, Some("CmdOrCtrl+Q"))?),
+        Box::new(item(
+            "quit",
+            "Quit Anvil and Stop Everything",
+            true,
+            mac.then_some("CmdOrCtrl+Alt+Q"),
+        )?),
     ]);
 
     let refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(|b| b.as_ref()).collect();
@@ -4734,13 +4761,24 @@ fn on_menu(handle: &AppHandle, id: &str) {
         // time): off the main thread, so the menu bar doesn't beachball.
         "start" | "restart" | "stop" => {
             let (handle, stopping) = (handle.clone(), id == "stop");
+            // Said in the menu until it's done; a second click meanwhile can't start another.
+            *anvil::lock(&TRAY_BUSY) = Some(match id {
+                "start" => "Starting…",
+                "stop" => "Stopping…",
+                _ => "Restarting…",
+            });
+            changed(&handle);
             std::thread::spawn(move || {
-                let app = handle.state::<App>();
-                if stopping {
-                    stop(&app);
-                } else if let Ok(cfg) = anvil::load() {
-                    start(&app, &cfg);
-                }
+                // Even after a panic the menu must not stay at "Starting…".
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let app = handle.state::<App>();
+                    if stopping {
+                        stop(&app);
+                    } else if let Ok(cfg) = anvil::load() {
+                        start(&app, &cfg);
+                    }
+                }));
+                *anvil::lock(&TRAY_BUSY) = None;
                 changed(&handle);
             });
             return;
