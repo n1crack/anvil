@@ -741,7 +741,12 @@ fn install_now(id: &str, version: &str) -> Result<()> {
                     "https://github.com/theseus-rs/postgresql-binaries/releases/download/{version}/{file}"
                 );
                 let sum = published_sum(&format!("{url}.sha256"), &file)?;
-                fetch_tgz(&url, d, true, Some(&sum))
+                fetch_tgz(&url, d, true, Some(&sum))?;
+                #[cfg(unix)]
+                if !mac {
+                    build_postgres_libxml2(&d.join("lib"))?;
+                }
+                Ok(())
             }
             "redis" if windows => install_garnet(d, version),
             "redis" => build_redis(d, version),
@@ -974,29 +979,77 @@ fn build_mysql_libs(private: &std::path::Path) -> Result<()> {
     let _ = fs::remove_dir_all(src);
     // The mysql client wants libncurses.so.6; Arch only has the wide-character build,
     // which serves the same calls.
-    let libs = ["ldconfig", "/sbin/ldconfig"]
-        .iter()
-        .find_map(|l| crate::platform::command(l).arg("-p").output().ok())
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default();
-    if let Some(wide) = narrow_curses_missing(&libs) {
+    let libs = system_libs();
+    if system_lib(&libs, "libncurses.so.6").is_none()
+        && let Some(wide) = system_lib(&libs, "libncursesw.so.6")
+    {
         std::os::unix::fs::symlink(wide, private.join("libncurses.so.6"))?;
     }
     Ok(())
 }
 
-/// libncursesw.so.6's path from `ldconfig -p` when no libncurses.so.6 is listed.
+/// The shared libraries the system has, as `ldconfig -p` lists them.
 #[cfg(unix)]
-fn narrow_curses_missing(ldconfig: &str) -> Option<&str> {
-    let path = |name: &str| {
-        ldconfig
-            .lines()
-            .filter(|l| l.trim_start().starts_with(name))
-            .find_map(|l| l.split_once(" => ").map(|(_, p)| p.trim()))
-    };
-    path("libncurses.so.6 ")
-        .is_none()
-        .then(|| path("libncursesw.so.6 "))?
+fn system_libs() -> String {
+    ["ldconfig", "/sbin/ldconfig"]
+        .iter()
+        .find_map(|l| crate::platform::command(l).arg("-p").output().ok())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// Where the system keeps `soname`, from `system_libs`' listing.
+#[cfg(unix)]
+fn system_lib<'a>(ldconfig: &'a str, soname: &str) -> Option<&'a str> {
+    ldconfig
+        .lines()
+        .filter(|l| l.split_whitespace().next() == Some(soname))
+        .find_map(|l| l.split_once(" => ").map(|(_, p)| p.trim()))
+}
+
+/// libxml2 2.13, the last to be libxml2.so.2, which Linux's PostgreSQL needs. GNOME
+/// publishes its SHA-256.
+#[cfg(unix)]
+const LIBXML2: (&str, &str) = (
+    "https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.9.tar.xz",
+    "a2c9ae7b770da34860050c309f903221c67830c86e4a7e760692b803df95143a",
+);
+
+/// PostgreSQL's libxml2.so.2 in its own `lib` folder, which it looks in first (its
+/// RUNPATH is `$ORIGIN/../lib`), when the system has none: Arch's libxml2 2.14 and
+/// later is libxml2.so.16.
+#[cfg(unix)]
+fn build_postgres_libxml2(lib: &std::path::Path) -> Result<()> {
+    if system_lib(&system_libs(), "libxml2.so.2").is_some() {
+        return Ok(());
+    }
+    println!("Building libxml2, which PostgreSQL needs on this Linux (a few seconds)…");
+    let src = home().join("build").join("libxml2");
+    let _ = fs::remove_dir_all(&src);
+    fetch_tgz(LIBXML2.0, &src, true, Some(LIBXML2.1))?;
+    let tools = "Building libxml2 for PostgreSQL failed — are gcc and make installed?";
+    // Only what PostgreSQL's XML functions use: no other library to find.
+    run(crate::platform::command("./configure")
+        .args(["-q", "--without-python", "--without-icu", "--without-lzma"])
+        .args([
+            "--without-zlib",
+            "--without-readline",
+            "--without-http",
+            "--without-modules",
+        ])
+        .current_dir(&src))
+    .context(tools)?;
+    let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
+    run(crate::platform::command("make")
+        .args(["-s", &format!("-j{jobs}"), "libxml2.la"])
+        .current_dir(&src))
+    .context(tools)?;
+    fs::copy(
+        src.join(".libs/libxml2.so.2.13.9"),
+        lib.join("libxml2.so.2"),
+    )?;
+    let _ = fs::remove_dir_all(src);
+    Ok(())
 }
 
 /// Download a service's program version if it isn't there yet.
@@ -1661,17 +1714,21 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn mysql_client_gets_ncursesw_only_where_ncurses_is_missing() {
+    fn system_libraries_by_soname() {
         let arch = "\tlibncursesw.so.6 (libc6,x86-64) => /usr/lib/libncursesw.so.6\n\
-                    \tlibtinfo.so.6 (libc6,x86-64) => /usr/lib/libtinfo.so.6\n";
+                    \tlibxml2.so.16 (libc6,x86-64) => /usr/lib/libxml2.so.16\n";
         assert_eq!(
-            narrow_curses_missing(arch),
+            system_lib(arch, "libncursesw.so.6"),
             Some("/usr/lib/libncursesw.so.6")
         );
-        let ubuntu = "\tlibncursesw.so.6 (libc6,x86-64) => /lib/x86_64-linux-gnu/libncursesw.so.6\n\
-                      \tlibncurses.so.6 (libc6,x86-64) => /lib/x86_64-linux-gnu/libncurses.so.6\n";
-        assert_eq!(narrow_curses_missing(ubuntu), None);
-        assert_eq!(narrow_curses_missing(""), None);
+        assert_eq!(system_lib(arch, "libncurses.so.6"), None);
+        assert_eq!(system_lib(arch, "libxml2.so.2"), None);
+        let ubuntu = "\tlibxml2.so.2 (libc6,x86-64) => /lib/x86_64-linux-gnu/libxml2.so.2\n";
+        assert_eq!(
+            system_lib(ubuntu, "libxml2.so.2"),
+            Some("/lib/x86_64-linux-gnu/libxml2.so.2")
+        );
+        assert_eq!(system_lib("", "libxml2.so.2"), None);
     }
 
     #[test]
