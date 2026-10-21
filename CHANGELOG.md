@@ -18,6 +18,7 @@ contain breaking changes.
 - Processes: Clear log asks before it empties the log file.
 - Processes: the Status column stays readable while a log is open, also at the smallest window size.
 - The titlebar's setup and update buttons stay on one line in a small window; Update available looks like a button.
+- Settings › PHP: every version row has the same height, and Extensions stays in place on hover and while Uninstall asks.
 
 ## [0.2.1] - 2026-10-21
 

@@ -154,7 +154,11 @@ function confirmInRow(box: HTMLElement, question: string, label: string, onYes: 
   yes.classList.add("danger");
   const no = textAct("Cancel", restore);
   box.classList.add("asking");
-  box.replaceChildren(Object.assign(document.createElement("span"), { className: "muted", textContent: question }), no, yes);
+  box.replaceChildren(
+    Object.assign(document.createElement("span"), { className: "muted", textContent: question, title: question }),
+    no,
+    yes,
+  );
   // Back to the row's actions once the mouse is elsewhere and nothing was chosen.
   box
     .closest(".row")
@@ -761,8 +765,10 @@ function phpParts(v: Settings["php"][number]) {
       installing.has(`opcache@${v.version}`) ||
       v.extensions.some((e) => e.building || installing.has(`ext@${v.version}@${e.name}`));
     const t = Object.assign(document.createElement("button"), { type: "button", className: "ext-toggle" });
-    t.innerHTML = `<span></span><span class="chevron" aria-hidden="true">›</span>`;
-    t.firstElementChild!.textContent = `Extensions ${on}/${v.extensions.length + 1}`;
+    // "Extensions" goes in a narrow row (style.css); the count and the tooltip stay.
+    t.innerHTML = `<span><span class="ext-word">Extensions </span></span><span class="chevron" aria-hidden="true">›</span>`;
+    t.firstElementChild!.append(`${on}/${v.extensions.length + 1}`);
+    t.title = "Extensions";
     if (busy) t.prepend(Object.assign(document.createElement("span"), { className: "spin-dot" }));
     below = Object.assign(document.createElement("div"), { className: "ext-fold" });
     below.append(extensionsList(v));
