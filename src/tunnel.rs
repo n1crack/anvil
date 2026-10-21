@@ -22,7 +22,7 @@ pub const VERSION: &str = "2026.10.2";
 /// GitHub's SHA-256 of each release asset, confirmed by hashing the downloads. The sums
 /// in Cloudflare's release notes are of the binaries inside the .tgz, not the archives.
 /// Windows on ARM has no build.
-const ASSETS: [(&str, &str, &str); 3] = [
+const ASSETS: [(&str, &str, &str); 5] = [
     (
         "macos-aarch64",
         "cloudflared-darwin-arm64.tgz",
@@ -32,6 +32,16 @@ const ASSETS: [(&str, &str, &str); 3] = [
         "macos-x86_64",
         "cloudflared-darwin-amd64.tgz",
         "b64efd5a2772fc124b855f60eb3d33ba1a4f2ba67b19ddc58d32b705d42b82c9",
+    ),
+    (
+        "linux-aarch64",
+        "cloudflared-linux-arm64",
+        "b7e55b4d9702c2ab5f8348f780bb1db044527fc555367714c78e0595750a4665",
+    ),
+    (
+        "linux-x86_64",
+        "cloudflared-linux-amd64",
+        "35fbdd2beb378436c7da377d7358cea8e33f9c94a6705d1d8036bf9b0d6d8005",
     ),
     (
         "windows-x86_64",
@@ -72,8 +82,11 @@ pub fn ensure() -> Result<PathBuf> {
             if file.ends_with(".tgz") {
                 crate::fetch_tgz(&url, d, false, Some(sum))
             } else {
+                // A bare program: Windows' .exe, Linux's binary (made executable).
                 let got = crate::download(&url, Some(sum))?;
-                Ok(fs::rename(got, d.join(platform::exe("cloudflared")))?)
+                let bin = d.join(platform::exe("cloudflared"));
+                fs::rename(got, &bin)?;
+                Ok(platform::set_mode(&bin, 0o755)?)
             }
         })?;
     }
@@ -492,6 +505,10 @@ mod tests {
         assert_eq!(
             asset("windows", "x86_64").unwrap().0,
             "cloudflared-windows-amd64.exe"
+        );
+        assert_eq!(
+            asset("linux", "x86_64").unwrap().0,
+            "cloudflared-linux-amd64"
         );
         assert!(asset("windows", "aarch64").is_err());
         for (_, _, sum) in ASSETS {

@@ -617,8 +617,10 @@ fn openssl_headers(text: &str) -> Result<PathBuf> {
     let src = home().join("build").join(format!("openssl-{version}"));
     let _ = fs::remove_dir_all(&src);
     let file = format!("openssl-{version}");
-    let target = match std::env::consts::ARCH {
-        "aarch64" => "darwin64-arm64-cc",
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "aarch64") => "linux-aarch64",
+        ("linux", _) => "linux-x86_64",
+        (_, "aarch64") => "darwin64-arm64-cc",
         _ => "darwin64-x86_64-cc",
     };
     let ok = fetch_tgz(
