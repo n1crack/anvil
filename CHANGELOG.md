@@ -36,6 +36,7 @@ contain breaking changes.
 - Mail tab: deleting one message asks first, in its row, as Clear does.
 - Worktree settings: "Add Install packages" reads "Add Package Install".
 - A failed New Application's "Show in Finder" is "Show Log in Finder", which is what it shows.
+- Changing a running app's type, start command, port or version says beside the field that it restarts the app; Start with Anvil no longer restarts it.
 
 ### Added
 

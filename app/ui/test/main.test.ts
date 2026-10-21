@@ -2540,7 +2540,7 @@ describe("php.ini fields", () => {
     const input = $("#ini-upload") as HTMLInputElement;
     input.value = "200M";
     input.dispatchEvent(new Event("change"));
-    expect($(".ini-note").textContent).toBe("Restarting the web server…");
+    expect($(".field-note").textContent).toBe("Restarting the web server…");
     await wait(60);
     expect(calls("set_site_ini").slice(n)).toEqual([
       [
@@ -2554,7 +2554,7 @@ describe("php.ini fields", () => {
         },
       ],
     ]);
-    expect($(".ini-note").textContent).toBe("Applied; the web server restarted.");
+    expect($(".field-note").textContent).toBe("Applied; the web server restarted.");
     input.value = "";
     input.dispatchEvent(new Event("change"));
     await wait(60);
@@ -2581,6 +2581,46 @@ describe("run settings", () => {
       w.mockSnap.sites.pop();
       delete w.mockSnap.runtimes.dotnet;
       await state();
+    }
+  });
+
+  test("a change that restarts the running app says so beside the field; stopped, nothing; refused, why", async () => {
+    const state = async () => {
+      await (await import("../src/app")).call("state");
+      await wait(40);
+    };
+    const change = async (sel: string, value: string) => {
+      const input = $(`#site ${sel}`) as HTMLInputElement;
+      input.value = value;
+      input.dispatchEvent(new Event("change"));
+      const during = input.parentElement!.querySelector(".field-note")?.textContent ?? null;
+      await wait(60);
+      return [during, $(`#site ${sel}`).parentElement!.querySelector(".field-note")?.textContent ?? null];
+    };
+    const site = w.mockSnap.sites.find((x) => x.name === "vuefinder");
+    const was = { command: site.command, command_custom: site.command_custom, port: site.port };
+    w.mockSnap.app_states.vuefinder = "running";
+    try {
+      await state();
+      await select("vuefinder");
+      $('.tabs [data-tab="settings"]').click();
+      await wait(60);
+      expect(await change("#app-command", "pnpm dev --host")).toEqual(["Restarting vuefinder…", "Applied; vuefinder restarted."]);
+      expect(calls("set_app").at(-1)![1]).toEqual({ site: "vuefinder", command: "pnpm dev --host" });
+      expect(await change("#app-port", "5174")).toEqual(["Restarting vuefinder…", "Applied; vuefinder restarted."]);
+      w.mockSetAppFail = "Port 5174 is taken by another app";
+      expect(await change("#app-port", "5175")).toEqual(["Restarting vuefinder…", "Port 5174 is taken by another app"]);
+      expect($("#site #app-port").parentElement!.querySelector(".field-note")!.classList.contains("error-text")).toBe(true);
+      delete w.mockSetAppFail;
+      delete w.mockSnap.app_states.vuefinder;
+      await state();
+      expect(await change("#app-port", "5176")).toEqual([null, null]);
+    } finally {
+      delete w.mockSetAppFail;
+      delete w.mockSnap.app_states.vuefinder;
+      Object.assign(site, was);
+      await state();
+      $('.tabs [data-tab="overview"]').click();
     }
   });
 });

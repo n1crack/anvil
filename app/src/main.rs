@@ -1800,8 +1800,10 @@ fn set_app(
     port: Option<u16>,
     autostart: Option<bool>,
     reset: Option<Vec<String>>,
-) -> Res<Snapshot> {
+) -> Res<Applied> {
     let reset = reset.unwrap_or_default();
+    // Autostart alone changes nothing that runs.
+    let restart = kind.is_some() || command.is_some() || port.is_some() || !reset.is_empty();
     let pick = |name: &str, v: Option<String>| -> Option<Option<String>> {
         if reset.iter().any(|r| r == name) {
             Some(None)
@@ -1826,19 +1828,35 @@ fn set_app(
             autostart,
         )
     })?;
-    // A running app picks up a new command or port by restarting.
-    let was_running = anvil::lock(&app.apps).running(&site);
-    if was_running {
+    // A running app picks up a new kind, command or port by restarting.
+    let restarted = restart && anvil::lock(&app.apps).running(&site);
+    if restarted {
         stop_app(&app, &site);
     }
     if reroute {
         sites_changed(&handle, &app, &cfg);
     }
-    if was_running {
+    if restarted {
         start_app(&app, &cfg, &site);
     }
     changed(&handle);
-    snapshot(&app)
+    applied(&app, restarted)
+}
+
+/// A snapshot after a setting changed, and whether that restarted the app's server, so
+/// its field can say so.
+#[derive(Serialize)]
+struct Applied {
+    #[serde(flatten)]
+    snap: Snapshot,
+    restarted: bool,
+}
+
+fn applied(app: &App, restarted: bool) -> Res<Applied> {
+    Ok(Applied {
+        snap: snapshot(app)?,
+        restarted,
+    })
 }
 
 /// Change one row's settings: its command (`reset` goes back to the detected one),
@@ -2935,15 +2953,15 @@ fn set_runtime(
     app: State<App>,
     site: String,
     version: Option<String>,
-) -> Res<Snapshot> {
+) -> Res<Applied> {
     let (cfg, ()) = edit(|c| anvil::set_site_runtime(c, &site, version))?;
-    let was_running = anvil::lock(&app.apps).running(&site);
-    if was_running {
+    let restarted = anvil::lock(&app.apps).running(&site);
+    if restarted {
         stop_app(&app, &site);
         start_app(&app, &cfg, &site);
     }
     changed(&handle);
-    snapshot(&app)
+    applied(&app, restarted)
 }
 
 /// php.ini overrides for `site`, each `[key, value]` (None unsets it). Several at once

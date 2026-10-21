@@ -2553,8 +2553,9 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
 .svc-settings .row { min-height: 36px; padding: 4px 14px; }
 .svc-settings .row input { height: 24px; }
 .svc-apps-hint { max-width: 640px; margin-top: 6px; }
-/* A php.ini field's restart of the web server, said beside it. */
-.ini-note { display: block; margin-top: 4px; font-size: 12px; }
+/* A field's restart of the web server or the app, said beside it. */
+.field-note { display: block; margin-top: 4px; font-size: 12px; }
+.field-note.error-text { color: var(--danger); overflow-wrap: anywhere; }
 /* Under Connect: write its lines into a listed app's .env, with what that did beside it. */
 .svc-write { display: grid; gap: 4px; max-width: 640px; margin-top: 8px; font-size: 12px; }
 .svc-write-line { display: flex; align-items: baseline; gap: 10px; }

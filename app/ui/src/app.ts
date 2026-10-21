@@ -1666,7 +1666,8 @@ export function renderSite() {
   kindSel.add(new Option(`Detected (${kindLabel(s.kind_detected)})`, ""));
   for (const [id, name] of snap.kinds) kindSel.add(new Option(name, id));
   kindSel.value = s.kind === s.kind_detected ? "" : s.kind;
-  kindSel.onchange = () => call("set_app", kindSel.value ? { site: s.name, kind: kindSel.value } : { site: s.name, reset: ["kind"] });
+  fieldNote(kindSel, `${s.name}/kind`);
+  kindSel.onchange = () => setRun(s, kindSel, "kind", "set_app", kindSel.value ? { kind: kindSel.value } : { reset: ["kind"] });
 
   const php = $("#php", root);
   // Unset follows the project's .anvil.toml when its version is installed, else the default.
@@ -1694,7 +1695,7 @@ export function renderSite() {
     const key = input.dataset.ini;
     input.value = s.ini[key] ?? "";
     input.placeholder = `${snap.ini[key] ?? base[key]} (default)`;
-    iniNote(input, `${s.name}/${key}`);
+    fieldNote(input, `${s.name}/${key}`);
     input.onchange = () => {
       const value = input.value.trim() || null;
       // The upload limit is also the largest form a POST may send: both in one restart.
@@ -1714,7 +1715,7 @@ export function renderSite() {
     .filter(([k]) => !known.has(k))
     .map(([k, v]) => `${k} = ${v}`)
     .join("\n");
-  iniNote(extra, `${s.name}/extra`);
+  fieldNote(extra, `${s.name}/extra`);
   extra.onchange = () => {
     const wanted = new Map();
     for (const line of extra.value.split("\n")) {
@@ -1743,28 +1744,48 @@ export function renderSite() {
   if (mayHaveWorktrees(s)) renderHooks(s, root);
 }
 
-// A php.ini field's change restarts the web server (when it serves): said beside the
-// field while it does, then that it's done. By `<app>/<field>`.
-const iniNotes = new Map<string, [string, boolean]>(); // what was said, whether it failed
+// A field whose change restarts something (a php.ini value: the web server, when it
+// serves; the app's kind, start command, port or version: the app, when it runs): said
+// beside the field while it does, then that it's done, or why not. By `<app>/<field>`.
+const fieldNotes = new Map<string, [string, boolean]>(); // what was said, whether it failed
 
-function iniNote(field: HTMLElement, at: string) {
-  field.parentElement?.querySelector(".ini-note")?.remove();
-  const said = iniNotes.get(at);
-  if (said) field.after(el("small", `ini-note ${said[1] ? "error" : "muted"}`, said[0]));
+function fieldNote(field: HTMLElement, at: string) {
+  field.parentElement?.querySelector(".field-note")?.remove();
+  const said = fieldNotes.get(at);
+  if (said) field.after(el("small", `field-note ${said[1] ? "error-text" : "muted"}`, said[0]));
 }
 
 async function setIni(s, field: HTMLElement, name: string, values: (string | null)[][]) {
   const at = `${s.name}/${name}`;
-  if (snap.running) iniNotes.set(at, ["Restarting the web server…", false]);
-  iniNote(field, at);
+  if (snap.running) fieldNotes.set(at, ["Restarting the web server…", false]);
+  fieldNote(field, at);
   try {
     await callOrThrow("set_site_ini", { site: s.name, values });
-    if (snap.running) iniNotes.set(at, ["Applied; the web server restarted.", false]);
-    else iniNotes.delete(at);
+    if (snap.running) fieldNotes.set(at, ["Applied; the web server restarted.", false]);
+    else fieldNotes.delete(at);
   } catch (e) {
-    iniNotes.set(at, [String(e), true]);
+    fieldNotes.set(at, [String(e), true]);
   }
-  if (field.isConnected) iniNote(field, at);
+  if (field.isConnected) fieldNote(field, at);
+  else render();
+}
+
+/** `cmd` (`set_app`, `set_runtime`) for `s`: it says whether it restarted the app. */
+async function setRun(s, field: HTMLElement, name: string, cmd: string, args: Record<string, unknown>) {
+  const at = `${s.name}/${name}`;
+  if (["running", "starting", "crashed"].includes(snap.app_states[s.name])) fieldNotes.set(at, [`Restarting ${s.name}…`, false]);
+  else fieldNotes.delete(at);
+  fieldNote(field, at);
+  try {
+    await callOrThrow(cmd, { site: s.name, ...args });
+    const failed = snap.app_errors[s.name];
+    if (!snap.restarted) fieldNotes.delete(at);
+    else if (failed) fieldNotes.set(at, [failed, true]);
+    else fieldNotes.set(at, [`Applied; ${s.name} restarted.`, false]);
+  } catch (e) {
+    fieldNotes.set(at, [String(e), true]);
+  }
+  if (field.isConnected) fieldNote(field, at);
   else render();
 }
 
@@ -2521,21 +2542,23 @@ function renderRunSettings(s, root) {
     ? `Automatic uses ${pinFile} when the project has one, otherwise the newest installed`
     : "Automatic uses the newest installed";
   rt.disabled = versions.length < 2;
-  rt.onchange = () => call("set_runtime", { site: s.name, version: rt.value || null });
+  fieldNote(rt, `${s.name}/runtime`);
+  rt.onchange = () => setRun(s, rt, "runtime", "set_runtime", { version: rt.value || null });
   // dotnet picks the SDK from the project's global.json: nothing to pin.
   if (rtId === "dotnet") rt.closest(".row").remove();
 
   const cmd = $("#app-command", root);
   cmd.value = s.command_custom ? s.command : "";
   cmd.placeholder = s.command_custom ? "" : (s.command ?? "");
-  cmd.onchange = () =>
-    call("set_app", cmd.value.trim() ? { site: s.name, command: cmd.value.trim() } : { site: s.name, reset: ["command"] });
+  fieldNote(cmd, `${s.name}/command`);
+  cmd.onchange = () => setRun(s, cmd, "command", "set_app", cmd.value.trim() ? { command: cmd.value.trim() } : { reset: ["command"] });
 
   const port = $("#app-port", root);
   port.value = s.port ?? "";
+  fieldNote(port, `${s.name}/port`);
   port.onchange = () => {
     const n = parseInt(port.value, 10);
-    call("set_app", Number.isNaN(n) ? { site: s.name, reset: ["port"] } : { site: s.name, port: n });
+    setRun(s, port, "port", "set_app", Number.isNaN(n) ? { reset: ["port"] } : { port: n });
   };
 
   const auto = $("#app-autostart", root);

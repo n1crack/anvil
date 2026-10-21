@@ -1021,6 +1021,16 @@ const mockHandle = (cmd, a) => {
     case "set_mail_catcher":
       window.mockMailCatcher = a.on;
       return mockHandle("settings", {});
+    case "set_app":
+    case "set_runtime": {
+      // As the app: a running app restarts on any change but autostart.
+      if (window.mockSetAppFail) throw window.mockSetAppFail;
+      const site = mockSnap.sites.find((x) => x.name === a.site);
+      if (a.command) Object.assign(site, { command: a.command, command_custom: true });
+      if (a.port) site.port = a.port;
+      const restarted = !("autostart" in a) && ["running", "starting", "crashed"].includes(mockSnap.app_states[a.site]);
+      return { ...mockSnap, restarted };
+    }
     case "set_site_ini": {
       const ini = mockSnap.sites.find((x) => x.name === a.site).ini;
       for (const [k, v] of a.values) {
