@@ -2201,6 +2201,8 @@ fn run() -> Result<()> {
                 cfg = load()?; // with the HTTPS creation chose
             }
             println!("Created {}", path.display());
+            // A running app serves it now, not once its window next looks.
+            control::notify_changed();
             if let Some(s) = sites(&cfg).into_iter().find(|s| s.path == path) {
                 println!("Serving at {}", cyan(site_url(&cfg, &s)));
             }
