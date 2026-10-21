@@ -220,8 +220,9 @@ async function itemMenu(name: string, x: Item, at: HTMLElement) {
 function entry(name: string, x: Item) {
   // The status column: a process's dot; a run's spinner, then a check or a cross.
   let status: HTMLElement;
-  // Green running, amber starting (its port doesn't answer yet), red crashed, grey stopped.
-  if (!x.run) status = el("span", `dot ${x.running ? (x.starting ? "amber" : "on") : x.crashed ? "bad" : ""}`);
+  // Red crashed, amber starting (its port doesn't answer yet), green running, grey stopped;
+  // in that order for All, as in the sidebar.
+  if (!x.run) status = el("span", `dot ${x.crashed ? "bad" : x.running ? (x.starting ? "amber" : "on") : ""}`);
   else if (x.running) {
     status = el("span", "dev-status");
     status.append(el("span", "spin-dot"));

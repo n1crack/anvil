@@ -761,9 +761,9 @@ describe("dev", () => {
     w.mockOv.shop.rows[1].starting = true;
     await select("shop");
     expect(item("proc:logs").querySelector(".dot.bad")).not.toBeNull();
-    // Starting is amber, as in the sidebar; All too while one starts.
+    // Starting is amber, as in the sidebar; All is red while one has crashed, also then.
     expect(item("proc:queue").querySelector(".dot.amber")).not.toBeNull();
-    expect(item("all").querySelector(".dot.amber")).not.toBeNull();
+    expect(item("all").querySelector(".dot.bad")).not.toBeNull();
     w.mockOv.shop.rows[1].starting = false;
     // A crash says how it ended; its ✕ dismisses, the ■ only stops.
     item("proc:logs").click();
