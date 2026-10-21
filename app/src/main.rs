@@ -2175,10 +2175,10 @@ async fn log_clear(site: String, source: String) -> Res<()> {
 async fn log_open(site: String, source: String) -> Res<()> {
     with_site(site, move |s| {
         let log = log_path(&s, &source)?;
-        anvil::run(&mut if cfg!(windows) {
-            anvil::platform::open(log)
-        } else {
+        anvil::run(&mut if cfg!(target_os = "macos") {
             anvil::platform::open_with("Console", log)
+        } else {
+            anvil::platform::open(log)
         })
     })
     .await

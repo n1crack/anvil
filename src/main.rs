@@ -640,6 +640,10 @@ fn print_resolver_step(cfg: &Config) {
         println!("*.localhost already resolves to this Mac; no resolver file needed.");
         return;
     }
+    if !cfg!(target_os = "macos") {
+        println!("{}", commands(&format!("{}.", anvil::LINUX_NOT_YET)));
+        return;
+    }
     println!(
         "{}\n\n  {}\n",
         commands(&format!(
@@ -758,6 +762,13 @@ fn print_setup(cfg: &Config) -> Result<()> {
         println!("{}\n", commands("Open a new terminal window to use them."));
     }
     let root = root_cert();
+    if !cfg!(target_os = "macos") {
+        let missing = !status.resolver || !status.ports || (root.exists() && !status.trusted);
+        if missing {
+            println!("{}", commands(&format!("{}.", anvil::LINUX_NOT_YET)));
+        }
+        return Ok(());
+    }
     let ports = (!status.ports)
         .then(|| stage_ports_daemon(cfg))
         .transpose()?;

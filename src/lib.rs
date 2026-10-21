@@ -880,10 +880,20 @@ pub fn run(cmd: &mut Command) -> Result<()> {
 /// Runs a shell `script` as root, after macOS asks for the password with `prompt`. The
 /// script goes to a private (0600) file and the file's path and the prompt reach
 /// AppleScript as arguments, so nothing in them is ever parsed as AppleScript.
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 pub fn run_as_admin(script: &str, prompt: &str) -> Result<()> {
     run_sh_file(script, prompt, ADMIN_SH)
 }
+
+/// Linux has no administrator steps yet: `setup_script` refuses them first.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn run_as_admin(script: &str, prompt: &str) -> Result<()> {
+    let _ = (script, prompt);
+    bail!("{LINUX_NOT_YET}")
+}
+
+/// What Linux can't set up yet: the suffix's DNS, ports 80 and 443, HTTPS trust.
+pub const LINUX_NOT_YET: &str = "On Linux, Anvil can't set up .test addresses, ports 80 and 443 or HTTPS trust yet: `anvil tld localhost` needs none of them, and addresses keep Caddy's port";
 
 /// Runs a PowerShell `script` as administrator, after Windows asks (UAC). `prompt` has
 /// no place in that dialog; the script stops at its first error.
@@ -944,10 +954,10 @@ pub fn run_as_admin(script: &str, prompt: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 const ADMIN_SH: &str = "do shell script \"/bin/sh \" & quoted form of (item 1 of argv) with prompt (item 2 of argv) with administrator privileges";
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 fn run_sh_file(script: &str, prompt: &str, applescript: &str) -> Result<()> {
     // tempfile creates the file 0600; it is removed when `file` drops.
     let mut file = tempfile::Builder::new()
@@ -2188,7 +2198,10 @@ pub fn trust() -> Result<()> {
             .args(["-user", "-addstore", "Root"])
             .arg(root));
     }
-    // ponytail: macOS login keychain only; Linux (update-ca-certificates / NSS) comes with the Linux port.
+    // ponytail: Linux (update-ca-certificates / NSS) comes with the Linux port.
+    if !cfg!(target_os = "macos") {
+        bail!("{LINUX_NOT_YET}");
+    }
     let keychain = user_home().join("Library/Keychains/login.keychain-db");
     run(crate::platform::command("security")
         .args(["add-trusted-cert", "-r", "trustRoot", "-k"])
@@ -2361,8 +2374,8 @@ pub const PF_ANCHOR: &str = "com.apple/anvil";
 // ponytail: checks the daemon file, not the live pf rules (reading those needs root);
 // rules flushed by other software stay unnoticed until the next boot.
 pub fn ports_forwarded(cfg: &Config) -> bool {
-    // Windows: Caddy listens on 80 and 443 itself when they are its ports.
-    if cfg!(windows) {
+    // Windows, Linux: Caddy listens on 80 and 443 itself when they are its ports.
+    if !cfg!(target_os = "macos") {
         return cfg.http_port == 80 && cfg.https_port == 443;
     }
     let (file, want) = ports_daemon(cfg);
@@ -2454,6 +2467,9 @@ fn cert_trusted_now(root: &Path) -> bool {
             .output()
             .is_ok_and(|o| o.status.success());
     }
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
     platform::command("security")
         .arg("verify-cert")
         .arg("-c")
@@ -2511,6 +2527,12 @@ pub fn setup_script(
 ) -> Result<String> {
     if cfg!(windows) {
         return setup_script_windows(cfg, resolver, cert);
+    }
+    if !cfg!(target_os = "macos") {
+        if (resolver && needs_resolver(cfg)) || ports_plist.is_some() || cert.is_some() {
+            bail!("{LINUX_NOT_YET}");
+        }
+        return Ok(String::new());
     }
     let q = |p: &Path| shims::sh_quote(&p.to_string_lossy());
     let mut steps = Vec::new();
@@ -4555,6 +4577,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn one_root_script_for_every_setup_step() {
         let cfg = Config::default();
         let s = setup_script(
@@ -4585,6 +4608,19 @@ mod tests {
         };
         assert!(setup_script(&bad, true, None, None).is_err());
         assert!(setup_script(&bad, false, None, None).is_ok());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_refuses_system_steps_it_cant_do_yet() {
+        let cfg = Config::default();
+        assert!(setup_script(&cfg, true, None, None).is_err());
+        assert!(setup_script(&cfg, false, None, Some(Path::new("/h/root.crt"))).is_err());
+        let local = Config {
+            tld: "localhost".into(),
+            ..Config::default()
+        };
+        assert_eq!(setup_script(&local, true, None, None).unwrap(), "");
     }
 
     #[test]

@@ -348,12 +348,20 @@ fn resolve_for(
     }
 }
 
-/// `~/.zshrc` always; `~/.bash_profile` only when it exists.
+/// The shell's own first: macOS `~/.zshrc` always and `~/.bash_profile` only when it
+/// exists; Linux `~/.bashrc` always (a terminal's bash reads it, not the profile) and
+/// `~/.zshrc` only when it exists.
+// ponytail: fish isn't covered; its config takes `fish_add_path`, not `export`.
 pub fn shell_rc_files(user_home: &Path) -> Vec<PathBuf> {
-    let mut v = vec![user_home.join(".zshrc")];
-    let bash = user_home.join(".bash_profile");
-    if bash.exists() {
-        v.push(bash);
+    let (first, other) = if cfg!(target_os = "macos") {
+        (".zshrc", ".bash_profile")
+    } else {
+        (".bashrc", ".zshrc")
+    };
+    let mut v = vec![user_home.join(first)];
+    let other = user_home.join(other);
+    if other.exists() {
+        v.push(other);
     }
     v
 }
@@ -573,12 +581,14 @@ mod tests {
     #[test]
     fn rc_files() {
         let d = tmp("files");
-        assert_eq!(shell_rc_files(&d), vec![d.join(".zshrc")]);
-        fs::write(d.join(".bash_profile"), "").unwrap();
-        assert_eq!(
-            shell_rc_files(&d),
-            vec![d.join(".zshrc"), d.join(".bash_profile")]
-        );
+        let (first, other) = if cfg!(target_os = "macos") {
+            (".zshrc", ".bash_profile")
+        } else {
+            (".bashrc", ".zshrc")
+        };
+        assert_eq!(shell_rc_files(&d), vec![d.join(first)]);
+        fs::write(d.join(other), "").unwrap();
+        assert_eq!(shell_rc_files(&d), vec![d.join(first), d.join(other)]);
         fs::remove_dir_all(d).unwrap();
     }
 
