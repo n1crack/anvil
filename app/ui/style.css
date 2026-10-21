@@ -107,6 +107,9 @@ html, body {
   cursor: default;
 }
 
+/* An app, not a page: links and images don't drag out as URLs or files. */
+a, img { -webkit-user-drag: none; }
+
 body {
   display: grid;
   grid-template-columns: var(--sidebar) 1fr;
