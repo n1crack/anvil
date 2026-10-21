@@ -11,11 +11,12 @@ async function as(agent: string) {
 }
 afterEach(() => {
   Object.defineProperty(navigator, "userAgent", { value: realAgent, configurable: true });
-  document.documentElement.classList.remove("windows");
+  document.documentElement.classList.remove("windows", "linux");
 });
 
 const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15";
 const WIN = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/141.0";
+const LINUX = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko)";
 const key = (k: string, mods: KeyboardEventInit) => new KeyboardEvent("keydown", { key: k, ...mods });
 
 describe("platform", () => {
@@ -38,6 +39,18 @@ describe("platform", () => {
     expect(p.keys("⌥⌘Q")).toBe("Ctrl+Alt+Q");
     expect(p.keys("⌘-click to open")).toBe("Ctrl+click to open");
     expect(p.say("Show Data in Finder")).toBe("Show Data in File Explorer");
+    expect(p.mod(key("n", { ctrlKey: true }))).toBe(true);
+    expect(p.mod(key("n", { metaKey: true }))).toBe(false);
+  });
+
+  test("Linux: Ctrl, not Super (the window manager's), and the file manager", async () => {
+    const p = await as(LINUX);
+    expect(p.windows).toBe(false);
+    expect(p.linux).toBe(true);
+    expect(document.documentElement.classList.contains("linux")).toBe(true);
+    expect(p.keys("⌘G")).toBe("Ctrl+G");
+    expect(p.say("Reaches this Mac by itself")).toBe("Reaches this computer by itself");
+    expect(p.say("Show Data in Finder")).toBe("Show Data in File Manager");
     expect(p.mod(key("n", { ctrlKey: true }))).toBe(true);
     expect(p.mod(key("n", { metaKey: true }))).toBe(false);
   });
