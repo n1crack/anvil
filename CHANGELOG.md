@@ -17,9 +17,8 @@ Anvil for Linux, in beta; WordPress, more PHP extensions, and a round of polish 
 
 ### Added
 
-- Linux (beta): the app and the CLI for x86_64 Linux with glibc 2.35 or later (Ubuntu 22.04+, Debian 12+, Fedora, Arch), as an AppImage that updates itself, a .deb, and the CLI alone. Apps answer at `http://<name>.localhost:8080`; `.test` addresses, ports 80/443 and HTTPS trust come in a later release. PHP, Node.js, Go, Rust, .NET, Python, MySQL, PostgreSQL, Redis, Mailpit, S3 storage, every app template, worktrees and Octane work; OPcache comes with PHP 8.5, and PHP extensions can't be added yet. MySQL and Redis are built in part from source the first time, so they need gcc and make.
+- Linux (beta): the app and the CLI for x86_64 Linux with glibc 2.35 or later (Ubuntu 22.04+, Debian 12+, Fedora, Arch), as an AppImage that updates itself, a .deb, and the CLI alone. Apps answer at `http://<name>.localhost:8080`; `.test` addresses, ports 80/443 and HTTPS trust come in a later release. PHP, Node.js, Go, Rust, .NET, Python, MySQL, PostgreSQL, Redis, Mailpit, S3 storage, every app template but WordPress, worktrees and Octane work; OPcache comes with PHP 8.5, and PHP extensions can't be added yet. MySQL and Redis are built in part from source the first time, so they need gcc and make.
 - Linux: Settings finds your editor, terminal and git app (from PATH and Flatpak), and opens files at the line in them.
-
 - WordPress: existing sites are recognised, and New Application creates one on a MySQL service, with PHP's mysqli built when it's missing.
 - PHP extensions MongoDB and Memcached, and Imagick on a Mac with Homebrew's ImageMagick: `anvil php ext add mongodb`.
 - Check for Updates… in the Anvil menu opens a Software Update window with what's new; the menu bar menu offers a new version when there is one.
@@ -113,8 +112,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Requests tab: every request an app served, with headers (`anvil app requests`).
 - Browser errors: an app's JavaScript errors, failed requests and page loads, for agents (`anvil app browser`).
 - Plugins, off by default:
-- Agents (MCP): requests, mail, browser errors, worktree removal, aliases; the app defaults to the agent's folder.
-- Overview: Aliases, and a Mail line for apps that send to Mailpit.
+  - Agents (MCP): requests, mail, browser errors, worktree removal, aliases; the app defaults to the agent's folder.
+  - Overview: Aliases, and a Mail line for apps that send to Mailpit.
 - A web root of your choice per app (`anvil app root`).
 - `anvil app start|stop|restart` and `anvil service start|stop` act in the running app.
 - Processes › Agents: what agents and the terminal did through Anvil.
