@@ -1,3 +1,4 @@
+import { M } from "./menu";
 import "./platform";
 import type { Activity, AgentAction } from "./types";
 import { follower } from "./console";
@@ -146,7 +147,7 @@ export async function act(key, action) {
   await load();
 }
 
-export const M = window.__TAURI__.menu;
+export { M };
 
 /** Right-click: Restart, Stop (Dismiss once it crashed) and Open in Browser, by row state.
  * From the keyboard it opens under the row (`at`). */

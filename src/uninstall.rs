@@ -104,7 +104,11 @@ pub fn plan(cfg: &Config) -> Vec<Step> {
     let mut steps = Vec::new();
 
     let root = crate::root_cert();
-    if let Some(sha1) = fingerprint(&root) {
+    // Linux: Anvil doesn't trust its authority there yet.
+    let keychain = cfg!(target_os = "macos")
+        .then(|| fingerprint(&root))
+        .flatten();
+    if let Some(sha1) = keychain {
         let listed = |keychain: &Path| {
             crate::platform::command("security")
                 .args(["find-certificate", "-a", "-Z"])

@@ -2,6 +2,8 @@
 // macOS's overlay title bar and vibrancy; style.css adjusts under `html.windows`.
 export const windows = navigator.userAgent.includes("Windows");
 if (windows) document.documentElement.classList.add("windows");
+// Linux has neither: its window manager draws the title bar and the sidebar is opaque.
+else if (navigator.userAgent.includes("Linux")) document.documentElement.classList.add("linux");
 
 /** The key shortcuts are held with: ⌘ on macOS, Ctrl on Windows. */
 export const mod = (e: KeyboardEvent | MouseEvent) => (windows ? e.ctrlKey : e.metaKey);

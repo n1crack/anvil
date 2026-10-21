@@ -2243,10 +2243,10 @@ async fn log_clear(site: String, source: String) -> Res<()> {
 async fn log_open(site: String, source: String) -> Res<()> {
     with_site(site, move |s| {
         let log = log_path(&s, &source)?;
-        anvil::run(&mut if cfg!(windows) {
-            anvil::platform::open(log)
-        } else {
+        anvil::run(&mut if cfg!(target_os = "macos") {
             anvil::platform::open_with("Console", log)
+        } else {
+            anvil::platform::open(log)
         })
     })
     .await
@@ -3342,6 +3342,22 @@ fn remove_service(
     edit(|c| anvil::services::remove(c, &id, delete_data))?;
     changed(&handle);
     services(app)
+}
+
+/// Where the page starts inside its window, in logical pixels. Linux places a menu
+/// relative to the whole GTK window, title bar and shadow included, so a position on
+/// the page is off by this much; elsewhere it is the page's own.
+#[tauri::command]
+fn menu_origin(window: tauri::WebviewWindow) -> (i32, i32) {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::WidgetExt;
+        if let (Ok(w), Ok(page)) = (window.gtk_window(), window.default_vbox()) {
+            return page.translate_coordinates(&w, 0, 0).unwrap_or_default();
+        }
+    }
+    let _ = window;
+    (0, 0)
 }
 
 #[tauri::command(async)]
@@ -4840,6 +4856,7 @@ fn main() {
         ))
         .manage(App::default())
         .invoke_handler(tauri::generate_handler![
+            menu_origin,
             state,
             run_states,
             performance,

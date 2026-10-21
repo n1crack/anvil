@@ -116,8 +116,8 @@ pub fn shell_args(script: &str) -> (PathBuf, Vec<String>) {
     }
 }
 
-/// Open a file, folder or web address as the desktop does: macOS `open`; on Windows the
-/// program registered for it.
+/// Open a file, folder or web address as the desktop does: macOS `open`, Linux
+/// `xdg-open`; on Windows the program registered for it.
 pub fn open(target: impl AsRef<std::ffi::OsStr>) -> Command {
     #[cfg(windows)]
     {
@@ -126,16 +126,22 @@ pub fn open(target: impl AsRef<std::ffi::OsStr>) -> Command {
         c.arg("url.dll,FileProtocolHandler").arg(target);
         c
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
         let mut c = command("open");
         c.arg(target);
         c
     }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let mut c = command("xdg-open");
+        c.arg(target);
+        c
+    }
 }
 
-/// Open `target` with the application `app`: macOS `open -a`; on Windows `app` is the
-/// program to run (`code`, a full path).
+/// Open `target` with the application `app`: macOS `open -a`; on Windows and Linux `app`
+/// is the program to run (`code`, a full path).
 pub fn open_with(app: &str, target: impl AsRef<std::ffi::OsStr>) -> Command {
     #[cfg(windows)]
     {
@@ -144,17 +150,23 @@ pub fn open_with(app: &str, target: impl AsRef<std::ffi::OsStr>) -> Command {
         c.args(["/D", "/C", "start", "\"\"", app]).arg(target);
         c
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
         let mut c = command("open");
         c.args(["-a", app]).arg(target);
         c
     }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let mut c = command(app);
+        c.arg(target);
+        c
+    }
 }
 
-/// Show a file in the file manager: selected in Finder; on Windows its folder.
+/// Show a file in the file manager: selected in Finder; on Windows and Linux its folder.
 pub fn reveal(file: &Path) -> Command {
-    if cfg!(windows) {
+    if !cfg!(target_os = "macos") {
         open(file.parent().unwrap_or(file))
     } else {
         let mut c = command("open");
@@ -163,8 +175,9 @@ pub fn reveal(file: &Path) -> Command {
     }
 }
 
-/// A terminal window in `dir`: `app` when set (macOS `open -a`, a program on Windows),
-/// else Terminal, or on Windows Windows Terminal, else PowerShell in a console.
+/// A terminal window in `dir`: `app` when set (macOS `open -a`, a program on Windows and
+/// Linux), else Terminal, or on Windows Windows Terminal, else PowerShell in a console,
+/// or on Linux `$TERMINAL`, else the first terminal found (`linux_terminal`).
 pub fn terminal(app: Option<&str>, dir: &Path) -> Command {
     #[cfg(windows)]
     {
@@ -186,10 +199,44 @@ pub fn terminal(app: Option<&str>, dir: &Path) -> Command {
             .current_dir(dir);
         c
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
         open_with(app.unwrap_or("Terminal"), dir)
     }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let program = app.map(String::from).unwrap_or_else(linux_terminal);
+        let mut c = command(program);
+        // Terminals open where they are started.
+        c.current_dir(dir);
+        c
+    }
+}
+
+/// The terminal Linux opens: `$TERMINAL`, else the first of the distributions' and
+/// desktops' own that is installed, else xterm.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn linux_terminal() -> String {
+    if let Some(t) = std::env::var("TERMINAL").ok().filter(|t| !t.is_empty()) {
+        return t;
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    [
+        "xdg-terminal-exec",
+        "x-terminal-emulator",
+        "gnome-terminal",
+        "konsole",
+        "ptyxis",
+        "kgx",
+        "alacritty",
+        "kitty",
+        "foot",
+        "wezterm",
+    ]
+    .into_iter()
+    .find(|t| std::env::split_paths(&path).any(|d| d.join(t).is_file()))
+    .unwrap_or("xterm")
+    .to_string()
 }
 
 /// No console window for a background child (Windows); nothing elsewhere.

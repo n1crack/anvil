@@ -29,15 +29,20 @@ impl Server {
 /// RoadRunner 2025.1.x: Octane 2.22 flags v3 as possibly incompatible.
 const RR_VERSION: &str = "2025.1.15";
 /// The release publishes no checksums file: these are the SHA-256 digests GitHub lists for
-/// its macOS assets (`gh api repos/roadrunner-server/roadrunner/releases/tags/v2025.1.15`).
+/// its macOS and Linux assets (`gh api repos/roadrunner-server/roadrunner/releases/tags/v2025.1.15`).
 const RR_ARM64: &str = "cc0521bd31478cc39403c2f090fc73db45e87e33a66b6783e9bcf096f321729a";
 const RR_AMD64: &str = "2059b1564de0352c8d010ffc9f630f9da2174e9430ee1a6aa83d6c2b38bdc6c6";
+const RR_LINUX_ARM64: &str = "f384d14b8687520816fc7ec204bb78f2fa54aba4da5336adef91d298fd6420d1";
+const RR_LINUX_AMD64: &str = "74589ff95e022dddf163f9316821cb80423a7db9865e96ce30a436d6898e34e7";
 
 /// FrankenPHP, a single binary with its own PHP inside. No checksums file either: the
 /// digests GitHub lists (`gh api repos/php/frankenphp/releases/tags/v1.13.1`).
 const FP_VERSION: &str = "1.13.1";
 const FP_ARM64: &str = "0cb3b88e0f18b51fb9d1d71977be2dd871199d5cdf986a6d20e32a841686a426";
 const FP_AMD64: &str = "b9123b427cb357eac076b1f316f71589cfe5c3db4ad2449114e243563d794a89";
+/// Linux: the static (musl) builds, which run on any distribution.
+const FP_LINUX_ARM64: &str = "52849d80dcb30fceaefbe140ee1c16ccebedd96a5719d932f9828e8da7688d02";
+const FP_LINUX_AMD64: &str = "0b5c93c63f02f796716287790028171dbe3af4740d76e1706e20e731312c4086";
 /// The PHP inside that release: `frankenphp version` says "FrankenPHP v1.13.1 PHP 8.5.11
 /// Caddy v2.11.7". Checked against the binary when it is installed (`install_frankenphp`),
 /// so a version bump can't leave this behind; known before the 180 MB download, so an app
@@ -90,13 +95,15 @@ pub fn ensure(server: Server) -> Result<PathBuf> {
     match server {
         Server::RoadRunner => {}
         Server::FrankenPhp => {
-            let (arch, sum) = match crate::platform()?.1 {
-                "mac_arm64" => ("arm64", FP_ARM64),
-                "mac_amd64" => ("x86_64", FP_AMD64),
+            let (file, sum) = match crate::platform()?.1 {
+                "mac_arm64" => ("mac-arm64", FP_ARM64),
+                "mac_amd64" => ("mac-x86_64", FP_AMD64),
+                "linux_arm64" => ("linux-aarch64", FP_LINUX_ARM64),
+                "linux_amd64" => ("linux-x86_64", FP_LINUX_AMD64),
                 p => bail!("Anvil has no FrankenPHP for {p}"),
             };
             let url = format!(
-                "https://github.com/php/frankenphp/releases/download/v{FP_VERSION}/frankenphp-mac-{arch}"
+                "https://github.com/php/frankenphp/releases/download/v{FP_VERSION}/frankenphp-{file}"
             );
             return install_frankenphp(&url, sum, &dir(server));
         }
@@ -105,6 +112,8 @@ pub fn ensure(server: Server) -> Result<PathBuf> {
     let (arch, sum, zip) = match crate::platform()?.1 {
         "mac_arm64" => ("darwin-arm64", RR_ARM64, false),
         "mac_amd64" => ("darwin-amd64", RR_AMD64, true),
+        "linux_arm64" => ("linux-arm64", RR_LINUX_ARM64, false),
+        "linux_amd64" => ("linux-amd64", RR_LINUX_AMD64, false),
         p => bail!("Anvil has no RoadRunner for {p}"),
     };
     let ext = if zip { "zip" } else { "tar.gz" };

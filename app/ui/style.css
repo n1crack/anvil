@@ -3549,14 +3549,27 @@ body.activity {
 
 /* Settings › Performance: Defender and Dev Drive are Windows' own. */
 html:not(.windows) .windows-only { display: none; }
-html.windows .mac-only { display: none; }
+html.windows .mac-only,
+html.linux .mac-only { display: none; }
 #perf-devdrive { font-weight: 500; }
 
 /* The system's title bar sits above the page: no room for traffic lights, and the
  * sidebar shows Mica rather than vibrancy. */
-html.windows { --titlebar: 12px; }
+html.windows,
+html.linux { --titlebar: 12px; }
 html.windows .detail .titlebar,
-html.windows header.titlebar { height: 52px; }
+html.windows header.titlebar,
+html.linux .detail .titlebar,
+html.linux header.titlebar { height: 52px; }
+
+/* ---------- Linux ---------- */
+
+/* No vibrancy or Mica behind the sidebar: without a colour of its own, the desktop
+ * behind the window shows through. */
+html.linux { --sidebar-bg: color-mix(in srgb, var(--steel-pane) 82%, #000); }
+@media (prefers-color-scheme: light) {
+  html.linux { --sidebar-bg: #f2f2f4; }
+}
 html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
 
 /* An address in a sheet's hint: brighter than the words around it, and selectable. */

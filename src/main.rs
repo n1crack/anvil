@@ -875,6 +875,10 @@ fn print_resolver_step(cfg: &Config) {
         println!("*.localhost already resolves to this Mac; no resolver file needed.");
         return;
     }
+    if !cfg!(target_os = "macos") {
+        println!("{}", commands(&format!("{}.", anvil::LINUX_NOT_YET)));
+        return;
+    }
     println!(
         "{}\n\n  {}\n",
         commands(&format!(
@@ -993,6 +997,13 @@ fn print_setup(cfg: &Config) -> Result<()> {
         println!("{}\n", commands("Open a new terminal window to use them."));
     }
     let root = root_cert();
+    if !cfg!(target_os = "macos") {
+        let missing = !status.resolver || !status.ports || (root.exists() && !status.trusted);
+        if missing {
+            println!("{}", commands(&format!("{}.", anvil::LINUX_NOT_YET)));
+        }
+        return Ok(());
+    }
     let ports = (!status.ports)
         .then(|| stage_ports_daemon(cfg))
         .transpose()?;
@@ -2480,9 +2491,20 @@ fn run() -> Result<()> {
         Cmd::Tld { tld } => {
             if let Some(t) = tld {
                 edit(&mut cfg, |c| set_tld(c, &t))?;
+                // A new site's scheme, with the port when it isn't the standard one.
+                let (scheme, port, standard) = if cfg.https_default == Some(true) {
+                    ("https", anvil::public_https_port(&cfg), 443)
+                } else {
+                    ("http", anvil::public_http_port(&cfg), 80)
+                };
+                let port = if port == standard {
+                    String::new()
+                } else {
+                    format!(":{port}")
+                };
                 println!(
                     "Applications now answer at {}",
-                    cyan(format!("https://<name>.{}", cfg.tld))
+                    cyan(format!("{scheme}://<name>.{}{port}", cfg.tld))
                 );
                 if !setup_status(&cfg).resolver {
                     print_resolver_step(&cfg);

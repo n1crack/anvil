@@ -558,7 +558,7 @@ pub fn with_pms(path: &str) -> String {
 /// isn't bundled with Node.js 25 and later). A newer pin replaces the older (`ensure_pnpm`).
 pub const PNPM: &str = "12.14.0";
 /// GitHub's SHA-256 of each release asset, confirmed by hashing the downloads.
-const PNPM_ASSETS: [(&str, &str, &str); 3] = [
+const PNPM_ASSETS: [(&str, &str, &str); 5] = [
     (
         "macos-aarch64",
         "pnpm-darwin-arm64.tar.gz",
@@ -568,6 +568,16 @@ const PNPM_ASSETS: [(&str, &str, &str); 3] = [
         "macos-x86_64",
         "pnpm-darwin-x64.tar.gz",
         "2c412e07382049b4edb04fa6da78f3d4ef7810b75853c80544dcfb7c0ed79880",
+    ),
+    (
+        "linux-aarch64",
+        "pnpm-linux-arm64.tar.gz",
+        "cfc780b9e690549e6633e1045fb1fb6ef84e390711e2099e6ccbae91c32456ea",
+    ),
+    (
+        "linux-x86_64",
+        "pnpm-linux-x64.tar.gz",
+        "3910c3852136bed5bc1511b9137a45fd4357ed6b3970d9d08893641e9005867e",
     ),
     (
         "windows-x86_64",

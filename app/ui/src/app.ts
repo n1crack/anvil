@@ -1,3 +1,4 @@
+import { M } from "./menu";
 import type { Snapshot } from "./types";
 import { late } from "./late";
 import { ownError, shown } from "./live";
@@ -786,7 +787,7 @@ function renderList() {
 
 /* ---------- Context menu ---------- */
 
-export const M = window.__TAURI__.menu;
+export { M };
 
 /** Turn HTTPS on or off, showing it on the row until the web server has reloaded. */
 async function setSecure(s) {
