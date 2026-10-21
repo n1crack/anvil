@@ -335,8 +335,11 @@ function sizeColor(n) {
 
 const SAFETY_LABEL = { safe: "Safe to delete", rebuild: "Rebuildable", keep: "Keep" };
 
-async function confirmDelete(title, message) {
-  return window.__TAURI__.dialog.ask(message, { title, kind: "warning", okLabel: "Delete", cancelLabel: "Cancel" });
+/** The button at a storage row's end, in a slot as wide on every row so the sizes line up. */
+function slot(b?: HTMLElement) {
+  const box = Object.assign(document.createElement("span"), { className: "act-slot" });
+  if (b) box.append(b);
+  return box;
 }
 
 async function loadAnvilStorage() {
@@ -402,20 +405,28 @@ function drawAnvilItem(list, i, withNote) {
   size.className = "size";
   size.textContent = bytes(i.bytes);
   size.style.color = sizeColor(i.bytes);
-  actions.append(size);
-  if (i.safety === "safe") {
-    actions.append(
-      button("Delete", async () => {
-        if (!(await confirmDelete(`Delete ${i.label}?`, `${i.note}. This frees about ${bytes(i.bytes)}.`))) return;
+  const tags = [...actions.childNodes];
+  const idle = () => actions.replaceChildren(...tags, size, slot(i.safety === "safe" ? button("Delete", ask) : undefined));
+  // Asks in the row; what it is stays said beside it.
+  const ask = () =>
+    confirmInRow(
+      actions,
+      `Delete ${bytes(i.bytes)}?`,
+      "Delete",
+      async () => {
         try {
           await invoke("clean_anvil", { path: i.path });
         } catch (e) {
           showError(String(e));
         }
         loadAnvilStorage();
-      }),
+      },
+      () => {
+        actions.classList.remove("asking");
+        idle();
+      },
     );
-  }
+  idle();
   row.append(info, actions);
   list.append(row);
 }
@@ -459,10 +470,12 @@ async function loadPnpmStore() {
   } else {
     actions.append(
       Object.assign(document.createElement("span"), { className: "size", textContent: bytes(st.bytes) }),
-      button("Prune…", () => {
-        pnpmState = { asking: true };
-        loadPnpmStore();
-      }),
+      slot(
+        button("Prune…", () => {
+          pnpmState = { asking: true };
+          loadPnpmStore();
+        }),
+      ),
     );
   }
   const list = document.createElement("div");
@@ -541,7 +554,12 @@ async function scanApps() {
   drawSizes();
 }
 
-const DELETE_ALL = "Delete Logs and Caches in All Apps";
+// In a narrow window "in All Apps" and the size go (style.css); the hint under it has the size.
+const DELETE_ALL = (size = "") => [
+  "Delete Logs and Caches",
+  Object.assign(document.createElement("span"), { className: "wide-only", textContent: ` in All Apps${size}` }),
+];
+const cleanAll = $("#clean-all-safe"); // kept while its confirm stands in its place
 
 function drawSizes() {
   const apps = [...sizes.values()].sort((a, b) => b.total - a.total);
@@ -561,10 +579,10 @@ function drawSizes() {
   scan.classList.toggle("spinning", busy);
   $("#measured").textContent = busy ? "Measuring…" : measuredAt ? `Measured ${agoText(measuredAt)}` : "";
 
-  const all = $("#clean-all-safe");
+  const all = cleanAll;
   const safe = sum("safe");
   all.disabled = busy || deleting || !safe;
-  all.replaceChildren(busy || deleting || !safe ? DELETE_ALL : `${DELETE_ALL} (${bytes(safe)})`);
+  all.replaceChildren(...DELETE_ALL(busy || deleting || !safe ? "" : ` (${bytes(safe)})`));
   if (deleting) all.prepend(Object.assign(document.createElement("span"), { className: "spin-dot" }));
 
   const list = $("#app-sizes");
@@ -610,13 +628,18 @@ function agoText(secs) {
 }
 
 $("#scan-apps").onclick = scanApps;
-$("#clean-all-safe").onclick = async () => {
+// Asks in the toolbar: logs, compiled views and caches in every app; sessions too.
+cleanAll.onclick = () => {
   const safe = [...sizes.values()].reduce((a, x) => a + x.safe, 0);
-  const ok = await confirmDelete(
-    "Delete logs and caches in all applications?",
-    `Removes application logs, compiled views and caches (sessions too, which logs users out) in every app. Folders and .gitignore files stay. About ${bytes(safe)}.`,
-  );
-  if (!ok) return;
+  const box = $("#clean-all-box");
+  confirmInRow(box, `Delete ${bytes(safe)}? Users get logged out.`, "Delete", cleanAllSafe, () => {
+    box.classList.remove("asking");
+    box.replaceChildren(cleanAll);
+  });
+};
+async function cleanAllSafe() {
+  $("#clean-all-box").classList.remove("asking");
+  $("#clean-all-box").replaceChildren(cleanAll);
   deleting = true;
   drawSizes();
   try {
@@ -627,7 +650,7 @@ $("#clean-all-safe").onclick = async () => {
   }
   deleting = false;
   scanApps();
-};
+}
 
 export function options(select, values, current, none) {
   select.replaceChildren(new Option(none, ""));

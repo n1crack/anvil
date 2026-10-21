@@ -406,6 +406,37 @@ describe("storage", () => {
     expect($("#app-sizes").textContent).toBe("No applications take any space.");
     delete w.mockDelay.storage_apps;
   });
+
+  test("Delete asks in the row, no dialog; every size sits before a slot as wide", async () => {
+    const rows = $$("#anvil-items .row");
+    expect(rows.every((r) => r.querySelector(".size")?.nextElementSibling?.classList.contains("act-slot"))).toBe(true);
+    const logs = rows.find((r) => r.textContent?.startsWith("Logs"))!;
+    (logs.querySelector(".act-slot button") as HTMLElement).click();
+    expect(logs.querySelector(".asking .muted")?.textContent).toBe("Delete 12 MB?");
+    const [no] = logs.querySelectorAll<HTMLElement>(".asking button");
+    no.click();
+    expect(logs.querySelector(".asking")).toBeNull();
+    expect(logs.querySelector(".act-slot button")?.textContent).toBe("Delete");
+    (logs.querySelector(".act-slot button") as HTMLElement).click();
+    logs.querySelectorAll<HTMLElement>(".asking button")[1].click();
+    await wait();
+    expect(w.mockCalls.some(([c, a]) => c === "clean_anvil" && a.path.endsWith("/log"))).toBe(true);
+  });
+
+  test("Delete Logs and Caches in All Apps asks in the toolbar", async () => {
+    // The mock's measurement counts no app: one is put in by hand.
+    const { sizes } = await import("../src/settings");
+    sizes.set("shop", { name: "shop", kind: "laravel", total: 524288000, safe: 104857600, rebuild: 0 });
+    ($("#clean-all-safe") as HTMLButtonElement).disabled = false;
+    $("#clean-all-safe").click();
+    expect($("#clean-all-box .muted").textContent).toBe("Delete 100 MB? Users get logged out.");
+    expect(w.mockCalls.some(([c]) => c === "clean_all_safe")).toBe(false);
+    $$("#clean-all-box button")[1].click();
+    await wait();
+    expect(w.mockCalls.some(([c]) => c === "clean_all_safe")).toBe(true);
+    expect($("#clean-all-box .asking")).toBeNull();
+    expect($("#clean-all-safe")).not.toBeNull();
+  });
 });
 
 describe("about", () => {

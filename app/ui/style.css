@@ -1634,13 +1634,26 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .page .storage-bar .icon-btn:disabled { opacity: 1; }
 
-#measured { font-size: 12px; font-variant-numeric: tabular-nums; }
+#measured { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+#clean-all-box { min-width: 0; margin-left: auto; }
 .page #clean-all-safe {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
+  white-space: nowrap;
+}
+/* Asking in the toolbar: the question takes the room "Measured…" had. */
+.storage-bar:has(.asking) #measured { display: none; }
+/* A narrow window: "Delete Logs and Caches", without "in All Apps" and the size. */
+@media (max-width: 700px) {
+  #clean-all-safe .wide-only { display: none; }
+}
+/* Storage asks in the row with a short question, whole; the name beside it wraps instead. */
+[data-storage-panel] .actions-inline.asking { flex: none; }
+/* A narrow window: the Delete button says what the pill would, and the name keeps its room. */
+@media (max-width: 700px) {
+  #anvil-items .safety { display: none; }
 }
 
 .page #clean-all-safe:disabled { color: var(--muted); }
@@ -1968,6 +1981,8 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .res-cells .muted { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .safety {
+  flex: none;
+  white-space: nowrap;
   padding: 1px 8px;
   border-radius: 9px;
   font-size: 11px;
@@ -1989,10 +2004,13 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .res-cells .del-space { width: 60px; }
 
 .page .size {
-  min-width: 64px;
+  flex: none;
+  width: 64px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* Delete or Prune… after the size, as wide on every row, so the sizes form one column. */
+.act-slot { display: flex; flex: none; justify-content: flex-end; width: 72px; }
 
 .res-sub {
   margin: 20px 0 8px;
