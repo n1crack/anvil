@@ -118,11 +118,21 @@ window.refresh = () => {
 
 /* ---------- Setup: what still stands between this Mac and working addresses ---------- */
 
-// [step, field in setup_status, label, what it does]
 // What setting up this Mac means, beyond PHP: local domains, ports 80/443, the HTTPS
-// certificate and the terminal commands. One button does them all, one password.
+// certificate and the terminal commands. One step does them all, one password.
 const SETUP_FIELDS = ["resolver", "ports", "trusted", "shims"];
 
+// The bubble closes on the mousedown before the button's click: that click must not
+// open it again. Window capture runs before the bubble's own document listener.
+let setupWasOpen = false;
+window.addEventListener(
+  "mousedown",
+  (e) => (setupWasOpen = !!$("#setup")?.contains(e.target) && !!document.querySelector(".setup-pop")),
+  true,
+);
+
+/** One titlebar button for every step still missing; it opens a bubble with each step, what
+ * it does and its own button, so nothing runs (or asks for a password) on that first click. */
 async function loadSetup(busy?: string) {
   let st;
   try {
@@ -132,77 +142,62 @@ async function loadSetup(busy?: string) {
   }
   const bar = $("#setup");
   const machine = SETUP_FIELDS.some((f) => !st[f]);
-  // `git` is false only where Anvil can install it (Windows).
-  bar.hidden = !machine && st.php && st.git !== false && st.node !== false;
-  bar.replaceChildren();
-  if (machine) {
-    const b = el("button", "setup-go", busy === "all" ? "Setting up…" : "Set up Anvil");
-    if (busy === "all") b.prepend(el("span", "spin-dot"));
-    b.title =
-      "Local .test domains, ports 80 and 443, the HTTPS certificate and php, composer, laravel and node in your terminal. Asks for your password once.";
-    b.disabled = !!busy;
-    b.onclick = async () => {
-      loadSetup("all");
-      try {
-        const after = await invoke("setup_fix", { step: "all" });
-        // macOS may refuse to trust the certificate system-wide without asking;
-        // the login keychain then takes it, with its own prompt.
-        if (after && !after.trusted) await invoke("setup_fix", { step: "trust" });
-      } catch (e) {
-        showError(String(e));
-      }
-      loadSetup();
-    };
-    bar.append(b);
-  }
-  if (!st.php) {
-    const b = el("button", null, busy === "php" ? "Installing PHP…" : "Install PHP");
-    b.title = "PHP 8.4 for PHP applications; no password needed";
-    b.disabled = !!busy;
-    b.onclick = async () => {
-      loadSetup("php");
-      try {
-        await invoke("setup_fix", { step: "php" });
-      } catch (e) {
-        showError(String(e));
-      }
-      loadSetup();
-    };
-    bar.append(b);
-  }
+  // [step, button, while running, what it does]
+  const steps: [string, string, string, string][] = [];
+  if (machine)
+    steps.push([
+      "all",
+      "Set up Anvil",
+      "Setting up…",
+      "Local .test domains, ports 80 and 443, the HTTPS certificate, and php, composer, laravel and node in your terminal. Asks for your administrator password once.",
+    ]);
+  if (!st.php) steps.push(["php", "Install PHP", "Installing PHP…", "PHP 8.4, for PHP applications. No password needed."]);
   // Only when an app needs it: a Node.js app, or a package.json (a Laravel app's Vite).
-  if (st.node === false) {
-    const b = el("button", null, busy === "node" ? "Installing Node.js…" : "Install Node.js");
-    if (busy === "node") b.prepend(el("span", "spin-dot"));
-    b.title = "The newest long-term support Node.js, for your apps' npm, Vite and Node.js servers; no password needed";
-    b.disabled = !!busy;
-    b.onclick = async () => {
-      loadSetup("node");
-      try {
-        await invoke("setup_fix", { step: "node" });
-      } catch (e) {
-        showError(String(e));
-      }
-      loadSetup();
-    };
-    bar.append(b);
-  }
-  if (st.git === false) {
-    const b = el("button", null, busy === "git" ? "Installing Git…" : "Install Git");
-    if (busy === "git") b.prepend(el("span", "spin-dot"));
-    b.title = "Git for Windows, through winget: new apps get a repository, and worktrees work. Windows may ask once.";
-    b.disabled = !!busy;
-    b.onclick = async () => {
-      loadSetup("git");
-      try {
-        await invoke("setup_fix", { step: "git" });
-      } catch (e) {
-        showError(String(e));
-      }
-      loadSetup();
-    };
-    bar.append(b);
-  }
+  if (st.node === false)
+    steps.push([
+      "node",
+      "Install Node.js",
+      "Installing Node.js…",
+      "The newest long-term support Node.js, for your apps' npm, Vite and Node.js servers. No password needed.",
+    ]);
+  // `git` is false only where Anvil can install it (Windows).
+  if (st.git === false)
+    steps.push([
+      "git",
+      "Install Git",
+      "Installing Git…",
+      "Git for Windows, through winget: new apps get a repository, and worktrees work. Windows may ask once.",
+    ]);
+  bar.hidden = !steps.length;
+  const running = steps.find(([step]) => step === busy);
+  const label = running ? running[2] : machine ? "Set up Anvil" : steps.length > 1 ? `Finish setup (${steps.length})` : steps[0]?.[1];
+  const b = el("button", "setup-go", label);
+  if (running) b.prepend(el("span", "spin-dot"));
+  b.disabled = !!busy;
+  b.setAttribute("aria-haspopup", "dialog");
+  b.onclick = () => {
+    if (setupWasOpen) return (setupWasOpen = false);
+    const pop = el("div", "pop-confirm wide setup-pop");
+    for (const [step, name, , what] of steps) {
+      const go = el("button", null, name);
+      go.onclick = async () => {
+        close();
+        loadSetup(step);
+        try {
+          const after = await invoke("setup_fix", { step });
+          // macOS may refuse to trust the certificate system-wide without asking;
+          // the login keychain then takes it, with its own prompt.
+          if (step === "all" && after && !after.trusted) await invoke("setup_fix", { step: "trust" });
+        } catch (e) {
+          showError(String(e));
+        }
+        loadSetup();
+      };
+      pop.append(el("p", null, what), go);
+    }
+    const close = popAt(b, pop, pop.querySelector("button"), "left");
+  };
+  bar.replaceChildren(b);
 }
 
 export function render() {

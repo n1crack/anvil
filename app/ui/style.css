@@ -3103,6 +3103,11 @@ a.pkg-adv-title:hover { text-decoration: underline; }
   color: var(--text);
   font-weight: 600;
 }
+/* Its bubble: each missing step, what it does, and its own button beside it. */
+.pop-confirm.setup-pop { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px 14px; width: 360px; max-width: none; }
+.setup-pop p { line-height: 1.4; }
+.setup-pop button { border: 1px solid var(--line); border-radius: var(--radius-s); background: none; color: var(--text); white-space: nowrap; }
+.setup-pop button:hover { background: var(--steel-hover); }
 
 .site-url.off { color: var(--muted); cursor: default; }
 .site-url.off:hover { text-decoration: none; }

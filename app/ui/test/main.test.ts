@@ -36,14 +36,38 @@ beforeAll(async () => {
 });
 
 describe("setup", () => {
-  test("one button sets everything up, then trusts the certificate if macOS didn't", async () => {
-    const buttons = $$("#setup button").map((b) => b.textContent);
-    expect(buttons).toEqual(["Set up Anvil"]);
-    w.mockSetup.trusted = false;
-    $("#setup .setup-go").click();
+  // The titlebar button only opens the bubble; each step runs from its own button there.
+  const step = (name: string) => $$(".setup-pop button").find((b) => b.textContent === name)!;
+
+  test("one button opens the steps; the password is said before Set up Anvil runs", async () => {
+    w.mockSetup.php = false;
+    (w as any).refresh();
     await wait(80);
+    expect($$("#setup button").map((b) => b.textContent)).toEqual(["Set up Anvil"]);
+    $("#setup .setup-go").click();
+    await wait();
+    expect(calls("setup_fix")).toEqual([]);
+    expect($$(".setup-pop button").map((b) => b.textContent)).toEqual(["Set up Anvil", "Install PHP"]);
+    expect($(".setup-pop p").textContent).toContain("Asks for your administrator password");
+    expect(document.activeElement).toBe(step("Set up Anvil"));
+    w.mockSetup.trusted = false;
+    step("Set up Anvil").click();
+    await wait(80);
+    expect($(".setup-pop")).toBeNull();
     expect(calls("setup_fix").map(([, a]) => a.step)).toEqual(["all", "trust"]);
+    expect($$("#setup button").map((b) => b.textContent)).toEqual(["Install PHP"]);
+    w.mockSetup.php = true;
+    (w as any).refresh();
+    await wait(80);
     expect($("#setup").hidden).toBe(true);
+  });
+
+  test("several installs left: Finish setup with their count", async () => {
+    Object.assign(w.mockSetup, { node: false, git: false });
+    (w as any).refresh();
+    await wait(80);
+    expect($$("#setup button").map((b) => b.textContent)).toEqual(["Finish setup (2)"]);
+    Object.assign(w.mockSetup, { node: true, git: true });
   });
 
   test("Install Git where Anvil can install it (git false), and nowhere else", async () => {
@@ -52,7 +76,8 @@ describe("setup", () => {
     await wait(80);
     expect($$("#setup button").map((b) => b.textContent)).toEqual(["Install Git"]);
     w.mockDelay = { setup_fix: 60 };
-    ($$("#setup button")[0] as HTMLElement).click();
+    $("#setup button").click();
+    step("Install Git").click();
     await wait(10);
     expect($("#setup button").textContent).toBe("Installing Git…");
     w.mockSetup.git = true;
@@ -68,7 +93,8 @@ describe("setup", () => {
     await wait(80);
     expect($$("#setup button").map((b) => b.textContent)).toEqual(["Install Node.js"]);
     w.mockDelay = { setup_fix: 60 };
-    ($$("#setup button")[0] as HTMLElement).click();
+    $("#setup button").click();
+    step("Install Node.js").click();
     await wait(10);
     expect($("#setup button").textContent).toBe("Installing Node.js…");
     w.mockSetup.node = true;
