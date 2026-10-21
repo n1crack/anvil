@@ -547,8 +547,7 @@ const svcPicker = picker({
   sheet: $("#new-service"),
   form: $("#svc-form"),
   groups: [],
-  choices: () =>
-    svcKinds.map((k) => ({ id: k.kind, name: k.name, about: SVC_ABOUT[k.kind] ?? k.category, group: k.category, icon: svcIcon(k.kind) })),
+  choices: () => svcKinds.map((k) => ({ id: k.kind, name: k.name, about: kindAbout(k), group: k.category, icon: svcIcon(k.kind) })),
   onPick: (kind) => {
     svcKind = kind;
     localStorage.setItem("serviceKind", kind);
@@ -556,6 +555,13 @@ const svcPicker = picker({
   },
   none: "No services match",
 });
+
+/** What a kind is, or, when this Mac is too old for every version, what it needs. */
+function kindAbout(k) {
+  const why = Object.values(k.unsupported ?? {});
+  const need = /needs (macOS [\d.]+ or later)/.exec(String(why[0]))?.[1];
+  return need && why.length === k.versions.length ? `Needs ${need}` : (SVC_ABOUT[k.kind] ?? k.category);
+}
 
 /** The add-service sheet; `want` starts it on a kind and version (a project's .anvil.toml). */
 export async function openAddService(want?: { kind: string; version: string }) {
@@ -589,8 +595,10 @@ function drawLicense() {
   const entry = k?.licenses?.find((l) => l[0] === v);
   const text = $("#svc-license-text");
   const check = $("#svc-license-check") as HTMLInputElement;
-  if (!entry) {
+  // No license to accept for what can't be added on this Mac.
+  if (!entry || k.unsupported?.[v]) {
     $(".svc-license").hidden = true;
+    syncAdd();
     return;
   }
   $(".svc-license").hidden = false;
@@ -617,7 +625,8 @@ function drawLicense() {
 function syncAdd() {
   const k = svcKinds.find((x) => x.kind === svcKind);
   const accepted = k?.licenses?.find((l) => l[0] === $("#svc-version").value)?.[2];
-  ($("#svc-create") as HTMLButtonElement).disabled = !accepted && !($("#svc-license-check") as HTMLInputElement).checked;
+  ($("#svc-create") as HTMLButtonElement).disabled =
+    !!k?.unsupported?.[$("#svc-version").value] || (!accepted && !($("#svc-license-check") as HTMLInputElement).checked);
 }
 $("#svc-license-check").onchange = syncAdd;
 
@@ -628,7 +637,10 @@ function fillService() {
   const ver = $("#svc-version");
   ver.replaceChildren();
   for (const v of k.versions) {
-    const tags = [v === k.default_version && "recommended", k.installed_versions.includes(v) && "installed"].filter(Boolean);
+    const tags = [
+      k.unsupported?.[v] ? "not on this Mac" : v === k.default_version && "recommended",
+      k.installed_versions.includes(v) && "installed",
+    ].filter(Boolean);
     ver.add(new Option(tags.length ? `${v} (${tags.join(", ")})` : v, v));
   }
   ver.value = k.default_version;
@@ -639,7 +651,6 @@ function fillService() {
   $("#svc-port-note").textContent = k.suggested_port === k.default_port ? "" : `Suggested: the usual port ${k.default_port} is in use`;
   noteService();
   drawLicense();
-  $("#svc-error").hidden = true;
 }
 
 /** One quiet line under the name: what gets downloaded, the port and where data goes. */
@@ -647,12 +658,17 @@ function noteService() {
   const k = svcKinds.find((x) => x.kind === svcKind);
   const v = $("#svc-version").value;
   const name = $("#svc-name").value || "…";
-  const fetch = k.installed_versions.includes(v)
-    ? ""
-    : k.kind === "redis"
-      ? `Redis ${v} is built from source first (about a minute). `
-      : `${k.name} ${v} is downloaded first. `;
+  // This Mac is too old for it: why, before anything is downloaded.
+  const why = k.unsupported?.[v];
+  const fetch =
+    why || k.installed_versions.includes(v)
+      ? ""
+      : k.kind === "redis"
+        ? `Redis ${v} is built from source first (about a minute). `
+        : `${k.name} ${v} is downloaded first. `;
   $("#svc-note").textContent = `${fetch}Data in ~/.anvil/data/${name}`;
+  $("#svc-error").textContent = why ?? "";
+  $("#svc-error").hidden = !why;
 }
 
 let progressTimer: ReturnType<typeof setInterval> | undefined;

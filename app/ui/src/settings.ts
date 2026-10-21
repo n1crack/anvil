@@ -84,7 +84,7 @@ const newest = (a: string, b: string) => b.localeCompare(a, undefined, { numeric
  * apps are pinned to names them and offers no Uninstall (the core refuses it). */
 function versionRow(
   label: string,
-  v: { installed: boolean; default?: boolean; pinned_by?: string[] },
+  v: { installed: boolean; default?: boolean; pinned_by?: string[]; unsupported?: string },
   busy: boolean,
   blocked: boolean,
   act: { install: () => void; uninstall: () => void; makeDefault?: () => void; note?: string },
@@ -111,6 +111,10 @@ function versionRow(
   actions.className = "actions-inline";
   if (busy) {
     actions.innerHTML = `<span class="spin-dot"></span><span class="muted">Installing…</span>`;
+  } else if (!v.installed && v.unsupported) {
+    // This Mac is too old for it; the row already names the version.
+    const why = v.unsupported.replace(/^.*? needs /, "Needs ");
+    actions.append(Object.assign(document.createElement("span"), { className: "muted", textContent: why }));
   } else if (!v.installed) {
     const b = button("Install", act.install);
     b.disabled = blocked;
@@ -159,7 +163,7 @@ function renderLanguages() {
       ...all.map((v) =>
         versionRow(
           `${rt.name} ${v}`,
-          { installed: rt.installed.includes(v), pinned_by: rt.pinned_by?.[v] },
+          { installed: rt.installed.includes(v), pinned_by: rt.pinned_by?.[v], unsupported: rt.unsupported?.[v] },
           installing.has(`${rt.id}@${v}`),
           blocked,
           {

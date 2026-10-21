@@ -45,6 +45,8 @@ pub struct RuntimeInfo {
     pub available: Vec<String>,
     /// Installed versions apps are pinned to, with those apps (`crate::pinned_to`).
     pub pinned_by: std::collections::BTreeMap<String, Vec<String>>,
+    /// Offered versions this Mac is too old for, with why.
+    pub unsupported: std::collections::BTreeMap<String, String>,
 }
 
 pub fn name(id: &str) -> &'static str {
@@ -151,7 +153,8 @@ pub fn available(id: &str) -> Result<Vec<String>> {
     })
 }
 
-/// The newest Node.js major with a long-term support release, from the official index.
+/// The newest Node.js major with a long-term support release that runs on this Mac,
+/// from the official index.
 pub fn node_lts() -> Result<String> {
     let list: Vec<serde_json::Value> = crate::fetch_json("https://nodejs.org/dist/index.json")?;
     newest_lts(&list).context("nodejs.org lists no LTS release")
@@ -163,7 +166,10 @@ fn newest_lts(list: &[serde_json::Value]) -> Option<String> {
         .filter(|v| v["lts"].is_string())
         .filter_map(|v| v["version"].as_str())
         .filter_map(|v| v.trim_start_matches('v').split('.').next())
-        .find(|m| m.parse::<u32>().is_ok())
+        .find(|m| {
+            m.parse::<u32>().is_ok()
+                && crate::platform::needs_newer_macos("Node.js", "node", m).is_none()
+        })
         .map(String::from)
 }
 
@@ -230,6 +236,9 @@ pub fn install(id: &str, version: &str) -> Result<()> {
     }
     // Windows downloads are zips, which Windows' tar unpacks too (`fetch_tgz`).
     let archive = if windows { "zip" } else { "tar.gz" };
+    if let Some(why) = crate::platform::needs_newer_macos(name(id), id, version) {
+        bail!(why);
+    }
     match id {
         "node" => {
             let list: Vec<serde_json::Value> =
@@ -497,16 +506,27 @@ pub fn env(id: &str, version: &str) -> Vec<(String, String)> {
 }
 
 pub fn info(id: &'static str, with_available: bool) -> RuntimeInfo {
+    let available = if with_available {
+        available(id).unwrap_or_default()
+    } else {
+        vec![]
+    };
+    let unsupported = available
+        .iter()
+        .filter_map(|v| {
+            Some((
+                v.clone(),
+                crate::platform::needs_newer_macos(name(id), id, v)?,
+            ))
+        })
+        .collect();
     RuntimeInfo {
         id,
         name: name(id),
         installed: installed(id),
-        available: if with_available {
-            available(id).unwrap_or_default()
-        } else {
-            vec![]
-        },
+        available,
         pinned_by: Default::default(),
+        unsupported,
     }
 }
 

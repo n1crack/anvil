@@ -873,8 +873,99 @@ pub fn local_clock(at: u64) -> String {
     }
 }
 
+/// The oldest macOS each download runs on, by kind and the first major version it
+/// holds for. The numbers are the binaries' `minos` (`vtool -show-build`), read on
+/// arm64 copies: mysqld 8.4.11 (mysql-…-macos15 tarball) 14.0, postgres 18.6.0
+/// 15.0, mailpit 1.31.6 13.0, node 24.22.0 13.5 (22.23.3: 11.0).
+/// Not measured, assumed the same: MySQL 9.7 and 8.0 (the same macos15 tarballs),
+/// PostgreSQL 14–17 (theseus-rs builds every version on GitHub's macos-15 runners,
+/// its targets.json) and Node.js 25+ (nodejs.org's BUILDING.md says 13.5 from 24 on).
+const MIN_MACOS: [(&str, u32, (u32, u32)); 4] = [
+    ("mysql", 0, (14, 0)),
+    ("postgres", 0, (15, 0)),
+    ("mailpit", 0, (13, 0)),
+    ("node", 24, (13, 5)),
+];
+
+/// "14.0" → (14, 0); "13.6.1" → (13, 6).
+fn os_version(v: &str) -> Option<(u32, u32)> {
+    let mut p = v.trim().split('.').map(|n| n.parse::<u32>().ok());
+    Some((p.next()??, p.next().flatten().unwrap_or(0)))
+}
+
+fn show_os((major, minor): (u32, u32)) -> String {
+    if minor == 0 {
+        major.to_string()
+    } else {
+        format!("{major}.{minor}")
+    }
+}
+
+/// Why `name version` (a service kind or runtime) can't run on macOS `have`, if it can't.
+fn too_old(name: &str, kind: &str, version: &str, have: &str) -> Option<String> {
+    let major: u32 = version.split('.').next()?.parse().unwrap_or(0);
+    let need = MIN_MACOS
+        .iter()
+        .find(|(k, from, _)| *k == kind && major >= *from)?
+        .2;
+    (os_version(have)? < need).then(|| {
+        format!(
+            "{name} {version} needs macOS {} or later; this Mac has {}.",
+            show_os(need),
+            have.trim()
+        )
+    })
+}
+
+/// This Mac's macOS version ("13.6.1"); None elsewhere.
+fn macos() -> Option<&'static str> {
+    static V: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        if !cfg!(target_os = "macos") {
+            return None;
+        }
+        let out = command("sysctl")
+            .args(["-n", "kern.osproductversion"])
+            .output()
+            .ok()?;
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|v| !v.is_empty())
+    })
+    .as_deref()
+}
+
+/// Why a download won't run on this Mac, said before it is fetched: "MySQL 8.4.11
+/// needs macOS 14 or later; this Mac has 13.6." None when it runs (and off macOS).
+pub fn needs_newer_macos(name: &str, kind: &str, version: &str) -> Option<String> {
+    too_old(name, kind, version, macos()?)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn downloads_too_new_for_this_macos_are_refused_with_the_reason() {
+        use super::too_old;
+        assert_eq!(
+            too_old("MySQL", "mysql", "8.4.11", "13.6.1").as_deref(),
+            Some("MySQL 8.4.11 needs macOS 14 or later; this Mac has 13.6.1.")
+        );
+        assert_eq!(too_old("MySQL", "mysql", "8.4.11", "14.0"), None);
+        assert_eq!(too_old("MySQL", "mysql", "9.7.2", "15.2"), None);
+        assert!(too_old("PostgreSQL", "postgres", "16.15.0", "14.7").is_some());
+        assert_eq!(too_old("PostgreSQL", "postgres", "18.6.0", "26.0"), None);
+        assert!(too_old("Mailpit", "mailpit", "1.31.6", "12.7.6").is_some());
+        assert_eq!(too_old("Mailpit", "mailpit", "1.31.6", "13"), None);
+        assert_eq!(
+            too_old("Node.js", "node", "24", "13.4").as_deref(),
+            Some("Node.js 24 needs macOS 13.5 or later; this Mac has 13.4.")
+        );
+        assert_eq!(too_old("Node.js", "node", "24", "13.5"), None);
+        assert!(too_old("Node.js", "node", "26", "12.7").is_some());
+        assert_eq!(too_old("Node.js", "node", "22", "12.0"), None);
+        // Kinds without a floor, and versions macOS can't be read for, pass.
+        assert_eq!(too_old("Redis", "redis", "8.10.2", "12.0"), None);
+        assert_eq!(too_old("MySQL", "mysql", "8.4.11", ""), None);
+    }
+
     #[test]
     fn left_groups_walks_by_parent_and_keeps_only_who_left() {
         let row = |pid, ppid, pgid, c: &str| (pid, ppid, pgid, c.to_string());

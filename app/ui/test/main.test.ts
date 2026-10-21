@@ -2188,6 +2188,29 @@ describe("show hidden", () => {
     expect(calls("add_service").at(-1)![1]).toMatchObject({ kind: "redis", version: "7.2.16", acceptLicense: true });
     ($("#new-service") as HTMLDialogElement).close();
   });
+
+  test("Add service on a Mac too old for MySQL: says why in the sheet and Add stays off", async () => {
+    w.mockOldMac = true;
+    try {
+      const { openAddService } = await import("../src/services");
+      await openAddService({ kind: "mysql", version: "8.4.11" });
+      await wait(30);
+      expect($("#svc-kinds-mysql").textContent).toContain("Needs macOS 14 or later");
+      expect($("#svc-kinds-redis").textContent).not.toContain("Needs");
+      expect($("#svc-error").hidden).toBe(false);
+      expect($("#svc-error").textContent).toBe("MySQL 8.4.11 needs macOS 14 or later; this Mac has 13.6.");
+      expect($("#svc-note").textContent).not.toContain("downloaded");
+      expect(($("#svc-version") as HTMLSelectElement).selectedOptions[0].textContent).toBe("8.4.11 (not on this Mac)");
+      expect(($(".svc-license") as HTMLElement).hidden).toBe(true);
+      expect(($("#svc-create") as HTMLButtonElement).disabled).toBe(true);
+      // Redis runs here: the reason goes away and Add follows the license again.
+      ($("#svc-kinds-redis") as HTMLElement).click();
+      expect($("#svc-error").hidden).toBe(true);
+    } finally {
+      delete w.mockOldMac;
+      ($("#new-service") as HTMLDialogElement).close();
+    }
+  });
 });
 
 describe("project file", () => {

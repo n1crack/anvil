@@ -984,6 +984,11 @@ const mockHandle = (cmd, a) => {
         suggested_port: port,
         default_port: port,
         licenses: versions.map((v) => [v, lic(k, v), accepted[v] ?? null]),
+        // As platform::needs_newer_macos on a Mac older than 14 (window.mockOldMac).
+        unsupported:
+          window.mockOldMac && k === "mysql"
+            ? Object.fromEntries(versions.map((v) => [v, `${name} ${v} needs macOS 14 or later; this Mac has 13.6.`]))
+            : {},
       });
       return [
         kind("mysql", "MySQL", "Databases", ["9.7.2", "8.4.11"], 3306),
@@ -1154,7 +1159,16 @@ const mockHandle = (cmd, a) => {
     }
     case "runtimes":
       return [
-        { id: "node", name: "Node.js", installed: ["24", "22"], available: ["26", "24", "22", "20"], pinned_by: { 22: ["blog", "shop"] } },
+        {
+          id: "node",
+          name: "Node.js",
+          installed: window.mockOldMac ? ["22"] : ["24", "22"],
+          available: ["26", "24", "22", "20"],
+          pinned_by: { 22: ["blog", "shop"] },
+          unsupported: window.mockOldMac
+            ? Object.fromEntries(["26", "24"].map((v) => [v, `Node.js ${v} needs macOS 13.5 or later; this Mac has 13.4.`]))
+            : {},
+        },
         { id: "go", name: "Go", installed: [], available: ["1.27.2", "1.26.8"] },
         { id: "rust", name: "Rust", installed: ["stable"], available: ["stable"] },
         { id: "dotnet", name: ".NET", installed: ["10.0"], available: ["10.0", "9.0", "8.0"] },

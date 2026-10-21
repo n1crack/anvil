@@ -466,6 +466,8 @@ pub struct Kind {
     pub default_port: u16,
     /// Each version's license, and when it was accepted (None: not yet).
     pub licenses: Vec<(String, License, Option<String>)>,
+    /// Versions this Mac is too old for, with why ("MySQL 8.4.11 needs macOS 14…").
+    pub unsupported: BTreeMap<String, String>,
 }
 
 /// What can be added, with a free name and port for each.
@@ -490,6 +492,13 @@ pub fn kinds(cfg: &Config) -> Vec<Kind> {
                     .map(|v| {
                         let accepted = license_accepted(cfg, kind, v).map(String::from);
                         (v.to_string(), license(kind, v), accepted)
+                    })
+                    .collect(),
+                unsupported: versions(kind)
+                    .iter()
+                    .filter_map(|v| {
+                        let why = crate::platform::needs_newer_macos(name(kind), kind, v)?;
+                        Some((v.to_string(), why))
                     })
                     .collect(),
             }
@@ -580,6 +589,9 @@ fn insert(
             versions(kind).join(", ")
         );
     }
+    if let Some(why) = crate::platform::needs_newer_macos(self::name(kind), kind, version) {
+        bail!(why);
+    }
     let id = name.map_or_else(|| free_name(cfg, kind), str::to_string);
     crate::validate::service_id(&id)?;
     if cfg.services.contains_key(&id) {
@@ -657,6 +669,9 @@ pub fn install(id: &str, version: &str) -> Result<()> {
     check(id)?;
     if !versions(id).contains(&version) {
         bail!("Anvil offers {} {}", name(id), versions(id).join(", "));
+    }
+    if let Some(why) = crate::platform::needs_newer_macos(name(id), id, version) {
+        bail!(why);
     }
     let build = id == "redis" && !cfg!(windows);
     *crate::lock(&INSTALLING) = Some((format!("{} {version}", name(id)), build));

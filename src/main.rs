@@ -1068,6 +1068,10 @@ fn add_service(
     accept_license: bool,
 ) -> Result<()> {
     let v = version.map_or_else(|| services::default_version(kind).to_string(), String::from);
+    // Said before the license is asked for and anything downloaded.
+    if let Some(why) = platform::needs_newer_macos(services::name(kind), kind, &v) {
+        bail!(why);
+    }
     let accept = accept_license
         || services::license_accepted(cfg, kind, &v).is_some()
         || ask_license(kind, &v)?;

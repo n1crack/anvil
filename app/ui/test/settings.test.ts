@@ -319,6 +319,23 @@ describe("versions", () => {
     expect($("#node .note").textContent).toContain(".nvmrc");
   });
 
+  test("Node.js on a Mac too old for 24 and later: those rows say why instead of Install", async () => {
+    await open("node");
+    w.mockOldMac = true;
+    try {
+      // An install reloads the list, now as an older Mac sees it.
+      ($$("#node .ver")[3].querySelector("button") as HTMLElement).click();
+      await wait(60);
+      const rows = $$("#node .ver");
+      expect(rows[0].querySelector(".actions-inline")?.textContent).toBe("Needs macOS 13.5 or later; this Mac has 13.4.");
+      expect(rows[1].querySelector(".actions-inline")?.textContent).toBe("Needs macOS 13.5 or later; this Mac has 13.4.");
+      expect(rows[0].querySelectorAll("button").length).toBe(0);
+      expect([...rows[3].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Install"]);
+    } finally {
+      delete w.mockOldMac;
+    }
+  });
+
   test("Rust shows its toolchain", async () => {
     await open("rust");
     expect(text("#rust .ver-label")).toEqual(["Rust stable"]);
