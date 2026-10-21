@@ -1996,7 +1996,7 @@ kbd {
 .page.about .hint { max-width: 420px; margin: 16px 0; }
 .page.about .small { font-size: 11px; margin-top: 24px; }
 .page.about .update-check { justify-content: center; margin-top: 8px; }
-.page.about .update-notes { margin: 8px 0 0; white-space: pre-line; text-align: left; }
+.page.about .update-notes { margin: 8px 0 0; white-space: pre-line; text-align: left; max-height: 220px; overflow-y: auto; }
 #update-result.error-text { color: var(--danger); }
 
 /* Titlebar: a newer release or local build, quiet until clicked (update.ts). */

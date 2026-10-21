@@ -251,10 +251,12 @@ jobs:
           base="https://github.com/${{ github.repository }}/releases/download/$TAG"
           mac="Anvil-$VERSION-universal.app.tar.gz"
           win="Anvil_${VERSION}_x64-setup.exe"
-          jq -n --arg v "$VERSION" --rawfile notes notes.md --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          # The apps show the notes as plain text: headings without ###, bullets, no backticks.
+          sed -E 's/^#+ //; s/^- /• /; s/`//g' notes.md > notes.txt
+          jq -n --arg v "$VERSION" --rawfile notes notes.txt --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --rawfile macsig "dist/$mac.sig" --arg mac "$base/$mac" \
             --rawfile winsig "dist/$win.sig" --arg win "$base/$win" \
-            '{version: $v, notes: $notes, pub_date: $date, platforms: {
+            '{version: $v, notes: ($notes | gsub("^\\s+|\\s+$"; "")), pub_date: $date, platforms: {
               "darwin-aarch64": {signature: $macsig, url: $mac},
               "darwin-x86_64": {signature: $macsig, url: $mac},
               "windows-x86_64": {signature: $winsig, url: $win}}}' > dist/latest.json
