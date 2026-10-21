@@ -766,9 +766,12 @@ const mockHandle = (cmd, a) => {
     case "worktree_remove":
       if (window.mockRemoveFail && !a.force) throw window.mockRemoveFail;
       return mockSnap;
-    case "remove_site":
-      mockSnap.sites = mockSnap.sites.filter((x) => x.name !== a.site);
+    case "remove_site": {
+      const s = mockSnap.sites.find((x) => x.name === a.site);
+      mockSnap.sites = mockSnap.sites.filter((x) => x !== s);
+      if (s && !s.linked) mockSnap.hidden.push({ name: s.name, path: s.path, kind: s.kind });
       return mockSnap;
+    }
     case "worktree_branches":
       return window.mockBranches ?? ["main", "feature/login"];
     case "worktree_new_db":

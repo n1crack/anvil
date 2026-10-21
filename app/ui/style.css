@@ -1846,6 +1846,9 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .item.hidden-app .mark,
 .item.hidden-app .name { opacity: 0.5; }
 .hidden-note { margin: 12px 0; color: var(--muted); }
+/* Just hidden: a slim row in its place for a few seconds, with Undo. */
+.hid-row { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px 0 56px; color: var(--muted); font-size: 12px; }
+.hid-row button.link { height: auto; padding: 0; border: 0; background: none; color: var(--text); text-decoration: underline; text-decoration-color: var(--line); }
 
 /* Starting: a green ring that is filling in; heat colours stay with the brand. */
 .dot.warm {
@@ -1991,29 +1994,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   color: inherit;
 }
 
-.toast {
-  position: fixed;
-  bottom: 20px;
-  left: calc(var(--sidebar) + (100vw - var(--sidebar)) / 2);
-  transform: translateX(-50%);
-  padding: 8px 14px;
-  border-radius: 16px;
-  background: var(--steel-raised);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-  font-size: 12px;
-  animation: toast-in 0.18s ease-out;
-}
-
-.toast button {
-  margin-left: 12px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--text);
-  font-weight: 600;
-}
-
-@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 6px); } }
 
 kbd {
   padding: 2px 8px;

@@ -599,7 +599,7 @@ describe("dev", () => {
     foot("Done").click();
     await wait();
     expect($(".dev-conf-error").textContent).toBe("docs:site: a command is needed");
-    expect($("#toast").hidden).toBe(true);
+    expect($(".toast")).toBeNull();
     expect(saved()).toBe(after);
 
     const reset = foot("Reset to detected");
@@ -921,7 +921,7 @@ describe("audit fixes", () => {
     await wait(80);
     w.__TAURI__.dialog.open = open;
     expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
-    expect($("#toast").hidden).toBe(true);
+    expect($(".toast")).toBeNull();
 
     await select("shop");
     ($("#new-name") as HTMLInputElement).value = "notes";
@@ -934,7 +934,7 @@ describe("audit fixes", () => {
     $("#new-done").click();
     await wait();
     expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
-    expect($("#toast").hidden).toBe(true);
+    expect($(".toast")).toBeNull();
   });
 
   test("New application: a folder can be chosen with nothing parked", async () => {
@@ -968,7 +968,7 @@ describe("audit fixes", () => {
     copy.click();
     await wait();
     expect(copy.textContent).toBe("Copied");
-    expect($("#toast").hidden).toBe(true);
+    expect($(".toast")).toBeNull();
     await wait(1600);
     // The copy icon again.
     expect(copy.textContent!.trim()).toBe("");
@@ -2969,5 +2969,26 @@ describe("browser errors", () => {
     expect($(".browser-blocked").hidden).toBe(false);
     expect($('[data-panel="overview"] .browser-line dd').textContent).toBe("Blocked by the app’s Content-Security-Policy");
     w.mockBrowser = undefined;
+  });
+});
+
+describe("hide", () => {
+  test("Hide from Anvil leaves a slim row in place with Undo, no toast; Undo brings the app back", async () => {
+    $('.modes [data-mode="apps"]').click();
+    await wait(40);
+    $(`#list [data-name="notes"]`).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait(80);
+    (w.mockMenu as any[]).find((i) => i.text === "Hide from Anvil").action();
+    await wait(80);
+    expect(calls("remove_site").at(-1)![1]).toEqual({ site: "notes" });
+    const row = $('#list .hid-row[data-name="notes"]');
+    expect(row.textContent).toBe("notes hidden·Undo");
+    expect($('#list .item[data-name="notes"]')).toBeNull();
+    expect($(".toast")).toBeNull();
+    (row.querySelector("button") as HTMLElement).click();
+    await wait(80);
+    expect(calls("unhide_site").at(-1)![1]).toEqual({ site: "notes" });
+    expect($("#list .hid-row")).toBeNull();
+    expect($('#list .item[data-name="notes"]')).not.toBeNull();
   });
 });

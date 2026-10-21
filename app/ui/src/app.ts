@@ -87,24 +87,6 @@ export function showError(msg, owner = "") {
   $("#error").hidden = !text;
 }
 
-let toastTimer;
-/** A short confirmation at the bottom of the window. */
-export function toast(msg: string, undo?: () => unknown) {
-  const t = $("#toast");
-  t.textContent = msg;
-  if (undo) {
-    const b = el("button", null, "Undo");
-    b.onclick = () => {
-      t.hidden = true;
-      undo();
-    };
-    t.append(b);
-  }
-  t.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), undo ? 6000 : 2400);
-}
-
 window.refresh = () => {
   // A command's own answer already carries the new state; the "changed" signal
   // that follows it doesn't need a second read.
@@ -268,10 +250,26 @@ let sortBy = localStorage.getItem("sortBy") ?? "name";
 let groupBy = localStorage.getItem("groupBy") ?? "folder";
 export let showHidden = localStorage.getItem("showHidden") === "1";
 
+// Apps just hidden, by name: for a few seconds their row says so in place, with Undo.
+const justHid = new Map<string, any>();
+
+/** A just-hidden app's slim row: "<name> hidden · Undo". */
+function hidRow(s) {
+  const r = el("div", "hid-row");
+  const undo = el("button", "link", "Undo");
+  undo.onclick = () => {
+    justHid.delete(s.name);
+    call("unhide_site", { site: s.name });
+  };
+  r.dataset.name = s.name;
+  r.append(el("span", null, `${s.name} hidden`), el("span", "sep", "·"), undo);
+  return r;
+}
+
 /** Apps hidden from Anvil, shaped like sites, while "Show Hidden Applications" is on. They aren't served. */
 function hiddenSites(): any[] {
   if (!showHidden) return [];
-  return (snap.hidden ?? []).map((h) => ({
+  return (snap.hidden ?? []).filter((h) => !justHid.has(h.name)).map((h) => ({
     ...h,
     hiddenApp: true,
     host: `${h.name}.${snap.tld}`,
@@ -578,7 +576,12 @@ function renderList() {
   const apps = new Set(snap.sites.filter((s) => !s.worktree_of && !alias.has(s.name)).map((s) => s.name));
   // A worktree whose app is gone stands alone, in its folder's section else Linked.
   const orphan = (s) => s.worktree_of && !apps.has(s.worktree_of);
-  const parked = [...snap.sites.filter((s) => (!s.linked && !s.worktree_of) || (orphan(s) && s.parked_in)), ...hiddenApps];
+  const gone = [...justHid.values()].filter((h) => !snap.sites.some((s) => s.name === h.name));
+  const parked = [
+    ...snap.sites.filter((s) => (!s.linked && !s.worktree_of) || (orphan(s) && s.parked_in)),
+    ...hiddenApps,
+    ...gone.map((h) => ({ ...h, justHid: true })),
+  ];
   const wts = new Map<string, any[]>();
   for (const s of snap.sites) if (s.worktree_of && !orphan(s)) wts.set(s.worktree_of, [...(wts.get(s.worktree_of) ?? []), s]);
   const linked = snap.sites.filter((s) => (s.linked && !s.worktree_of && !alias.has(s.name)) || (orphan(s) && !s.parked_in));
@@ -609,6 +612,10 @@ function renderList() {
       const parentHit = hit(s);
       const shownKids = kids.filter((k) => parentHit || hit(k));
       if (!parentHit && !shownKids.length) continue;
+      if (s.justHid) {
+        rows.push(hidRow(s));
+        continue;
+      }
       rows.push(row(s, { kids: kids.length, path, kind }));
       if (shownKids.length) {
         const inner = document.createElement("div");
@@ -728,8 +735,13 @@ async function siteMenu(s) {
     await M.MenuItem.new({
       text: s.linked ? "Remove Link" : "Hide from Anvil",
       action: async () => {
+        if (!s.linked) {
+          justHid.set(s.name, s);
+          setTimeout(() => {
+            if (justHid.delete(s.name) && mode === "apps") renderList();
+          }, 6000);
+        }
         await call("remove_site", { site: s.name });
-        if (!s.linked) toast(`Hid ${s.name}.${snap.tld}`, () => call("unhide_site", { site: s.name }));
       },
     }),
   );
