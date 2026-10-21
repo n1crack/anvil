@@ -917,6 +917,30 @@ describe("audit fixes", () => {
     expect($("#toast").hidden).toBe(true);
   });
 
+  test("New application: a folder can be chosen with nothing parked", async () => {
+    const { snap } = await import("../src/app");
+    const { openNewApp } = await import("../src/newapp");
+    const open = w.__TAURI__.dialog.open;
+    const { paths, sites } = snap;
+    snap.paths = [];
+    snap.sites = [];
+    w.__TAURI__.dialog.open = async () => "/Users/x/Elsewhere";
+    openNewApp();
+    const parent = $("#new-parent") as HTMLSelectElement;
+    // Choose a folder… isn't the one selected, so picking it is a change.
+    expect(parent.value).toBe("");
+    expect(parent.options[parent.options.length - 1].value).toBe("choose");
+    parent.value = "choose";
+    parent.dispatchEvent(new Event("change"));
+    await wait(20);
+    expect(parent.value).toBe("/Users/x/Elsewhere");
+    expect([...parent.options].map((o) => o.value)).not.toContain("");
+    w.__TAURI__.dialog.open = open;
+    snap.paths = paths;
+    snap.sites = sites;
+    ($("#new-app") as HTMLDialogElement).close();
+  });
+
   test("Copy says Copied on the button for a moment, not in a toast", async () => {
     $('.modes [data-mode="services"]').click();
     await wait(80);

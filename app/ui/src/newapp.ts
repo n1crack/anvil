@@ -169,12 +169,22 @@ export function openNewApp() {
   kinds.draw(newKind);
   const parent = $("#new-parent");
   parent.replaceChildren();
-  for (const p of snap.paths) parent.add(new Option(tilde(p), p));
-  parent.add(new Option("Choose a folder…", ""));
+  // The parked folders, then those linked apps live in; an app made outside a parked
+  // folder is linked.
+  const linkedIn = snap.sites
+    .filter((s) => s.linked && !s.worktree_of)
+    .map((s) => s.path.replace(/[\\/][^\\/]+[\\/]?$/, "").replace(/^[A-Za-z]:$/, "$&\\"));
+  for (const p of new Set([...snap.paths, ...linkedIn])) if (p) parent.add(new Option(tilde(p), p));
+  // With no folder yet, "Choose a folder…" isn't the one selected, so picking it opens the dialog.
+  if (!parent.options.length) parent.add(new Option("No folder yet", ""));
+  parent.add(new Option("Choose a folder…", "choose"));
   parent.onchange = async () => {
-    if (parent.value) return;
+    if (parent.value !== "choose") return;
     const path = await window.__TAURI__.dialog.open({ directory: true, title: "Create the application in" });
-    if (path) parent.add(new Option(tilde(path), path), 0);
+    if (path) {
+      if (!parent.options[0].value) parent.remove(0);
+      parent.add(new Option(tilde(path), path), 0);
+    }
     parent.selectedIndex = 0;
   };
   const name = $("#new-name");
@@ -213,7 +223,8 @@ $("#new-form").onsubmit = (e) => {
   const name = $("#new-name").value.trim();
   const parent = $("#new-parent").value;
   if (!name) return $("#new-name").focus();
-  if (!parent || list().querySelector(".kind-none:not([hidden])")) return; // nothing matches the search
+  if (!parent || parent === "choose") return $("#new-parent").focus();
+  if (list().querySelector(".kind-none:not([hidden])")) return; // nothing matches the search
   create(newKind, name, parent);
 };
 
@@ -241,17 +252,25 @@ function drawSteps() {
   const plan = stepsOf(job.kind);
   for (const s of seen) if (!plan.includes(s)) plan.push(s);
   const at = seen.length ? plan.indexOf(seen[seen.length - 1]) : job.end ? -1 : 0;
-  $("#new-steps").replaceChildren(
-    ...plan.map((s, i) => {
-      const state =
-        job!.end === "ok" || i < at ? "done" : i === at ? (job!.end === "bad" ? "bad" : "now") : job!.end === "bad" ? "skip" : "todo";
-      const li = el("li", `new-step ${state}`);
-      const mark = el("span", "new-step-mark");
-      mark.innerHTML = state === "done" ? CHECK : state === "bad" ? CROSS : state === "now" ? `<span class="spin-dot"></span>` : "";
-      li.append(mark, el("span", null, s));
-      return li;
-    }),
-  );
+  // Each step keeps its element and changes only when its state does, so the spinner
+  // turns on instead of starting over at every read of the log.
+  const box = $("#new-steps");
+  const old = new Map([...box.children].map((li) => [(li as HTMLElement).dataset.step, li as HTMLElement]));
+  const items = plan.map((s, i) => {
+    const state =
+      job!.end === "ok" || i < at ? "done" : i === at ? (job!.end === "bad" ? "bad" : "now") : job!.end === "bad" ? "skip" : "todo";
+    const was = old.get(s);
+    if (was?.dataset.state === state) return was;
+    const li = was ?? el("li");
+    li.className = `new-step ${state}`;
+    li.dataset.step = s;
+    li.dataset.state = state;
+    const mark = el("span", "new-step-mark");
+    mark.innerHTML = state === "done" ? CHECK : state === "bad" ? CROSS : state === "now" ? `<span class="spin-dot"></span>` : "";
+    li.replaceChildren(mark, el("span", null, s));
+    return li;
+  });
+  if (items.some((li, i) => box.children[i] !== li) || box.children.length !== items.length) box.replaceChildren(...items);
 }
 
 const ERROR_LINE = /error|failed|fatal|exception|ERR!|could not|not found|✕|×/i;
