@@ -214,11 +214,12 @@ describe("processes tabs", () => {
 
   test("agents_tab_lists_all_newest_first, from the activity poll", async () => {
     const { load } = await import("../src/activity");
-    const at = (h: number, m: number) => new Date(2026, 9, 19, h, m).getTime() / 1000;
-    // The backend sends them newest first.
+    const now = new Date();
+    const today = (h: number, m: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).getTime() / 1000;
+    // The backend sends them newest first; today's say the time, earlier days' the date too.
     w.agents = [
-      { at: at(14, 2), client: "Claude Code", site: "shop", what: "restarted queue", ok: false, detail: "No process queue" },
-      { at: at(9, 5), client: "Terminal", site: null, what: "started mysql", ok: true, detail: null },
+      { at: today(14, 2), client: "Claude Code", site: "shop", what: "couldn't restart queue", ok: false, detail: "No process queue" },
+      { at: new Date(2026, 9, 19, 9, 5).getTime() / 1000, client: "Terminal", site: null, what: "started mysql", ok: true, detail: null },
     ];
     tabBtn("agents").click();
     expect($("#empty").textContent).toBe("No actions from agents or the terminal yet");
@@ -228,8 +229,8 @@ describe("processes tabs", () => {
     expect($("#rows").closest("table")!.hidden).toBe(true);
     const rows = [...document.querySelectorAll("#agent-rows tr")].map((tr) => [...tr.children].map((c) => c.firstChild?.textContent ?? ""));
     expect(rows).toEqual([
-      ["Claude Code restarted queue", "shop", "14:02"],
-      ["Terminal started mysql", "", "09:05"],
+      ["Claude Code couldn't restart queue:", "shop", "14:02"],
+      ["Terminal started mysql", "", "Oct 19, 09:05"],
     ]);
     const d = $("#agent-rows .agent-detail");
     expect([d.textContent, d.classList.contains("error-text")]).toEqual(["No process queue", true]);

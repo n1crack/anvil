@@ -49,20 +49,21 @@ fn need(req: &Request, key: &str) -> Res<String> {
         .ok_or_else(|| format!("{} needs \"{key}\"", req.method))
 }
 
-/// The site and what a request does, as the activity list words it; `None` for reads.
-pub(crate) fn describe(req: &Request) -> Option<(Option<String>, String)> {
+/// The site and what a request did, as the activity list words it ("restarted api"), or
+/// what it failed to do ("couldn't restart api"); `None` for reads.
+pub(crate) fn describe(req: &Request, ok: bool) -> Option<(Option<String>, String)> {
     // A config write `anvil mcp` made itself, told so the list shows it.
     if req.method == "set_done" {
-        return Some((
-            param(req, "site").map(String::from),
-            need(req, "what").ok()?,
-        ));
+        let what = need(req, "what").ok()?;
+        let what = if ok { what } else { format!("couldn't {what}") };
+        return Some((param(req, "site").map(String::from), what));
     }
-    let done = match param(req, "action")? {
-        "start" => "started",
-        "stop" => "stopped",
-        "restart" => "restarted",
-        other => other,
+    let done = match (ok, param(req, "action")?) {
+        (false, a) => format!("couldn't {a}"),
+        (true, "start") => "started".into(),
+        (true, "stop") => "stopped".into(),
+        (true, "restart") => "restarted".into(),
+        (true, a) => a.into(),
     };
     match req.method.as_str() {
         "run" => Some((
@@ -125,7 +126,7 @@ pub(crate) fn dispatch(handle: &AppHandle, req: &Request) -> Res<Value> {
         return Err(anvil::mcp::TURNED_OFF.into());
     }
     let out = answer(handle, req);
-    if let Some((site, what)) = describe(req) {
+    if let Some((site, what)) = describe(req, out.is_ok()) {
         let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
@@ -204,23 +205,28 @@ mod tests {
     fn describe_names_the_action() {
         let run = json!({"site": "shop", "process": "api", "action": "restart"});
         assert_eq!(
-            describe(&req("run", run)),
+            describe(&req("run", run.clone()), true),
             Some((Some("shop".into()), "restarted api".into()))
+        );
+        // A failure says what it couldn't do, not that it was done.
+        assert_eq!(
+            describe(&req("run", run), false),
+            Some((Some("shop".into()), "couldn't restart api".into()))
         );
         let all = json!({"site": "shop", "action": "restart"});
         assert_eq!(
-            describe(&req("run", all)),
+            describe(&req("run", all), true),
             Some((Some("shop".into()), "restarted all processes".into()))
         );
         let svc = json!({"id": "mysql", "action": "stop"});
         assert_eq!(
-            describe(&req("service", svc)),
+            describe(&req("service", svc), true),
             Some((None, "stopped mysql".into()))
         );
-        assert_eq!(describe(&req("apps", json!({}))), None);
+        assert_eq!(describe(&req("apps", json!({})), true), None);
         let set = json!({"site": "shop", "what": "set PHP to 8.4"});
         assert_eq!(
-            describe(&req("set_done", set)),
+            describe(&req("set_done", set), true),
             Some((Some("shop".into()), "set PHP to 8.4".into()))
         );
     }

@@ -3437,7 +3437,8 @@ describe("sidebar worktrees", () => {
 });
 
 describe("agent activity", () => {
-  const at = (h: number, m: number) => new Date(2026, 9, 19, h, m).getTime() / 1000;
+  const now = new Date(); // today's actions say only the time
+  const at = (h: number, m: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).getTime() / 1000;
   const act = (what: string, h: number, m: number, more = {}) => ({
     at: at(h, m),
     client: "Claude Code",
@@ -3474,8 +3475,9 @@ describe("agent activity", () => {
   });
 
   test("failed_action_shows_detail: inline, in the error colour", async () => {
-    w.mockAgents = [act("restarted api", 14, 2, { ok: false, detail: "No process api" })];
+    w.mockAgents = [act("couldn't restart api", 14, 2, { ok: false, detail: "No process api" })];
     await refreshed();
+    expect(lines()).toEqual(["Claude Code couldn't restart api · 14:02"]);
     const d = $("#site .agents .row .agent-detail");
     expect([d.textContent, d.classList.contains("error-text")]).toEqual(["No process api", true]);
     w.mockAgents = [];

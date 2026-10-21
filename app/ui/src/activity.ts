@@ -285,11 +285,13 @@ $("#rows").addEventListener("keydown", (e: KeyboardEvent) => {
   }
 });
 
-/** "Claude Code restarted api", its app and time; a failure says why, inline. Not a link. */
+/** "Claude Code restarted api", its app and time; a failure says why, inline: "Claude Code
+ * couldn't restart api: <reason>" (control.rs words it). Not a link. */
 function agentRow(a: AgentAction) {
   const tr = document.createElement("tr");
-  const what = td(`${a.client} ${a.what}`, "act-name");
-  if (!a.ok && a.detail) {
+  const failed = !a.ok && a.detail;
+  const what = td(`${a.client} ${a.what}${failed ? ":" : ""}`, "act-name");
+  if (failed) {
     const d = document.createElement("span");
     d.className = "act-detail agent-detail error-text";
     d.textContent = a.detail;
