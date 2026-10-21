@@ -4,6 +4,7 @@ import { ownError, shown } from "./live";
 import { NAMES, editor, summary } from "./hooksform";
 import { bubbleKeys, confirmInRow } from "./confirm";
 import { icon } from "./icons";
+import { fileManager, keys, mod } from "./platform";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -1267,7 +1268,7 @@ export function drawMeta() {
     };
     // A stopped server can't answer: the address looks and acts off.
     link.classList.toggle("off", !snap.running);
-    link.title = snap.running ? "Open in browser (⌘O)" : "Start Anvil to open this address";
+    link.title = snap.running ? keys("Open in browser (⌘O)") : "Start Anvil to open this address";
     if (!securing.has(s.name)) addr.append(lockOf(s.secure));
     addr.append(link);
     if (securing.has(s.name)) {
@@ -1586,12 +1587,12 @@ function drawOpenWith(root) {
       .split("/")
       .pop()
       .replace(/\.app$/, "");
-  const apps = { finder: "Finder", terminal: label(snap.terminal ?? "Terminal"), editor: snap.editor && label(snap.editor) };
+  const apps = { finder: fileManager, terminal: label(snap.terminal ?? "Terminal"), editor: snap.editor && label(snap.editor) };
   for (const b of root.querySelectorAll(".open-with [data-open]")) {
     const name = apps[b.dataset.open];
     b.hidden = !name;
     if (!name) continue;
-    b.title = `Open in ${name}${b.dataset.open === "editor" ? " (⌘E)" : ""}`;
+    b.title = `Open in ${name}${b.dataset.open === "editor" ? keys(" (⌘E)") : ""}`;
     b.setAttribute("aria-label", String(b.title));
     // Plain outline icons here, like the rest of the toolbar; the app's name is in the tooltip.
   }
@@ -2892,7 +2893,8 @@ function runAction(name) {
 window.__TAURI__.event?.listen("menu", (e) => runAction(e.payload));
 
 document.addEventListener("keydown", (e) => {
-  if (!e.metaKey || e.shiftKey || e.altKey) return;
+  // ⌘ on macOS, Ctrl on Windows; Ctrl+A/C/V/X/Z aren't shortcuts here, so editing keeps them.
+  if (!mod(e) || e.shiftKey || e.altKey) return;
   // In text fields only the app-wide keys apply; the rest belong to editing.
   const typing = (e.target as HTMLElement).closest("input, textarea, select");
   const name = TAB_KEYS[e.key]

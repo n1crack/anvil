@@ -11,6 +11,7 @@ contain breaking changes.
 
 - Anvil needs macOS 12 or later; it no longer installs on older versions, where its web server and PHP don't run.
 - On a Mac too old for them, MySQL (macOS 14), PostgreSQL (15), Mailpit (13) and Node.js 24 or later (13.5) say so before downloading instead of failing to start.
+- Windows: the main window's shortcuts work with Ctrl, and Settings › Shortcuts and tooltips say Ctrl and File Explorer instead of ⌘ and Finder.
 - Settings › Plugins is now Settings › Features: they come with Anvil and only need turning on.
 - Settings › Features › Request log: on as before; off, the web server keeps no request logs and apps lose the Requests tab.
 - Unfinished setup is one titlebar button; it lists each step and says which one asks for your password before anything runs.

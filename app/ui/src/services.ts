@@ -25,6 +25,7 @@ import {
 import { icon } from "./icons";
 import { late } from "./late";
 import { picker } from "./picker";
+import { fileManager, keys } from "./platform";
 import { confirmPop } from "./processes";
 
 /* Services in the main window: list in the sidebar, details on the right, and
@@ -140,7 +141,7 @@ export function renderModes() {
   $("#svc-running").title = running ? `${running} running` : "";
   const apps = mode === "apps";
   $("#search").placeholder = apps ? "Search applications" : "Search services";
-  $("#add").title = apps ? "Add applications" : "Add a service (⌘N)";
+  $("#add").title = apps ? "Add applications" : keys("Add a service (⌘N)");
   $("#add").setAttribute("aria-label", $("#add").title);
   $("#list").setAttribute("aria-label", apps ? "Applications" : "Services");
 }
@@ -184,7 +185,7 @@ async function serviceMenu(svc) {
   ];
   if (svc.web && svc.running)
     items.push(item(svc.kind === "mailpit" ? "Open Inbox" : "Open Web Console", () => invoke("open_url", { url: svc.web }).catch(fail)));
-  items.push(item("Show Data in Finder", () => invoke("open_service", { id: svc.id, what: "data" }).catch(fail)));
+  items.push(item(`Show Data in ${fileManager}`, () => invoke("open_service", { id: svc.id, what: "data" }).catch(fail)));
   if (svc.running) items.push(item("Show Log in Processes", () => invoke("show_processes", { select: `service:${svc.id}` }).catch(fail)));
   items.push(
     M.PredefinedMenuItem.new({ item: "Separator" }),
@@ -310,7 +311,7 @@ export function renderService() {
   }
   // The data folder opens in Finder: the outline folder icon, as on an app's page.
   const data = $('[data-svc-open="data"]', root);
-  data.title = `Show ~/.anvil/data/${svc.id} in Finder`;
+  data.title = `Show ~/.anvil/data/${svc.id} in ${fileManager}`;
   data.setAttribute("aria-label", String(data.title));
   inbox.onclick = () => invoke("open_url", { url: svc.web }).catch((e) => showError(String(e)));
   data.onclick = () => invoke("open_service", { id: svc.id, what: "data" }).catch((e) => showError(String(e)));

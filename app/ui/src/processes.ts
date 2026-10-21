@@ -2,6 +2,7 @@ import type { AgentAction, Container, Overview } from "./types";
 import { $, el, invoke, mode, popAt, renderSite, selected, showError, showTab, snap, tab } from "./app";
 import { late } from "./late";
 import { clock, shown } from "./live";
+import { keys } from "./platform";
 
 /* An app's processes as the Overview and the header see them: the backend's overview
  * (rows, one-off scripts, Docker Compose containers), the header's Dev start/stop, one
@@ -276,13 +277,13 @@ export function drawProcs(name) {
   const devTab = !$('#site .tabs [data-tab="dev"]')?.hidden;
   if (dev.length) {
     const dots: [string, string][] = dev.map((r) => [r.name, r.running ? "on" : r.crashed ? "bad" : ""]);
-    box.append(summaryLine("Dev", dots, "dev", "⌘3"));
+    box.append(summaryLine("Dev", dots, "dev", keys("⌘3")));
   }
   const error = o?.docker_error;
   if (error && !containers.length) box.append(composeError(error, o!.compose_file));
   else if (compose) {
     const dots: [string, string][] = containers.map((c) => [c.service, DOT[containerState(c)]]);
-    const line = summaryLine("Containers", dots, "containers", devTab ? "" : "⌘3", error && composeBrief(error, o!.compose_file));
+    const line = summaryLine("Containers", dots, "containers", devTab ? "" : keys("⌘3"), error && composeBrief(error, o!.compose_file));
     if (error) line.title = error;
     box.append(line);
   }

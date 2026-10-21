@@ -1,4 +1,5 @@
 /* Terminal output, shared by the main window's console and the Processes window. */
+import { keys } from "./platform";
 
 /** Terminal output as a terminal would leave it: progress bars redraw a line with \r,
  * \b or cursor codes (composer's and npm's ESC[1G ESC[2K); other escape codes don't
@@ -241,7 +242,7 @@ export function linkify<T extends Node>(root: T): T {
     const a = document.createElement("span");
     a.className = "term-link";
     a.dataset.url = m[0];
-    a.title = "⌘-click to open";
+    a.title = keys("⌘-click to open");
     a.append(range.extractContents());
     range.insertNode(a);
   }

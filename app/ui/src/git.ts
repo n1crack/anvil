@@ -1,5 +1,6 @@
 import { $, drawMeta, el, invoke, mode, open, renderSite, selected, showError, showTab, snap, tab } from "./app";
 import { late } from "./late";
+import { keys } from "./platform";
 
 // Git: a button for the git app and a Git group in the Overview.
 
@@ -86,7 +87,7 @@ function drawGit(name) {
     const actions = el("div", "below");
     if (snap.git_client) {
       const btn = el("button", "git-btn", `Open in ${snap.git_client}`);
-      btn.title = "⌘G";
+      btn.title = keys("⌘G");
       btn.onclick = () => open("git");
       actions.append(btn);
     }
