@@ -61,6 +61,22 @@ describe("setup", () => {
     expect(calls("setup_fix").at(-1)![1]).toEqual({ step: "git" });
     expect($("#setup").hidden).toBe(true);
   });
+
+  test("Install Node.js when an app needs it and none is installed", async () => {
+    w.mockSetup.node = false;
+    (w as any).refresh();
+    await wait(80);
+    expect($$("#setup button").map((b) => b.textContent)).toEqual(["Install Node.js"]);
+    w.mockDelay = { setup_fix: 60 };
+    ($$("#setup button")[0] as HTMLElement).click();
+    await wait(10);
+    expect($("#setup button").textContent).toBe("Installing Node.js…");
+    w.mockSetup.node = true;
+    await wait(120);
+    w.mockDelay = {};
+    expect(calls("setup_fix").at(-1)![1]).toEqual({ step: "node" });
+    expect($("#setup").hidden).toBe(true);
+  });
 });
 
 describe("sidebar menu", () => {
