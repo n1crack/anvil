@@ -82,6 +82,7 @@ contain breaking changes.
 - Logs and Requests say in red when a log can't be read, instead of looking empty; Packages' and Resources' errors line up with the tab.
 - Requests: the filters wrap onto a second line in a narrow window instead of running off the edge; their reset reads Clear Filters, so it isn't mistaken for deleting the log.
 - Processes: a row says Restarting… or Stopping… while its Restart or Stop runs, instead of looking unchanged.
+- Processes: a log with nothing in it says No output yet instead of an empty black pane.
 
 ## [0.2.1] - 2026-10-21
 

@@ -326,6 +326,7 @@ export function select(key) {
   logStyle = undefined;
   logToken++;
   $("#log").textContent = "";
+  delete $("#log").dataset.empty; // said only once a read found nothing
   logView.end();
   $("#pane").hidden = $("#split").hidden = !key;
   $("#log-title").textContent = key ? `${nameOf(key)} · log` : "";
@@ -358,6 +359,7 @@ export async function tail() {
     if (tailing === token) tailing = null;
   }
   if (token !== logToken) return;
+  log.dataset.empty = "No output yet.";
   // A file that shrank (cleared or rotated): read it again from the start.
   if (page.end_offset < logFrom) {
     logFrom = 0;

@@ -177,6 +177,8 @@ describe("processes tabs", () => {
     await wait(60);
     expect(w.actCalls.filter((c: any) => c[0] === "activity_log_clear").at(-1)[1]).toEqual({ key: "shop@queue" });
     expect($("#log").textContent).toBe("");
+    // The empty pane says so (CSS shows data-empty).
+    expect($("#log").dataset.empty).toBe("No output yet.");
     w.logCleared = false;
   });
 

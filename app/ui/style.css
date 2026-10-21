@@ -3461,6 +3461,9 @@ body.activity {
   -webkit-user-select: text;
 }
 
+/* A log with nothing in it says so, as the Logs tab does. */
+.act-log:empty::before { content: attr(data-empty); color: #8d959f; }
+
 /* A small confirm bubble next to the button that asked. */
 /* A bubble under its button (popAt in app.js). */
 .pop {
