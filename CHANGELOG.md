@@ -78,6 +78,7 @@ contain breaking changes.
 - Anvil frees the main window's memory after it has been closed for 10 minutes; opening it again shows the same app and tab.
 - Anvil uses much less CPU while it starts with many apps.
 - Less CPU while an app starts.
+- Less CPU while the Requests tab is open and no requests come in.
 
 ## [0.2.1] - 2026-10-21
 

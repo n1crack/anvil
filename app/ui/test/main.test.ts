@@ -1535,6 +1535,11 @@ describe("requests", () => {
     await req.tick();
     expect(calls("requests_tail").length).toBe(n);
   });
+
+  test("the tab looks 4 times a second after a request, slowing to once a second while none come", async () => {
+    const { nextIn } = await import("../src/requests");
+    expect([0, 1, 2, 3, 50, 2000].map(nextIn)).toEqual([250, 500, 1000, 1000, 1000, 1000]);
+  });
 });
 
 describe("polls and races", () => {
