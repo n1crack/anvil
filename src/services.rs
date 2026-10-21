@@ -938,6 +938,41 @@ pub fn env_lines(cfg: &Config, id: &str) -> String {
     }
 }
 
+/// Write the Connect lines (`env_lines`, pointed at `database` as the page shows them) into
+/// `dir`'s existing `.env`: those keys' lines are replaced or appended, the rest stays.
+/// Returns the keys written.
+pub fn write_env(
+    cfg: &Config,
+    id: &str,
+    dir: &Path,
+    database: Option<&str>,
+) -> Result<Vec<String>> {
+    kind_of(cfg, id)?;
+    let env = dir.join(".env");
+    if !env.is_file() {
+        bail!("There is no .env in {}", dir.display());
+    }
+    let mut pairs: Vec<(String, String)> = env_lines(cfg, id)
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect();
+    if let Some(db) = database.filter(|d| !d.is_empty()) {
+        for (k, v) in &mut pairs {
+            if k == "DATABASE_URL" {
+                *v = format!(
+                    "{}/{db}",
+                    v.rsplit_once('/').map_or(v.as_str(), |(base, _)| base)
+                );
+            }
+        }
+        pairs.push(("DB_DATABASE".into(), db.into()));
+    }
+    let text = std::fs::read_to_string(&env)?;
+    std::fs::write(&env, crate::create::set_env(&text, &pairs))?;
+    Ok(pairs.into_iter().map(|(k, _)| k).collect())
+}
+
 pub fn set_enabled(cfg: &mut Config, id: &str, enabled: bool) -> Result<()> {
     kind_of(cfg, id)?;
     cfg.services.entry(id.into()).or_default().enabled = enabled;
@@ -1537,6 +1572,30 @@ mod tests {
             .collect();
         assert!(args.windows(2).any(|w| w == ["--listen", "127.0.0.1:8026"]));
         assert!(args.windows(2).any(|w| w == ["--smtp", "127.0.0.1:1025"]));
+    }
+
+    #[test]
+    fn write_env_sets_the_connect_keys_and_keeps_the_rest() {
+        let mut cfg = Config::default();
+        let id = insert(&mut cfg, "postgres", Some("pg"), Some(5433), None).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        assert!(write_env(&cfg, &id, dir.path(), None).is_err());
+        let env = dir.path().join(".env");
+        fs::write(&env, "APP_KEY=x\nDB_CONNECTION=sqlite\n# DB_HOST=db\n").unwrap();
+        let keys = write_env(&cfg, &id, dir.path(), Some("shop")).unwrap();
+        assert!(keys.contains(&"DB_DATABASE".to_string()));
+        let text = fs::read_to_string(&env).unwrap();
+        for line in [
+            "APP_KEY=x",
+            "DB_CONNECTION=pgsql",
+            "DB_HOST=127.0.0.1",
+            "DB_PORT=5433",
+            "DATABASE_URL=postgres://postgres@127.0.0.1:5433/shop",
+            "DB_DATABASE=shop",
+        ] {
+            assert!(text.lines().any(|l| l == line), "{line} in {text}");
+        }
+        assert!(!text.contains("sqlite") && !text.contains("DB_HOST=db"));
     }
 
     #[test]

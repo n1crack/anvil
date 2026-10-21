@@ -347,7 +347,7 @@ fn npx_args(kind: &str, name: &str, opts: &Options) -> Vec<String> {
 
 /// `text` (a .env) with each pair set: an existing or commented-out line for
 /// the key is replaced, a missing one appended.
-fn set_env(text: &str, pairs: &[(String, String)]) -> String {
+pub(crate) fn set_env(text: &str, pairs: &[(String, String)]) -> String {
     let mut lines: Vec<String> = text.lines().map(Into::into).collect();
     for (k, v) in pairs {
         let line = format!("{k}={v}");

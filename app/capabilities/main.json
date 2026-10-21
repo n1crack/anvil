@@ -72,6 +72,7 @@
     "allow-service-data",
     "allow-service-kinds",
     "allow-service-run",
+    "allow-service-write-env",
     "allow-services",
     "allow-set-app",
     "allow-set-app-hooks",

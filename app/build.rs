@@ -112,6 +112,7 @@ const COMMANDS: &[&str] = &[
     "service_run",
     "set_service_tags",
     "set_service_apps",
+    "service_write_env",
     "open_service",
     "add_service",
     "remove_service",

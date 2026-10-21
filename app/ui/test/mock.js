@@ -1188,6 +1188,9 @@ const mockHandle = (cmd, a) => {
     case "share_stop":
       delete mockSnap.shares[a.site];
       return mockSnap;
+    case "service_write_env":
+      if (a.site === "blog") throw "There is no .env in ~/Sites/blog";
+      return ["DB_CONNECTION", "DB_HOST"];
     case "resources":
       return window.mockResources ?? null;
     case "clean":

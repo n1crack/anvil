@@ -127,6 +127,10 @@ export function browseButton(name: string, database?: string, cls = "inline-acti
 /** Browse is offered while the viewer is on and served. */
 const browsable = () => !!snap?.db_viewer && !snap.db_viewer.problem;
 
+/** Apps a service can be listed for: parked or linked, as New application offers; not a
+ * worktree (it shares its app's) nor an alias (another name for an app's folder). */
+const ownApp = (s) => late.mayHaveWorktrees(s);
+
 export function renderModes() {
   for (const b of document.querySelectorAll<HTMLElement>(".modes [role=tab]")) {
     b.setAttribute("aria-selected", String(b.dataset.mode === mode));
@@ -364,7 +368,7 @@ export function renderService() {
   const pick = el("select");
   pick.setAttribute("aria-label", "Add an application");
   pick.add(new Option(svc.apps.length ? "Add…" : "Choose an application…", ""));
-  for (const s of snap.sites.filter((s) => !s.linked && !svc.apps.includes(s.name))) {
+  for (const s of snap.sites.filter((s) => ownApp(s) && !svc.apps.includes(s.name))) {
     pick.add(new Option(`${s.name}.${snap.tld}`, s.name));
   }
   pick.onchange = () => pick.value && saveApps([...svc.apps, pick.value]);
@@ -391,6 +395,7 @@ export function renderService() {
   const env = envFor(svc);
   $(".svc-env", root).textContent = env;
   $(".svc-copy", root).onclick = (e) => copy(env, e.currentTarget);
+  drawWrite(svc, root);
 
   const clients = $(".svc-clients", root);
   clients.hidden = svc.clients.length < 2;
@@ -406,6 +411,45 @@ export function renderService() {
   renderContents(svc, root);
   if (browsable() && (svc.kind === "mysql" || svc.kind === "postgres")) $(".svc-contents-head", root).append(browseButton(svc.id));
   $(".svc-remove", root).onclick = (e) => removeService(svc, e.currentTarget as HTMLElement);
+}
+
+const written = new Map<string, string>(); // "service/app" -> what the last write said
+
+/** Under Connect: write its lines into each listed app's .env, asked first with the keys. */
+function drawWrite(svc, root) {
+  const box = $(".svc-write", root);
+  const apps = svc.apps.filter((a) => snap.sites.some((s) => s.name === a));
+  box.hidden = !apps.length;
+  box.replaceChildren();
+  const keys = envFor(svc)
+    .split("\n")
+    .map((l) => l.split("=")[0])
+    .filter(Boolean);
+  for (const a of apps) {
+    const b = el("button", "inline-action", `Write to ${a}’s .env…`);
+    b.onclick = () =>
+      confirmPop(
+        b,
+        `Set ${keys.join(", ")} in ${a}’s .env? Its other lines stay.`,
+        "Write",
+        async () => {
+          try {
+            await invoke("service_write_env", { id: svc.id, site: a, database: chosenDb[svc.id] ?? null });
+            written.set(`${svc.id}/${a}`, "Written. Running processes get it when they restart.");
+          } catch (e) {
+            written.set(`${svc.id}/${a}`, `!${String(e)}`);
+          }
+          if (root.dataset.service === svc.id) drawWrite(svc, root);
+        },
+        [],
+        "left",
+      );
+    const said = written.get(`${svc.id}/${a}`);
+    const line = el("div", "svc-write-line");
+    line.append(b);
+    if (said) line.append(el("span", said.startsWith("!") ? "error" : "muted", said.replace(/^!/, "")));
+    box.append(line);
+  }
 }
 
 /** The line under the name, as an app's: kind · version · port · data size (once
@@ -523,7 +567,7 @@ export async function openAddService(want?: { kind: string; version: string }) {
   }
   const app = $("#svc-app");
   app.replaceChildren(new Option("None", ""));
-  for (const s of snap.sites.filter((s) => !s.linked)) app.add(new Option(`${s.name}.${snap.tld}`, s.name));
+  for (const s of snap.sites.filter(ownApp)) app.add(new Option(`${s.name}.${snap.tld}`, s.name));
   // Adding from an application's page? Start with that application.
   app.value = mode === "apps" && selected ? selected : "";
   svcPicker.groups.splice(0, Infinity, ...new Set(svcKinds.map((k) => k.category)));
@@ -748,6 +792,7 @@ function drawContents(svc, root, c) {
       const env = envFor(svc);
       $(".svc-env", root).textContent = env;
       $(".svc-copy", root).onclick = (e) => copy(env, e.currentTarget);
+      drawWrite(svc, root);
     };
     const system = c.databases.filter(([n]) => SYSTEM_DBS.has(n));
     for (const [name, size] of c.databases.filter(([n]) => !SYSTEM_DBS.has(n))) {

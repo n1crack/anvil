@@ -1093,6 +1093,38 @@ describe("service page", () => {
     await wait(40);
   });
 
+  test("Applications says it changes no .env; Write to .env asks with the keys and says how it went", async () => {
+    const elsewhere = w.mockSite("notes2", "laravel", { linked: true, path: "/Users/x/Elsewhere/notes2", parked_in: null });
+    w.mockSnap.sites.push(elsewhere);
+    const { call } = await import("../src/app");
+    try {
+      await call("state");
+      await show("mysql");
+      expect($(".svc-apps-hint").textContent).toContain("Their .env isn’t changed");
+      // A linked app can be picked; an alias (admin.shop: shop's folder) can't.
+      const picks = $$("#site .svc-apps select option").map((o) => o.textContent);
+      expect(picks).toContain("notes2.test");
+      expect(picks).not.toContain("admin.shop.test");
+      const write = $(".svc-write button");
+      expect(write.textContent).toBe("Write to shop’s .env…");
+      write.click();
+      await wait();
+      expect($(".pop-confirm p").textContent).toBe(
+        "Set DB_CONNECTION, DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD in shop’s .env? Its other lines stay.",
+      );
+      expect(calls("service_write_env")).toEqual([]);
+      $$(".pop-confirm button")
+        .find((b) => b.textContent === "Write")!
+        .click();
+      await wait();
+      expect(calls("service_write_env").at(-1)![1]).toEqual({ id: "mysql", site: "shop", database: null });
+      expect($(".svc-write .muted").textContent).toBe("Written. Running processes get it when they restart.");
+    } finally {
+      w.mockSnap.sites.pop();
+      await call("state");
+    }
+  });
+
   test("Drop and Remove ask in a bubble, no dialog; Remove's two answers are labelled", async () => {
     await show("mysql");
     const drop = $$(".svc-contents .svc-row").find((r) => r.querySelector(".proc-name")?.textContent === "shop")!;

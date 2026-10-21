@@ -312,6 +312,7 @@
       <div class="row"><dt>Applications</dt><dd class="chips svc-apps"></dd></div>
       <div class="row"><dt>Tags</dt><dd class="chips svc-tags"></dd></div>
     </dl>
+    <p class="procs-note svc-apps-hint">Applications listed here show it on their Overview and Resources. Their .env isn’t changed: copy the lines under Connect, or write them in.</p>
 
     <h3 class="res-sub connect-head">Connect <span class="muted">.env</span> <select class="svc-db" aria-label="Database for the .env lines" hidden></select></h3>
     <div class="env">
@@ -320,6 +321,8 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.5"/><path d="M10.75 5.25v-2a1 1 0 0 0-1-1h-6.5a1 1 0 0 0-1 1v6.5a1 1 0 0 0 1 1h2"/></svg>
       </button>
     </div>
+
+    <div class="svc-write" hidden></div>
 
     <div class="below"><button class="link-quiet svc-remove">Remove Service…</button></div>
   </template>
@@ -352,7 +355,8 @@
       </label>
       <label class="field">
         <span>Application</span>
-        <select id="svc-app"></select>
+        <select id="svc-app" aria-describedby="svc-app-note"></select>
+        <small id="svc-app-note">Listed with the service; its .env isn’t changed. The service’s page has the lines to use.</small>
       </label>
       <section class="svc-license" aria-labelledby="svc-license-title">
         <h3 id="svc-license-title" class="new-opts-title">License</h3>

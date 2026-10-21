@@ -3049,6 +3049,18 @@ fn set_service_apps(
     services(app)
 }
 
+/// The service's Connect lines into `site`'s .env, asked for on the service's page.
+/// Returns the keys written.
+#[tauri::command(async)]
+fn service_write_env(id: String, site: String, database: Option<String>) -> Res<Vec<String>> {
+    let cfg = anvil::load().map_err(err)?;
+    let s = anvil::sites(&cfg)
+        .into_iter()
+        .find(|s| s.name == site)
+        .ok_or_else(|| format!("There's no application called {site}"))?;
+    anvil::services::write_env(&cfg, &id, &s.path, database.as_deref()).map_err(err)
+}
+
 /// `what` is "data": the service's data folder in Finder.
 #[tauri::command(async)]
 fn open_service(id: String, what: String) -> Res<()> {
@@ -4758,6 +4770,7 @@ fn main() {
             service_run,
             set_service_tags,
             set_service_apps,
+            service_write_env,
             open_service,
             add_service,
             remove_service,
