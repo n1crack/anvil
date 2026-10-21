@@ -109,11 +109,13 @@ jobs:
 
       - name: Build the CLI
         run: |
-          # The universal one bundle-cli.sh made for the app; one download, like the .dmg.
+          # The universal one from inside the app: signed with the Developer ID and
+          # notarized with it, so a browser download opens (app/binaries' copy is
+          # ad-hoc signed). One download, like the .dmg.
           mkdir -p dist
           stage="anvil-$VERSION-universal-apple-darwin"
           mkdir -p "$stage"
-          cp app/binaries/anvil-universal-apple-darwin "$stage/anvil"
+          cp target/universal-apple-darwin/release/bundle/macos/Anvil.app/Contents/MacOS/anvil "$stage/anvil"
           cp LICENSE README.md CHANGELOG.md "$stage/"
           tar -czf "dist/$stage.tar.gz" "$stage"
 

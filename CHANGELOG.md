@@ -12,6 +12,14 @@ contain breaking changes.
 - Windows (beta): the app and the CLI for Windows 10 and 11, with a per-user installer. `.test` addresses, HTTPS, PHP, Node.js, Go, .NET, MySQL, PostgreSQL, Redis (Garnet), Mailpit, S3 storage, dev processes and worktrees; Python and Rust come later.
 - Settings › Performance on Windows: whether your projects are on a Dev Drive, which antivirus scanning slows down less.
 
+### Fixed
+
+- Terminal setup is offered again when the shell's PATH line points to another Anvil folder.
+- New application: a folder can be chosen when none is parked, and the folders of linked apps are offered.
+- New application: the steps' spinner no longer starts over while the app is created.
+- Dev › Configure: Add and × of a new process sit side by side.
+- `anvil uninstall` run a second time no longer says `~/.anvil` is kept.
+
 ## [0.2.0] - 2026-10-21
 
 The first public release, a beta for macOS: a desktop app that carries the `anvil` CLI.
