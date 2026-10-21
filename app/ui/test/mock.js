@@ -419,7 +419,16 @@ window.mockServices = [
     else if (i === 58) trace.push("#58 {main}");
     else trace.push(vend(i).replace(/^#\d+/, "#" + i));
   }
-  const E = (min, level, message, extra = {}) => ({ time: ts(min), env: "local", level, message, context: null, trace: [], ...extra });
+  // Lowercase, as src/logs.rs sends the level.
+  const E = (min, level, message, extra = {}) => ({
+    time: ts(min),
+    env: "local",
+    level: level.toLowerCase(),
+    message,
+    context: null,
+    trace: [],
+    ...extra,
+  });
   const err = "Target class [request] does not exist.";
   // The same exception 24 times over three hours, as Laravel writes it: the context only
   // repeats it, and no frame of the trace is the app's.
