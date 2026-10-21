@@ -88,6 +88,7 @@ export interface Snapshot {
   php_ext: Record<string, string[]>;
   /** The extensions built for each version that has some on; one on without a build loads nothing. */
   php_ext_built: Record<string, string[]>;
+  php_no_mysqli?: string[];
   /** Settings › Features › Tunnel: Overview offers Share. */
   tunnel: boolean;
   /** Settings › Features › Request log: apps' Requests tabs. */

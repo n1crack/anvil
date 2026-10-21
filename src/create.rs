@@ -12,10 +12,143 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Kinds that can be created, in the order the dialog shows them.
-pub const TEMPLATES: [&str; 15] = [
-    "laravel", "statamic", "symfony", "php", "static", "next", "nuxt", "vite", "node", "rust",
-    "go", "dotnet", "django", "fastapi", "flask",
+pub const TEMPLATES: [&str; 16] = [
+    "laravel",
+    "statamic",
+    "symfony",
+    "wordpress",
+    "php",
+    "static",
+    "next",
+    "nuxt",
+    "vite",
+    "node",
+    "rust",
+    "go",
+    "dotnet",
+    "django",
+    "fastapi",
+    "flask",
 ];
+
+/// WordPress's latest release; it publishes a SHA-1 (and an MD5) beside it.
+const WORDPRESS: &str = "https://wordpress.org/latest.tar.gz";
+
+/// Prints WordPress's eight keys and salts, a line each: 64 characters from its own
+/// generator's set less `'` and `\`, so each fits a single-quoted PHP string as it is.
+const SALTS_PHP: &str = r#"$c = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_[]{}<>~`+=,.;:/?|';
+for ($k = 0; $k < 8; $k++) { $s = ''; for ($i = 0; $i < 64; $i++) $s .= $c[random_int(0, strlen($c) - 1)]; echo $s, PHP_EOL; }"#;
+
+const SALT_NAMES: [&str; 8] = [
+    "AUTH_KEY",
+    "SECURE_AUTH_KEY",
+    "LOGGED_IN_KEY",
+    "NONCE_KEY",
+    "AUTH_SALT",
+    "SECURE_AUTH_SALT",
+    "LOGGED_IN_SALT",
+    "NONCE_SALT",
+];
+
+/// A new WordPress site's wp-config.php: its database from `.env` (or the environment,
+/// which Anvil sets for a worktree), so a worktree of it gets a database of its own; its
+/// address the one it is opened at; `salts` (8 lines) as its keys.
+fn wp_config(salts: &str) -> String {
+    let keys: String = SALT_NAMES
+        .iter()
+        .zip(salts.lines())
+        .map(|(k, v)| format!("define( '{k}', '{v}' );\n"))
+        .collect();
+    format!(
+        r#"<?php
+/**
+ * WordPress's settings, as Anvil wrote them. The database comes from .env, or from the
+ * environment, which wins: Anvil sets it for a git worktree, so the worktree uses a
+ * database of its own.
+ */
+
+function anvil_env( $key, $default = '' ) {{
+	static $file = null;
+	if ( null === $file ) {{
+		$file  = array();
+		$lines = is_readable( __DIR__ . '/.env' ) ? file( __DIR__ . '/.env', FILE_IGNORE_NEW_LINES ) : array();
+		foreach ( $lines as $line ) {{
+			$pair = explode( '=', $line, 2 );
+			if ( 2 === count( $pair ) && '#' !== substr( ltrim( $line ), 0, 1 ) ) {{
+				$file[ trim( $pair[0] ) ] = trim( trim( $pair[1] ), '"\'' );
+			}}
+		}}
+	}}
+	$value = getenv( $key );
+	if ( false === $value && isset( $_SERVER[ $key ] ) ) {{
+		$value = $_SERVER[ $key ];
+	}}
+	return false !== $value ? $value : ( isset( $file[ $key ] ) ? $file[ $key ] : $default );
+}}
+
+define( 'DB_NAME', anvil_env( 'DB_DATABASE', 'wordpress' ) );
+define( 'DB_USER', anvil_env( 'DB_USERNAME', 'root' ) );
+define( 'DB_PASSWORD', anvil_env( 'DB_PASSWORD' ) );
+define( 'DB_HOST', anvil_env( 'DB_HOST', '127.0.0.1' ) . ':' . anvil_env( 'DB_PORT', '3306' ) );
+define( 'DB_CHARSET', 'utf8mb4' );
+define( 'DB_COLLATE', '' );
+
+{keys}
+$table_prefix = 'wp_';
+
+define( 'WP_ENVIRONMENT_TYPE', 'local' );
+define( 'WP_DEBUG', false );
+
+// WordPress keeps its address in the database; here it follows the one it is opened at
+// (HTTPS on or off, an alias, a worktree's own address).
+if ( isset( $_SERVER['HTTP_HOST'] ) ) {{
+	$anvil_url = ( isset( $_SERVER['HTTPS'] ) && 'off' !== $_SERVER['HTTPS'] ? 'https' : 'http' ) . '://' . $_SERVER['HTTP_HOST'];
+	define( 'WP_HOME', $anvil_url );
+	define( 'WP_SITEURL', $anvil_url );
+}}
+
+if ( ! defined( 'ABSPATH' ) ) {{
+	define( 'ABSPATH', __DIR__ . '/' );
+}}
+
+require_once ABSPATH . 'wp-settings.php';
+"#
+    )
+}
+
+/// A must-use plugin sending WordPress's mail (PHP's mail() otherwise, which goes
+/// nowhere here) to Anvil's mail catcher while it catches the site's: the `MAIL_*` Anvil
+/// passes PHP then.
+const WP_MAIL_PLUGIN: &str = r#"<?php
+/**
+ * Plugin Name: Anvil mail
+ * Description: Sends mail to Anvil's mail catcher while it catches this site's mail.
+ */
+
+add_action(
+	'phpmailer_init',
+	function ( $mailer ) {
+		$get = function ( $key ) {
+			$value = getenv( $key );
+			return false !== $value ? $value : ( isset( $_SERVER[ $key ] ) ? $_SERVER[ $key ] : '' );
+		};
+		if ( '' === $get( 'MAIL_HOST' ) ) {
+			return;
+		}
+		$mailer->isSMTP();
+		$mailer->Host        = $get( 'MAIL_HOST' );
+		$mailer->Port        = (int) $get( 'MAIL_PORT' );
+		$mailer->SMTPAuth    = '' !== $get( 'MAIL_USERNAME' );
+		$mailer->Username    = $get( 'MAIL_USERNAME' );
+		$mailer->Password    = $get( 'MAIL_PASSWORD' );
+		$mailer->SMTPSecure  = '';
+		$mailer->SMTPAutoTLS = false;
+	}
+);
+"#;
+
+/// What git leaves out of a new WordPress site: its database settings and uploads.
+const WP_GITIGNORE: &str = ".env\n/wp-content/uploads/\n/wp-content/upgrade/\n";
 
 const FASTAPI_MAIN: &str = r#"from fastapi import FastAPI
 
@@ -48,13 +181,14 @@ fn django_settings(tld: &str) -> String {
 /// What each template needs installed first: a PHP version or a runtime id.
 pub fn needs(kind: &str) -> Option<&'static str> {
     match kind {
-        "laravel" | "statamic" | "symfony" => Some("php"),
+        "laravel" | "statamic" | "symfony" | "wordpress" => Some("php"),
         k => apps::runtime(k),
     }
 }
 
 /// `needs(kind)` when it isn't installed for an app in `parent` with `opts`: what
 /// `create` refuses on before it starts, so the New sheet can offer installing it.
+/// `mysql` for WordPress without a MySQL service of Anvil's to make its database in.
 pub fn missing(kind: &str, parent: &Path, opts: &Options) -> Option<&'static str> {
     let need = needs(kind)?;
     let has = match need {
@@ -62,7 +196,29 @@ pub fn missing(kind: &str, parent: &Path, opts: &Options) -> Option<&'static str
         "node" => opts.contains_key("node") || apps::runtime_version("node", parent).is_some(),
         rt => apps::runtime_version(rt, parent).is_some(),
     };
-    (!has).then_some(need)
+    if !has {
+        return Some(need);
+    }
+    (kind == "wordpress" && !opts.contains_key("db")).then_some("mysql")
+}
+
+/// Anvil's services of `kinds`, as the Database choice offers them: `service:<id>`.
+fn db_services(cfg: &Config, kinds: &[&str]) -> Vec<(String, String)> {
+    services::instances(cfg)
+        .into_iter()
+        .filter_map(|id| {
+            let kind = services::kind_of(cfg, &id)
+                .ok()
+                .filter(|k| kinds.contains(k))?;
+            let name = services::name(kind);
+            let label = if id == kind {
+                name.to_string()
+            } else {
+                format!("{name} · {id}")
+            };
+            Some((format!("service:{id}"), label))
+        })
+        .collect()
 }
 
 pub(crate) fn composer() -> Result<PathBuf> {
@@ -182,19 +338,21 @@ pub fn options(kind: &str, cfg: &Config) -> Vec<Opt> {
             ));
             // SQLite, or a database in one of Anvil's MySQL or PostgreSQL services.
             let mut db = pick("db", "Database", &[("sqlite", "SQLite")]);
-            for id in services::instances(cfg) {
-                let kind = services::kind_of(cfg, &id).unwrap_or("");
-                if matches!(kind, "mysql" | "postgres") {
-                    let name = services::name(kind);
-                    let label = if id == kind {
-                        name.to_string()
-                    } else {
-                        format!("{name} · {id}")
-                    };
-                    db.choices.push((format!("service:{id}"), label));
-                }
-            }
+            db.choices.extend(db_services(cfg, &["mysql", "postgres"]));
             v.push(db);
+        }
+        // MySQL only: WordPress has no other database without a plugin. None at all
+        // leaves the option out, and `missing` says so.
+        "wordpress" => {
+            let choices = db_services(cfg, &["mysql"]);
+            if let Some((first, _)) = choices.first() {
+                v.push(Opt {
+                    key: "db",
+                    label: "Database",
+                    default: first.clone(),
+                    choices,
+                });
+            }
         }
         "next" => {
             v.push(on_off("ts", "TypeScript"));
@@ -414,6 +572,7 @@ pub fn create(
     }
     match missing(kind, parent, opts) {
         Some("php") => bail!("Install a PHP version first"),
+        Some("mysql") => bail!("Add a MySQL service first, in Services"),
         Some(rt) => bail!("Install {0} in Settings › {0} first", runtimes::name(rt)),
         None => {}
     }
@@ -557,6 +716,45 @@ fn build(
                 composer(&["run-script", "post-create-project-cmd"], dir)?;
             }
         }
+        // WordPress's own release, checked against its published SHA-1. Its install screen
+        // is the first page: the site's title and admin account are WordPress's to ask.
+        "wordpress" => {
+            let v = opts.get("php").context("Install a PHP version first")?;
+            let id = opts
+                .get("db")
+                .and_then(|d| d.strip_prefix("service:"))
+                .context("Add a MySQL service first, in Services")?;
+            if !crate::opcache::has_mysqli(v) {
+                step("PHP’s mysqli")?;
+                writeln!(
+                    &*log,
+                    "WordPress reaches MySQL through mysqli, which Anvil's PHP {v} comes without: building it, once"
+                )?;
+                crate::opcache::build_mysqli(v)?;
+                writeln!(&*log, "mysqli built for PHP {v}")?;
+            }
+            step("Download")?;
+            let sum = published_sum(&format!("{WORDPRESS}.sha1"), "latest.tar.gz")?;
+            crate::fetch_tgz(WORDPRESS, dir, true, Some(&sum))?;
+            writeln!(&*log, "WordPress {} (SHA-1 checked)", wp_version(dir))?;
+            step("Set up")?;
+            let pairs = database_env(name, id, log)?;
+            fs::write(dir.join(".env"), set_env("", &pairs))?;
+            let salts = crate::platform::command(crate::php_bin(v))
+                .args(["-n", "-r", SALTS_PHP])
+                .output()
+                .context("failed to run PHP")?;
+            let salts = String::from_utf8_lossy(&salts.stdout);
+            if salts.lines().filter(|l| l.len() == 64).count() != 8 {
+                bail!("PHP {v} made no keys for wp-config.php");
+            }
+            fs::write(dir.join("wp-config.php"), wp_config(&salts))?;
+            let mu = dir.join("wp-content").join("mu-plugins");
+            fs::create_dir_all(&mu)?;
+            fs::write(mu.join("anvil-mail.php"), WP_MAIL_PLUGIN)?;
+            fs::write(dir.join(".gitignore"), WP_GITIGNORE)?;
+            writeln!(&*log, "Open the site to finish WordPress's install")?;
+        }
         "next" | "nuxt" | "vite" => {
             step("Download")?;
             sh(
@@ -692,6 +890,16 @@ fn build(
 /// Point a new Laravel app at a database of its name in Anvil's service `id`,
 /// created there if it can be; migrations then run against it.
 fn use_database(name: &str, dir: &Path, id: &str, log: &fs::File) -> Result<()> {
+    let pairs = database_env(name, id, log)?;
+    let env = dir.join(".env");
+    let text = fs::read_to_string(&env).unwrap_or_default();
+    fs::write(&env, set_env(&text, &pairs))?;
+    Ok(())
+}
+
+/// A database of the new app's name in Anvil's service `id`, created there if it can be,
+/// and the `DB_*` lines that reach it.
+fn database_env(name: &str, id: &str, log: &fs::File) -> Result<Vec<(String, String)>> {
     let cfg = crate::load()?;
     let db = name.replace(['.', '-'], "_");
     writeln!(&*log, "Using the {db} database in {id}")?;
@@ -705,10 +913,16 @@ fn use_database(name: &str, dir: &Path, id: &str, log: &fs::File) -> Result<()> 
         .map(|(k, v)| (k.into(), v.into()))
         .collect();
     pairs.push(("DB_DATABASE".into(), db));
-    let env = dir.join(".env");
-    let text = fs::read_to_string(&env).unwrap_or_default();
-    fs::write(&env, set_env(&text, &pairs))?;
-    Ok(())
+    Ok(pairs)
+}
+
+/// The WordPress release in `dir`, as wp-includes/version.php names it.
+fn wp_version(dir: &Path) -> String {
+    let text = fs::read_to_string(dir.join("wp-includes/version.php")).unwrap_or_default();
+    text.lines()
+        .find_map(|l| l.trim().strip_prefix("$wp_version = '")?.split('\'').next())
+        .unwrap_or("")
+        .to_string()
 }
 
 #[cfg(test)]
@@ -886,6 +1100,68 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout), "100 30\n");
+    }
+
+    #[test]
+    fn wordpress_needs_a_mysql_service() {
+        let mut cfg = Config::default();
+        let parent = Path::new("/nowhere");
+        let php = Options::from([("php".into(), "8.4".into())]);
+        // No MySQL of Anvil's: no Database choice, and the form says what's missing.
+        assert!(!options("wordpress", &cfg).iter().any(|o| o.key == "db"));
+        assert_eq!(missing("wordpress", parent, &Options::new()), Some("php"));
+        assert_eq!(missing("wordpress", parent, &php), Some("mysql"));
+        for (id, kind) in [("pg", "postgres"), ("mysql", "mysql"), ("mysql-2", "mysql")] {
+            cfg.services.insert(
+                id.into(),
+                services::ServiceConfig {
+                    kind: Some(kind.into()),
+                    ..Default::default()
+                },
+            );
+        }
+        let db = options("wordpress", &cfg)
+            .into_iter()
+            .find(|o| o.key == "db")
+            .unwrap();
+        let ids: Vec<&str> = db.choices.iter().map(|c| c.0.as_str()).collect();
+        assert_eq!(ids, ["service:mysql", "service:mysql-2"], "MySQL only");
+        assert_eq!(db.default, "service:mysql");
+        // (No PHP here to offer: the chosen one as the sheet would send it.)
+        let mut full = resolve("wordpress", &cfg, &Options::new()).unwrap();
+        full.extend(php);
+        assert_eq!(missing("wordpress", parent, &full), None);
+        let pg = Options::from([("db".into(), "service:pg".into())]);
+        assert!(resolve("wordpress", &cfg, &pg).is_err());
+    }
+
+    #[test]
+    fn wp_config_reads_its_database_from_the_env() {
+        let salts: String = (0..8)
+            .map(|i| format!("{}\n", i.to_string().repeat(64)))
+            .collect();
+        let text = wp_config(&salts);
+        assert!(text.starts_with("<?php\n"));
+        assert!(text.contains("define( 'DB_NAME', anvil_env( 'DB_DATABASE', 'wordpress' ) );"));
+        assert!(text.contains(
+            "anvil_env( 'DB_HOST', '127.0.0.1' ) . ':' . anvil_env( 'DB_PORT', '3306' )"
+        ));
+        assert!(text.contains(&format!("define( 'AUTH_KEY', '{}' );", "0".repeat(64))));
+        assert!(text.contains(&format!("define( 'NONCE_SALT', '{}' );", "7".repeat(64))));
+        assert!(text.contains("require_once ABSPATH . 'wp-settings.php';"));
+        // What the worktree check looks for: it reads DB_DATABASE.
+        assert!(text.contains("DB_DATABASE"));
+        // The salt alphabet leaves out what would end or escape a PHP string.
+        let set = SALTS_PHP.split('\'').nth(1).unwrap();
+        assert!(!set.contains('\\') && set.len() > 80, "{set}");
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("wp-includes")).unwrap();
+        fs::write(
+            dir.path().join("wp-includes/version.php"),
+            "<?php\n/**\n * @global string $wp_version\n */\n$wp_version = '6.8.3';\n",
+        )
+        .unwrap();
+        assert_eq!(wp_version(dir.path()), "6.8.3");
     }
 
     #[test]

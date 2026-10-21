@@ -29,9 +29,11 @@ const BRANDS: Record<string, string> = {
   flask:
     "M10.773 2.878c-.013 1.434.322 4.624.445 5.734l-8.558 3.83c-.56-.959-.98-2.304-1.237-3.38l-.06.027c-.205.09-.406.053-.494-.088l-.011-.018-.82-1.506c-.058-.105-.05-.252.024-.392a.78.78 0 0 1 .358-.331l9.824-4.207c.146-.064.299-.063.4.004.106.062.127.128.13.327Zm.68 7c.523 1.97.675 2.412.832 2.818l-7.263 3.7a19.35 19.35 0 0 1-1.81-2.83l8.24-3.689Zm12.432 8.786h.003c.283.402-.047.657-.153.698l-.947.37c.037.125.035.319-.217.414l-.736.287c-.229.09-.398-.059-.42-.2l-.025-.125c-4.427 1.784-7.94 1.685-10.696.647-1.981-.745-3.576-1.983-4.846-3.379l6.948-3.54c.721 1.431 1.586 2.454 2.509 3.178 2.086 1.638 4.415 1.712 5.793 1.563l-.047-.233c-.015-.077.007-.135.086-.165l.734-.288a.302.302 0 0 1 .342.086l.748-.288a.306.306 0 0 1 .341.086l.583.89Z",
 };
-// Outline glyphs where a brand mark doesn't fit: plain PHP, Node.js, static files.
+// Outline glyphs where a brand mark doesn't fit: plain PHP, Node.js, static files, and a
+// W in a circle for WordPress.
 const OUTLINES: Record<string, string> = {
   php: "M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 4.5l-3 15",
+  wordpress: "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM7 8.5l2.4 7L12 10l2.6 5.5 2.4-7",
   node: "M12 2.8l8 4.6v9.2l-8 4.6-8-4.6V7.4z",
   static: "M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6",
 };
@@ -47,6 +49,7 @@ const TEMPLATES = [
   ["laravel", "Laravel", "Full-stack PHP framework", "PHP"],
   ["statamic", "Statamic", "Flat-file CMS on Laravel", "PHP"],
   ["symfony", "Symfony", "Modular PHP framework", "PHP"],
+  ["wordpress", "WordPress", "Sites and blogs, on MySQL", "PHP"],
   ["php", "PHP", "Plain PHP, a public folder", "PHP"],
   ["next", "Next.js", "React with server rendering", "JavaScript"],
   ["nuxt", "Nuxt", "Vue with server rendering", "JavaScript"],
@@ -68,7 +71,10 @@ const stepsOf = (kind: string) =>
     ? ["Download", "PHP dependencies", "JS dependencies", "Set up"]
     : ["next", "nuxt", "vite"].includes(kind)
       ? ["Download", "JS dependencies", "Set up"]
-      : ["Set up"];
+      : kind === "wordpress"
+        ? // Its PHP's mysqli is built first where that PHP lacks it.
+          [...(snap.php_no_mysqli?.includes(chosen.php) ? ["PHP’s mysqli"] : []), "Download", "Set up"]
+        : ["Set up"];
 
 export let newKind = localStorage.getItem("newKind") ?? "laravel";
 if (!TEMPLATES.some((t) => t[0] === newKind)) newKind = "laravel";
@@ -237,6 +243,19 @@ $("#new-form").onsubmit = async (e) => {
 function showNeed(need: { id: string; name: string; version: string }) {
   const what = `${need.name} ${need.version}`;
   const template = TEMPLATES.find((t) => t[0] === newKind)?.[1] ?? newKind;
+  if (need.id === "mysql") {
+    // A service comes with a license to accept: the Add service sheet asks, then this
+    // sheet offers it as the Database.
+    const add = el("button", "inline-action", "Add MySQL…");
+    add.type = "button";
+    add.onclick = () => {
+      $("#new-app").close();
+      late.openAddService({ kind: "mysql", version: need.version });
+    };
+    $("#new-error").replaceChildren(`${template} needs a MySQL service, and there is none yet. `, add);
+    $("#new-error").hidden = false;
+    return;
+  }
   const install = el("button", "inline-action", `Install ${what}`);
   install.type = "button";
   install.onclick = async () => {

@@ -96,7 +96,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AppCmd,
     },
-    /// Create a new application: laravel, statamic, symfony, php, static, next, nuxt, vite, node, rust, go, dotnet, django, fastapi, flask
+    /// Create a new application: laravel, statamic, symfony, wordpress, php, static, next, nuxt, vite, node, rust, go, dotnet, django, fastapi, flask
     New {
         /// The template, e.g. laravel
         kind: String,
@@ -225,7 +225,7 @@ struct NewOpts {
     /// laravel: none, react, vue, svelte or livewire
     #[arg(long, value_name = "KIT")]
     starter: Option<String>,
-    /// laravel: sqlite, or a MySQL/PostgreSQL service, e.g. mysql or pgsql
+    /// laravel: sqlite, or a MySQL/PostgreSQL service, e.g. mysql or pgsql; wordpress: a MySQL service
     #[arg(long)]
     db: Option<String>,
     /// vite: react, vue, svelte or vanilla
@@ -234,7 +234,7 @@ struct NewOpts {
     /// laravel, statamic, next, nuxt, vite: pnpm (the default), npm or bun
     #[arg(long, value_name = "MANAGER")]
     pm: Option<String>,
-    /// laravel, statamic, symfony, php: an installed PHP version, e.g. 8.4
+    /// laravel, statamic, symfony, wordpress, php: an installed PHP version, e.g. 8.4
     #[arg(long, value_name = "VERSION")]
     php: Option<String>,
     /// next, nuxt, vite, node: an installed Node.js version, e.g. 22
@@ -715,6 +715,11 @@ enum PhpCmd {
     /// Build OPcache for an installed PHP 8.1–8.4
     Opcache {
         /// An installed version, e.g. 8.3
+        version: String,
+    },
+    /// Build mysqli for an installed PHP: WordPress needs it, and Anvil's macOS PHP lacks it
+    Mysqli {
+        /// An installed version, e.g. 8.4
         version: String,
     },
     /// Extensions for every app on a PHP version, built on this Mac (xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached, imagick)
@@ -1632,6 +1637,23 @@ fn run() -> Result<()> {
                 bail!("PHP {version} has OPcache built in");
             }
             opcache::build(&version)?;
+            println!(
+                "{}",
+                commands(
+                    "Restart Anvil to use it: `anvil start`, or the app reloads on its next refresh."
+                )
+            );
+        }
+        Cmd::Php {
+            cmd: PhpCmd::Mysqli { version },
+        } => {
+            if !installed_php().contains(&version) {
+                bail!("PHP {version} is not installed — run `anvil php install {version}`");
+            }
+            if opcache::has_mysqli(&version) {
+                bail!("PHP {version} has mysqli already");
+            }
+            opcache::build_mysqli(&version)?;
             println!(
                 "{}",
                 commands(

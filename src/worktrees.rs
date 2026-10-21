@@ -95,10 +95,11 @@ impl<'de> Deserialize<'de> for Hooks {
 }
 
 /// The framework presets: id, name, the kinds (`apps::KINDS`) that use it. Any other kind uses `other`.
-pub const PRESETS: [(&str, &str, &[&str]); 8] = [
+pub const PRESETS: [(&str, &str, &[&str]); 9] = [
     ("laravel", "Laravel", &["laravel"]),
     ("statamic", "Statamic", &["statamic"]),
     ("symfony", "Symfony", &["symfony"]),
+    ("wordpress", "WordPress", &["wordpress"]),
     ("next", "Next.js", &["next"]),
     ("nuxt", "Nuxt", &["nuxt"]),
     ("node", "Node.js", &["node", "vite"]),
@@ -128,6 +129,11 @@ keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", APP_URL =
 copy = [".env.local"]
 after_create = ["composer install", "php bin/console doctrine:migrations:migrate --no-interaction"]
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", DEFAULT_URI = "{url}" }
+
+[wordpress]
+copy = [".env"]
+after_create = []
+keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
 
 [next]
 copy = [".env", ".env.local"]
@@ -264,6 +270,13 @@ pub fn resolve(cfg: &Config, app: &str, main: &Path, kind: &str) -> Resolved {
             out
         })
         .collect();
+    // WordPress names its database in wp-config.php: the keys reach only one that reads it
+    // from the env or .env, as Anvil's WordPress template writes it.
+    let reads_env =
+        || fs::read_to_string(main.join("wp-config.php")).is_ok_and(|t| t.contains("DB_DATABASE"));
+    if kind == "wordpress" && !reads_env() {
+        problems.push("wp-config.php names its database itself, so Anvil can't give a worktree one of its own: a worktree with this wp-config.php uses main's. Have it read DB_DATABASE from .env, as Anvil's WordPress template does".into());
+    }
     let mut from = BTreeMap::new();
     let mut pick = |field: &'static str, has: fn(&Hooks) -> bool| {
         let (layer, hooks) = layers
@@ -4156,6 +4169,23 @@ pub(crate) mod tests {
         let laravel = shipped("laravel");
         assert_eq!(laravel.keys.unwrap()["REDIS_PREFIX"], "{prefix}");
         assert_eq!(shipped("symfony").copy.unwrap(), [".env.local"]);
+        assert_eq!(preset_of("wordpress"), "wordpress");
+        // A wp-config.php naming its database itself can't be pointed elsewhere: said.
+        let (main, _) = repo("wpconf");
+        let says = |main: &Path| {
+            resolve(&Config::default(), "blog", main, "wordpress")
+                .problems
+                .iter()
+                .any(|p| p.starts_with("wp-config.php names its database itself"))
+        };
+        fs::write(main.join("wp-config.php"), "define( 'DB_NAME', 'blog' );").unwrap();
+        assert!(says(&main));
+        fs::write(
+            main.join("wp-config.php"),
+            "define( 'DB_NAME', anvil_env( 'DB_DATABASE' ) );",
+        )
+        .unwrap();
+        assert!(!says(&main));
     }
 
     #[test]
