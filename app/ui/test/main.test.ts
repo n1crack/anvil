@@ -992,6 +992,37 @@ describe("audit fixes", () => {
     w.__TAURI__.dialog.open = open;
   });
 
+  test("PHP version: what it builds is said beside the select, a failed build under it", async () => {
+    const { snap } = await import("../src/app");
+    const saved = [snap.php_installed, snap.php_ext_built];
+    for (const m of [w.mockSnap, snap]) {
+      m.php_installed = ["8.4", "8.3"];
+      m.php_ext_built = { "8.3": [] };
+      m.sites.find((s) => s.name === "shop").ext = ["xdebug"];
+    }
+    await select("shop");
+    $('.tabs [data-tab="settings"]').click();
+    w.mockDelay = { set_php: 60 };
+    w.mockSetPhpFail = "PHP 8.3 works without xdebug for now: couldn't get xdebug-3.4.5 from pecl.php.net";
+    const php = $("#php") as HTMLSelectElement;
+    php.value = "8.3";
+    php.dispatchEvent(new Event("change"));
+    await wait(20);
+    expect($(".php-busy").textContent).toBe("Building xdebug…");
+    expect(($("#php") as HTMLSelectElement).disabled).toBe(true);
+    await wait(120);
+    expect($(".php-busy")).toBeNull();
+    expect($(".php-error").textContent).toBe(w.mockSetPhpFail);
+    expect($("#error").hidden).toBe(true);
+    delete w.mockSetPhpFail;
+    w.mockDelay = {};
+    for (const m of [w.mockSnap, snap]) {
+      [m.php_installed, m.php_ext_built] = saved;
+      m.sites.find((s) => s.name === "shop").ext = [];
+    }
+    $('.tabs [data-tab="overview"]').click();
+  });
+
   test("New application: a folder can be chosen with nothing parked", async () => {
     const { snap } = await import("../src/app");
     const { openNewApp } = await import("../src/newapp");

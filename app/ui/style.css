@@ -1580,6 +1580,10 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .app-exts .ver-exts { padding: 4px 0; }
 .app-exts .ver-error { padding: 2px 0 0; }
 
+/* The PHP version select while a change builds and restarts, and what it ran without. */
+.php-busy { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; color: var(--muted); font-size: 12px; }
+.php-error { padding: 4px 0 0; white-space: pre-line; }
+
 .ver .actions-inline { min-height: 26px; }
 
 .ver .on-hover { visibility: hidden; }

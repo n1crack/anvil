@@ -610,11 +610,15 @@ fn set_php(
 ) -> Res<Snapshot> {
     let (cfg, ()) = edit(|c| anvil::set_site_php(c, &site, version))?;
     // Its extensions, built for the version it's on now, before PHP-FPM restarts.
-    anvil::phpext::build_missing_for(&cfg, &site);
+    let failed = anvil::phpext::build_missing_for(&cfg, &site);
     if running(&app) {
         start(&app, &cfg);
     }
     changed(&handle);
+    // It runs without the ones that failed: said beside the version, not only to stdout.
+    if !failed.is_empty() {
+        return Err(failed.join("\n"));
+    }
     snapshot(&app)
 }
 

@@ -1636,7 +1636,9 @@ export function renderSite() {
   );
   for (const v of snap.php_installed) php.add(new Option(`PHP ${v}`, v));
   php.value = s.php_pinned ? s.php : "";
-  php.onchange = () => call("set_php", { site: s.name, version: php.value || null });
+  php.onchange = () =>
+    setPhp(s, php.value || null, php.value || (filePhp && snap.php_installed.includes(filePhp) ? filePhp : snap.php_default));
+  phpState(s, php);
 
   if (!process && serves(s)) webRoot(s, root);
   browserBridge(s, root);
@@ -1767,6 +1769,45 @@ function appExtensions(s, root) {
     error.append(tools);
   }
   cell.append(error);
+}
+
+const phpSwitching = new Map<string, [string, string]>(); // app -> [the version picked, what it does]
+const phpErrors = new Map<string, string>(); // app -> the extensions its new PHP runs without
+
+/** A version change first builds the extensions the app uses that `minor` lacks (a pecl
+ * download and compile each), then restarts PHP: said beside the select, a failure under it. */
+async function setPhp(s, version: string | null, minor: string) {
+  const want = [...(snap.php_ext?.[minor] ?? []), ...s.ext];
+  const built = snap.php_ext_built?.[minor];
+  const build = built ? (snap.php_ext_catalog ?? []).filter((n) => want.includes(n) && !built.includes(n)) : [];
+  phpSwitching.set(s.name, [version ?? "", build.length ? `Building ${build.join(", ")}…` : "Switching…"]);
+  phpErrors.delete(s.name);
+  render();
+  try {
+    await askSnap("set_php", { site: s.name, version });
+  } catch (e) {
+    phpErrors.set(s.name, String(e));
+    await askSnap("state").catch(() => {});
+  }
+  phpSwitching.delete(s.name);
+  render();
+}
+
+/** The PHP version select's busy line and last failure. */
+function phpState(s, php) {
+  const doing = phpSwitching.get(s.name);
+  php.disabled = !!doing;
+  if (doing) {
+    php.value = doing[0];
+    const busy = el("span", "php-busy", doing[1]);
+    busy.prepend(el("span", "spin-dot"));
+    php.after(busy);
+  }
+  const why = phpErrors.get(s.name);
+  if (!why) return;
+  const error = el("div", "ver-error php-error");
+  error.append(el("span", null, why));
+  php.parentElement.append(error);
 }
 
 /** On builds it first unless built for the app's PHP, then the web server restarts. */

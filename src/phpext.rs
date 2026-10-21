@@ -391,13 +391,18 @@ fn names_for(cfg: &Config, minor: &str, site: Option<&crate::Site>) -> Vec<Strin
 
 /// Build what is turned on for PHP `minor` (for the version, or by an app on it) but
 /// not built for its installed patch release: after `anvil php install` brings a new
-/// one, or an app moves to `minor`. One that fails is said; it shows as not built.
-pub fn build_missing(cfg: &Config, minor: &str) {
+/// one, or an app moves to `minor`. One that fails is said, and returned; it shows as
+/// not built.
+pub fn build_missing(cfg: &Config, minor: &str) -> Vec<String> {
+    let mut failed = vec![];
     for name in missing(cfg, minor) {
         if let Err(e) = build(minor, name) {
-            println!("PHP {minor} works without {name} for now: {e:#}");
+            let line = format!("PHP {minor} works without {name} for now: {e:#}");
+            println!("{line}");
+            failed.push(line);
         }
     }
+    failed
 }
 
 /// What `build_missing` builds, in catalog order.
@@ -416,15 +421,14 @@ fn missing(cfg: &Config, minor: &str) -> Vec<&'static str> {
 }
 
 /// `build_missing` for the PHP `site` is on now: after it moved to another version.
-pub fn build_missing_for(cfg: &Config, site: &str) {
+pub fn build_missing_for(cfg: &Config, site: &str) -> Vec<String> {
     let name = crate::site_name(site);
-    if let Some(v) = crate::sites(cfg)
+    crate::sites(cfg)
         .into_iter()
         .find(|s| s.name == name)
         .and_then(|s| s.php)
-    {
-        build_missing(cfg, &v);
-    }
+        .map(|v| build_missing(cfg, &v))
+        .unwrap_or_default()
 }
 
 /// `php_args_with` and then the php.ini values PHP-FPM's pool gives `site` (or, without

@@ -929,6 +929,9 @@ const mockHandle = (cmd, a) => {
       return null;
     case "link_folder":
       return "notes";
+    case "set_php":
+      if (window.mockSetPhpFail) throw window.mockSetPhpFail;
+      return mockSnap;
     case "park_folder":
       return window.mockParked ?? { project: null, apps: 3 };
     case "create_app":
