@@ -7,7 +7,7 @@
 **Your tools. Your rules.**
 
 A local development environment for web projects.<br>
-Free and open source, in beta. Runs on macOS; Linux and Windows are in development.
+Free and open source, in beta. Runs on macOS and Windows; Linux is in development.
 
 </div>
 
@@ -56,7 +56,15 @@ brew install anvil
 
 Pick one: both put `anvil` on PATH. Without the tap step, use the full names: `brew install --cask n1crack/anvil/anvil` or `brew install n1crack/anvil/anvil`. The app updates itself; `brew upgrade` updates the CLI. The app is also on the [releases page](https://github.com/n1crack/anvil/releases).
 
-### Linux and Windows
+### Windows
+
+Windows 10 or 11, 64-bit. Download `Anvil_<version>_x64-setup.exe` from the [releases page](https://github.com/n1crack/anvil/releases) and run it: it installs for your account, without administrator rights, and puts `anvil` on PATH once Anvil sets up. The app updates itself.
+
+The installer isn't code-signed yet, so SmartScreen may say "Windows protected your PC" the first time: choose More info, then Run anyway. Setting up `.test` addresses and HTTPS asks for permission once.
+
+The CLI alone is `anvil-<version>-x86_64-pc-windows-msvc.zip`.
+
+### Linux
 
 In development.
 

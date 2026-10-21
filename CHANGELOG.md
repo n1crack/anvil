@@ -7,6 +7,11 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Windows (beta): the app and the CLI for Windows 10 and 11, with a per-user installer. `.test` addresses, HTTPS, PHP, Node.js, Go, .NET, MySQL, PostgreSQL, Redis (Garnet), Mailpit, S3 storage, dev processes and worktrees; Python and Rust come later.
+- Settings › Performance on Windows: whether your projects are on a Dev Drive, which antivirus scanning slows down less.
+
 ## [0.2.0] - 2026-10-21
 
 The first public release, a beta for macOS: a desktop app that carries the `anvil` CLI.
