@@ -19,6 +19,7 @@ contain breaking changes.
 - Processes: the Status column stays readable while a log is open, also at the smallest window size.
 - The titlebar's setup and update buttons stay on one line in a small window; Update available looks like a button.
 - Settings › PHP: every version row has the same height, and Extensions stays in place on hover and while Uninstall asks.
+- Software Update: a failed check shows why under its title and offers Try Again; without release notes the window's content sits in the middle.
 
 ## [0.2.1] - 2026-10-21
 

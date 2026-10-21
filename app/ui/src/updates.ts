@@ -57,18 +57,21 @@ async function check() {
   const notes = $("#upd-notes");
   title.textContent = "Checking…";
   sub.textContent = "";
+  sub.classList.remove("error-text");
   status.textContent = "";
   status.classList.remove("error-text");
-  go.hidden = true;
+  go.hidden = $("#upd-retry").hidden = true;
   notes.hidden = true;
   const current = (await window.__TAURI__.app?.getVersion()) ?? "";
   let found: Release | null;
   try {
     found = await invoke("update_check");
   } catch (e) {
+    // Under the title, wrapped: the reason, often a long address.
     title.textContent = "Couldn't check for updates";
-    status.textContent = String(e);
-    status.classList.add("error-text");
+    sub.textContent = String(e);
+    sub.classList.add("error-text");
+    $("#upd-retry").hidden = false;
     return;
   }
   if (!found) {
@@ -95,5 +98,6 @@ $("#upd-go").onclick = async () => {
   busy = false;
   $("#upd-close").disabled = false;
 };
+$("#upd-retry").onclick = check;
 window.__TAURI__.event.listen("update-recheck", check);
 check();

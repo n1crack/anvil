@@ -47,3 +47,26 @@ test("a newer release: what's new as headings and bullets, Later and Restart to 
   expect(notes.querySelectorAll("li")).toHaveLength(3);
   expect(notes.querySelectorAll("h2")[1].textContent).toBe("Fixed");
 });
+
+test("a failed check: the reason under the title, Try Again checks again", async () => {
+  const err = "error sending request for url (https://github.com/n1crack/anvil/releases/latest/download/latest.json)";
+  Object.defineProperty(w, "mockUpdate", {
+    configurable: true,
+    get: () => {
+      throw err;
+    },
+  });
+  recheck();
+  await wait();
+  expect($("#upd-title").textContent).toBe("Couldn't check for updates");
+  expect($("#upd-sub").textContent).toBe(err);
+  expect($("#upd-status").textContent).toBe("");
+  expect($("#upd-retry").hidden).toBe(false);
+  expect($("#upd-go").hidden).toBe(true);
+  Object.defineProperty(w, "mockUpdate", { configurable: true, writable: true, value: null });
+  $("#upd-retry").click();
+  await wait();
+  expect($("#upd-title").textContent).toBe("Anvil is up to date");
+  expect($("#upd-sub").classList.contains("error-text")).toBe(false);
+  expect($("#upd-retry").hidden).toBe(true);
+});

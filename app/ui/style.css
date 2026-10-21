@@ -3458,12 +3458,15 @@ body.updates { display: flex; flex-direction: column; height: 100vh; background:
 .upd-head { display: flex; align-items: center; gap: 14px; padding: 0 24px 16px; }
 .upd-head h1 { margin: 0 0 2px; font-size: 16px; }
 .upd-head p { margin: 0; }
+.upd-head > div { min-width: 0; }
+#upd-sub.error-text { margin-top: 4px; color: var(--danger); font-size: 12px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+/* Without notes the head is all there is: in the middle, not over an empty box. */
+body.updates:has(.upd-notes[hidden]) .upd-head { margin: auto 0; padding-bottom: 0; }
 .upd-notes { flex: 1; min-height: 0; overflow-y: auto; margin: 0 24px; padding: 4px 14px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--steel-raised); }
 .upd-notes h2 { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .upd-notes p { margin: 10px 0; }
 .upd-notes ul { margin: 0 0 8px; padding-left: 18px; }
 .upd-notes li { margin: 4px 0; }
-.upd-notes[hidden] + .upd-foot { margin-top: auto; }
 .upd-foot { display: flex; align-items: center; gap: 8px; padding: 16px 24px; }
 .upd-foot #upd-status { flex: 1; min-width: 0; }
 .upd-foot button:disabled { opacity: 0.5; }
