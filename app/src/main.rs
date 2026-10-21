@@ -208,19 +208,28 @@ type Res<T> = Result<T, String>;
 
 /// The sidebar's dot per app: "starting" while its own server's port doesn't answer
 /// yet, "running" when anything of it runs (its server, a dev process `<site>@…`, a
-/// container), "crashed" when one ended on its own and nothing runs. One-off scripts
+/// container), "crashed" when one ended on its own and nothing runs, or, as in the
+/// app's header, when one of its containers exited with an error. One-off scripts
 /// (`<site>#…`) don't count.
 fn app_states(
     sites: &[Site],
     live: &[String],
     crashed: &[String],
-    containers: &[std::path::PathBuf],
+    (containers, broken): (&[std::path::PathBuf], &[std::path::PathBuf]),
     answers: impl Fn(u16) -> bool,
 ) -> std::collections::BTreeMap<String, &'static str> {
-    let canon: Vec<_> = containers
-        .iter()
-        .filter_map(|d| anvil::platform::canonicalize(d).ok())
-        .collect();
+    let canon = |dirs: &[std::path::PathBuf]| -> Vec<_> {
+        dirs.iter()
+            .filter_map(|d| anvil::platform::canonicalize(d).ok())
+            .collect()
+    };
+    let (up, down) = (canon(containers), canon(broken));
+    // Whether one of `dirs` (canonical: `canon`) is the app's folder.
+    let has = |s: &Site, dirs: &[std::path::PathBuf], canon: &[std::path::PathBuf]| {
+        !dirs.is_empty()
+            && (dirs.contains(&s.path)
+                || anvil::platform::canonicalize(&s.path).is_ok_and(|p| canon.contains(&p)))
+    };
     let mine = |s: &Site, keys: &[String]| {
         keys.iter().any(|k| {
             k == &s.name
@@ -234,12 +243,9 @@ fn app_states(
             let server = live.contains(&s.name);
             let state = if server && !s.port.is_some_and(&answers) {
                 "starting"
-            } else if mine(s, live)
-                || (!containers.is_empty()
-                    && (containers.contains(&s.path)
-                        || anvil::platform::canonicalize(&s.path)
-                            .is_ok_and(|p| canon.contains(&p))))
-            {
+            } else if has(s, broken, &down) {
+                "crashed"
+            } else if mine(s, live) || has(s, containers, &up) {
                 "running"
             } else if mine(s, crashed) {
                 "crashed"
@@ -251,22 +257,29 @@ fn app_states(
         .collect()
 }
 
-/// Folders with a running container, from the shared `docker ps`, and only when an app has
-/// a compose file. An answer up to 5 s old does: the snapshot is asked for often.
+/// Folders with a running container, and folders with one that exited with an error (a
+/// project service, not a `docker compose run`), from the shared `docker ps`, and only
+/// when an app has a compose file. An answer up to 5 s old does: the snapshot is asked
+/// for often.
 /// ponytail: a container started outside Anvil shows within 5 s, or at the next change.
-fn running_containers(sites: &[Site]) -> Vec<std::path::PathBuf> {
+fn compose_states(sites: &[Site]) -> (Vec<std::path::PathBuf>, Vec<std::path::PathBuf>) {
     if !sites
         .iter()
         .any(|s| anvil::compose::file(&s.path).is_some())
     {
-        return vec![];
+        return (vec![], vec![]);
     }
-    anvil::compose::running(std::time::Duration::from_secs(5))
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|(_, c)| c.state == "running")
-        .map(|(d, _)| d)
-        .collect()
+    let all = anvil::compose::listed(std::time::Duration::from_secs(5)).unwrap_or_default();
+    let dirs = |f: &dyn Fn(&anvil::compose::Container) -> bool| {
+        all.iter()
+            .filter(|(_, c)| f(c))
+            .map(|(d, _)| d.clone())
+            .collect()
+    };
+    (
+        dirs(&|c| c.state == "running"),
+        dirs(&|c| !c.oneoff && c.state == "exited" && c.exit_code.is_some_and(|x| x != 0)),
+    )
 }
 
 fn err(e: anyhow::Error) -> String {
@@ -390,13 +403,8 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         let crashed: Vec<String> = apps.crashed().into_iter().map(|(k, _)| k).collect();
         (live, crashed)
     };
-    let app_states = app_states(
-        &sites,
-        &live,
-        &crashed,
-        &running_containers(&sites),
-        anvil::port_answers,
-    );
+    let (up, broken) = compose_states(&sites);
+    let app_states = app_states(&sites, &live, &crashed, (&up, &broken), anvil::port_answers);
     Ok(Snapshot {
         app_states,
         app_errors: anvil::lock(&app.app_errors).clone(),
@@ -5126,7 +5134,7 @@ mod tests {
             // A Laravel app's queue, vuefinder's own server, a one-off script.
             &keys(&["ozdemir.be@queue", "vuefinder", "notes#lint"]),
             &keys(&["shop@logs", "ozdemir.be@vite"]),
-            std::slice::from_ref(&dir),
+            (std::slice::from_ref(&dir), &[]),
             up,
         );
         assert_eq!(states.get("ozdemir.be"), Some(&"running"));
@@ -5135,8 +5143,18 @@ mod tests {
         assert_eq!(states.get("shop"), Some(&"crashed"));
         assert_eq!(states.get("notes"), None);
         assert_eq!(states.get("blog"), None);
+        // One of its containers exited with an error while the others run: crashed, as
+        // in its header.
+        let states = app_states(
+            &sites,
+            &[],
+            &[],
+            (std::slice::from_ref(&dir), std::slice::from_ref(&dir)),
+            up,
+        );
+        assert_eq!(states.get("elpida"), Some(&"crashed"));
         // Its own server whose port doesn't answer yet: starting.
-        let states = app_states(&[vite], &keys(&["vuefinder"]), &[], &[], |_| false);
+        let states = app_states(&[vite], &keys(&["vuefinder"]), &[], (&[], &[]), |_| false);
         assert_eq!(states.get("vuefinder"), Some(&"starting"));
         std::fs::remove_dir_all(&dir).unwrap();
     }

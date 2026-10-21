@@ -347,6 +347,11 @@ pub fn running(max_age: Duration) -> Result<Vec<(PathBuf, Container)>> {
     running_with(&docker_bin(), max_age)
 }
 
+/// Every compose container, stopped ones too, from an answer at most `max_age` old.
+pub fn listed(max_age: Duration) -> Result<Vec<(PathBuf, Container)>> {
+    listed_with(&docker_bin(), max_age)
+}
+
 /// How old a `docker ps` answer the Processes window takes: `TICK` while a compose
 /// container runs (or nothing has been asked yet), else `IDLE`, so Docker isn't woken
 /// every 2 s with nothing to show. An action from Anvil drops the answer (`forget`), so
