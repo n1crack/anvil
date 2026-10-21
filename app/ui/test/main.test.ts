@@ -1967,7 +1967,7 @@ describe("new application", () => {
     expect(calls("open").at(-1)![1]).toEqual({ site: "notes", target: "browser" });
   });
 
-  test("a failure shows ✕, highlights the error in the log, and offers Close and Show in Finder", async () => {
+  test("a failure shows ✕, highlights the error in the log, and offers Close and Show Log in Finder", async () => {
     await openSheet();
     fill("broken");
     w.mockCreateLog =
@@ -1984,6 +1984,7 @@ describe("new application", () => {
     expect(errors).toContain("Your requirements could not be resolved.");
     expect($("#new-done").textContent).toBe("Close");
     expect($("#new-reveal").hidden).toBe(false);
+    expect($("#new-reveal").textContent).toBe("Show Log in Finder");
     $("#new-reveal").click();
     await wait();
     expect(calls("create_reveal").at(-1)![1]).toEqual({ name: "broken" });
