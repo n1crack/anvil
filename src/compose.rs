@@ -50,7 +50,7 @@ fn compose(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Resul
 }
 
 /// Run `docker <args>` in `dir`; stdout on success, a readable error otherwise.
-fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
+pub(crate) fn run(docker: &Path, dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
     use crate::platform::OwnGroup;
     let mut child = match crate::platform::command(docker)
         .args(args)

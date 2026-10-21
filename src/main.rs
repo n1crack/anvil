@@ -391,25 +391,54 @@ enum DbCmd {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // parsed once from the command line
 enum ServiceCmd {
     /// List added services and their state
     List,
     /// Add a service: `add redis`, `add redis cache --port 6380`. Downloads the
-    /// program the first time (Redis is built from source).
+    /// program the first time (Redis is built from source). Also a Docker image
+    /// (`add --docker mongo:7 --port 27017:27017`), a container that is there
+    /// (`add --container my-db`) or a server elsewhere (`add --external db.lan:3306 --kind mysql`).
     Add {
-        /// mysql, postgres, redis, mailpit, versitygw or silo (both S3)
-        kind: String,
+        /// mysql, postgres, redis, mailpit, versitygw or silo (both S3); with --docker,
+        /// --container or --external: the name
+        kind: Option<String>,
         /// Defaults to a readable one no service has, like `redis-swift-ember`
         name: Option<String>,
-        /// A free port (default: the service's usual one, or the next free)
+        /// A free port (default: the service's usual one, or the next free); with
+        /// --docker, PORT:CONTAINER_PORT
         #[arg(long)]
-        port: Option<u16>,
+        port: Option<String>,
         /// e.g. 8.0.46; `anvil service versions` lists them
         #[arg(long)]
         version: Option<String>,
         /// Accept the program's license without being asked
         #[arg(long)]
         accept_license: bool,
+        /// Run this Docker image, e.g. mongo:7
+        #[arg(long, value_name = "IMAGE", conflicts_with_all = ["container", "external", "version"])]
+        docker: Option<String>,
+        /// KEY=value for the --docker container; repeat for more
+        #[arg(long, requires = "docker")]
+        env: Vec<String>,
+        /// Add a Docker container that is there already; Anvil never deletes it
+        #[arg(long, conflicts_with_all = ["external", "version"])]
+        container: Option<String>,
+        /// A server Anvil doesn't run, as HOST:PORT
+        #[arg(long, value_name = "HOST:PORT", conflicts_with = "version")]
+        external: Option<String>,
+        /// What the --external server is: mysql, postgres, redis or other
+        #[arg(long = "kind", requires = "external")]
+        external_kind: Option<String>,
+        /// The --external server's user
+        #[arg(long, requires = "external")]
+        user: Option<String>,
+        /// The --external server's password
+        #[arg(long, requires = "external")]
+        password: Option<String>,
+        /// The --external server's database
+        #[arg(long, requires = "external")]
+        database: Option<String>,
     },
     /// Versions each service offers, and which are installed
     Versions,
@@ -1114,6 +1143,64 @@ fn add_service(
         services::port(cfg, &id),
         cyan("`anvil start`")
     );
+    Ok(())
+}
+
+/// `anvil service add --docker <image>` (pulled now) or `--container <name>`.
+fn add_docker(
+    cfg: &mut Config,
+    name: Option<&str>,
+    port: Option<&str>,
+    image: Option<String>,
+    container: Option<String>,
+    env: Vec<String>,
+) -> Result<()> {
+    let ports = port
+        .map(|p| -> Result<(u16, u16)> {
+            let (outer, inner) = p.split_once(':').unwrap_or((p, p));
+            Ok((outer.parse()?, inner.parse()?))
+        })
+        .transpose()
+        .context("Give --port as PORT or PORT:CONTAINER_PORT, e.g. 27017:27017")?;
+    // A container that is there: its published port unless one is given.
+    let ports = match (&container, ports) {
+        (Some(c), None) => {
+            let found = services::containers()?.into_iter().find(|x| &x.name == c);
+            let found = found.with_context(|| format!("Docker has no container named {c}"))?;
+            found.port.zip(found.container_port)
+        }
+        (_, p) => p,
+    };
+    let (outer, inner) = (ports.map(|p| p.0), ports.map(|p| p.1));
+    let id = edit(cfg, |c| {
+        services::add_docker(
+            c,
+            name,
+            image.as_deref(),
+            container.as_deref(),
+            outer,
+            inner,
+            &env,
+        )
+    })?;
+    if let Some(image) = &image {
+        println!("Pulling {image}…");
+        if let Err(e) = services::ensure_installed(cfg, &id) {
+            edit(cfg, |c| services::remove(c, &id, false))?;
+            return Err(e);
+        }
+        edit(cfg, |c| services::set_enabled(c, &id, true))?;
+        println!(
+            "Added {}; it starts with {}.",
+            bold(&id),
+            cyan("`anvil start`")
+        );
+    } else {
+        println!(
+            "Added {}; Anvil starts and stops it but never deletes it.",
+            bold(&id)
+        );
+    }
     Ok(())
 }
 
@@ -1846,11 +1933,18 @@ fn run() -> Result<()> {
                     );
                 }
                 for s in list {
-                    let state = match (s.installed, s.enabled) {
-                        (false, _) => dim("not installed"),
-                        (true, true) if services::runs_somewhere(&s.id) => green("running"),
-                        (true, true) => "enabled".into(),
-                        (true, false) => "installed".into(),
+                    let state = match (s.kind, s.installed, s.enabled) {
+                        (services::DOCKER, ..) => match (&s.problem, s.running) {
+                            (Some(why), _) => dim(why),
+                            (None, true) => green("running"),
+                            (None, false) => "stopped".into(),
+                        },
+                        (services::EXTERNAL, ..) if s.running => green("answers"),
+                        (services::EXTERNAL, ..) => dim("not answering"),
+                        (_, false, _) => dim("not installed"),
+                        (_, true, true) if services::runs_somewhere(&s.id) => green("running"),
+                        (_, true, true) => "enabled".into(),
+                        (_, true, false) => "installed".into(),
                     };
                     let inbox = s
                         .web_port
@@ -1863,8 +1957,13 @@ fn run() -> Result<()> {
                         "{} {} {:<9} port {:<6} {state}{inbox}",
                         bold(format!("{:<12}", s.id)),
                         dim(format!("{:<10}", s.kind)),
-                        s.version,
-                        s.port
+                        // An external one's host; a Docker one's image.
+                        s.host.as_deref().unwrap_or(&s.version),
+                        // A container that publishes none.
+                        match s.port {
+                            0 => "-".to_string(),
+                            p => p.to_string(),
+                        }
                     );
                 }
             }
@@ -1874,19 +1973,71 @@ fn run() -> Result<()> {
                 port,
                 version,
                 accept_license,
-            } => add_service(
-                &mut cfg,
-                &kind,
-                name.as_deref(),
-                port,
-                version.as_deref(),
-                accept_license,
-            )?,
+                docker,
+                env,
+                container,
+                external,
+                external_kind,
+                user,
+                password,
+                database,
+            } => {
+                if docker.is_none() && container.is_none() && external.is_none() {
+                    let kind = kind.context(
+                        "Name the kind: mysql, postgres, redis, mailpit, versitygw or silo",
+                    )?;
+                    let port = port
+                        .map(|p| p.parse::<u16>())
+                        .transpose()
+                        .context("--port takes a port number")?;
+                    add_service(
+                        &mut cfg,
+                        &kind,
+                        name.as_deref(),
+                        port,
+                        version.as_deref(),
+                        accept_license,
+                    )?
+                } else if name.is_some() {
+                    bail!("Give the name once, e.g. `anvil service add --docker mongo:7 mongo`");
+                } else if let Some(at) = external {
+                    let (host, p) = at
+                        .rsplit_once(':')
+                        .and_then(|(h, p)| Some((h, p.parse::<u16>().ok()?)))
+                        .context("Give --external as HOST:PORT, e.g. db.lan:3306")?;
+                    let ext = services::External {
+                        kind: external_kind.unwrap_or_else(|| "other".into()),
+                        host: host.into(),
+                        user,
+                        password,
+                        database,
+                    };
+                    let id = edit(&mut cfg, |c| {
+                        services::add_external(c, kind.as_deref(), ext, p)
+                    })?;
+                    println!("Added {} at {at}", bold(&id));
+                } else {
+                    add_docker(
+                        &mut cfg,
+                        kind.as_deref(),
+                        port.as_deref(),
+                        docker,
+                        container,
+                        env,
+                    )?
+                }
+            }
             ServiceCmd::Remove { id, delete_data } => {
+                // An adopted container or a server elsewhere: only forgotten.
+                let forgotten = cfg.services.get(&id).is_some_and(|s| {
+                    s.external.is_some() || s.docker.as_ref().is_some_and(|d| d.image.is_none())
+                });
+                services::drop_container(&cfg, &id, delete_data)?;
                 edit(&mut cfg, |c| services::remove(c, &id, delete_data))?;
-                match delete_data {
-                    true => println!("Removed {id} and its data"),
-                    false => println!("Removed {id}; its data is kept"),
+                match (forgotten, delete_data) {
+                    (true, _) => println!("Removed {id} from Anvil; it is left as it is"),
+                    (false, true) => println!("Removed {id} and its data"),
+                    (false, false) => println!("Removed {id}; its data is kept"),
                 }
             }
             ServiceCmd::Tag { id, tags } => {

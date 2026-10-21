@@ -252,7 +252,53 @@ pub struct ServiceConfig {
     /// Applications that use it, by site name.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub apps: Vec<String>,
+    /// Kind `docker`: the container instead of a program of Anvil's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docker: Option<Docker>,
+    /// Kind `external`: a server Anvil doesn't run, reached at its host and `port`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external: Option<External>,
 }
+
+/// A Docker service's container. Anvil only runs `docker start|stop|restart` on it, and
+/// for an image it runs, `docker run` the first time and `docker rm` on Remove.
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Docker {
+    /// The container's name: `anvil-<id>` for an image Anvil runs.
+    pub container: String,
+    /// The image Anvil runs; None for a container that was there before (adopted),
+    /// which Anvil never creates or deletes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// The container port the service's `port` publishes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_port: Option<u16>,
+    /// `KEY=value` lines the container gets, e.g. a root password.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<String>,
+}
+
+/// An external service: a server elsewhere, or on this computer but not Anvil's.
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct External {
+    /// What it speaks: one of `EXTERNAL_KINDS`.
+    pub kind: String,
+    pub host: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
+}
+
+/// Kinds that aren't a program of Anvil's: a Docker container, a server elsewhere.
+pub const DOCKER: &str = "docker";
+pub const EXTERNAL: &str = "external";
+/// What an external service can be; the first three get .env lines and database apps.
+pub const EXTERNAL_KINDS: [&str; 4] = ["mysql", "postgres", "redis", "other"];
 
 #[derive(Serialize)]
 pub struct ServiceInfo {
@@ -278,6 +324,15 @@ pub struct ServiceInfo {
     pub suggested_port: Option<u16>,
     /// The same for Mailpit's web inbox port.
     pub suggested_web_port: Option<u16>,
+    /// What it speaks: its kind, or an external one's (`mysql`… or `other`).
+    pub speaks: &'static str,
+    /// External: the host it is reached at.
+    pub host: Option<String>,
+    /// Docker: the container, and whether it was there before Anvil (adopted).
+    pub container: Option<String>,
+    pub adopted: bool,
+    /// Why its state can't be known: Docker isn't installed or running.
+    pub problem: Option<String>,
 }
 
 pub fn name(id: &str) -> &'static str {
@@ -288,6 +343,8 @@ pub fn name(id: &str) -> &'static str {
         "redis" => "Redis",
         "versitygw" => "Versity S3 Gateway",
         "silo" => "SILO (MinIO fork)",
+        DOCKER => "Docker",
+        EXTERNAL | "other" => "External",
         _ => "Mailpit",
     }
 }
@@ -297,6 +354,8 @@ fn category(id: &str) -> &'static str {
         "mysql" | "postgres" => "Database",
         "redis" => "Cache & Queue",
         "versitygw" | "silo" => "Object Storage",
+        DOCKER => "Docker",
+        EXTERNAL => "External",
         _ => "Mail",
     }
 }
@@ -315,6 +374,7 @@ fn default_port(id: &str) -> u16 {
         "redis" => 6379,
         "versitygw" => 7070,
         "silo" => 9000,
+        DOCKER | EXTERNAL => 0,
         _ => 1025, // Mailpit SMTP
     }
 }
@@ -453,6 +513,7 @@ pub fn kind_of(cfg: &Config, id: &str) -> Result<&'static str> {
     let kind = cfg.services.get(id).and_then(|s| s.kind.as_deref());
     SERVICES
         .into_iter()
+        .chain([DOCKER, EXTERNAL])
         .find(|k| Some(*k) == kind)
         .with_context(|| format!("No service named {id}"))
 }
@@ -568,7 +629,7 @@ pub fn installed(kind: &str, version: &str) -> bool {
 fn ports_taken(cfg: &Config, except: &str) -> Vec<u16> {
     instances(cfg)
         .iter()
-        .filter(|i| *i != except)
+        .filter(|i| *i != except && kind_of(cfg, i).is_ok_and(|k| k != EXTERNAL))
         .flat_map(|i| [Some(port(cfg, i)), web_port(cfg, i)])
         .flatten()
         .chain([cfg.http_port, cfg.https_port, cfg.dns_port])
@@ -608,11 +669,7 @@ fn insert(
     if let Some(why) = crate::platform::needs_newer_macos(self::name(kind), kind, version) {
         bail!(why);
     }
-    let id = name.map_or_else(|| free_name(cfg, kind), str::to_string);
-    crate::validate::service_id(&id)?;
-    if cfg.services.contains_key(&id) {
-        bail!("There's already a service called {id}");
-    }
+    let id = new_id(cfg, kind, name)?;
     let mut taken = ports_taken(cfg, "");
     let port = match port {
         Some(p) => {
@@ -641,16 +698,565 @@ fn insert(
     Ok(id)
 }
 
+/// `name`, or a free one like `<base>-swift-ember`, checked and not taken yet.
+fn new_id(cfg: &Config, base: &str, name: Option<&str>) -> Result<String> {
+    let id = name.map_or_else(|| free_name(cfg, base), str::to_string);
+    crate::validate::service_id(&id)?;
+    if cfg.services.contains_key(&id) {
+        bail!("There's already a service called {id}");
+    }
+    Ok(id)
+}
+
+/// Add a Docker service: `image`, one Anvil runs (its container is made at the first
+/// start), or `container`, one that is there already. `port` is the one on this computer,
+/// publishing `container_port` (default the same); `env` is `KEY=value` lines. Returns the name.
+pub fn add_docker(
+    cfg: &mut Config,
+    name: Option<&str>,
+    image: Option<&str>,
+    container: Option<&str>,
+    port: Option<u16>,
+    container_port: Option<u16>,
+    env: &[String],
+) -> Result<String> {
+    let id = insert_docker(cfg, name, image, container, port, container_port, env)?;
+    save(cfg)?;
+    Ok(id)
+}
+
+fn insert_docker(
+    cfg: &mut Config,
+    name: Option<&str>,
+    image: Option<&str>,
+    container: Option<&str>,
+    port: Option<u16>,
+    container_port: Option<u16>,
+    env: &[String],
+) -> Result<String> {
+    let docker = match (image, container) {
+        (Some(image), None) => {
+            if !docker_ref(image) {
+                bail!("{image} isn't an image name, like mongo:7");
+            }
+            let p = port.context("Give the port it gets on this computer")?;
+            check_port(cfg, "", p)?;
+            if in_use(p) {
+                bail!("Port {p} is in use by another program; pick another one");
+            }
+            for e in env {
+                let key = e.split_once('=').map_or("", |(k, _)| k);
+                let ok = key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                    && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if !ok || e.contains('\n') {
+                    bail!("Write each variable as KEY=value: {e}");
+                }
+            }
+            Docker {
+                image: Some(image.into()),
+                container_port: Some(container_port.unwrap_or(p)),
+                env: env.to_vec(),
+                ..Default::default()
+            }
+        }
+        (None, Some(c)) => {
+            if !docker_ref(c) || c.contains([':', '/', '@']) {
+                bail!("{c} isn't a container name");
+            }
+            if cfg
+                .services
+                .values()
+                .any(|s| s.docker.as_ref().is_some_and(|d| d.container == c))
+            {
+                bail!("{c} is a service already");
+            }
+            Docker {
+                container: c.into(),
+                ..Default::default()
+            }
+        }
+        _ => bail!("Give an image to run or a container to add"),
+    };
+    // `ghcr.io/org/mongo:7` and a container `my_mongo` suggest `mongo-…` and `my-mongo-…`.
+    let base = image
+        .or(container)
+        .unwrap_or_default()
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .split([':', '@'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .replace(|c: char| !c.is_ascii_alphanumeric(), "-");
+    let base = match base.starts_with(|c: char| c.is_ascii_lowercase()) {
+        true => base.trim_end_matches('-').to_string(),
+        false => DOCKER.to_string(),
+    };
+    // A container that is there keeps its own name when it can.
+    let own = (image.is_none() && !cfg.services.contains_key(&base)).then_some(base.as_str());
+    let id = new_id(cfg, &base, name.or(own))?;
+    let docker = Docker {
+        container: match image {
+            Some(_) => format!("anvil-{id}"),
+            None => docker.container,
+        },
+        ..docker
+    };
+    cfg.services.insert(
+        id.clone(),
+        ServiceConfig {
+            kind: Some(DOCKER.into()),
+            port: port.filter(|p| *p > 0),
+            docker: Some(docker),
+            ..Default::default()
+        },
+    );
+    Ok(id)
+}
+
+/// An image or container name docker takes as one, never as an option.
+fn docker_ref(s: &str) -> bool {
+    s.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && s.len() <= 200
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-/:@".contains(c))
+}
+
+/// Add an external service at `ext.host` and `port`. Returns the name.
+pub fn add_external(
+    cfg: &mut Config,
+    name: Option<&str>,
+    ext: External,
+    port: u16,
+) -> Result<String> {
+    let id = insert_external(cfg, name, ext, port)?;
+    save(cfg)?;
+    Ok(id)
+}
+
+fn insert_external(
+    cfg: &mut Config,
+    name: Option<&str>,
+    ext: External,
+    port: u16,
+) -> Result<String> {
+    if !EXTERNAL_KINDS.contains(&ext.kind.as_str()) {
+        bail!(
+            "Use one of {} for an external service",
+            EXTERNAL_KINDS.join(", ")
+        );
+    }
+    let host = ext.host.trim();
+    let ok = host.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '[')
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".-_:[]".contains(c));
+    if !ok {
+        bail!("Give the host as a name or address, like db.example.com");
+    }
+    if port == 0 {
+        bail!("Give its port");
+    }
+    let blank = |v: Option<String>| v.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let database = blank(ext.database);
+    if let Some(db) = &database {
+        crate::databases::check_db(db)?;
+    }
+    let base = match ext.kind.as_str() {
+        "other" => EXTERNAL,
+        k => k,
+    };
+    let id = new_id(cfg, base, name)?;
+    cfg.services.insert(
+        id.clone(),
+        ServiceConfig {
+            kind: Some(EXTERNAL.into()),
+            port: Some(port),
+            external: Some(External {
+                host: host.into(),
+                user: blank(ext.user),
+                password: ext.password.filter(|p| !p.is_empty()),
+                database,
+                ..ext
+            }),
+            ..Default::default()
+        },
+    );
+    Ok(id)
+}
+
+/// Rename a service that doesn't run; its data folder and log move along.
+pub fn rename(cfg: &mut Config, id: &str, to: &str) -> Result<()> {
+    if id == to {
+        return Ok(());
+    }
+    rename_entry(cfg, id, to)?;
+    if runs_somewhere(id) {
+        bail!("Stop {id} first");
+    }
+    // A removed `to`'s kept data would become this one's.
+    if data(to).exists() {
+        bail!("There is data of an earlier {to}; pick another name");
+    }
+    for (from, into) in [(data(id), data(to)), (log_file(id), log_file(to))] {
+        if from.exists() {
+            fs::rename(from, into)?;
+        }
+    }
+    save(cfg)
+}
+
+/// `rename`'s config part: the entry and the worktrees' copies made in it.
+fn rename_entry(cfg: &mut Config, id: &str, to: &str) -> Result<()> {
+    let kind = kind_of(cfg, id)?;
+    new_id(cfg, kind, Some(to))?;
+    let entry = cfg.services.remove(id).context("No service")?;
+    cfg.services.insert(to.into(), entry);
+    for w in cfg.worktrees.values_mut() {
+        for (svc, _) in &mut w.copies {
+            if svc == id {
+                *svc = to.into();
+            }
+        }
+    }
+    Ok(())
+}
+
+/* ---------- Docker and external services: not Anvil's processes ---------- */
+
+/// A container `docker ps --all` lists: the Add sheet offers them, and a Docker
+/// service's state is its container's.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Container {
+    pub name: String,
+    pub image: String,
+    /// `running`, `exited`, `created`…
+    pub state: String,
+    /// The first published port, on this computer and in the container.
+    pub port: Option<u16>,
+    pub container_port: Option<u16>,
+}
+
+fn docker(args: &[&str], timeout: Duration) -> Result<String> {
+    crate::compose::run(&crate::compose::docker_bin(), Path::new("/"), args, timeout)
+}
+
+/// Read `docker ps --all --format '{{.Names}}\t{{.State}}\t{{.Image}}\t{{.Ports}}'`.
+fn parse_ps(out: &str) -> Vec<Container> {
+    out.lines()
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let (name, state, image) = (f.next()?, f.next()?, f.next()?);
+            // "0.0.0.0:27017->27017/tcp, [::]:27017->27017/tcp".
+            let published = f.next().unwrap_or("").split(", ").find_map(|p| {
+                let (host, inside) = p.split_once("->")?;
+                let host = host.rsplit(':').next()?.parse().ok()?;
+                Some((host, inside.split('/').next()?.parse().ok()?))
+            });
+            Some(Container {
+                name: name.into(),
+                image: image.into(),
+                state: state.into(),
+                port: published.map(|p| p.0),
+                container_port: published.map(|p| p.1),
+            })
+        })
+        .collect()
+}
+
+/// Every container, stopped ones too, or why Docker can't say.
+pub fn containers() -> Result<Vec<Container>> {
+    let format = "{{.Names}}\t{{.State}}\t{{.Image}}\t{{.Ports}}";
+    let out = docker(&["ps", "--all", "--format", format], Duration::from_secs(5))?;
+    Ok(parse_ps(&out))
+}
+
+/// A slow look's last answer, kept by `probe`.
+struct Probe<T> {
+    at: Option<std::time::Instant>,
+    last: Option<T>,
+    busy: bool,
+}
+type Probes<T> = std::sync::Mutex<BTreeMap<String, Probe<T>>>;
+
+/// The last answer of `look` for `key`, asked again on a thread once older than `age`, so
+/// a poll never waits on Docker or the network; only a first look is waited for, `wait` at
+/// most.
+fn probe<T: Clone + Send + 'static>(
+    cache: &'static Probes<T>,
+    key: &str,
+    age: Duration,
+    wait: Duration,
+    look: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let mut all = crate::lock(cache);
+    let p = all.entry(key.into()).or_insert(Probe {
+        at: None,
+        last: None,
+        busy: false,
+    });
+    if p.busy || p.at.is_some_and(|t| t.elapsed() < age) {
+        return p.last.clone();
+    }
+    p.busy = true;
+    let last = p.last.clone();
+    drop(all);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let key = key.to_string();
+    std::thread::spawn(move || {
+        let v = look();
+        let fresh = Probe {
+            at: Some(std::time::Instant::now()),
+            last: Some(v.clone()),
+            busy: false,
+        };
+        crate::lock(cache).insert(key, fresh);
+        let _ = tx.send(v);
+    });
+    last.or_else(|| rx.recv_timeout(wait).ok())
+}
+
+type Listed = Result<Vec<Container>, String>;
+static PS: Probes<Listed> = std::sync::Mutex::new(BTreeMap::new());
+
+/// `containers`, at most 4 s old: one `docker ps` for every Docker service and poll.
+fn docker_states() -> Listed {
+    let look = || containers().map_err(|e| format!("{e:#}"));
+    probe(
+        &PS,
+        "",
+        Duration::from_secs(4),
+        Duration::from_secs(3),
+        look,
+    )
+    .unwrap_or(Ok(vec![]))
+}
+
+static REACH: Probes<bool> = std::sync::Mutex::new(BTreeMap::new());
+
+/// Whether something answers at `host:port`, looked at most every 10 s.
+fn answers(host: &str, port: u16) -> bool {
+    let h = host.trim_matches(['[', ']']).to_string();
+    let look = move || {
+        use std::net::ToSocketAddrs;
+        (h.as_str(), port)
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut a| a.next())
+            .is_some_and(|a| {
+                std::net::TcpStream::connect_timeout(&a, Duration::from_millis(500)).is_ok()
+            })
+    };
+    let key = format!("{host}:{port}");
+    probe(
+        &REACH,
+        &key,
+        Duration::from_secs(10),
+        Duration::from_millis(600),
+        look,
+    )
+    .unwrap_or(false)
+}
+
+/// Whether docker has a container by that name; an error when Docker can't say.
+fn exists(container: &str) -> Result<bool> {
+    match docker(
+        &["container", "inspect", "--format", "{{.Id}}", container],
+        Duration::from_secs(5),
+    ) {
+        Ok(_) => Ok(true),
+        Err(e) if format!("{e:#}").contains("No such") => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// `docker pull` an image that isn't here yet.
+fn pull(image: &str) -> Result<()> {
+    if docker(
+        &["image", "inspect", "--format", "{{.Id}}", image],
+        Duration::from_secs(10),
+    )
+    .is_err()
+    {
+        *crate::lock(&INSTALLING) = Some((image.into(), false));
+        let done = docker(&["pull", image], Duration::from_secs(1800));
+        *crate::lock(&INSTALLING) = None;
+        done?;
+    }
+    Ok(())
+}
+
+/// The volume for an image's data folder: `anvil-cache` and `/data` make `anvil-cache-data`.
+fn volume_name(container: &str, path: &str) -> String {
+    let p: String = path
+        .chars()
+        .map(
+            |c| match c.is_ascii_alphanumeric() || c == '.' || c == '_' {
+                true => c,
+                false => '-',
+            },
+        )
+        .collect();
+    format!("{container}-{}", p.trim_matches('-'))
+}
+
+/// `docker run` an image's container: on 127.0.0.1 only, labelled with the service, each
+/// of the image's data folders (`VOLUME`) in a volume named after it, so a Remove that
+/// keeps the data and an Add under the same name find it again.
+fn create(id: &str, d: &Docker, image: &str, port: Option<u16>) -> Result<()> {
+    pull(image)?;
+    let format = "{{range $p, $_ := .Config.Volumes}}{{$p}}\n{{end}}";
+    let paths = docker(
+        &["image", "inspect", "--format", format, image],
+        Duration::from_secs(10),
+    )?;
+    let mut args: Vec<String> = ["run", "-d", "--name", &d.container, "--label"]
+        .map(String::from)
+        .into();
+    args.push(format!("dev.anvil.service={id}"));
+    if let (Some(p), Some(inside)) = (port, d.container_port) {
+        args.extend(["-p".into(), format!("127.0.0.1:{p}:{inside}")]);
+    }
+    for e in &d.env {
+        args.extend(["-e".into(), e.clone()]);
+    }
+    for path in paths.lines().filter(|p| p.starts_with('/')) {
+        args.extend([
+            "-v".into(),
+            format!("{}:{path}", volume_name(&d.container, path)),
+        ]);
+    }
+    args.push(image.into());
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    docker(&args, Duration::from_secs(120)).map(drop)
+}
+
+/// Start, stop or restart a service Anvil doesn't run as a process of its own: a Docker
+/// one's container (an image's first start makes it). None for Anvil's own services.
+pub fn outside_run(cfg: &Config, id: &str, action: &str) -> Option<Result<()>> {
+    let s = cfg.services.get(id)?;
+    if s.external.is_some() {
+        return Some(Err(anyhow::anyhow!(
+            "Anvil doesn't run {id}: it is a server elsewhere"
+        )));
+    }
+    let d = s.docker.as_ref()?;
+    let c = d.container.as_str();
+    let done = match (action, &d.image) {
+        ("start", Some(image)) => match exists(c) {
+            Ok(false) => create(id, d, image, s.port),
+            Ok(true) => docker(&["start", c], Duration::from_secs(60)).map(drop),
+            Err(e) => Err(e),
+        },
+        ("start" | "stop" | "restart", _) => {
+            docker(&[action, c], GRACE + Duration::from_secs(60)).map(drop)
+        }
+        _ => Err(anyhow::anyhow!("Unknown action: {action}")),
+    };
+    crate::lock(&PS).clear();
+    Some(done)
+}
+
+/// Remove's Docker part, before `remove`: the container of an image Anvil runs is stopped
+/// and deleted, its volumes too when `delete_data`. A container that was there before
+/// stays as it is.
+pub fn drop_container(cfg: &Config, id: &str, delete_data: bool) -> Result<()> {
+    let Some(d) = cfg.services.get(id).and_then(|s| s.docker.as_ref()) else {
+        return Ok(());
+    };
+    if d.image.is_none() || !exists(&d.container)? {
+        return Ok(());
+    }
+    let c = d.container.as_str();
+    let format = "{{range .Mounts}}{{if eq .Type \"volume\"}}{{.Name}}\n{{end}}{{end}}";
+    let mounts = docker(
+        &["container", "inspect", "--format", format, c],
+        Duration::from_secs(5),
+    )?;
+    docker(&["stop", c], GRACE + Duration::from_secs(60))?;
+    docker(&["rm", c], Duration::from_secs(60))?;
+    crate::lock(&PS).clear();
+    if delete_data {
+        // Only the volumes Anvil named for it.
+        let ours = format!("{c}-");
+        for v in mounts.lines().filter(|v| v.starts_with(&ours)) {
+            docker(&["volume", "rm", v], Duration::from_secs(60))?;
+        }
+    }
+    Ok(())
+}
+
+/// How an app reaches a MySQL, PostgreSQL or Redis service: Anvil's own on 127.0.0.1, an
+/// external one where it is.
+pub struct Conn {
+    pub kind: &'static str,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub password: String,
+    pub database: Option<String>,
+}
+
+impl Conn {
+    /// `scheme://user:password@host:port`, both percent-encoded.
+    pub fn url(&self, scheme: &str) -> String {
+        use crate::worktrees::encoded;
+        let auth = match (self.user.as_str(), self.password.as_str()) {
+            ("", "") => String::new(),
+            (u, "") => format!("{}@", encoded(u)),
+            (u, p) => format!("{}:{}@", encoded(u), encoded(p)),
+        };
+        format!("{scheme}://{auth}{}:{}", self.host, self.port)
+    }
+}
+
+/// What a service speaks: its kind, or an external one's (`mysql`… or `other`).
+pub fn speaks(cfg: &Config, id: &str) -> &'static str {
+    match kind_of(cfg, id) {
+        Ok(EXTERNAL) => cfg
+            .services
+            .get(id)
+            .and_then(|s| s.external.as_ref())
+            .and_then(|e| EXTERNAL_KINDS.into_iter().find(|k| *k == e.kind))
+            .unwrap_or("other"),
+        Ok(k) => k,
+        Err(_) => "other",
+    }
+}
+
+/// `Conn` for a service that speaks MySQL, PostgreSQL or Redis.
+pub fn conn(cfg: &Config, id: &str) -> Option<Conn> {
+    let kind = speaks(cfg, id);
+    let user = match kind {
+        "mysql" => "root",
+        "postgres" => "postgres",
+        "redis" => "",
+        _ => return None,
+    };
+    let ext = cfg.services.get(id).and_then(|s| s.external.as_ref());
+    Some(Conn {
+        kind,
+        host: ext.map_or_else(|| "127.0.0.1".into(), |e| e.host.clone()),
+        port: port(cfg, id),
+        user: ext.and_then(|e| e.user.clone()).unwrap_or(user.into()),
+        password: ext.and_then(|e| e.password.clone()).unwrap_or_default(),
+        database: ext.and_then(|e| e.database.clone()),
+    })
+}
+
 /// Remove a service. Its data stays unless `delete_data`, so adding the same
-/// name again finds the databases; the program stays for other services.
+/// name again finds the databases; the program stays for other services. A Docker
+/// service's container goes with `drop_container` first.
 pub fn remove(cfg: &mut Config, id: &str, delete_data: bool) -> Result<()> {
     if !cfg.services.contains_key(id) {
         bail!("No service named {id}");
     }
     crate::validate::service_id(id)?;
+    let own = !matches!(kind_of(cfg, id), Ok(DOCKER | EXTERNAL));
     cfg.services.remove(id);
     save(cfg)?;
-    if delete_data {
+    if delete_data && own {
         match fs::remove_dir_all(data(id)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
             _ => {}
@@ -1069,6 +1675,13 @@ fn build_postgres_libxml2(lib: &std::path::Path) -> Result<()> {
 
 /// Download a service's program version if it isn't there yet.
 pub fn ensure_installed(cfg: &Config, id: &str) -> Result<()> {
+    if let Some(s) = cfg.services.get(id)
+        && (s.docker.is_some() || s.external.is_some())
+    {
+        // A Docker service's image is pulled now, not at its first start.
+        let image = s.docker.as_ref().and_then(|d| d.image.as_deref());
+        return image.map_or(Ok(()), pull);
+    }
     let (kind, v) = (kind_of(cfg, id)?, version(cfg, id));
     migrate_kind(kind)?;
     if installed(kind, &v) {
@@ -1122,15 +1735,36 @@ fn entry<'a>(cfg: &'a mut Config, id: &str) -> Result<&'a mut ServiceConfig> {
 
 /// What an app puts in `.env` to use this service (Laravel names plus a URL).
 pub fn env_lines(cfg: &Config, id: &str) -> String {
+    if let Some(c) = conn(cfg, id) {
+        let (h, p, u, pw) = (&c.host, c.port, &c.user, &c.password);
+        let db = c.database.as_deref();
+        let named = db.map_or(String::new(), |d| format!("DB_DATABASE={d}\n"));
+        return match c.kind {
+            "mysql" => format!(
+                "DB_CONNECTION=mysql\nDB_HOST={h}\nDB_PORT={p}\nDB_USERNAME={u}\nDB_PASSWORD={pw}\n{named}DATABASE_URL={}/{}",
+                c.url("mysql"),
+                db.unwrap_or("")
+            ),
+            "postgres" => format!(
+                "DB_CONNECTION=pgsql\nDB_HOST={h}\nDB_PORT={p}\nDB_USERNAME={u}\nDB_PASSWORD={pw}\n{named}DATABASE_URL={}/{}",
+                c.url("postgres"),
+                db.unwrap_or("postgres")
+            ),
+            _ => {
+                let user = (!u.is_empty()).then(|| format!("REDIS_USERNAME={u}\n"));
+                let pass = (!pw.is_empty()).then(|| format!("REDIS_PASSWORD={pw}\n"));
+                format!(
+                    "REDIS_HOST={h}\nREDIS_PORT={p}\n{}{}REDIS_URL={}",
+                    user.unwrap_or_default(),
+                    pass.unwrap_or_default(),
+                    c.url("redis")
+                )
+            }
+        };
+    }
     let p = port(cfg, id);
-    match kind_of(cfg, id).unwrap_or("redis") {
-        "mysql" => format!(
-            "DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT={p}\nDB_USERNAME=root\nDB_PASSWORD=\nDATABASE_URL=mysql://root@127.0.0.1:{p}/"
-        ),
-        "postgres" => format!(
-            "DB_CONNECTION=pgsql\nDB_HOST=127.0.0.1\nDB_PORT={p}\nDB_USERNAME=postgres\nDB_PASSWORD=\nDATABASE_URL=postgres://postgres@127.0.0.1:{p}/postgres"
-        ),
-        "redis" => format!("REDIS_HOST=127.0.0.1\nREDIS_PORT={p}\nREDIS_URL=redis://127.0.0.1:{p}"),
+    match kind_of(cfg, id).unwrap_or(EXTERNAL) {
+        DOCKER | EXTERNAL => String::new(),
         "versitygw" | "silo" => format!(
             "AWS_ACCESS_KEY_ID={S3_ACCESS_KEY}\nAWS_SECRET_ACCESS_KEY={S3_SECRET_KEY}\nAWS_DEFAULT_REGION=us-east-1\nAWS_BUCKET={S3_BUCKET}\nAWS_ENDPOINT=http://127.0.0.1:{p}\nAWS_USE_PATH_STYLE_ENDPOINT=true"
         ),
@@ -1166,7 +1800,10 @@ pub fn write_env(
                 );
             }
         }
-        pairs.push(("DB_DATABASE".into(), db.into()));
+        match pairs.iter_mut().find(|(k, _)| k == "DB_DATABASE") {
+            Some(p) => p.1 = db.into(),
+            None => pairs.push(("DB_DATABASE".into(), db.into())),
+        }
     }
     let text = std::fs::read_to_string(&env)?;
     std::fs::write(&env, crate::create::set_env(&text, &pairs))?;
@@ -1174,13 +1811,18 @@ pub fn write_env(
 }
 
 pub fn set_enabled(cfg: &mut Config, id: &str, enabled: bool) -> Result<()> {
-    kind_of(cfg, id)?;
+    if kind_of(cfg, id)? == EXTERNAL {
+        bail!("Anvil doesn't run {id}: it is a server elsewhere");
+    }
     cfg.services.entry(id.into()).or_default().enabled = enabled;
     save(cfg)
 }
 
 pub fn set_port(cfg: &mut Config, id: &str, port: Option<u16>) -> Result<()> {
     let kind = kind_of(cfg, id)?;
+    if matches!(kind, DOCKER | EXTERNAL) {
+        bail!("{id}'s port is set where it runs; add it again for another one");
+    }
     check_port(cfg, id, port.unwrap_or(default_port(kind)))?;
     cfg.services.entry(id.into()).or_default().port = port;
     save(cfg)
@@ -1422,6 +2064,9 @@ impl Services {
     }
 
     pub fn start(&mut self, cfg: &Config, id: &str) -> Result<()> {
+        if let Some(done) = outside_run(cfg, id, "start") {
+            return done;
+        }
         if !self.begin(cfg, id)? {
             return Ok(());
         }
@@ -1491,23 +2136,63 @@ impl Services {
     }
 
     pub fn info(&mut self, cfg: &Config) -> Vec<ServiceInfo> {
-        instances(cfg)
-            .into_iter()
+        let ids = instances(cfg);
+        // One `docker ps` for every Docker service, and none without one.
+        let ps = ids
+            .iter()
+            .any(|id| kind_of(cfg, id).is_ok_and(|k| k == DOCKER))
+            .then(docker_states);
+        ids.into_iter()
             .map(|id| {
                 let kind = kind_of(cfg, &id).unwrap_or("redis");
-                let running = self.running(&id);
+                let s = cfg.services.get(&id);
+                let ext = s.and_then(|s| s.external.as_ref());
+                let dock = s.and_then(|s| s.docker.as_ref());
                 let port = port(cfg, &id);
+                let seen = match (&ps, dock) {
+                    (Some(Ok(all)), Some(d)) => all.iter().find(|c| c.name == d.container),
+                    _ => None,
+                };
+                let (running, problem) = match (kind, &ps) {
+                    (DOCKER, Some(Err(e))) => (false, Some(e.clone())),
+                    (DOCKER, _) => (seen.is_some_and(|c| c.state == "running"), None),
+                    (EXTERNAL, _) => (ext.is_some_and(|e| answers(&e.host, port)), None),
+                    _ => (self.running(&id), None),
+                };
+                let outside = matches!(kind, DOCKER | EXTERNAL);
+                let speaks = speaks(cfg, &id);
+                let version = match (dock, ext) {
+                    (Some(d), _) => d
+                        .image
+                        .clone()
+                        .or_else(|| seen.map(|c| c.image.clone()))
+                        .unwrap_or_default(),
+                    (_, Some(_)) => String::new(),
+                    _ => version(cfg, &id),
+                };
                 let web_port = web_port(cfg, &id);
-                let suggest = |p: u16| (!running && in_use(p)).then(|| next_free(p)).flatten();
+                let suggest = |p: u16| {
+                    (!running && !outside && in_use(p))
+                        .then(|| next_free(p))
+                        .flatten()
+                };
                 ServiceInfo {
                     kind,
-                    name: name(kind),
+                    name: match ext {
+                        Some(_) => name(speaks),
+                        None => name(kind),
+                    },
                     category: category(kind),
-                    version: version(cfg, &id),
+                    installed: outside || installed(kind, &version),
+                    version,
                     port,
                     web: web_port.map(|p| format!("http://127.0.0.1:{p}")),
                     web_port,
-                    installed: installed(kind, &version(cfg, &id)),
+                    speaks,
+                    host: ext.map(|e| e.host.clone()),
+                    container: dock.map(|d| d.container.clone()),
+                    adopted: dock.is_some_and(|d| d.image.is_none()),
+                    problem,
                     enabled: cfg.services.get(&id).is_some_and(|s| s.enabled),
                     running,
                     suggested_port: suggest(port),
@@ -1971,6 +2656,200 @@ mod tests {
         assert_ne!(web_port(&cfg, &a), web_port(&cfg, &b));
         assert_eq!(instances(&cfg), ["mail-a", "mail-b", "redis", "redis-2"]);
     }
+    #[test]
+    fn a_docker_image_gets_a_container_of_its_own_and_a_container_is_adopted_as_it_is() {
+        let mut cfg = Config::default();
+        let env = vec!["MONGO_INITDB_ROOT_PASSWORD=s3cret=x".to_string()];
+        let id = insert_docker(
+            &mut cfg,
+            None,
+            Some("mongo:7"),
+            None,
+            Some(47017),
+            Some(27017),
+            &env,
+        )
+        .unwrap();
+        assert!(id.starts_with("mongo-"), "{id}");
+        let s = &cfg.services[&id];
+        let d = s.docker.as_ref().unwrap();
+        assert_eq!(d.container, format!("anvil-{id}"));
+        assert_eq!(
+            (d.image.as_deref(), d.container_port),
+            (Some("mongo:7"), Some(27017))
+        );
+        assert_eq!(
+            (kind_of(&cfg, &id).unwrap(), s.port, s.enabled),
+            (DOCKER, Some(47017), false)
+        );
+        assert_eq!(env_lines(&cfg, &id), "");
+        // The port is the one on this computer: no other service may take it.
+        assert!(check_port(&cfg, "", 47017).is_err());
+        // The container port defaults to the same; names come from the image's last part.
+        let ghcr = Some("ghcr.io/org/my_cache:1");
+        let id2 = insert_docker(&mut cfg, None, ghcr, None, Some(47018), None, &[]).unwrap();
+        assert!(id2.starts_with("my-cache-"), "{id2}");
+        assert_eq!(
+            cfg.services[&id2].docker.as_ref().unwrap().container_port,
+            Some(47018)
+        );
+        for (image, port, env) in [
+            ("-v", Some(47019), vec![]),      // an option, not an image
+            ("mongo 7", Some(47019), vec![]), // two words
+            ("mongo:7", None, vec![]),        // no port
+            ("mongo:7", Some(47019), vec!["=x".to_string()]),
+            ("mongo:7", Some(47019), vec!["A B=x".to_string()]),
+        ] {
+            assert!(
+                insert_docker(&mut cfg, None, Some(image), None, port, None, &env).is_err(),
+                "{image}"
+            );
+        }
+        assert!(insert_docker(&mut cfg, None, None, None, Some(1), None, &[]).is_err());
+
+        let mine = insert_docker(
+            &mut cfg,
+            Some("old-db"),
+            None,
+            Some("legacy_db"),
+            Some(3307),
+            Some(3306),
+            &[],
+        )
+        .unwrap();
+        let d = cfg.services[&mine].docker.clone().unwrap();
+        assert_eq!((d.container.as_str(), d.image), ("legacy_db", None));
+        // Once is enough; a name with a tag isn't a container.
+        assert!(insert_docker(&mut cfg, None, None, Some("legacy_db"), None, None, &[]).is_err());
+        assert!(insert_docker(&mut cfg, None, None, Some("redis:7"), None, None, &[]).is_err());
+        // Unnamed, it keeps the container's name, as a service name.
+        let kept =
+            insert_docker(&mut cfg, None, None, Some("Queue_Redis"), None, None, &[]).unwrap();
+        assert_eq!(kept, "queue-redis");
+
+        // What the config keeps, read back.
+        let text = toml::to_string(&cfg.services[&id]).unwrap();
+        assert!(text.contains("image = \"mongo:7\""), "{text}");
+        let back: ServiceConfig = toml::from_str(&text).unwrap();
+        assert_eq!(back.docker, cfg.services[&id].docker);
+    }
+
+    #[test]
+    fn docker_ps_lines_and_volume_names() {
+        let ps = "anvil-cache\trunning\tredis:7-alpine\t127.0.0.1:46379->6379/tcp\n\
+                  db\texited\tmariadb:11\t\n\
+                  web\trunning\tnginx\t0.0.0.0:8080->80/tcp, [::]:8080->80/tcp\n";
+        let rows = parse_ps(ps);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[0],
+            Container {
+                name: "anvil-cache".into(),
+                image: "redis:7-alpine".into(),
+                state: "running".into(),
+                port: Some(46379),
+                container_port: Some(6379),
+            }
+        );
+        assert_eq!(
+            (rows[1].port, rows[2].port, rows[2].container_port),
+            (None, Some(8080), Some(80))
+        );
+        assert_eq!(volume_name("anvil-cache", "/data"), "anvil-cache-data");
+        assert_eq!(
+            volume_name("anvil-m", "/data/configdb/"),
+            "anvil-m-data-configdb"
+        );
+    }
+
+    #[test]
+    fn an_external_service_connects_where_it_is_and_never_runs() {
+        let mut cfg = Config::default();
+        let ext = |kind: &str, host: &str| External {
+            kind: kind.into(),
+            host: host.into(),
+            user: Some(" app ".into()),
+            password: Some("p@ss:w".into()),
+            database: Some("shop".into()),
+        };
+        let id = insert_external(&mut cfg, None, ext("mysql", "db.example.com"), 3306).unwrap();
+        assert!(id.starts_with("mysql-"), "{id}");
+        assert_eq!(
+            (kind_of(&cfg, &id).unwrap(), speaks(&cfg, &id)),
+            (EXTERNAL, "mysql")
+        );
+        assert_eq!(
+            env_lines(&cfg, &id),
+            "DB_CONNECTION=mysql\nDB_HOST=db.example.com\nDB_PORT=3306\nDB_USERNAME=app\nDB_PASSWORD=p@ss:w\nDB_DATABASE=shop\nDATABASE_URL=mysql://app:p%40ss%3Aw@db.example.com:3306/shop"
+        );
+        assert_eq!(
+            crate::databases::url(&cfg, &id, None).unwrap(),
+            "mysql://app:p%40ss%3Aw@db.example.com:3306/shop"
+        );
+        // Anvil's own MySQL can still take 3306: the external one is elsewhere.
+        assert!(check_port(&cfg, "", 3306).is_ok());
+        assert!(set_enabled(&mut cfg, &id, true).is_err());
+        assert!(set_port(&mut cfg, &id, Some(3307)).is_err());
+        let mut started = Services::default();
+        assert!(started.start(&cfg, &id).is_err());
+
+        let redis = External {
+            user: None,
+            database: None,
+            ..ext("redis", "10.0.0.5")
+        };
+        let r = insert_external(&mut cfg, Some("shared-cache"), redis, 6379).unwrap();
+        assert_eq!(
+            env_lines(&cfg, &r),
+            "REDIS_HOST=10.0.0.5\nREDIS_PORT=6379\nREDIS_PASSWORD=p@ss:w\nREDIS_URL=redis://:p%40ss%3Aw@10.0.0.5:6379"
+        );
+        let other = insert_external(&mut cfg, None, ext("other", "mq.lan"), 5672).unwrap();
+        assert!(other.starts_with("external-"), "{other}");
+        assert_eq!(
+            (speaks(&cfg, &other), env_lines(&cfg, &other).as_str()),
+            ("other", "")
+        );
+        assert!(crate::databases::url(&cfg, &other, None).is_err());
+        for (kind, host, port) in [
+            ("mongo", "h", 1),
+            ("mysql", "", 1),
+            ("mysql", "-oProxy", 1),
+            ("mysql", "a b", 1),
+            ("mysql", "h", 0),
+        ] {
+            assert!(
+                insert_external(&mut cfg, None, ext(kind, host), port).is_err(),
+                "{kind} {host}"
+            );
+        }
+        // Anvil's own keep their lines as they were.
+        let own = insert(&mut cfg, "mysql", Some("mine"), Some(13306), None).unwrap();
+        assert_eq!(
+            env_lines(&cfg, &own),
+            "DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT=13306\nDB_USERNAME=root\nDB_PASSWORD=\nDATABASE_URL=mysql://root@127.0.0.1:13306/"
+        );
+    }
+
+    #[test]
+    fn a_rename_moves_the_entry_and_the_worktrees_copies() {
+        let mut cfg = Config::default();
+        let id = insert(&mut cfg, "redis", Some("cache"), Some(16380), None).unwrap();
+        insert(&mut cfg, "redis", Some("taken"), Some(16381), None).unwrap();
+        let wt = crate::worktrees::WorktreeConfig {
+            copies: vec![(id.clone(), "shop_x".into()), ("other".into(), "y".into())],
+            ..Default::default()
+        };
+        cfg.worktrees.insert("shop--x".into(), wt);
+        assert!(rename_entry(&mut cfg, &id, "taken").is_err());
+        assert!(rename_entry(&mut cfg, &id, "Bad Name").is_err());
+        assert!(rename_entry(&mut cfg, "nope", "fine").is_err());
+        rename_entry(&mut cfg, &id, "queue").unwrap();
+        assert!(!cfg.services.contains_key("cache"));
+        assert_eq!(port(&cfg, "queue"), 16380);
+        assert_eq!(cfg.worktrees["shop--x"].copies[0].0, "queue");
+        assert_eq!(cfg.worktrees["shop--x"].copies[1].0, "other");
+    }
+
     #[test]
     fn a_service_runs_somewhere_while_its_launched_pid_lives() {
         let dir = std::env::temp_dir().join(format!("anvil-svc-pid-{}", std::process::id()));

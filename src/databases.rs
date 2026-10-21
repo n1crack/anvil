@@ -194,6 +194,9 @@ pub fn contents(cfg: &Config, id: &str) -> Result<Contents> {
                 .collect();
             c.buckets.sort();
         }
+        crate::services::DOCKER | crate::services::EXTERNAL => {
+            bail!("Anvil doesn't look inside {id}")
+        }
         _ => {
             let web = web_port(cfg, id).context("no inbox port")?;
             let url = format!("http://127.0.0.1:{web}/api/v1/messages?limit=1");
@@ -502,16 +505,14 @@ pub fn clients(kind: &str) -> Vec<&'static str> {
 
 /// A connection URL database apps understand.
 pub fn url(cfg: &Config, id: &str, database: Option<&str>) -> Result<String> {
-    let p = port(cfg, id);
-    let db = database.unwrap_or("");
-    Ok(match kind_of(cfg, id)? {
-        "mysql" => format!("mysql://root@127.0.0.1:{p}/{db}"),
-        "postgres" => format!(
-            "postgresql://postgres@127.0.0.1:{p}/{}",
-            database.unwrap_or("postgres")
-        ),
-        "redis" => format!("redis://127.0.0.1:{p}"),
-        _ => bail!("{id} has no connection URL"),
+    kind_of(cfg, id)?;
+    let c =
+        crate::services::conn(cfg, id).with_context(|| format!("{id} has no connection URL"))?;
+    let db = database.or(c.database.as_deref());
+    Ok(match c.kind {
+        "mysql" => format!("{}/{}", c.url("mysql"), db.unwrap_or("")),
+        "postgres" => format!("{}/{}", c.url("postgresql"), db.unwrap_or("postgres")),
+        _ => c.url("redis"),
     })
 }
 

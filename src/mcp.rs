@@ -622,7 +622,7 @@ fn call(name: &str, args: &Value, client: &str) -> Result<Value> {
                         "id": s.id, "kind": s.kind, "version": s.version, "port": s.port,
                         "installed": s.installed, "enabled": s.enabled,
                         // This process started none: the pid files say what runs.
-                        "running": crate::services::runs_somewhere(&s.id),
+                        "running": s.running || crate::services::runs_somewhere(&s.id),
                         "web": s.web, "apps": s.apps, "env": s.env,
                     })
                 })
