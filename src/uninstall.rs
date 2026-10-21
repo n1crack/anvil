@@ -362,7 +362,10 @@ fn anvil_process(cmd: &str, home: &str) -> bool {
 pub fn uninstall(cfg: &Config, config_ok: bool, yes: bool) -> Result<()> {
     let h = home();
     let user = crate::user_home();
-    let problem = if config_ok {
+    // Already gone (a second run): nothing to keep or explain.
+    let problem = if h.symlink_metadata().is_err() {
+        None
+    } else if config_ok {
         home_problem(&h, &user, &projects(cfg))
     } else {
         Some("its config.toml couldn't be read, so Anvil can't tell where your projects are".into())
