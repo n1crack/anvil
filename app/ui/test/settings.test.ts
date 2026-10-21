@@ -333,6 +333,9 @@ describe("versions", () => {
       expect([...rows[3].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Install"]);
     } finally {
       delete w.mockOldMac;
+      // Reload the list as this Mac sees it, so later tests find Install where it was.
+      ($$("#node .ver")[3].querySelector("button") as HTMLElement).click();
+      await wait(60);
     }
   });
 
