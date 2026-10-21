@@ -29,6 +29,7 @@ contain breaking changes.
 - Changing an app's PHP version says which extensions it is building beside the version, and under it which ones the new version runs without.
 - Remove Link… asks first and says what goes: the app's processes stop and its settings in Anvil are deleted; its folder stays.
 - New Application says a missing PHP or runtime in the form, with an Install button, before anything is made; reopening the sheet keeps the typed name.
+- A new app's Open is Open in Browser and opens it there, and selects it in the sidebar as before; with the web server stopped it is Show.
 
 ### Added
 

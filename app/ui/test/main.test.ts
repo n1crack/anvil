@@ -1943,13 +1943,15 @@ describe("new application", () => {
     expect($("#new-progress-title").textContent).toBe("notes is ready");
     expect($("#new-state").classList.contains("ok")).toBe(true);
     expect(steps().every((s) => s.endsWith(":done"))).toBe(true);
-    expect($("#new-done").textContent).toBe("Open");
+    expect($("#new-done").textContent).toBe("Open in Browser");
     expect($("#new-reveal").hidden).toBe(true);
     await select("shop");
     $("#new-done").click();
     await wait();
     expect($("#new-app").hasAttribute("open")).toBe(false);
     expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
+    // Open in Browser does what it says, and selects the app too.
+    expect(calls("open").at(-1)![1]).toEqual({ site: "notes", target: "browser" });
   });
 
   test("a failure shows ✕, highlights the error in the log, and offers Close and Show in Finder", async () => {

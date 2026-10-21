@@ -1,4 +1,4 @@
-import { $, addAppFolder, call, el, filterOf, filters, invoke, mode, select, setMode, snap, tilde } from "./app";
+import { $, addAppFolder, call, el, filterOf, filters, invoke, mode, open, select, setMode, snap, tilde } from "./app";
 import { termOut } from "./console";
 import { late } from "./late";
 import { picker } from "./picker";
@@ -371,7 +371,8 @@ export async function create(kind: string, name: string, parent: string) {
   term.out.replaceChildren();
   term.atEnd = true;
   $("#new-reveal").hidden = true;
-  $("#new-done").textContent = "Open";
+  $("#new-done").textContent = "Open in Browser";
+  browse = false;
   $("#new-done").disabled = true;
   drawSteps();
   const timer = setInterval(readLog, 300);
@@ -405,6 +406,10 @@ export async function create(kind: string, name: string, parent: string) {
     setHead("ok", `${name} is ready`);
     $("#new-name").value = "";
     await call("state");
+    // Open goes to the browser, as it says; the app is selected here either way. With the
+    // web server stopped there's no page to open: Show only selects it.
+    browse = snap.running;
+    $("#new-done").textContent = browse ? "Open in Browser" : "Show";
   }
   $("#new-done").disabled = false;
   $("#new-done").focus({ focusVisible: false } as FocusOptions);
@@ -427,10 +432,13 @@ export function reveal(site: string) {
   select(site);
 }
 
+let browse = false; // the done button opens the new app in the browser too
 $("#new-done").onclick = () => {
   const site = job?.end === "ok" ? job.site : null;
   $("#new-app").close();
-  if (site) reveal(site);
+  if (!site) return;
+  reveal(site);
+  if (browse) open("browser", site);
 };
 $("#new-reveal").onclick = () => job && invoke("create_reveal", { name: job.name });
 
