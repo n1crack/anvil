@@ -1779,6 +1779,12 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .page input::placeholder { color: var(--muted); }
 
+/* Agents (MCP): each command whole on its own line, under what it is for. */
+#mcp-line code { margin-top: 4px; }
+
+/* General: the selects form one column, as wide as the longest choice needs. */
+#general .row > select { flex: none; width: 180px; }
+
 .below { display: flex; gap: 8px; margin-top: 8px; }
 
 .page .row code {

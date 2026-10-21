@@ -469,8 +469,14 @@ describe("plugins", () => {
     await wait();
     expect(w.mockCalls.at(-1)).toEqual(["set_mcp", { on: true }]);
     expect($("#mcp-line").hidden).toBe(false);
-    expect($("#mcp-line code").textContent).toBe("anvil mcp");
-    expect($("#mcp-copy").textContent).toBe("Copy");
+    expect(text("#mcp-line code")).toEqual(["claude mcp add anvil -- anvil mcp", "anvil mcp"]);
+    // Copy copies the whole command of its row.
+    let copied = "";
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => void (copied = t) } });
+    $(".mcp-copy").click();
+    await wait();
+    expect(copied).toBe("claude mcp add anvil -- anvil mcp");
+    expect($(".mcp-copy").textContent).toBe("Copied");
     box.checked = false;
     box.dispatchEvent(new Event("change"));
     await wait();

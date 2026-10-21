@@ -215,10 +215,14 @@
     <section id="plugin-mcp" class="page" hidden>
       <h1>Agents (MCP)</h1>
       <p class="hint">AI agents such as Claude Code see your apps, start and stop their processes and services, read logs and caught mail, add worktrees and change app settings.</p>
-      <div class="group">
-        <div class="row" id="mcp-line">
-          <span>Command for the agent’s MCP settings<small>Claude Code: claude mcp add anvil -- anvil mcp</small></span>
-          <span class="actions-inline"><code>anvil mcp</code><button id="mcp-copy">Copy</button></span>
+      <div class="group" id="mcp-line">
+        <div class="row">
+          <span>Claude Code, once in a terminal<code>claude mcp add anvil -- anvil mcp</code></span>
+          <button class="mcp-copy">Copy</button>
+        </div>
+        <div class="row">
+          <span>Other agents, in their MCP settings<code>anvil mcp</code></span>
+          <button class="mcp-copy">Copy</button>
         </div>
       </div>
     </section>

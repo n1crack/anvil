@@ -15,6 +15,8 @@ contain breaking changes.
 - Processes works from the keyboard: arrows move between rows, Enter opens a row's log, Shift+F10 its menu.
 - Settings › Storage asks before deleting in the row itself, not in a dialog, and its sizes line up in one column.
 - Software Update: Return presses the main button and Esc closes the window, except while an update downloads.
+- Settings › General: the menus on the right are all one width.
+- Settings › Features › Agents (MCP) shows the whole Claude Code command with its own Copy, next to `anvil mcp` for other agents.
 
 ### Added
 

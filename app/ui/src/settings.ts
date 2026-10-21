@@ -1071,13 +1071,13 @@ function renderMailCatcher() {
   }
   other.load().then(() => (box.hidden = !other!.node.querySelector(".mail-item")));
 }
-// "Copied" in the button for a moment, no toast.
-$("#mcp-copy").onclick = async (e) => {
-  const b = e.currentTarget;
-  await navigator.clipboard.writeText("anvil mcp").catch(() => {});
-  b.textContent = "Copied";
-  setTimeout(() => (b.textContent = "Copy"), 1500);
-};
+// Each Copy copies its row's command; "Copied" in the button for a moment, no toast.
+for (const b of document.querySelectorAll<HTMLElement>(".mcp-copy"))
+  b.onclick = async () => {
+    await navigator.clipboard.writeText(b.closest(".row")!.querySelector("code")!.textContent!).catch(() => {});
+    b.textContent = "Copied";
+    setTimeout(() => (b.textContent = "Copy"), 1500);
+  };
 $("#theme").onchange = (e) => call("set_theme", { theme: e.target.value || null });
 $("#editor").onchange = (e) => call("set_editor", { editor: e.target.value || null });
 $("#terminal").onchange = (e) => call("set_terminal", { terminal: e.target.value || null });
