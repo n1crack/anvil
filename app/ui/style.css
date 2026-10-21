@@ -1996,8 +1996,6 @@ kbd {
 .page.about .hint { max-width: 420px; margin: 16px 0; }
 .page.about .small { font-size: 11px; margin-top: 24px; }
 .page.about .update-check { justify-content: center; margin-top: 8px; }
-.page.about .update-notes { margin: 8px 0 0; white-space: pre-line; text-align: left; max-height: 220px; overflow-y: auto; }
-#update-result.error-text { color: var(--danger); }
 
 /* Titlebar: a newer release or local build, quiet until clicked (update.ts). */
 .update { display: flex; align-items: center; gap: 8px; font-size: 12px; -webkit-app-region: no-drag; }
@@ -2141,7 +2139,8 @@ kbd {
 
 .sheet-actions .spacer { flex: 1; }
 
-.sheet-actions button {
+.sheet-actions button,
+.upd-foot button {
   height: 28px;
   padding: 0 14px;
   border: 1px solid var(--edge);
@@ -2152,7 +2151,8 @@ kbd {
 /* The main action: a little stronger than the others, never colored. */
 .sheet-actions .primary,
 .pop-confirm .primary,
-.dev-conf-foot .primary {
+.dev-conf-foot .primary,
+.upd-foot .primary {
   border-color: color-mix(in srgb, var(--text) 28%, transparent);
   background: color-mix(in srgb, var(--text) 13%, transparent);
   color: var(--text);
@@ -3307,6 +3307,7 @@ body.activity {
 
 .sheet-actions .primary:hover,
 .pop-confirm .primary:hover,
+.upd-foot .primary:hover:not(:disabled),
 .setup .setup-go:hover,
 .welcome .primary:hover { background: color-mix(in srgb, var(--text) 20%, transparent); }
 
@@ -3418,3 +3419,20 @@ html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui
 .actions-inline:has(.text-act) { gap: 12px; }
 .actions-inline.asking { font-size: 12px; white-space: nowrap; }
 .ver .ver-name { white-space: nowrap; }
+
+/* ---------- Software Update window ---------- */
+
+body.updates { display: flex; flex-direction: column; height: 100vh; background: var(--steel-pane); }
+.upd-head { display: flex; align-items: center; gap: 14px; padding: 0 24px 16px; }
+.upd-head h1 { margin: 0 0 2px; font-size: 16px; }
+.upd-head p { margin: 0; }
+.upd-notes { flex: 1; min-height: 0; overflow-y: auto; margin: 0 24px; padding: 4px 14px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--steel-raised); }
+.upd-notes h2 { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.upd-notes p { margin: 10px 0; }
+.upd-notes ul { margin: 0 0 8px; padding-left: 18px; }
+.upd-notes li { margin: 4px 0; }
+.upd-notes[hidden] + .upd-foot { margin-top: auto; }
+.upd-foot { display: flex; align-items: center; gap: 8px; padding: 16px 24px; }
+.upd-foot #upd-status { flex: 1; min-width: 0; }
+.upd-foot button:disabled { opacity: 0.5; }
+#upd-status.error-text { color: var(--danger); }

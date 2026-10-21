@@ -32,7 +32,6 @@
     "allow-php-uninstall",
     "allow-pnpm-prune",
     "allow-pnpm-store",
-    "allow-relaunch",
     "allow-remove-path",
     "allow-runtime-install",
     "allow-runtime-uninstall",
@@ -56,13 +55,11 @@
     "allow-set-worktree-db",
     "allow-set-worktree-preset",
     "allow-settings",
+    "allow-show-updates",
     "allow-storage-anvil",
     "allow-storage-apps",
     "allow-storage-last",
     "allow-unhide-site",
-    "allow-update-check",
-    "allow-update-install",
-    "allow-update-state",
     "allow-xcode-tools-install"
   ]
 }

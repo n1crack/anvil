@@ -51,6 +51,7 @@ const COMMANDS: &[&str] = &[
     "settings",
     "show_settings",
     "show_processes",
+    "show_updates",
     "add_path",
     "remove_path",
     "set_editor",

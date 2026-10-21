@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Software Update</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="updates">
+  <header class="titlebar" data-tauri-drag-region></header>
+  <div class="upd-head">
+    <img src="icon.png" alt="" width="56" height="56">
+    <div>
+      <h1 id="upd-title">Checking…</h1>
+      <p id="upd-sub" class="muted"></p>
+    </div>
+  </div>
+  <div id="upd-notes" class="upd-notes" hidden></div>
+  <footer class="upd-foot">
+    <span id="upd-status" class="muted" role="status"></span>
+    <button id="upd-close">Close</button>
+    <button id="upd-go" class="primary" hidden>Restart to update</button>
+  </footer>
+  <script type="module" src="/src/updates.ts"></script>
+</body>
+</html>

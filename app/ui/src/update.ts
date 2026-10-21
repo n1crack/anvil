@@ -52,6 +52,14 @@ export function updateBar(popAt: (anchor: Element, pop: HTMLElement, focus?: HTM
       const what = el("p", "muted", "Anvil restarts; the apps running now start again.");
       const later = el("button", null, "Later") as HTMLButtonElement;
       const go = el("button", "primary", update ? "Restart to update" : "Restart") as HTMLButtonElement;
+      if (update) {
+        const news = el("button", "link", "What's new") as HTMLButtonElement;
+        news.onclick = () => {
+          close?.();
+          invoke("show_updates");
+        };
+        note.append(" ", news);
+      }
       pop.append(note, what, later, go);
       toggle.setAttribute("aria-expanded", "true");
       const shut = popAt(toggle, pop, go);

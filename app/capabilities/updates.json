@@ -1,0 +1,17 @@
+{
+  "identifier": "updates",
+  "description": "The Software Update window: updates.html, src/updates.ts and its imports. The app commands are the ones it calls (ui/test/permissions.test.ts).",
+  "windows": [
+    "updates"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "allow-relaunch",
+    "allow-show-updates",
+    "allow-update-check",
+    "allow-update-install",
+    "allow-update-state"
+  ]
+}

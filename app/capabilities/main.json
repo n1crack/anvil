@@ -97,6 +97,7 @@
     "allow-share-stop",
     "allow-show-processes",
     "allow-show-settings",
+    "allow-show-updates",
     "allow-state",
     "allow-switch-to-pnpm",
     "allow-touched",

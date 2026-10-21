@@ -1479,6 +1479,7 @@ async fn update_check(handle: AppHandle) -> Res<Option<Release>> {
         notes: u.body,
     });
     *anvil::lock(&FOUND) = found.clone();
+    update_menus(&handle);
     let _ = handle.emit("update", ());
     Ok(found)
 }
@@ -4094,6 +4095,48 @@ fn show_processes(handle: AppHandle, select: Option<String>) {
     open_processes(&handle, select.as_deref());
 }
 
+/// The update window: checks on opening, shows what's new, installs on Restart.
+fn open_updates(handle: &AppHandle) {
+    if let Some(w) = handle.get_webview_window("updates") {
+        let _ = w.emit("update-recheck", ());
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = titlebar(
+        WebviewWindowBuilder::new(handle, "updates", WebviewUrl::App("updates.html".into()))
+            .title("Software Update")
+            .inner_size(480.0, 520.0)
+            .min_inner_size(400.0, 360.0),
+    )
+    .build();
+    if built.is_ok() {
+        apply_theme(handle, anvil::load().ok().and_then(|c| c.theme).as_deref());
+        update_dock(handle);
+    }
+}
+
+#[tauri::command(async)]
+fn show_updates(handle: AppHandle) {
+    open_updates(&handle);
+}
+
+/// The menu bar's item and the tray name a release once a check finds one.
+fn update_menus(handle: &AppHandle) {
+    let text = match &*anvil::lock(&FOUND) {
+        Some(r) => format!("Update to {}…", r.version),
+        None => "Check for Updates…".into(),
+    };
+    if let Some(item) = handle.menu().and_then(|m| m.get("m:updates"))
+        && let Some(item) = item.as_menuitem()
+    {
+        let _ = item.set_text(text);
+    }
+    if let (Some(tray), Ok(menu)) = (handle.tray_by_id("anvil"), menu(handle)) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
 #[tauri::command(async)]
 fn open(site: String, target: String) -> Res<()> {
     let (cfg, s) = find_site_cfg(&site)?;
@@ -4182,6 +4225,7 @@ fn app_menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     };
     let anvil = SubmenuBuilder::new(handle, "Anvil")
         .about(None)
+        .item(&item("updates", "Check for Updates…", None)?)
         .separator()
         .item(&item("settings", "Settings…", Some("CmdOrCtrl+,"))?)
         .separator()
@@ -4273,6 +4317,7 @@ fn on_app_menu(handle: &AppHandle, id: &str) {
     };
     match action {
         "settings" => return open_settings(handle),
+        "updates" => return open_updates(handle),
         "close_all" => return hide_windows(handle),
         "quit_all" => return handle.exit(0),
         _ => {}
@@ -4310,9 +4355,23 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     };
     let sep = || PredefinedMenuItem::separator(handle);
 
-    let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = vec![
-        Box::new(item("sites", "Open Anvil", true, None)?),
-        Box::new(sep()?),
+    let mut items: Vec<Box<dyn IsMenuItem<Wry>>> =
+        vec![Box::new(item("sites", "Open Anvil", true, None)?)];
+    // A found release; on Windows, which has no app menu, the check always.
+    match &*anvil::lock(&FOUND) {
+        Some(r) => items.push(Box::new(item(
+            "updates",
+            &format!("Update to {}…", r.version),
+            true,
+            None,
+        )?)),
+        None if cfg!(windows) => {
+            items.push(Box::new(item("updates", "Check for Updates…", true, None)?))
+        }
+        None => {}
+    }
+    items.extend([
+        Box::new(sep()?) as Box<dyn IsMenuItem<Wry>>,
         Box::new(item("status", &status, false, None)?),
         Box::new(item(
             if on { "stop" } else { "start" },
@@ -4322,7 +4381,7 @@ fn menu(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )?),
         Box::new(item("restart", "Restart", on, None)?),
         Box::new(sep()?),
-    ];
+    ]);
     // PHP versions in one submenu, so the menu doesn't grow with every install.
     let php: Vec<CheckMenuItem<Wry>> = anvil::installed_php()
         .iter()
@@ -4385,6 +4444,7 @@ fn on_menu(handle: &AppHandle, id: &str) {
             let _ = anvil::platform::open(home.join("log")).status();
         }
         "settings" => open_settings(handle),
+        "updates" => open_updates(handle),
         "quit" => handle.exit(0),
         _ => {
             if let Some(v) = id.strip_prefix("php:") {
@@ -4480,6 +4540,7 @@ fn main() {
             settings,
             show_settings,
             show_processes,
+            show_updates,
             add_path,
             remove_path,
             set_editor,

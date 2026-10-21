@@ -7,6 +7,15 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Check for Updates… in the Anvil menu opens a Software Update window with what's new.
+- The menu bar icon's menu offers a new version when there is one.
+
+### Fixed
+
+- Release notes in an update read as text, without markdown marks.
+
 ## [0.2.1] - 2026-10-21
 
 Anvil for Windows, in beta, next to macOS.

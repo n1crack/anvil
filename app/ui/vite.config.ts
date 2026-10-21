@@ -14,6 +14,7 @@ export default defineConfig({
         main: resolve(import.meta.dirname, "index.html"),
         settings: resolve(import.meta.dirname, "settings.html"),
         processes: resolve(import.meta.dirname, "processes.html"),
+        updates: resolve(import.meta.dirname, "updates.html"),
       },
     },
   },
