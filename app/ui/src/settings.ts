@@ -669,9 +669,22 @@ export function render() {
   for (const p of s.paths) {
     const row = document.createElement("div");
     row.className = "row";
-    row.innerHTML = `<span class="path"></span><button>Remove</button>`;
+    row.innerHTML = `<span class="path"></span><span class="actions-inline"><button>Remove</button></span>`;
     $(".path", row).textContent = tilde(p);
-    $("button", row).onclick = () => call("remove_path", { path: p });
+    // Asks in the row: its apps leave Anvil and stop, nothing on disk changes.
+    const box = $(".actions-inline", row);
+    const remove = $("button", row);
+    remove.onclick = () =>
+      confirmInRow(
+        box,
+        "Its applications leave Anvil and their processes stop. The files stay.",
+        "Remove",
+        () => call("remove_path", { path: p }),
+        () => {
+          box.classList.remove("asking");
+          box.replaceChildren(remove);
+        },
+      );
     paths.append(row);
   }
 

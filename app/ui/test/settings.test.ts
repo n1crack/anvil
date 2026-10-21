@@ -440,6 +440,22 @@ describe("storage", () => {
   });
 });
 
+describe("general", () => {
+  test("a folder's Remove asks in the row first: its apps leave Anvil and stop, the files stay", async () => {
+    await open("general");
+    const row = $("#paths .row");
+    (row.querySelector("button") as HTMLElement).click();
+    expect(row.querySelector(".asking .muted")?.textContent).toBe("Its applications leave Anvil and their processes stop. The files stay.");
+    expect(w.mockCalls.some(([c]) => c === "remove_path")).toBe(false);
+    (row.querySelectorAll(".asking button")[0] as HTMLElement).click();
+    expect(row.querySelector(".asking")).toBeNull();
+    (row.querySelector("button") as HTMLElement).click();
+    (row.querySelectorAll(".asking button")[1] as HTMLElement).click();
+    await wait();
+    expect(w.mockCalls.filter(([c]) => c === "remove_path").at(-1)[1]).toEqual({ path: "/Users/x/Sites" });
+  });
+});
+
 describe("about", () => {
   test("Check for Updates… opens the Software Update window", async () => {
     await open("about");

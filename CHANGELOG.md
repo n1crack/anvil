@@ -19,6 +19,7 @@ contain breaking changes.
 - Settings › Features › Agents (MCP) shows the whole Claude Code command with its own Copy, next to `anvil mcp` for other agents.
 - Drop, Flush, Delete All, Clear inbox, Clear log, Resources' Delete and Remove Service ask in the window, not in a system dialog; Remove Service names its apps and labels both answers.
 - A service's Applications says it changes no .env, can list linked apps, and offers "Write to <app>'s .env…" with the keys it sets.
+- Settings › General: removing an application folder asks first, in its row.
 
 ### Added
 
