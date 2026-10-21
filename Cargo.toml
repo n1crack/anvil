@@ -33,7 +33,7 @@ members = ["app"]
 # bundle reads it too (tauri.conf.json has no "version" on purpose).
 # Bump it with scripts/bump-version.sh.
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.90"
 license = "GPL-3.0-only"

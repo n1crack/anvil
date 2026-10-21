@@ -7,111 +7,56 @@ contain breaking changes.
 
 ## [Unreleased]
 
-### Changed
+## [0.3.0] - 2026-10-21
 
-- Anvil needs macOS 12 or later; it no longer installs on older versions, where its web server and PHP don't run.
-- On a Mac too old for them, MySQL (macOS 14), PostgreSQL (15), Mailpit (13) and Node.js 24 or later (13.5) say so before downloading instead of failing to start.
-- Windows: the main window's shortcuts work with Ctrl, and Settings › Shortcuts and tooltips say Ctrl and File Explorer instead of ⌘ and Finder.
-- Settings › Plugins is now Settings › Features: they come with Anvil and only need turning on.
-- Settings › Features › Request log: on as before; off, the web server keeps no request logs and apps lose the Requests tab.
-- Unfinished setup is one titlebar button; it lists each step and says which one asks for your password before anything runs.
-- Processes works from the keyboard: arrows move between rows, Enter opens a row's log, Shift+F10 its menu.
-- Settings › Storage asks before deleting in the row itself, not in a dialog, and its sizes line up in one column.
-- Software Update: Return presses the main button and Esc closes the window, except while an update downloads.
-- Settings › General: the menus on the right are all one width.
-- Settings › Features › Agents (MCP) shows the whole Claude Code command with its own Copy, next to `anvil mcp` for other agents.
-- Drop, Flush, Delete All, Clear inbox, Clear log, Resources' Delete and Remove Service ask in the window, not in a system dialog; Remove Service names its apps and labels both answers.
-- A service's Applications says it changes no .env, can list linked apps, and offers "Write to <app>'s .env…" with the keys it sets.
-- Settings › General: removing an application folder asks first, in its row.
-- An app's php.ini fields restart the web server once per change and say so beside the field while it restarts.
-- A share whose Stop fails says why on its line.
-- Adding a service says what it is downloading and how much has come in, or that Redis is being built.
-- Mail tab: after catching is turned on or off, it offers to restart the processes still sending the old way; inboxes count "messages".
-- Worktree settings say in plain sentences what a new worktree gets; Customize… edits files, env keys and commands as rows with plain choices instead of text boxes.
-- Add Folder of Applications… on a folder that is one project offers to add it as one application instead of serving its subfolders, and an empty folder says it has none yet.
-- Changing an app's PHP version says which extensions it is building beside the version, and under it which ones the new version runs without.
-- Remove Link… asks first and says what goes: the app's processes stop and its settings in Anvil are deleted; its folder stays.
-- New Application says a missing PHP or runtime in the form, with an Install button, before anything is made; reopening the sheet keeps the typed name.
-- A new app's Open is Open in Browser and opens it there, and selects it in the sidebar as before; with the web server stopped it is Show.
-- Dev: a server whose port doesn't answer yet has an amber dot, a crashed process says its exit code, and dismissing a crash is ✕, not ■.
-- Worktrees: Create says Creating… while it works, and a worktree being removed says Removing… in its row; a failed removal is said under its name.
-- Storage and Resources mark what is safe to delete in grey instead of orange.
-- Mail tab: deleting one message asks first, in its row, as Clear does.
-- Worktree settings: "Add Install packages" reads "Add Package Install".
-- A failed New Application's "Show in Finder" is "Show Log in Finder", which is what it shows.
-- Changing a running app's type, start command, port or version says beside the field that it restarts the app; Start with Anvil no longer restarts it.
-- `anvil --help` and each command's help explain every argument and flag, with examples, and say "application" where they said "site".
-- `anvil apps` lists the applications; `anvil sites` still works.
-- Git tab: a branch that tracks the same name on its remote shows only the remote ("origin"), not the branch twice.
-- Settings › PHP and the other language pages: a failed Install, Uninstall or Make default says why in its version's row, not at the top of the page.
-- Settings › Node.js: the note under Package managers is two short sentences, and says node_modules come from the app's lockfile manager.
+WordPress, more PHP extensions, and a round of polish and speed across the app and the CLI. Still a beta.
 
 ### Added
 
+- WordPress: existing sites are recognised, and New Application creates one on a MySQL service, with PHP's mysqli built when it's missing.
 - PHP extensions MongoDB and Memcached, and Imagick on a Mac with Homebrew's ImageMagick: `anvil php ext add mongodb`.
-- Check for Updates… in the Anvil menu opens a Software Update window with what's new.
-- The menu bar icon's menu offers a new version when there is one.
-- WordPress: existing sites are recognised, and New Application creates one on a MySQL service.
+- Check for Updates… in the Anvil menu opens a Software Update window with what's new; the menu bar menu offers a new version when there is one.
+- Settings › Features › Request log: on as before; off, the web server keeps no request logs and apps lose the Requests tab.
+- Services: "Write to <app>'s .env…" writes a service's connection keys into an app's .env, after showing them.
+- A service in the sidebar has a right-click menu: Start or Stop, open in a database app, its data, its log and Remove Service….
+- `anvil apps` lists the applications; `anvil sites` still works.
 
 ### Changed
 
-- Process names in Dev and Containers no longer use red, orange or green, so only the dot shows a process's state.
+- Anvil needs macOS 12 or later. MySQL (macOS 14), PostgreSQL (15), Mailpit (13) and Node.js 24 or later (13.5) say so before downloading on an older Mac.
+- Settings › Plugins is now Settings › Features: they come with Anvil and only need turning on.
+- Worktree settings say in plain sentences what a new worktree gets; Customize… edits files, env keys and commands as rows with plain choices.
+- Every confirm is asked in the window, most in the row itself, never in a system dialog. Remove Service offers Remove, Keep Data or Remove and Delete Data.
+- Unfinished setup is one titlebar button; it lists each step and says which one asks for your password.
+- Add Folder of Applications… on a folder that is one project offers to add it as one application; an empty folder says it has none yet.
+- New Application says a missing PHP or runtime in the form, with Install, before anything is made; after creating, Open in Browser opens the app.
+- Changing an app's PHP version, type, start command, port, version or php.ini says beside the field what it builds or restarts, and what failed.
+- Dev: amber while a server's port doesn't answer yet; a crash says its exit code; All processes is red while one has crashed, as in the sidebar.
+- Adding a service says what it downloads and how much has come in. Worktrees say Creating… and Removing… where you asked.
+- Processes works from the keyboard and says Restarting… or Stopping… in a row while it acts; the menu bar menu does the same.
+- Processes › Agents: a failed action reads "couldn't start vite: <reason>"; actions from earlier days show their date.
+- Settings › Features › Agents (MCP) shows the whole Claude Code command with its own Copy.
+- Settings › PHP and the other language pages say a failed Install, Uninstall or Make default in its version's row.
+- Mail tab: deleting one message asks first; after catching is switched it offers to restart the processes still sending the old way.
+- The CLI explains every argument and flag with examples, says "application", prints what each setting command set, and gives one "No app named …" or "No service named …" error with what to run.
+- Windows: shortcuts work with Ctrl, and the app says Ctrl and File Explorer instead of ⌘ and Finder.
+- Menu bar menu: Quit reads Quit Anvil and Stop Everything with ⌥⌘Q; ⌘Q only closes the windows.
+- Icons are one set of outline icons, and only a dot shows a process's state: names are no longer red, orange or green.
 
 ### Fixed
 
-- The sidebar shows an app red when one of its processes crashed, even while others run, as its header does.
+- Stopping an app also ends the processes it started in the background, such as Next.js's telemetry flusher.
+- The sidebar shows an app red when one of its processes or Docker Compose containers crashed, also while others run.
+- Less CPU at start with many apps, while an app starts, and while Dev, Requests, Overview or Processes is open; Processes asks Docker every 15 s while no container runs.
+- A closed window no longer reloads after every action, and Anvil frees the main window's memory after it has been closed for 10 minutes.
 - Release notes in an update read as text, without markdown marks.
-- Processes: Clear log asks before it empties the log file.
-- Processes: the Status column stays readable while a log is open, also at the smallest window size.
-- Processes › Agents: a failed action reads "couldn't start vite: <reason>", not "started vite"; actions from earlier days show their date.
-- The titlebar's setup and update buttons stay on one line in a small window; Update available looks like a button.
-- Settings › PHP: every version row has the same height, and Extensions stays in place on hover and while Uninstall asks.
-- Software Update: a failed check shows why under its title and offers Try Again; without release notes the window's content sits in the middle.
-- Settings › Storage: Applications no longer says it is measuring and that no applications take space at the same time.
-- Settings › Storage: a language's row points to its own Settings page, not the former Languages page.
-- In a narrow window every tab of an app fits, Settings included, the header stays short and Dev's output keeps its room.
-- An app's header counts a crashed Docker Compose container as crashed, not running.
-- New Worktree…, Dev's Run and the Start/Stop of all processes look like the other buttons; Run no longer looks disabled.
-- The keyboard focus ring on an app's tabs is drawn whole, not cut at the top and bottom.
-- Service tags in the sidebar line up with the apps' type labels; short of room, a tag is left out instead of cut.
-- The line under an app's or service's name wraps without a stray "·" at a line's start or end.
-- Stopping an app also ends the processes it started in the background, such as Next.js's telemetry flusher, which were left running.
-- The main window's small buttons and marks (close, remove, more, keys, start, stop, done, failed) use the same outline icons as the rest of Anvil.
-- An app's Overview says how many of its processes run once, in the header; the Dev and Containers lines below keep their dots.
-- The sidebar shows a Docker Compose app as crashed when one of its containers exited with an error, as its header does.
-- A service in the sidebar has a right-click menu: Start or Stop, open in a database app, its data, its log and Remove Service….
-- Hide from Anvil leaves "name hidden · Undo" in the app's place in the sidebar for a few seconds, instead of a notice at the bottom of the window.
-- Caught mail rows fit their box in a narrow window: sender and subject are cut with "…" and shown whole on hover, and the recipient gives way first.
-- A failed action shows where it was taken: an app's under its name, a service's on its page, Load older's and Clear's beside them. Other errors lie over the top of the pane and no longer push it down.
-- Less CPU while an app's Dev, Requests or Overview tab, or the Processes window, is open.
-- The Processes window asks Docker every 15 s instead of every 2 s while no container runs.
-- A closed or minimized window no longer reloads after every action; it catches up when it is shown again.
-- Anvil frees the main window's memory after it has been closed for 10 minutes; opening it again shows the same app and tab.
-- Anvil uses much less CPU while it starts with many apps.
-- Less CPU while an app starts.
-- Less CPU while the Requests tab is open and no requests come in.
-- Logs and Requests say in red when a log can't be read, instead of looking empty; Packages' and Resources' errors line up with the tab.
-- Requests: the filters wrap onto a second line in a narrow window instead of running off the edge; their reset reads Clear Filters, so it isn't mistaken for deleting the log.
-- Processes: a row says Restarting… or Stopping… while its Restart or Stop runs, instead of looking unchanged.
-- Processes: a log with nothing in it says No output yet instead of an empty black pane.
-- Menu bar menu: Start, Stop and Restart say Starting…, Stopping… or Restarting… until done; "1 application" is singular; Quit reads Quit Anvil and Stop Everything with ⌥⌘Q, as in the Anvil menu, since ⌘Q only closes the windows.
-- Settings › Shortcuts lists ⌘Q as closing the windows and ⌥⌘Q as quitting, and no longer lists PHP keys the menu doesn't have.
-- Packages: in a narrow window the + list opens inside the window instead of pushing the sidebar out of view.
-- Settings › About: static-php-cli no longer breaks across two lines.
-- Settings › Shortcuts: ← → show or hide an app's worktrees, as they do; it said linked domains.
-- Menu bar menu: picking a default PHP version while Anvil runs says Restarting… until its extensions are built and the web server is back.
-- `anvil unlink` and `anvil forget` say what they did, and fail for a name or folder Anvil doesn't serve; `anvil forget` works for a deleted folder.
-- CLI errors for an unknown app all read "No app named …" and point to `anvil sites`; "Anvil isn't running" is an error like the others.
-- Warnings and hints the CLI writes to stderr have no color codes when stderr isn't a terminal.
-- `anvil sites`, `anvil php list`, `anvil worktree list` and `anvil packages` say so when there is nothing to list, and what to run.
-- `anvil git` names the folder that isn't a Git repository and says "1 hour ago", not "1 hours ago".
-- `anvil app`, `anvil service`, `anvil use` and `anvil php ini` settings print what they set, e.g. "blog: port 3901".
-- An unknown service reads "No service named …" everywhere in the CLI and points to `anvil service list`.
-- Grey text is easier to read in the dark theme, also on a selected row, and the running-services count in the light theme.
-- Esc closes the New Application and Add Service sheets while the cursor is in their empty search field.
-- In a small bubble (Remove, Set up Anvil, an update) Tab stays inside it, and Esc puts the keyboard focus back on the button that opened it; Esc also closes Dev's Keys card.
-- Screen readers hear a running, starting or crashed state where the window shows it as a coloured dot, and the notes that appear beside a field while something restarts or saves.
-- Settings › General: each folder's Remove and each hidden app's Show say which one they act on to a screen reader.
+- A failed action is said where it was taken, not in a banner far from it; Logs and Requests say when a log can't be read instead of looking empty.
+- In a narrow window every tab fits, Requests' filters wrap, bubbles and lists open inside the window, and caught mail rows are cut with "…".
+- Settings › Shortcuts lists the keys Anvil has: ← → fold an app's worktrees, ⌘Q closes the windows, ⌥⌘Q quits.
+- `anvil unlink` and `anvil forget` say what they did and fail for a name Anvil doesn't serve; empty lists say what to run.
+- The CLI's warnings carry no color codes when stderr isn't a terminal.
+- Grey text reads at 4.5:1 or better in both themes; screen readers hear process states and the notes beside fields; Tab and Esc work in every bubble and sheet.
+- Settings › Storage: no measuring and empty at once; safe to delete is grey, not orange; a language's row points to its own page.
 
 ## [0.2.1] - 2026-10-21
 
@@ -200,6 +145,7 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/n1crack/anvil/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/n1crack/anvil/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/n1crack/anvil/releases/tag/v0.2.0
