@@ -521,7 +521,7 @@ fn mcp_off_by_default() {
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
-        "Turn on Agents (MCP) in Settings › Plugins\n"
+        "Turn on Agents (MCP) in Settings › Features\n"
     );
     assert!(out.stdout.is_empty());
 }
