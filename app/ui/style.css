@@ -9,7 +9,7 @@
   --selected: rgba(255, 255, 255, 0.11);
   --line: rgba(255, 255, 255, 0.08);
   --text: #e8ebee;
-  --muted: #8d959f;
+  --muted: #9aa2ac;
   --cold: #5b636d;
 
   --heat-white: #ffd166;
@@ -74,7 +74,7 @@
     --heat-text: #c2410c;
     --danger: #c42127;
     --ok: #1f9d3e;
-    --ok-text: #157030;
+    --ok-text: #126429;
     --lock-on: #4e8a5d;
     --lock-off: #b0675e;
     --amber: #b87400;
@@ -511,6 +511,9 @@ button, select, input { font: inherit; color: inherit; }
   background: var(--selected);
   box-shadow: inset 2px 0 0 var(--select-mark);
 }
+/* Quiet text on a selection's grey: a step brighter, so it keeps 4.5:1 there too. */
+.item[aria-current="true"] :is(.kind, .sub),
+.storage-tabs [aria-selected="true"] span { color: color-mix(in srgb, var(--muted) 50%, var(--text)); }
 
 .empty {
   margin: 24px 4px;

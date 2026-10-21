@@ -97,6 +97,7 @@ contain breaking changes.
 - `anvil git` names the folder that isn't a Git repository and says "1 hour ago", not "1 hours ago".
 - `anvil app`, `anvil service`, `anvil use` and `anvil php ini` settings print what they set, e.g. "blog: port 3901".
 - An unknown service reads "No service named …" everywhere in the CLI and points to `anvil service list`.
+- Grey text is easier to read in the dark theme, also on a selected row, and the running-services count in the light theme.
 
 ## [0.2.1] - 2026-10-21
 
