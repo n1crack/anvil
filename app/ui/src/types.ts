@@ -313,7 +313,14 @@ export interface Settings {
     /** The catalog, each on or off for every app on the version. */
     /** `needs`: what it needs first that isn't here; it can't be turned on. */
     extensions: { name: string; on: boolean; built: boolean; building: boolean; needs?: string | null }[];
+    /** A newer patch, [installed, newest], as the last check found. */
+    available: [string, string] | null;
+    /** The patch it was updated to since Anvil started. */
+    updated: string | null;
+    updating: boolean;
   }[];
+  /** Settings › PHP › Keep PHP up to date. */
+  php_auto_update: boolean;
   ini: Record<string, string>;
   terminal: string | null;
   terminals: string[];

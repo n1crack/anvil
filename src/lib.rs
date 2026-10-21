@@ -150,6 +150,10 @@ pub struct Config {
     /// every app on a version, by minor version. Stored only when there are some.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub php_ext: BTreeMap<String, Vec<String>>,
+    /// Settings › PHP › Keep PHP up to date: a newer patch of an installed version
+    /// installs on its own (`php_updates`). On unless turned off; stored only when off.
+    #[serde(skip_serializing_if = "is_true")]
+    pub php_auto_update: bool,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -273,6 +277,7 @@ impl Default for Config {
             db_viewer: false,
             mail_port: None,
             php_ext: BTreeMap::new(),
+            php_auto_update: true,
         }
     }
 }
@@ -1305,16 +1310,23 @@ pub fn installed_php() -> Vec<String> {
     v
 }
 
-pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
-    php_offered(minor).map_err(anyhow::Error::msg)?;
-    if cfg!(windows) {
-        return php_install_windows(cfg, minor);
-    }
-    let (plat, _) = platform()?;
-    let list: Vec<serde_json::Value> = fetch_json(&format!("{PHP_INDEX}?format=json"))?;
+/// The source's list of PHP builds: static-php-cli's directory, or windows.php.net's
+/// releases.json.
+fn php_index() -> Result<serde_json::Value> {
+    fetch_json(&if cfg!(windows) {
+        format!("{PHP_WINDOWS}releases.json")
+    } else {
+        format!("{PHP_INDEX}?format=json")
+    })
+}
+
+/// The newest patch of `minor` (`8.4.27`) in static-php-cli's directory that has an
+/// FPM build for `plat`.
+fn static_php_newest(list: &serde_json::Value, minor: &str, plat: &str) -> Option<String> {
     let prefix = format!("php-{minor}.");
     let suffix = format!("-fpm-{plat}.tar.gz");
     let patch = list
+        .as_array()?
         .iter()
         .filter_map(|f| f["name"].as_str())
         .filter_map(|n| {
@@ -1323,9 +1335,61 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
                 .parse::<u32>()
                 .ok()
         })
-        .max()
+        .max()?;
+    Some(format!("{minor}.{patch}"))
+}
+
+/// `new` is a later patch release than `have`: `8.4.27` after `8.4.9`.
+fn newer_patch(have: &str, new: &str) -> bool {
+    let patch = |v: &str| v.rsplit('.').next()?.parse::<u32>().ok();
+    matches!((patch(have), patch(new)), (Some(a), Some(b)) if b > a)
+}
+
+/// The installed PHP versions the source has a newer patch of: (minor, installed, newest).
+pub fn php_updates() -> Result<Vec<(String, String, String)>> {
+    let installed = installed_php();
+    if installed.is_empty() {
+        return Ok(vec![]);
+    }
+    let index = php_index()?;
+    let plat = if cfg!(windows) { "" } else { platform()?.0 };
+    Ok(installed
+        .into_iter()
+        .filter_map(|minor| {
+            let have = opcache::installed_full(&minor).ok()?;
+            let new = if cfg!(windows) {
+                index[minor.as_str()]["version"].as_str()?.to_string()
+            } else {
+                static_php_newest(&index, &minor, plat)?
+            };
+            newer_patch(&have, &new).then_some((minor, have, new))
+        })
+        .collect())
+}
+
+/// A new PHP folder's `php` and server start, or it doesn't replace the one that does.
+fn php_runs(dir: &Path) -> Result<()> {
+    for bin in [platform::exe("php"), PHP_SERVER.to_string()] {
+        let ok = platform::command(dir.join(&bin))
+            .args(["-n", "-v"])
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !ok {
+            bail!("the new {bin} doesn't start");
+        }
+    }
+    Ok(())
+}
+
+pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
+    php_offered(minor).map_err(anyhow::Error::msg)?;
+    let index = php_index()?;
+    if cfg!(windows) {
+        return php_install_windows(cfg, minor, &index);
+    }
+    let (plat, _) = platform()?;
+    let full = static_php_newest(&index, minor, plat)
         .with_context(|| format!("no PHP {minor} build for {plat}"))?;
-    let full = format!("{minor}.{patch}");
     let dir = php_dir(minor);
     println!("Installing PHP {full}…");
     replace_dir(&dir, |new| {
@@ -1338,6 +1402,7 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
                 None,
             )?;
         }
+        php_runs(new)?;
         let ini = dir.join("php.ini");
         if ini.exists() {
             fs::copy(ini, new.join("php.ini"))?;
@@ -1392,8 +1457,7 @@ const PHP_WINDOWS_EXT: [&str; 15] = [
 
 /// PHP from windows.php.net: the thread-safe-less x64 build (php-cgi), checked against
 /// its published SHA-256, with a php.ini that loads the usual extensions and OPcache.
-fn php_install_windows(cfg: &mut Config, minor: &str) -> Result<()> {
-    let list: serde_json::Value = fetch_json(&format!("{PHP_WINDOWS}releases.json"))?;
+fn php_install_windows(cfg: &mut Config, minor: &str, list: &serde_json::Value) -> Result<()> {
     let rel = &list[minor];
     let build = ["nts-vs17-x64", "nts-vs16-x64"]
         .iter()
@@ -1410,6 +1474,7 @@ fn php_install_windows(cfg: &mut Config, minor: &str) -> Result<()> {
     println!("Installing PHP {full}…");
     replace_dir(&dir, |new| {
         fetch_tgz(&format!("{PHP_WINDOWS}{file}"), new, false, Some(sum))?;
+        php_runs(new)?;
         let ini = dir.join("php.ini");
         if ini.exists() {
             fs::copy(ini, new.join("php.ini"))?;
@@ -4187,6 +4252,24 @@ mod tests {
             no
         );
         assert!(cfg.sites.is_empty());
+    }
+
+    #[test]
+    fn php_newest_patch_is_picked_by_number() {
+        let list = serde_json::json!([
+            {"name": "php-8.4.9-fpm-macos-aarch64.tar.gz"},
+            {"name": "php-8.4.27-fpm-macos-aarch64.tar.gz"},
+            {"name": "php-8.4.30-cli-macos-aarch64.tar.gz"},
+            {"name": "php-8.4.31-fpm-linux-x86_64.tar.gz"},
+            {"name": "php-8.40.1-fpm-macos-aarch64.tar.gz"},
+        ]);
+        let newest = static_php_newest(&list, "8.4", "macos-aarch64");
+        assert_eq!(newest.as_deref(), Some("8.4.27"));
+        assert_eq!(static_php_newest(&list, "8.3", "macos-aarch64"), None);
+        assert!(newer_patch("8.4.9", "8.4.27"));
+        assert!(!newer_patch("8.4.27", "8.4.27"));
+        assert!(!newer_patch("8.4.27", "8.4.9"));
+        assert!(!newer_patch("8.4.27", "8.4.x"));
     }
 
     #[test]

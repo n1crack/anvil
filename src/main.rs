@@ -698,6 +698,11 @@ enum PhpCmd {
         /// The minor version, e.g. 8.4
         version: String,
     },
+    /// Install the newest patch release of installed versions
+    Update {
+        /// An installed version, e.g. 8.4 (leave it out for all)
+        version: Option<String>,
+    },
     /// List installed versions
     List,
     /// Remove an installed version
@@ -1619,6 +1624,36 @@ fn run() -> Result<()> {
             cmd: PhpCmd::Install { version },
         } => php_install(&mut cfg, &version)?,
         Cmd::Php {
+            cmd: PhpCmd::Update { version },
+        } => {
+            if let Some(v) = &version
+                && !installed_php().contains(v)
+            {
+                bail!("PHP {v} is not installed — run `anvil php install {v}`");
+            }
+            let found: Vec<_> = php_updates()?
+                .into_iter()
+                .filter(|(minor, ..)| version.as_ref().is_none_or(|v| v == minor))
+                .collect();
+            if found.is_empty() {
+                println!(
+                    "PHP {}is up to date",
+                    version.map(|v| v + " ").unwrap_or_default()
+                );
+            }
+            for (minor, ..) in &found {
+                php_install(&mut cfg, minor)?;
+            }
+            if !found.is_empty() {
+                println!(
+                    "{}",
+                    commands(
+                        "Restart Anvil to use it: `anvil start`, or the app reloads on its next refresh."
+                    )
+                );
+            }
+        }
+        Cmd::Php {
             cmd: PhpCmd::Uninstall { version },
         } => php_uninstall(&cfg, &version)?,
         Cmd::Php {
@@ -1774,6 +1809,8 @@ fn run() -> Result<()> {
                     style::note("No PHP yet: `anvil php install 8.4` installs one.")
                 );
             }
+            // Offline, the list goes without it.
+            let updates = php_updates().unwrap_or_default();
             for v in all {
                 let mark = if cfg.php.as_deref() == Some(&v) {
                     dim(" (default)")
@@ -1785,7 +1822,13 @@ fn run() -> Result<()> {
                     opcache::State::BuiltIn => "opcache (built in)".into(),
                     opcache::State::Missing => dim(format!("no opcache (anvil php opcache {v})")),
                 };
-                println!("{v}  {opcache}{mark}");
+                let patch = match updates.iter().find(|(m, ..)| *m == v) {
+                    Some((_, have, new)) => {
+                        format!("  {have} · {new} available (anvil php update {v})")
+                    }
+                    None => String::new(),
+                };
+                println!("{v}  {opcache}{mark}{patch}");
             }
         }
         Cmd::Use { version } => {

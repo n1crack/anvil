@@ -61,6 +61,8 @@ const COMMANDS: &[&str] = &[
     "set_default_php",
     "set_ini",
     "php_install",
+    "php_update",
+    "set_php_auto_update",
     "php_opcache",
     "php_mysqli",
     "php_opcache_remove",

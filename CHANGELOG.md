@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- PHP keeps itself on the newest patch release (Settings › PHP › Keep PHP up to date); off, Settings offers Update, and `anvil php update` does it from the CLI.
+
 ## [0.3.0] - 2026-10-21
 
 Anvil for Linux, in beta; WordPress, more PHP extensions, and a round of polish and speed across the app and the CLI. Still a beta.

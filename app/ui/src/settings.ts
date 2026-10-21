@@ -86,7 +86,7 @@ function versionRow(
   busy: boolean,
   blocked: boolean,
   act: { install: () => void; uninstall: () => void; makeDefault?: () => void; note?: string },
-  extra?: { slot?: HTMLElement; end?: HTMLElement; error?: HTMLElement; below?: HTMLElement },
+  extra?: { slot?: HTMLElement; note?: HTMLElement; end?: HTMLElement; error?: HTMLElement; below?: HTMLElement },
 ) {
   const row = document.createElement("div");
   row.className = `row ver${v.installed ? "" : " missing"}${v.default ? " is-default" : ""}`;
@@ -105,6 +105,7 @@ function versionRow(
         title: `Unpin ${pinned} first to uninstall it`,
       }),
     );
+  if (extra?.note) name.append(extra.note);
   const actions = document.createElement("span");
   actions.className = "actions-inline";
   if (busy) {
@@ -718,6 +719,7 @@ export function render() {
   $("#login").checked = s.login;
   $("#dock").checked = s.dock_icon;
   $("#trim-logs").checked = s.trim_app_logs;
+  $("#php-auto-update").checked = s.php_auto_update;
   $("#notifications").checked = s.notifications;
   $("#theme").value = s.theme ?? "";
   options($("#editor"), s.editors, s.editor, "None");
@@ -786,7 +788,11 @@ export function render() {
           uninstall: () => phpAct(v.version, "php_uninstall"),
           note: "Apps asking for it use the default.",
         },
-        { ...phpParts(v), ...(verErrors.has(`php@${v.version}`) && { error: verError(`php@${v.version}`) }) },
+        {
+          ...phpParts(v),
+          note: phpPatch(v),
+          ...(verErrors.has(`php@${v.version}`) && { error: verError(`php@${v.version}`) }),
+        },
       ),
     ),
   );
@@ -794,6 +800,30 @@ export function render() {
   for (const input of document.querySelectorAll<HTMLInputElement>("[data-ini]")) {
     if (document.activeElement !== input) input.value = s.ini[input.dataset.ini ?? ""] ?? "";
   }
+}
+
+/** A version's newer patch after its name: "8.4.23 · 8.4.27 available" with Update,
+ * "Updating to 8.4.27…" while it installs, then "Updated to 8.4.27". */
+function phpPatch(v: Settings["php"][number]) {
+  if (!v.installed) return undefined;
+  const box = Object.assign(document.createElement("span"), { className: "ver-pinned ver-patch" });
+  if (v.available && (v.updating || installing.has(`update@${v.version}`))) {
+    box.innerHTML = `<span class="spin-dot"></span>`;
+    box.append(`Updating to ${v.available[1]}…`);
+  } else if (v.available) {
+    const update = textAct("Update", async () => {
+      installing.add(`update@${v.version}`);
+      const done = phpAct(v.version, "php_update"); // clears the old errors first
+      render();
+      await done;
+      installing.delete(`update@${v.version}`);
+      render();
+    });
+    box.append(`${v.available[0]} · ${v.available[1]} available`, update);
+  } else if (v.updated) {
+    box.textContent = `Updated to ${v.updated}`;
+  } else return undefined;
+  return box;
 }
 
 const opcacheErrors = new Map<string, string>();
@@ -1030,6 +1060,7 @@ $("#add-path").onclick = async () => {
 $("#login").onchange = (e) => call("set_login", { on: e.target.checked });
 $("#dock").onchange = (e) => call("set_dock_icon", { on: e.target.checked });
 $("#trim-logs").onchange = (e) => call("set_trim_app_logs", { on: e.target.checked });
+$("#php-auto-update").onchange = (e) => call("set_php_auto_update", { on: e.target.checked });
 $("#notifications").onchange = (e) => call("set_notifications", { on: e.target.checked });
 $("#https-default").onchange = (e) => call("set_https_default", { on: e.target.checked });
 $("#worktree-db").onchange = (e) => call("set_worktree_db", { choice: e.target.checked ? "copy" : "empty" });

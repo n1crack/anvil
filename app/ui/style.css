@@ -1486,6 +1486,9 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-size: 12px;
 }
 
+/* PHP: a newer patch, with Update, after Default and Pinned by. */
+.ver-patch { display: inline-flex; align-items: center; gap: 8px; }
+
 /* PHP: OPcache in a fixed slot after the version, so Default and Pinned by stay aligned. */
 .ver-opcache {
   display: inline-flex;

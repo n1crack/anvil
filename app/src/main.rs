@@ -1591,9 +1591,11 @@ fn update_state() -> UpdateState {
 }
 
 /// The newest release, when it is newer than this Anvil; windows hear of it as `update`.
+/// PHP's newer patches are looked for alongside (`php_check`).
 #[tauri::command]
 async fn update_check(handle: AppHandle) -> Res<Option<Release>> {
     use tauri_plugin_updater::UpdaterExt;
+    php_check(&handle);
     let update = handle.updater().map_err(|e| e.to_string())?;
     let found = update.check().await.map_err(|e| e.to_string())?;
     let found = found.map(|u| Release {
@@ -1604,6 +1606,88 @@ async fn update_check(handle: AppHandle) -> Res<Option<Release>> {
     update_menus(&handle);
     let _ = handle.emit("update", ());
     Ok(found)
+}
+
+/// Installed PHP versions the last check found a newer patch of: minor -> (installed,
+/// newest). Settings › PHP offers Update.
+static PHP_AVAILABLE: Mutex<std::collections::BTreeMap<String, (String, String)>> =
+    Mutex::new(std::collections::BTreeMap::new());
+/// The patch each version was updated to since Anvil started, said on its row.
+static PHP_UPDATED: Mutex<std::collections::BTreeMap<String, String>> =
+    Mutex::new(std::collections::BTreeMap::new());
+/// Versions being updated: a second check or click doesn't start another.
+static PHP_UPDATING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Look for newer PHP patches: with Keep PHP up to date on they install in the
+/// background, otherwise Settings › PHP offers them. Offline, nothing changes.
+fn php_check(handle: &AppHandle) {
+    let handle = handle.clone();
+    std::thread::spawn(move || {
+        let Ok(found) = anvil::php_updates() else {
+            return;
+        };
+        let found: std::collections::BTreeMap<_, _> = found
+            .into_iter()
+            .map(|(minor, have, new)| (minor, (have, new)))
+            .collect();
+        let minors: Vec<String> = found.keys().cloned().collect();
+        let differs = *anvil::lock(&PHP_AVAILABLE) != found;
+        *anvil::lock(&PHP_AVAILABLE) = found;
+        if differs {
+            changed(&handle);
+        }
+        if !minors.is_empty() && anvil::load().is_ok_and(|c| c.php_auto_update) {
+            let _ = update_php(&handle, &minors);
+        }
+    });
+}
+
+/// Install the newest patch of each of `minors` (php.ini kept, OPcache and extensions
+/// built again), then restart the web server once if it runs. The first failure is
+/// returned; the others are still tried.
+fn update_php(handle: &AppHandle, minors: &[String]) -> Res<()> {
+    let (mut result, mut any) = (Ok(()), false);
+    for minor in minors {
+        {
+            let mut busy = anvil::lock(&PHP_UPDATING);
+            if busy.contains(minor) {
+                result = result.and(Err(format!("PHP {minor} is already being updated")));
+                continue;
+            }
+            busy.push(minor.clone());
+        }
+        changed(handle);
+        let done = anvil::load().and_then(|mut cfg| anvil::php_install(&mut cfg, minor));
+        anvil::lock(&PHP_UPDATING).retain(|m| m != minor);
+        match done {
+            Ok(()) => {
+                any = true;
+                if let Some((_, new)) = anvil::lock(&PHP_AVAILABLE).remove(minor) {
+                    anvil::lock(&PHP_UPDATED).insert(minor.clone(), new);
+                }
+            }
+            Err(e) => result = result.and(Err(err(e))),
+        }
+    }
+    let app = handle.state::<App>();
+    if any
+        && running(&app)
+        && let Ok(cfg) = anvil::load()
+    {
+        start(&app, &cfg);
+    }
+    changed(handle);
+    result
+}
+
+/// Settings › PHP's Update: the newest patch of `version`, then the web server restarts.
+#[tauri::command]
+async fn php_update(handle: AppHandle, version: String) -> Res<Settings> {
+    let h = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || update_php(&h, &[version]))
+        .await
+        .map_err(|e| e.to_string())??;
+    settings(handle)
 }
 
 /// Download and install the newest release (progress as `update-progress`, a percent or
@@ -3397,6 +3481,12 @@ struct PhpVersion {
     opcache_building: bool,
     /// The catalog (`phpext::CATALOG`), each on or off for every app on this version.
     extensions: Vec<PhpExt>,
+    /// A newer patch than the installed one, (installed, newest), as the last check found.
+    available: Option<(String, String)>,
+    /// The patch it was updated to since Anvil started.
+    updated: Option<String>,
+    /// Its newest patch is being installed.
+    updating: bool,
 }
 
 #[derive(Serialize)]
@@ -3422,6 +3512,8 @@ struct Settings {
     editor: Option<String>,
     editors: Vec<String>,
     php: Vec<PhpVersion>,
+    /// Settings › PHP › Keep PHP up to date.
+    php_auto_update: bool,
     ini: std::collections::BTreeMap<String, String>,
     terminal: Option<String>,
     terminals: Vec<String>,
@@ -3606,8 +3698,12 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                         needs: anvil::phpext::needs(e.name),
                     })
                     .collect(),
+                available: anvil::lock(&PHP_AVAILABLE).get(*v).cloned(),
+                updated: anvil::lock(&PHP_UPDATED).get(*v).cloned(),
+                updating: anvil::lock(&PHP_UPDATING).iter().any(|u| u == v),
             })
             .collect(),
+        php_auto_update: cfg.php_auto_update,
         editors: installed_apps("editor", &EDITORS),
         terminals: installed_apps("terminal", &TERMINALS),
         git_clients: installed_apps("git", &GIT_CLIENTS),
@@ -4047,6 +4143,23 @@ fn set_trim_app_logs(handle: AppHandle, on: bool) -> Res<Settings> {
         },
         false,
     )
+}
+
+/// Settings › PHP › Keep PHP up to date: turned on, a newer patch found installs now.
+#[tauri::command(async)]
+fn set_php_auto_update(handle: AppHandle, on: bool) -> Res<Settings> {
+    let s = apply(
+        &handle,
+        |cfg| {
+            cfg.php_auto_update = on;
+            Ok(())
+        },
+        false,
+    )?;
+    if on {
+        php_check(&handle);
+    }
+    Ok(s)
 }
 
 /// Anvil's logs capped, and apps' trimmed weekly when that is on.
@@ -4975,6 +5088,8 @@ fn main() {
             set_default_php,
             set_ini,
             php_install,
+            php_update,
+            set_php_auto_update,
             php_opcache,
             php_mysqli,
             php_opcache_remove,
