@@ -222,7 +222,7 @@ export function editor(field: Field, h: Hooks, o: Opts): HTMLElement {
   };
   onEnter(cmd, go);
   add.append(cmd, action("Add", go));
-  if (!list.includes("{install}")) add.append(action("Add Install packages", () => run([...list, "{install}"])));
+  if (!list.includes("{install}")) add.append(action("Add Package Install", () => run([...list, "{install}"])));
   box.append(add, el("small", "hk-hint", "Offered once a worktree is made; each runs only after you say so."), fail);
   return box;
 }

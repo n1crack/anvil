@@ -34,6 +34,7 @@ contain breaking changes.
 - Worktrees: Create says Creating… while it works, and a worktree being removed says Removing… in its row; a failed removal is said under its name.
 - Storage and Resources mark what is safe to delete in grey instead of orange.
 - Mail tab: deleting one message asks first, in its row, as Clear does.
+- Worktree settings: "Add Install packages" reads "Add Package Install".
 
 ### Added
 

@@ -3045,7 +3045,7 @@ describe("worktrees", () => {
     expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "keys", value: { DB_DATABASE: "{db}" } });
     // After create: {install} offered as Install packages (the lock file's command).
     expect(after.textContent).not.toContain("{install}");
-    ([...after.querySelectorAll("button")].find((b) => b.textContent === "Add Install packages") as HTMLButtonElement).click();
+    ([...after.querySelectorAll("button")].find((b) => b.textContent === "Add Package Install") as HTMLButtonElement).click();
     await wait(60);
     expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "after_create", value: ["composer install", "{install}"] });
     btn("Use preset").click();
