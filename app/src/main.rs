@@ -3056,6 +3056,12 @@ fn set_service_apps(
     services(app)
 }
 
+/// What adding a service is downloading or building, asked by the Add sheet while it waits.
+#[tauri::command]
+fn service_installing() -> Option<anvil::services::Installing> {
+    anvil::services::installing()
+}
+
 /// The service's Connect lines into `site`'s .env, asked for on the service's page.
 /// Returns the keys written.
 #[tauri::command(async)]
@@ -4778,6 +4784,7 @@ fn main() {
             set_service_tags,
             set_service_apps,
             service_write_env,
+            service_installing,
             open_service,
             add_service,
             remove_service,

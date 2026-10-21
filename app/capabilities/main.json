@@ -70,6 +70,7 @@
     "allow-runtime-install",
     "allow-service-contents",
     "allow-service-data",
+    "allow-service-installing",
     "allow-service-kinds",
     "allow-service-run",
     "allow-service-write-env",

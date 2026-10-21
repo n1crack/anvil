@@ -2203,6 +2203,8 @@ kbd {
 }
 
 .sheet-actions .spacer { flex: 1; }
+/* Add Service: what a first add is downloading or building. */
+#svc-progress { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 
 .sheet-actions button,
 .upd-foot button {

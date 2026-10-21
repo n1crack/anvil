@@ -1067,6 +1067,16 @@ pub(crate) fn verify(file: &Path, sum: &str, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// The file `download` is writing while it does, so its size says how far it got.
+/// ponytail: one at a time; two downloads at once show the later one.
+static DOWNLOADING: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Bytes the running download has written, if one runs.
+pub fn downloaded() -> Option<u64> {
+    let path = lock(&DOWNLOADING).clone()?;
+    Some(fs::metadata(path).map_or(0, |m| m.len()))
+}
+
 /// Download `url` into ~/.anvil/build and check it against `sum` when the
 /// publisher provides one. Returns the downloaded file.
 pub(crate) fn download(url: &str, sum: Option<&str>) -> Result<PathBuf> {
@@ -1075,11 +1085,13 @@ pub(crate) fn download(url: &str, sum: Option<&str>) -> Result<PathBuf> {
     fs::create_dir_all(&build)?;
     // Keep the published name: rustup-init decides what it is from it.
     let tmp = build.join(name);
-    let ok = run(crate::platform::command("curl")
+    *lock(&DOWNLOADING) = Some(tmp.clone());
+    let fetched = run(crate::platform::command("curl")
         .args(["-fL#", "-o"])
         .arg(&tmp)
-        .arg(url))
-    .and_then(|_| sum.map_or(Ok(()), |s| verify(&tmp, s, name)));
+        .arg(url));
+    *lock(&DOWNLOADING) = None;
+    let ok = fetched.and_then(|_| sum.map_or(Ok(()), |s| verify(&tmp, s, name)));
     if let Err(e) = ok {
         let _ = fs::remove_file(&tmp);
         return Err(e);

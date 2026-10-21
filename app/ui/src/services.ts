@@ -655,11 +655,29 @@ function noteService() {
   $("#svc-note").textContent = `${fetch}Data in ~/.anvil/data/${name}`;
 }
 
+let progressTimer: ReturnType<typeof setInterval> | undefined;
+
 function setServiceBusy(on) {
   $("#svc-create").disabled = on;
   if (!on) syncAdd();
   $("#svc-create").textContent = on ? "Adding…" : "Add";
   for (const i of $("#svc-form").querySelectorAll("input, select")) i.disabled = on;
+  // A first add downloads (Redis builds) for a while: what it is at, beside the buttons.
+  clearInterval(progressTimer);
+  $("#svc-progress").textContent = "";
+  if (on) progressTimer = setInterval(showProgress, 500);
+}
+
+async function showProgress() {
+  const p = await invoke("service_installing").catch(() => null);
+  if (!$("#svc-create").disabled) return;
+  $("#svc-progress").textContent = !p
+    ? ""
+    : p.downloaded != null
+      ? `Downloading ${p.what}… ${bytes(p.downloaded)}`
+      : p.build
+        ? `Building ${p.what} from source…`
+        : `Downloading ${p.what}…`;
 }
 
 $("#svc-version").onchange = () => {

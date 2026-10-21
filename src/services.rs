@@ -628,12 +628,41 @@ pub fn remove(cfg: &mut Config, id: &str, delete_data: bool) -> Result<()> {
     Ok(())
 }
 
+/// What `install` is at, for the Add sheet: "MySQL 8.4.2", whether it is built from
+/// source, and how much of its download has come in.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Installing {
+    pub what: String,
+    pub build: bool,
+    pub downloaded: Option<u64>,
+}
+
+static INSTALLING: std::sync::Mutex<Option<(String, bool)>> = std::sync::Mutex::new(None);
+
+/// The running install, if one runs.
+pub fn installing() -> Option<Installing> {
+    let (what, build) = crate::lock(&INSTALLING).clone()?;
+    Some(Installing {
+        what,
+        build,
+        downloaded: crate::downloaded(),
+    })
+}
+
 /// Download (or for Redis, build) a version into `~/.anvil/services/<kind>/<version>`.
 pub fn install(id: &str, version: &str) -> Result<()> {
     check(id)?;
     if !versions(id).contains(&version) {
         bail!("Anvil offers {} {}", name(id), versions(id).join(", "));
     }
+    let build = id == "redis" && !cfg!(windows);
+    *crate::lock(&INSTALLING) = Some((format!("{} {version}", name(id)), build));
+    let done = install_now(id, version);
+    *crate::lock(&INSTALLING) = None;
+    done
+}
+
+fn install_now(id: &str, version: &str) -> Result<()> {
     let (_, caddy_plat) = platform()?;
     let mac = caddy_plat.starts_with("mac");
     let arm = caddy_plat.ends_with("arm64");
@@ -1572,6 +1601,17 @@ mod tests {
             .collect();
         assert!(args.windows(2).any(|w| w == ["--listen", "127.0.0.1:8026"]));
         assert!(args.windows(2).any(|w| w == ["--smtp", "127.0.0.1:1025"]));
+    }
+
+    #[test]
+    fn installing_says_what_and_clears_after_a_refused_install() {
+        assert_eq!(installing(), None);
+        *crate::lock(&INSTALLING) = Some(("Redis 8.2.1".into(), true));
+        let now = installing().unwrap();
+        assert_eq!((now.what.as_str(), now.build), ("Redis 8.2.1", true));
+        *crate::lock(&INSTALLING) = None;
+        assert!(install("mysql", "0.0").is_err());
+        assert_eq!(installing(), None);
     }
 
     #[test]

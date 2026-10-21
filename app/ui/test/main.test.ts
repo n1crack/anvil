@@ -1995,8 +1995,19 @@ describe("show hidden", () => {
     check.dispatchEvent(new Event("change"));
     $("#svc-port").setAttribute("value", "6380");
     ($("#svc-port") as HTMLInputElement).value = "6380";
+    // A first add: what it downloads, then that it builds, beside the buttons.
+    w.mockDelay = { ...w.mockDelay, add_service: 1500 };
+    w.mockInstalling = { what: "Redis 7.2.16", build: true, downloaded: 3145728 };
     ($("#svc-form") as HTMLFormElement).requestSubmit();
-    await wait(60);
+    await wait(600);
+    expect($("#svc-create").textContent).toBe("Adding…");
+    expect($("#svc-progress").textContent).toBe("Downloading Redis 7.2.16… 3.0 MB");
+    w.mockInstalling = { what: "Redis 7.2.16", build: true, downloaded: null };
+    await wait(550);
+    expect($("#svc-progress").textContent).toBe("Building Redis 7.2.16 from source…");
+    delete w.mockInstalling;
+    delete w.mockDelay.add_service;
+    await wait(500);
     expect(calls("add_service").at(-1)![1]).toMatchObject({ kind: "redis", version: "7.2.16", acceptLicense: true });
     ($("#new-service") as HTMLDialogElement).close();
   });

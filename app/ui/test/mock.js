@@ -1200,6 +1200,8 @@ const mockHandle = (cmd, a) => {
     case "service_write_env":
       if (a.site === "blog") throw "There is no .env in ~/Sites/blog";
       return ["DB_CONNECTION", "DB_HOST"];
+    case "service_installing":
+      return window.mockInstalling ?? null;
     case "resources":
       return window.mockResources ?? null;
     case "clean":

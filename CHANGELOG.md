@@ -22,6 +22,7 @@ contain breaking changes.
 - Settings › General: removing an application folder asks first, in its row.
 - An app's php.ini fields restart the web server once per change and say so beside the field while it restarts.
 - A share whose Stop fails says why on its line.
+- Adding a service says what it is downloading and how much has come in, or that Redis is being built.
 
 ### Added
 
