@@ -52,7 +52,8 @@ pub struct Hooks {
     /// is replaced, a SQLite file maps into the worktree.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<BTreeMap<String, String>>,
-    /// Keys whose value in the worktree's env files must differ from main's.
+    /// Keys whose value in the worktree's env files must differ from main's, besides the
+    /// ones `resolve` checks by itself (those set to `{db}` or `{prefix}`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check: Option<Vec<String>>,
     /// Commands for a new worktree, run when the user says so; `{install}` is the JS
@@ -115,49 +116,41 @@ pub const PRESETS: [(&str, &str, &[&str]); 8] = [
 const SHIPPED: &str = r#"
 [laravel]
 copy = [".env"]
-check = ["DB_DATABASE", "DB_URL", "DATABASE_URL", "REDIS_PREFIX", "CACHE_PREFIX"]
 after_create = ["composer install", "{install}", "php artisan migrate"]
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", APP_URL = "{url}", REDIS_PREFIX = "{prefix}", CACHE_PREFIX = "{prefix}" }
 
 [statamic]
 copy = [".env"]
-check = ["DB_DATABASE", "DB_URL", "DATABASE_URL", "REDIS_PREFIX", "CACHE_PREFIX"]
 after_create = ["composer install", "{install}", "php artisan migrate"]
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", APP_URL = "{url}", REDIS_PREFIX = "{prefix}", CACHE_PREFIX = "{prefix}" }
 
 [symfony]
 copy = [".env.local"]
-check = ["DATABASE_URL"]
 after_create = ["composer install", "php bin/console doctrine:migrations:migrate --no-interaction"]
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}", DEFAULT_URI = "{url}" }
 
 [next]
 copy = [".env", ".env.local"]
-check = ["DATABASE_URL"]
 after_create = ["{install}"]
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
 
 [nuxt]
 copy = [".env", ".env.local"]
-check = ["DATABASE_URL"]
 after_create = ["{install}"]
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
 
 [node]
 copy = [".env", ".env.local"]
-check = ["DATABASE_URL"]
 after_create = ["{install}"]
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
 
 [python]
 copy = [".env"]
-check = ["DATABASE_URL"]
 after_create = []
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
 
 [other]
 copy = [".env"]
-check = ["DB_DATABASE", "DB_URL", "DATABASE_URL"]
 after_create = []
 keys = { DB_DATABASE = "{db}", DB_URL = "{db}", DATABASE_URL = "{db}" }
 "#;
@@ -227,6 +220,7 @@ pub fn resolve(cfg: &Config, app: &str, main: &Path, kind: &str) -> Resolved {
     let name = PRESETS.iter().find(|p| p.0 == id).map_or("Other", |p| p.1);
     let mut settings = shipped("other");
     settings.copy_database = Some(cfg.worktree_db == DbChoice::Copy);
+    settings.check = Some(Vec::new());
     let layers = [
         (
             "this app".to_string(),
@@ -308,13 +302,23 @@ pub fn resolve(cfg: &Config, app: &str, main: &Path, kind: &str) -> Resolved {
             ));
         }
     }
-    let check = pick("check", |h| h.check.is_some()).check;
+    // Checked: an explicit `check` (config.toml, .anvil.toml), and every key some layer sets
+    // to the worktree's database or a prefix of its own. Any layer, so a key the app takes out
+    // (sharing main's database, say) is still warned about while it gives main's value.
+    let mut check = pick("check", |h| h.check.is_some())
+        .check
+        .unwrap_or_default();
+    for (k, v) in layers.iter().filter_map(|(_, h)| h.keys.as_ref()).flatten() {
+        if (v.contains("{db}") || v.contains("{prefix}")) && !check.contains(k) {
+            check.push(k.clone());
+        }
+    }
     let after_create = pick("after_create", |h| h.after_create.is_some()).after_create;
     Resolved {
         copy: copy.unwrap_or_default(),
         copy_database: copy_database.unwrap_or_default(),
         keys: keys.unwrap_or_default(),
-        check: check.unwrap_or_default(),
+        check,
         after_create: after_create.unwrap_or_default(),
         from,
         preset: name,
@@ -2058,16 +2062,7 @@ fn in_worktree(v: &str) -> bool {
 /// file asks for (`npm ci` with package-lock.json), a command with it left out without package.json.
 /// `shared`: the worktree's "Shared dependencies" (`apps::shared_deps`).
 fn commands(list: &[String], dir: &Path, shared: bool) -> Vec<String> {
-    // `js_manager` says npm without a lock file too: then there's nothing to install from.
-    let install = match crate::apps::js_manager(dir) {
-        _ if !dir.join("package.json").is_file() => None,
-        "npm" => dir
-            .join("package-lock.json")
-            .is_file()
-            .then(|| "npm ci".to_string()),
-        "pnpm" => Some(crate::apps::js_install("pnpm", shared)),
-        m => Some(format!("{m} install")),
-    };
+    let install = install_command(dir, shared);
     list.iter()
         .filter_map(|c| match &install {
             _ if !c.contains("{install}") => Some(c.clone()),
@@ -2075,6 +2070,20 @@ fn commands(list: &[String], dir: &Path, shared: bool) -> Vec<String> {
             None => None,
         })
         .collect()
+}
+
+/// `{install}` for a checkout in `dir`: the JS install its lock file asks for, none without package.json.
+pub fn install_command(dir: &Path, shared: bool) -> Option<String> {
+    // `js_manager` says npm without a lock file too: then there's nothing to install from.
+    match crate::apps::js_manager(dir) {
+        _ if !dir.join("package.json").is_file() => None,
+        "npm" => dir
+            .join("package-lock.json")
+            .is_file()
+            .then(|| "npm ci".to_string()),
+        "pnpm" => Some(crate::apps::js_install("pnpm", shared)),
+        m => Some(format!("{m} install")),
+    }
 }
 
 /// The worktree's `after_create` commands, ready to run (`commands`).
@@ -4127,10 +4136,7 @@ pub(crate) mod tests {
         for (id, _, _) in PRESETS {
             let h = shipped(id);
             assert!(
-                h.copy.is_some()
-                    && h.keys.is_some()
-                    && h.check.is_some()
-                    && h.after_create.is_some(),
+                h.copy.is_some() && h.keys.is_some() && h.after_create.is_some(),
                 "{id}"
             );
             assert_eq!(h.copy_database, None, "{id}: left to Settings");
@@ -4159,9 +4165,20 @@ pub(crate) mod tests {
         let mut cfg = Config::default();
         let all = r(&cfg);
         assert_eq!(all.preset, "Laravel");
-        for f in ["copy", "keys", "check", "after_create"] {
+        for f in ["copy", "keys", "after_create"] {
             assert_eq!(all.from[f], "Laravel preset", "{f}");
         }
+        // Checked without a `check`: the keys set to its database or a prefix.
+        assert_eq!(
+            all.check,
+            [
+                "CACHE_PREFIX",
+                "DATABASE_URL",
+                "DB_DATABASE",
+                "DB_URL",
+                "REDIS_PREFIX"
+            ]
+        );
         assert_eq!(
             (all.copy_database, all.from["copy_database"].as_str()),
             (false, "Settings")
@@ -4176,7 +4193,8 @@ pub(crate) mod tests {
             },
         );
         assert!(r(&cfg).copy_database);
-        assert_eq!(r(&cfg).check, ["APP_KEY"]);
+        assert_eq!(r(&cfg).check[0], "APP_KEY");
+        assert!(r(&cfg).check.contains(&"DB_DATABASE".to_string()));
         assert_eq!(
             r(&cfg).after_create,
             shipped("laravel").after_create.unwrap()
@@ -4237,7 +4255,7 @@ pub(crate) mod tests {
                 "this app: copyy isn't a hooks field, or its value isn't the right kind"
             ]
         );
-        assert_eq!(r.from["check"], "Laravel preset");
+        assert_eq!(r.from["check"], "Settings");
     }
 
     #[test]

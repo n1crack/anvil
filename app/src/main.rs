@@ -2567,6 +2567,8 @@ fn worktree_rewrite(handle: AppHandle, app: State<App>, site: String) -> Res<Sna
 struct AppHooks {
     hooks: anvil::worktrees::Resolved,
     own: anvil::worktrees::Hooks,
+    /// What `{install}` runs for it: the JS install its lock file asks for.
+    install: Option<String>,
 }
 
 /// `AppHooks` of the app `site`; refused for a folder that isn't a git repository.
@@ -2584,6 +2586,7 @@ fn worktree_hooks(site: String) -> Res<AppHooks> {
             .get(&site)
             .map(|c| c.worktree.clone())
             .unwrap_or_default(),
+        install: anvil::worktrees::install_command(&s.path, s.shared_deps == Some(true)),
     })
 }
 

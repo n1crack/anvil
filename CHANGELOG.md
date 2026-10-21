@@ -24,6 +24,7 @@ contain breaking changes.
 - A share whose Stop fails says why on its line.
 - Adding a service says what it is downloading and how much has come in, or that Redis is being built.
 - Mail tab: after catching is turned on or off, it offers to restart the processes still sending the old way; inboxes count "messages".
+- Worktree settings say in plain sentences what a new worktree gets; Customize… edits files, env keys and commands as rows with plain choices instead of text boxes.
 
 ### Added
 

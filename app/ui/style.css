@@ -1274,12 +1274,36 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 
 .row-top { align-items: start; }
 
-/* Worktree hooks fields (hooksform.ts): what a field does, where it comes from, a refusal. */
+/* Worktree hooks (hooksform.ts): the summary, then rows with ×, an Add line, a refusal.
+ * Keys line up in columns: name, what it's set to, the custom value. */
 .preset-field small[hidden],
-.wt-hooks small[hidden] { display: none; }
+.wt-hooks small[hidden],
+.hk [hidden] { display: none; }
 .preset-field small.error-text,
-.wt-hooks small.error-text { color: var(--danger); }
-.wt-hooks dd small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.wt-hooks small.error-text { display: block; margin-top: 2px; color: var(--danger); font-size: 11px; }
+.wt-summary { display: grid; gap: 2px; }
+.wt-summary .muted { margin-top: 4px; color: var(--muted); }
+.wt-actions { display: flex; gap: 6px; margin-top: 4px; }
+.wt-actions .inline-action { margin-left: 0; }
+.hk { display: grid; gap: 4px; flex: 1; min-width: 0; max-width: 460px; }
+.hk-row { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+.hk .hk-text { flex: 1; min-width: 0; max-width: none; overflow-wrap: anywhere; }
+.hk code { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+.hk .hk-key,
+.hk input.hk-key[type="text"] { flex: none; box-sizing: border-box; width: 150px; overflow-wrap: anywhere; }
+.hk .hk-choice { flex: none; width: 210px; }
+.hk .seg { justify-self: start; }
+.hk .hk-custom { flex: 1; min-width: 0; max-width: none; }
+.hk input[type="text"] { width: auto; text-align: left; font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
+.hk .inline-action { flex: none; margin-left: 0; }
+.hk .hk-x { flex: none; width: 22px; height: 22px; margin-left: auto; background: none; }
+.hk .hk-x svg { width: 12px; height: 12px; }
+.hk-add .hk-key + .hk-choice + .hk-custom[hidden] + .inline-action { margin-left: auto; }
+.hk small.hk-hint { margin: 0; color: var(--muted); font-size: 11px; }
+.page .row.preset-field { align-items: start; }
+.page .row.preset-field > span:first-child { flex: none; width: 110px; padding-top: 4px; }
+.page .row.preset-field .hk { max-width: none; }
+.page .hk button.hk-x { padding: 0; border: 0; }
 
 .row-top dt { padding-top: 4px; }
 

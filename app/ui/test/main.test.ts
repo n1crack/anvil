@@ -2832,25 +2832,97 @@ describe("worktrees", () => {
     await wait(80);
     const box = $('[data-panel="settings"] .wt-hooks');
     expect(box.hidden).toBe(false);
-    expect(box.querySelector(".error-text")!.textContent).toBe("this app: copyy isn't a hooks field, or its value isn't the right kind");
+    expect(box.querySelector(".error-text:not([hidden])")!.textContent).toBe(
+      "this app: copyy isn't a hooks field, or its value isn't the right kind",
+    );
     delete w.mockProblems;
-    const rows = [...box.querySelectorAll(".row")].map((r) => r.querySelector("dt")!.textContent);
-    expect(rows).toEqual(["Worktrees", "Copy files", "Copy the database too", "Env keys", "Check keys", "After create"]);
-    expect(box.textContent).toContain("Laravel preset, edited in Settings › Worktrees");
-    expect(box.textContent).toContain("Set for this app");
-    expect(box.textContent).toContain("From .anvil.toml");
-    const keys = box.querySelectorAll("textarea")[1] as HTMLTextAreaElement;
-    expect(keys.value).toBe("APP_URL={url}\nDB_DATABASE={db}");
-    keys.value = "APP_URL={url}";
-    w.mockHooksFail = "A: {nope} isn't one of {db}, {url}, {prefix}, {port}, {name}";
-    keys.dispatchEvent(new Event("change"));
+    // Closed: what a new worktree gets, in sentences, and where it comes from, once.
+    const btn = (t: string) => [...box.querySelectorAll("button")].find((b) => b.textContent === t) as HTMLButtonElement;
+    expect([...box.querySelectorAll(".wt-summary > div:not(.muted):not(.wt-actions)")].map((d) => d.textContent)).toEqual([
+      "Copies .env",
+      "Its own database, empty",
+      "Sets APP_URL, DB_DATABASE",
+      "Then offers to run composer install",
+    ]);
+    expect(box.querySelector(".wt-summary .muted")!.textContent).toBe(
+      "Changed for this app; the rest from the Laravel preset and .anvil.toml",
+    );
+    expect(box.querySelectorAll(".row").length).toBe(1);
+    expect(box.querySelector("textarea")).toBeNull();
+    btn("Customize…").click();
     await wait(60);
-    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "keys", value: { APP_URL: "{url}" } });
-    expect(box.textContent).toContain("isn't one of");
+    const rows = [...box.querySelectorAll(".row")].map((r) => r.querySelector("dt")!.textContent);
+    expect(rows).toEqual(["Worktrees", "Copy files", "Database", "Env keys", "After create"]);
+    const [copy, db, keys, after] = [...box.querySelectorAll(".hk")] as HTMLElement[];
+    // Copy files: a row per path with ×, Add.
+    (copy.querySelector(".hk-add input") as HTMLInputElement).value = ".env.local";
+    (copy.querySelector(".hk-add .inline-action") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "copy", value: [".env", ".env.local"] });
+    // Database: Empty | Copy of main's.
+    ([...db.querySelectorAll("button")].find((b) => b.textContent === "Copy of main’s") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "copy_database", value: true });
+    // Env keys: a plain chooser, no placeholders to learn; Custom… takes free text.
+    const keysBox = () => [...box.querySelectorAll(".hk")][2] as HTMLElement;
+    const sels = [...keys.querySelectorAll("select")] as HTMLSelectElement[];
+    expect(sels.map((s) => s.selectedOptions[0].textContent)).toEqual([
+      "This worktree’s address",
+      "This worktree’s database",
+      "This worktree’s database",
+    ]);
+    sels[0].value = "{prefix}";
+    sels[0].dispatchEvent(new Event("change"));
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "keys", value: { APP_URL: "{prefix}", DB_DATABASE: "{db}" } });
+    const add = keysBox().querySelector(".hk-add")!;
+    (add.querySelector("input.hk-key") as HTMLInputElement).value = "A";
+    const sel = add.querySelector("select") as HTMLSelectElement;
+    sel.value = "";
+    sel.dispatchEvent(new Event("change"));
+    const custom = add.querySelector(".hk-custom") as HTMLInputElement;
+    expect(custom.hidden).toBe(false);
+    custom.value = "{nope}";
+    w.mockHooksFail = "A: {nope} isn't one of {db}, {url}, {prefix}, {port}, {name}";
+    (add.querySelector(".inline-action") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({
+      site: "shop",
+      field: "keys",
+      value: { APP_URL: "{url}", DB_DATABASE: "{db}", A: "{nope}" },
+    });
+    // Refused: said in its row, the typed value kept.
+    expect(keysBox().querySelector(".error-text")!.textContent).toContain("isn't one of");
+    expect(custom.value).toBe("{nope}");
     delete w.mockHooksFail;
-    ([...box.querySelectorAll("button")].find((b) => b.textContent === "Use preset") as HTMLButtonElement).click();
+    (keysBox().querySelector(".hk-row .hk-x") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "keys", value: { DB_DATABASE: "{db}" } });
+    // After create: {install} offered as Install packages (the lock file's command).
+    expect(after.textContent).not.toContain("{install}");
+    ([...after.querySelectorAll("button")].find((b) => b.textContent === "Add Install packages") as HTMLButtonElement).click();
+    await wait(60);
+    expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "after_create", value: ["composer install", "{install}"] });
+    btn("Use preset").click();
     await wait(60);
     expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: null, value: null });
+    btn("Done").click();
+    await wait(60);
+    expect(box.querySelectorAll(".row").length).toBe(1);
+  });
+
+  test("hooks said plainly: {install} as the lock file's command, left out without one", async () => {
+    const { summary, command } = await import("../src/hooksform");
+    expect(command("{install}", "pnpm install")).toBe("Install packages (pnpm install)");
+    expect(command("{install}")).toBe("Install packages (the lock file’s install)");
+    const h = { copy: [], copy_database: true, keys: {}, after_create: ["{install}", "php artisan migrate"] };
+    expect(summary(h, null)).toEqual([
+      "Copies no files",
+      "Its own database, a copy of main’s",
+      "Sets no env keys",
+      "Then offers to run php artisan migrate",
+    ]);
+    expect(summary(h, "npm ci").at(-1)).toBe("Then offers to run Install packages (npm ci), php artisan migrate");
   });
 
   test("Remove Worktree… says what's uncommitted, offers to delete its database, and removes anyway", async () => {

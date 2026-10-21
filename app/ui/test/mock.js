@@ -761,6 +761,7 @@ const mockHandle = (cmd, a) => {
           problems: window.mockProblems ?? [],
         },
         own: { keys: { APP_URL: "{url}", DB_DATABASE: "{db}" } },
+        install: "pnpm install",
       };
     case "worktree_losses":
       return window.mockLosses ?? [];

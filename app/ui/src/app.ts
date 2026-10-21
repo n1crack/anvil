@@ -1,7 +1,7 @@
 import type { Snapshot } from "./types";
 import { late } from "./late";
 import { ownError, shown } from "./live";
-import { FIELDS, control } from "./hooksform";
+import { NAMES, editor, summary } from "./hooksform";
 import { confirmInRow } from "./confirm";
 
 export const { invoke } = window.__TAURI__.core;
@@ -1756,10 +1756,20 @@ function webRoot(s, root) {
   reset.onclick = () => save(null);
 }
 
-const FROM = (from: string) => (from === "this app" ? "Set for this app" : `From ${from === "Settings" ? "Settings › Worktrees" : from}`);
+const hooksOpen = new Set<string>(); // apps whose Worktrees editor is open
 
-/** The Settings tab's Worktrees section, for a git repository: each hook as it applies, where
- * it comes from, changed here for this app only; Use preset drops this app's own. */
+/** Where an app's hooks come from, said once: "Laravel preset", ".anvil.toml", changed here. */
+function hooksFrom(from: Record<string, string>): string {
+  const layers = [...new Set(Object.values(from))].filter((l) => l !== "Settings");
+  const others = layers.filter((l) => l !== "this app").map((l) => (l.endsWith(" preset") ? `the ${l}` : l));
+  if (layers.includes("this app"))
+    return others.length ? `Changed for this app; the rest from ${others.join(" and ")}` : "Changed for this app";
+  return others.length ? `From ${others.join(" and ")}` : "From Settings › Worktrees";
+}
+
+/** The Settings tab's Worktrees section, for a git repository: what a new worktree gets, in
+ * plain sentences, and where that comes from; Customize… opens the editors (hooksform.ts),
+ * changed here for this app only; Use preset drops this app's own. */
 async function renderHooks(s, root) {
   const box = $(".wt-hooks", root);
   let v;
@@ -1768,34 +1778,49 @@ async function renderHooks(s, root) {
   } catch {
     return; // not a git repository: no worktrees to set up
   }
-  if (box.contains(document.activeElement)) return; // being typed in
-  const head = el("dd", "muted", `${v.hooks.preset} preset, edited in Settings › Worktrees`);
+  if (box.contains(document.activeElement) && document.activeElement?.tagName !== "BUTTON") return; // being typed in
+  const open = hooksOpen.has(s.name);
+  const head = el("dd", "wt-summary");
+  if (!open) head.append(...summary(v.hooks, v.install).map((line) => el("div", null, line)));
+  const from = el("div", "muted", hooksFrom(v.hooks.from));
+  const fail = el("small", "error-text");
+  fail.hidden = true;
+  const toggle = el("button", "inline-action", open ? "Done" : "Customize…");
+  toggle.onclick = () => {
+    if (open) hooksOpen.delete(s.name);
+    else hooksOpen.add(s.name);
+    renderHooks(s, root);
+  };
+  const actions = el("div", "wt-actions");
+  actions.append(toggle);
   if (Object.keys(v.own).length) {
     const reset = el("button", "inline-action", "Use preset");
     reset.onclick = () =>
       invoke("set_app_hooks", { site: s.name, field: null, value: null }).then(
         () => renderHooks(s, root),
-        (e) => showError(String(e)),
+        (e) => {
+          fail.textContent = String(e);
+          fail.hidden = false;
+        },
       );
-    head.append(" ", reset);
+    actions.append(reset);
   }
+  head.append(from, actions, fail);
   // A layer with a mistake (a typo in config.toml or .anvil.toml): one line each.
-  for (const p of v.hooks.problems ?? []) {
-    const line = el("small", "error-text", p);
-    head.append(line);
-  }
-  const top = el("div", "row");
+  for (const p of v.hooks.problems ?? []) head.append(el("small", "error-text", p));
+  const top = el("div", "row row-top");
   top.append(el("dt", null, "Worktrees"), head);
-  const rows = FIELDS.map(([field, name]) => {
-    const row = el("div", "row row-top");
-    const dd = el("dd");
-    const fail = el("small", "error-text");
-    fail.hidden = true;
-    const save = (value: unknown) => invoke("set_app_hooks", { site: s.name, field, value }).then(() => renderHooks(s, root));
-    dd.append(control(field, v.hooks, save, fail), el("small", null, FROM(v.hooks.from[field])), fail);
-    row.append(el("dt", null, name), dd);
-    return row;
-  });
+  const save = (field: string, value: unknown) => invoke("set_app_hooks", { site: s.name, field, value }).then(() => renderHooks(s, root));
+  const fields = ["copy", "copy_database", "keys", "after_create"] as const;
+  const rows = open
+    ? fields.map((field) => {
+        const row = el("div", "row row-top");
+        const dd = el("dd");
+        dd.append(editor(field, v.hooks, { save, install: v.install, root: s.path }));
+        row.append(el("dt", null, NAMES[field]), dd);
+        return row;
+      })
+    : [];
   box.replaceChildren(top, ...rows);
   box.hidden = false;
 }

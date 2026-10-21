@@ -577,15 +577,21 @@ describe("worktrees", () => {
     expect(rows().map((r) => r.querySelector("span")!.firstChild!.textContent)).toEqual(["Laravel", "Other"]);
     expect(rows()[0].querySelector("small")!.textContent).toBe("Laravel · edited");
     expect(rows()[1].querySelector("small")!.textContent).toBe("Any other type");
-    expect($$("#presets textarea").length).toBe(0);
+    expect($$("#presets .hk").length).toBe(0);
     (rows()[0].querySelector("button") as HTMLButtonElement).click();
     await wait();
-    const areas = $$("#presets textarea") as HTMLTextAreaElement[];
-    expect(areas.map((a) => a.value)).toEqual([".env", "APP_URL={url}", "", "composer install"]);
-    // The database switch is Settings' own, above: not a preset field.
-    expect($$("#presets input[type=checkbox]").length).toBe(0);
-    areas[3].value = "composer install\nphp artisan migrate";
-    areas[3].dispatchEvent(new Event("change"));
+    // The same editors as an app's: no Check keys, and the database is Settings' own, above.
+    expect(text("#presets .preset-field > span:first-child")).toEqual(["Copy files", "Env keys", "After create", ""]);
+    expect(text("#presets .hk-row:not(.hk-add) .hk-text, #presets .hk-row:not(.hk-add) .hk-key")).toEqual([
+      ".env",
+      "APP_URL",
+      "composer install",
+    ]);
+    expect(($("#presets .hk-row select") as HTMLSelectElement).selectedOptions[0].textContent).toBe("This worktree’s address");
+    expect($$("#presets .seg").length).toBe(0);
+    const after = $$("#presets .hk")[2];
+    (after.querySelector(".hk-add input") as HTMLInputElement).value = "php artisan migrate";
+    (after.querySelector(".hk-add .inline-action") as HTMLButtonElement).click();
     await wait();
     expect(w.mockCalls.at(-1)).toEqual([
       "set_worktree_preset",
