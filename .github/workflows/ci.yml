@@ -88,20 +88,21 @@ jobs:
   # The core library and CLI build and test on Linux too. The app isn't built
   # for Linux yet.
   linux:
-    name: Linux (anvil crate)
+    name: Linux (anvil crate: clippy, test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal
+          rustup toolchain install stable --profile minimal --component clippy
           rustup default stable
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - name: Build
-        run: cargo build -p anvil --locked
+      # Catches macOS-only code that compiles on Linux under cfg(unix).
+      - name: Clippy
+        run: cargo clippy -p anvil --all-targets --locked -- -D warnings
 
       - name: Test
         run: cargo test -p anvil --locked
