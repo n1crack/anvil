@@ -13,7 +13,7 @@ contain breaking changes.
 - Packages tab: Install and Update for Composer and the app's JS package manager, with the output in Dev.
 - Settings › PHP lists Composer's global packages with Update, and installs Laravel Forge's CLI (`forge`) on request.
 - Docker services: Anvil runs an image for you or adds a container you already have, and starts, stops and restarts it (`anvil service add --docker mongo:7 --port 27017:27017`).
-- External services: a MySQL, PostgreSQL or Redis server elsewhere, with its .env lines and database apps; its dot is green while it answers (`anvil service add --external db.lan:3306 --kind mysql`).
+- External services: a MySQL, PostgreSQL or Redis server elsewhere, with its .env lines and database apps; its dot is green while it can be reached (`anvil service add --external db.lan:3306 --kind mysql`).
 - A service's right-click menu has Restart and Rename….
 - PHP 8.6 as a preview.
 
@@ -22,6 +22,7 @@ contain breaking changes.
 - PHP comes from Anvil's own builds of php.net's releases, so new patch releases arrive within a day; OPcache, mysqli, intl and sodium are built in.
 - Settings: plainer words, shorter hints, and rarely used options under Advanced.
 - Settings: "Features" in the sidebar, Tunnel explained in its row instead of a page of its own, "Applications" throughout, and storage sizes lined up; an npm or yarn app's Packages line offers Switch to pnpm beside Install and Update.
+- Main window: plainer words on service, Mail and Settings pages; an external server shows Reachable, a crashed container says so.
 
 ### Fixed
 

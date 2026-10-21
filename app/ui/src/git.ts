@@ -95,6 +95,7 @@ function drawGit(name) {
     }
     if (worktrees) {
       const add = el("button", "git-new", "New Worktree…");
+      add.title = "Another copy of this app on its own branch, with its own address";
       add.onclick = () => late.newWorktree(s);
       actions.append(add);
     }

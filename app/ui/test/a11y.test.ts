@@ -84,7 +84,7 @@ describe("state in words", () => {
     for (const b of badges)
       expect([b.getAttribute("role"), b.getAttribute("aria-label")]).toEqual([
         "img",
-        b.closest('[data-name="shared-db"]') ? "Answers" : "Running",
+        b.closest('[data-name="shared-db"]') ? "Reachable" : "Running",
       ]);
     $('[data-mode="apps"]').click();
     await wait(80);

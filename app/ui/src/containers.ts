@@ -28,12 +28,12 @@ const items = (name: string): Item[] =>
     busy: procBusy.get(`${name}/${c.service}`),
   }));
 const up = (x: Item) => x.c.state === "running";
-/** ":5432 · healthy", or how it ended: "exited (1)". */
+/** ":5432 · healthy", or how it ended: "crashed (code 1)", the word the header counts. */
 const detail = (x: Item) =>
   up(x) || x.c.state === "restarting"
     ? [...x.c.ports.map((p) => `:${p}`), x.c.health ?? (up(x) ? "" : x.c.state)].filter(Boolean).join(" · ")
     : x.c.exit_code
-      ? `exited (${x.c.exit_code})`
+      ? `crashed (code ${x.c.exit_code})`
       : x.c.state;
 
 /** docker's "2026-10-17T10:00:01.112345678Z text" lines after the time `after`, each

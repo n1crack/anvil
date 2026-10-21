@@ -148,7 +148,7 @@
           <dd class="https-cell">
             <input id="app-shared" type="checkbox" role="switch">
             <span class="securing" hidden><span class="spin-dot"></span><span class="securing-text">Reinstalling…</span></span>
-            <small>pnpm links node_modules into its store instead of copying it there: an install takes a moment and next to no space</small>
+            <small>Packages are stored once and shared between apps (pnpm): installs are quick and take next to no space</small>
             <small class="shared-note" hidden></small>
           </dd>
         </div>
@@ -156,7 +156,7 @@
           <dt><label for="app-browser">Browser errors</label></dt>
           <dd class="https-cell">
             <input id="app-browser" type="checkbox" role="switch">
-            <small>Your browser sends this app's JavaScript errors, failed requests and console errors to Anvil, for AI agents (MCP); one script is added to its pages</small>
+            <small>Shows this app's JavaScript errors and failed requests to AI agents (MCP); Anvil adds one small script to its pages</small>
             <small class="error browser-blocked" hidden>This app's Content-Security-Policy keeps the script out of its pages, so nothing arrives</small>
           </dd>
         </div>
@@ -312,9 +312,9 @@
       <div class="row"><dt>Applications</dt><dd class="chips svc-apps"></dd></div>
       <div class="row"><dt>Tags</dt><dd class="chips svc-tags"></dd></div>
     </dl>
-    <p class="procs-note svc-apps-hint">Applications listed here show it on their Overview and Resources. Their .env isn’t changed: copy the lines under Connect, or write them in.</p>
+    <p class="procs-note svc-apps-hint">Linked applications show this service on their pages. Their .env isn’t changed: copy the lines below into it.</p>
 
-    <h3 class="res-sub connect-head">Connect <span class="muted">.env</span> <select class="svc-db" aria-label="Database for the .env lines" hidden></select></h3>
+    <h3 class="res-sub connect-head">Connect <span class="muted">lines for .env</span> <select class="svc-db" aria-label="Database for the .env lines" hidden></select></h3>
     <div class="env">
       <pre class="svc-env"></pre>
       <button class="icon-btn svc-copy" title="Copy the .env lines" aria-label="Copy the .env lines">
@@ -398,7 +398,7 @@
       <label class="field">
         <span>Application</span>
         <select id="svc-app" aria-describedby="svc-app-note"></select>
-        <small id="svc-app-note">Listed with the service; its .env isn’t changed. The service’s page has the lines to use.</small>
+        <small id="svc-app-note">Optional. Its .env isn’t changed; the service’s page has the lines to copy.</small>
       </label>
       <section class="svc-license" aria-labelledby="svc-license-title">
         <h3 id="svc-license-title" class="new-opts-title">License</h3>

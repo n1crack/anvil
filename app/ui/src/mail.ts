@@ -27,9 +27,11 @@ window.mailTab = (root, visible) => {
     "p",
     "mail-how muted",
     caught
-      ? `Anvil catches ${s.name}’s mail: its processes and PHP get MAIL_HOST=127.0.0.1, MAIL_PORT=${c.port} and MAIL_USERNAME=${s.name}, overriding its .env. A running process gets them when it restarts.`
+      ? `Mail ${s.name} sends lands here, not in real inboxes. A running process picks this up when it restarts.`
       : `${s.name} sends mail with its own settings; Anvil doesn’t catch it.`,
   );
+  // The how, for those who want it: what overrides the .env.
+  if (caught) how.title = `MAIL_HOST=127.0.0.1, MAIL_PORT=${c.port} and MAIL_USERNAME=${s.name}, over its .env`;
   const sw = el("label", "mail-catch");
   const box = el("input");
   box.type = "checkbox";

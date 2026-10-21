@@ -2497,7 +2497,7 @@ function renderResources(name) {
 
   body.append(el("h3", "res-sub", "Services"));
   if (!r.services.length) {
-    body.append(el("p", "muted", "None found in .env"));
+    body.append(el("p", "muted", "None in this app’s .env"));
   } else {
     const svcs = el("dl", "group res-list");
     for (const sv of r.services) {

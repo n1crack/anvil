@@ -171,7 +171,7 @@ function serviceRow(svc) {
   const end = el("span", "end");
   for (const t of svc.tags.slice(0, 2)) end.append(el("span", "tag", t));
   const badge = svc.running ? "on" : svc.error ? "bad" : null;
-  b.append(markBox(serviceMark(svc), badge, external(svc) && svc.running ? "Answers" : undefined), text, end);
+  b.append(markBox(serviceMark(svc), badge, external(svc) && svc.running ? "Reachable" : undefined), text, end);
   b.onclick = () => selectService(svc.id);
   b.oncontextmenu = (e) => {
     e.preventDefault();
@@ -337,7 +337,7 @@ export function renderService() {
       el(
         "p",
         "muted",
-        "Add MySQL, PostgreSQL, Redis, Mailpit or S3 storage. Each one gets its own name, port and data, and you can add as many as you need. A Docker container or a server elsewhere can be added too.",
+        "Databases, caches and mail for your applications: MySQL, PostgreSQL, Redis, Mailpit, S3 storage, a Docker container or a server elsewhere. Add as many as you need.",
       ),
       add,
     );
@@ -357,7 +357,7 @@ export function renderService() {
   $(".run-box .dot", root).className = `dot ${svc.running ? "on" : svc.error ? "bad" : ""}`;
   // An external one isn't run: whether it answers.
   const ext = external(svc);
-  $(".state-text", root).textContent = ext ? (svc.running ? "Answers" : "Not answering") : svc.running ? "Running" : "Stopped";
+  $(".state-text", root).textContent = ext ? (svc.running ? "Reachable" : "Not reachable") : svc.running ? "Running" : "Stopped";
   $('[data-svc="start"]', root).hidden = svc.running || ext;
   $('[data-svc="stop"]', root).hidden = !svc.running || ext;
   for (const b of root.querySelectorAll("[data-svc]")) {
@@ -642,7 +642,7 @@ const EXT_PORT: Record<string, number> = { mysql: 3306, postgres: 5432, redis: 6
 const OUTSIDE_NOTE: Record<string, string> = {
   docker: "Pulled the first time; its data stays in Docker volumes.",
   adopt: "Anvil starts and stops it, and never deletes it.",
-  external: "Anvil doesn’t run it; its dot is green while it answers.",
+  external: "Anvil doesn’t run it; its dot is green while it can be reached.",
 };
 const svcIcon = (kind: string) =>
   `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="${SVC_ICONS[kind] ?? SVC_ICONS.db}"/></svg>`;

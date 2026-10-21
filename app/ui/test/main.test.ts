@@ -842,7 +842,7 @@ describe("containers", () => {
     const dot = (k: string) => item(k).firstElementChild!.className;
     expect([dot("web"), dot("db"), dot("cache"), dot("worker")]).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
     expect(item("db").querySelector(".dev-exit")!.textContent).toBe(":5432 · healthy");
-    expect(item("worker").querySelector(".dev-exit")!.textContent).toBe("exited (1)");
+    expect(item("worker").querySelector(".dev-exit")!.textContent).toBe("crashed (code 1)");
     // Start, as in Dev: something is down. No Run nor Configure.
     expect($$(".containers .dev-bar button").map((b) => b.className)).toEqual(["dev-all dev-start"]);
   });
@@ -870,7 +870,7 @@ describe("containers", () => {
     await wait(50);
     expect(lines()).toEqual(["Starting queue worker", "Error: connect ECONNREFUSED 172.18.0.3:6379", "exited with code 1"]);
     expect($('[data-panel="containers"] .dev-out span.ansi1').textContent).toBe("Error:");
-    expect($('[data-panel="containers"] .dev-head .dev-cmd').textContent).toBe("exited (1)");
+    expect($('[data-panel="containers"] .dev-head .dev-cmd').textContent).toBe("crashed (code 1)");
     const n = calls("container_run").length;
     keyDown("x"); // already stopped: nothing
     keyDown("s");
@@ -1237,7 +1237,7 @@ describe("service page", () => {
     const row = $('#list [data-name="shared-db"]');
     expect(row.querySelector(".sub")!.textContent).toBe("MySQL at db.example.com:3306");
     expect(row.querySelector(".run-badge.on")).not.toBeNull();
-    expect($(".state-text").textContent).toBe("Answers");
+    expect($(".state-text").textContent).toBe("Reachable");
     expect([$('[data-svc="start"]').hidden, $('[data-svc="stop"]').hidden]).toEqual([true, true]);
     expect([$('[data-svc-open="data"]').hidden, $('[data-svc-open="log"]').hidden]).toEqual([true, true]);
     expect(($("#svc-port-edit").closest(".row") as HTMLElement).hidden).toBe(true);
@@ -1250,7 +1250,7 @@ describe("service page", () => {
     const { pollOutside } = await import("../src/services");
     await pollOutside();
     expect($('#list [data-name="shared-db"] .run-badge')).toBeNull();
-    expect($(".state-text").textContent).toBe("Not answering");
+    expect($(".state-text").textContent).toBe("Not reachable");
     svc.running = true;
     await pollOutside();
     // A Docker one: the image and port under its name; Start and Stop as Anvil's own.
@@ -2799,8 +2799,9 @@ describe("mail catcher", () => {
     expect(cell(second, ".log-msg")).toBe("(no subject)");
     expect(second.querySelector(".mail-files")!.textContent).toBe("");
     expect($(".mail-how").textContent).toBe(
-      "Anvil catches shop’s mail: its processes and PHP get MAIL_HOST=127.0.0.1, MAIL_PORT=2525 and MAIL_USERNAME=shop, overriding its .env. A running process gets them when it restarts.",
+      "Mail shop sends lands here, not in real inboxes. A running process picks this up when it restarts.",
     );
+    expect($(".mail-how").title).toBe("MAIL_HOST=127.0.0.1, MAIL_PORT=2525 and MAIL_USERNAME=shop, over its .env");
     expect(($(".mail-catch input") as HTMLInputElement).checked).toBe(true);
   });
 
