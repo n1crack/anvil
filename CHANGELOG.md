@@ -30,6 +30,7 @@ contain breaking changes.
 - New Worktree…, Dev's Run and the Start/Stop of all processes look like the other buttons; Run no longer looks disabled.
 - The keyboard focus ring on an app's tabs is drawn whole, not cut at the top and bottom.
 - Service tags in the sidebar line up with the apps' type labels; short of room, a tag is left out instead of cut.
+- The line under an app's or service's name wraps without a stray "·" at a line's start or end.
 
 ## [0.2.1] - 2026-10-21
 

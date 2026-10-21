@@ -1148,9 +1148,18 @@ export function drawMeta() {
   // git.js may not have loaded when the first state arrives.
   const g = late.gitCache ? late.gitCache.get(s.name) : null;
   if (g && !g.error && g.branch) parts.push(el("span", "branch", g.branch));
-  box.replaceChildren(...parts.flatMap((p, i) => (i ? [el("span", "sep", "·"), p] : [p])));
+  box.replaceChildren(...metaParts(parts));
   drawHttps(s);
 }
+
+/** The header's meta items, each with its "·" before it, so a wrapped line can't start or
+ * end with a lone one: the line's first "·" is clipped off (style.css, .site-meta). */
+export const metaParts = (parts: HTMLElement[]) =>
+  parts.map((p) => {
+    const part = el("span", "part");
+    part.append(el("span", "sep", "·"), p);
+    return part;
+  });
 
 /** The Settings tab's HTTPS switch: on or off, and while it changes, where it goes
  * with a spinner beside it. */

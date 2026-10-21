@@ -667,7 +667,11 @@ button, select, input { font: inherit; color: inherit; }
   font-size: 12px;
 }
 .site-meta .meta { display: inline-flex; flex-wrap: wrap; align-items: center; min-width: 0; }
-.site-meta .sep { margin: 0 7px; opacity: 0.5; }
+/* Each item carries its "·" (metaParts); the meta reaches 17px left and that strip is
+ * clipped, so every line's first "·" is hidden and a wrap never leaves one alone. */
+.site-meta .meta { margin-left: -17px; clip-path: inset(-4px -4px -4px 13px); }
+.site-meta .part { display: inline-flex; align-items: center; min-width: 0; }
+.site-meta .sep { flex: none; width: 17px; opacity: 0.5; text-align: center; }
 .site-meta .addr { display: inline-flex; align-items: center; gap: 5px; }
 .site-meta .securing { display: inline-flex; align-items: center; gap: 5px; margin-left: 3px; }
 .https-cell { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 10px; }

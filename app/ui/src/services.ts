@@ -11,6 +11,7 @@ import {
   focusRow,
   invoke,
   markBox,
+  metaParts,
   mode,
   renderMain,
   select,
@@ -379,7 +380,7 @@ function drawServiceMeta(svc, root) {
   if (!svc.installed) parts.push("not installed");
   else if (svc.enabled) parts.push("starts with Anvil");
   const spans = parts.map((t) => el("span", null, t));
-  $(".meta", root).replaceChildren(...spans.flatMap((p, i) => (i ? [el("span", "sep", "·"), p] : [p])));
+  $(".meta", root).replaceChildren(...metaParts(spans));
 }
 
 /** A row of a service's lists, in the Processes look: the name, a muted detail, then buttons. */
