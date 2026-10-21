@@ -159,6 +159,8 @@ pub fn offered() -> impl Iterator<Item = &'static Ext> {
 pub fn needs(name: &str) -> Option<&'static str> {
     match name {
         "memcached" | "imagick" if cfg!(windows) => Some("Not on Windows yet"),
+        // No Homebrew to point to; Linux's PHP loads no extension yet anyway (`build`).
+        "imagick" if cfg!(target_os = "linux") => Some("Not on Linux yet"),
         "imagick" if imagemagick().is_none() => {
             Some("Needs ImageMagick from Homebrew: brew install imagemagick")
         }

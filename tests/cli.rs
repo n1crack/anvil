@@ -254,6 +254,8 @@ fn https_refuses_an_app_anvil_doesnt_serve() {
 #[test]
 fn config_round_trip() {
     let env = Env::new("config");
+    // A new config's suffix is .localhost on Linux; this is about .test.
+    env.ok(&["tld", "test"]);
     let parked = env.root.join("sites");
     write(&parked.join("shop/artisan"), "");
     write(&parked.join("shop/composer.json"), "{}");
@@ -418,6 +420,8 @@ fn fake_app(env: &Env) -> Seen {
 #[test]
 fn edit_without_app_prints_nothing_extra() {
     let env = Env::short("ctl-none");
+    // A new config's suffix is .localhost on Linux.
+    env.ok(&["tld", "test"]);
     let dir = env.root.join("extra");
     fs::create_dir_all(&dir).unwrap();
     let t = Instant::now();
@@ -976,7 +980,9 @@ fn cli_php_ext_add_lists_it() {
     env.ok(&["php", "ext", "remove", "apcu"]);
     assert!(env.config().php_ext.is_empty());
     let list = env.ok(&["php", "ext", "list"]);
-    assert!(list.lines().all(|l| l.contains("off")), "{list}");
+    // None on; one that can't be added here says why instead of "off".
+    let on = |l: &str| l.split_whitespace().nth(2) == Some("on");
+    assert!(!list.lines().any(on), "{list}");
     assert!(so.exists(), "the build stays");
     assert!(!env.ok(&["shim", "php", "-v"]).contains("apcu"));
 }
