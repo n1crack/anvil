@@ -1,5 +1,4 @@
 import { $, ago, call, el, invoke, popAt, renderMain, seg, selected, showError, snap } from "./app";
-import { late } from "./late";
 
 /* Packages tab: the app's key packages as badges (pinned per app, the detected ones by
  * default), then Check outdated and Check security. What a check finds shows as a notice
