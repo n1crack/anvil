@@ -38,7 +38,7 @@ function build(s) {
       <input class="logs-search" type="search" placeholder="Filter by path" aria-label="Filter by path" spellcheck="false">
       <select class="logs-source req-method-pick" aria-label="Method"><option value="">All methods</option>${METHODS.map((m) => `<option>${m}</option>`).join("")}</select>
       <label class="req-assets"><input type="checkbox"> Show assets</label>
-      <button class="req-clear" hidden>Clear</button>
+      <button class="req-clear" hidden>Clear Filters</button>
     </div>
     <p class="logs-status muted"></p>
     <ol class="logs-list req-list"></ol>

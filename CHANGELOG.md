@@ -80,6 +80,7 @@ contain breaking changes.
 - Less CPU while an app starts.
 - Less CPU while the Requests tab is open and no requests come in.
 - Logs and Requests say in red when a log can't be read, instead of looking empty; Packages' and Resources' errors line up with the tab.
+- Requests: the filters wrap onto a second line in a narrow window instead of running off the edge; their reset reads Clear Filters, so it isn't mistaken for deleting the log.
 
 ## [0.2.1] - 2026-10-21
 

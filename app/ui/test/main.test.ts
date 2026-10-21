@@ -1519,6 +1519,8 @@ describe("requests", () => {
     expect(calls("requests_read").at(-1)![1].filter.query).toBe("login");
     const clear = $(".req-clear");
     expect(clear.hidden).toBe(false);
+    // Not Logs' Clear…, which deletes the log.
+    expect(clear.textContent).toBe("Clear Filters");
     clear.click();
     await wait(30);
     expect(calls("requests_read").at(-1)![1].filter).toEqual({ status: null, method: null, query: "", assets: false });

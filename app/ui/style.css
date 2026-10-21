@@ -2868,6 +2868,8 @@ button.log-file:hover { text-decoration-color: currentColor; }
 
 /* Requests: the Logs list's rows, in aligned columns; status colour as text only. */
 .req-bar select { flex: none; }
+/* In a narrow window the filters go onto a second line instead of past the edge. */
+.req-bar { flex-wrap: wrap; }
 .req-assets { flex: none; display: inline-flex; font-size: 12px; align-items: center; gap: 5px; color: var(--muted); white-space: nowrap; }
 .req .log-time { width: 64px; }
 .req-method { flex: none; width: 56px; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
