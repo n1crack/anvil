@@ -1115,6 +1115,9 @@ const mockHandle = (cmd, a) => {
           pinned_by: window.mockPhpPins?.[version] ?? [],
           opcache: version === "8.5" ? "builtin" : (window.mockOpcache?.[version] ?? (version === "8.4" ? "ready" : "missing")),
           opcache_building: window.mockOpcacheBuilding?.includes(version) ?? false,
+          available: window.mockPhpAvailable?.[version] ?? null,
+          updated: window.mockPhpUpdated?.[version] ?? null,
+          updating: window.mockPhpUpdating?.includes(version) ?? false,
           extensions: ["xdebug", "pcov", "apcu", "igbinary", "msgpack", "mongodb", "memcached", "imagick"].map((name) => ({
             name,
             on: window.mockExt?.[version]?.includes(name) ?? false,

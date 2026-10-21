@@ -86,7 +86,7 @@ function versionRow(
   busy: boolean,
   blocked: boolean,
   act: { install: () => void; uninstall: () => void; makeDefault?: () => void; note?: string },
-  extra?: { slot?: HTMLElement; note?: HTMLElement; end?: HTMLElement; error?: HTMLElement; below?: HTMLElement },
+  extra?: { slot?: HTMLElement; note?: HTMLElement; status?: HTMLElement; end?: HTMLElement; error?: HTMLElement; below?: HTMLElement },
 ) {
   const row = document.createElement("div");
   row.className = `row ver${v.installed ? "" : " missing"}${v.default ? " is-default" : ""}`;
@@ -133,7 +133,7 @@ function versionRow(
   }
   // The row's own control (PHP's Extensions) at the far end, after the actions: it stays
   // in one place whether they show or not.
-  row.append(name, actions, ...(extra?.end ? [extra.end] : []));
+  row.append(name, actions, ...[extra?.status, extra?.end].filter((e) => e !== undefined));
   if (extra?.below) row.append(extra.below);
   if (extra?.error) {
     row.classList.add("has-error");
@@ -790,7 +790,7 @@ export function render() {
         },
         {
           ...phpParts(v),
-          note: phpPatch(v),
+          status: phpPatch(v),
           ...(verErrors.has(`php@${v.version}`) && { error: verError(`php@${v.version}`) }),
         },
       ),
@@ -802,16 +802,16 @@ export function render() {
   }
 }
 
-/** A version's newer patch after its name: "8.4.27 available" with Update,
- * "Updating to 8.4.27…" while it installs, then "Updated to 8.4.27". */
+/** A version's newer patch, before Extensions: "Update to 8.4.27", "Updating to 8.4.27…"
+ * while it installs, then "Updated". */
 function phpPatch(v: Settings["php"][number]) {
   if (!v.installed) return undefined;
-  const box = Object.assign(document.createElement("span"), { className: "ver-pinned ver-patch" });
+  const box = Object.assign(document.createElement("span"), { className: "ver-patch" });
   if (v.available && (v.updating || installing.has(`update@${v.version}`))) {
     box.innerHTML = `<span class="spin-dot"></span>`;
     box.append(`Updating to ${v.available[1]}…`);
   } else if (v.available) {
-    const update = textAct("Update", async () => {
+    const update = button(`Update to ${v.available[1]}`, async () => {
       installing.add(`update@${v.version}`);
       const done = phpAct(v.version, "php_update"); // clears the old errors first
       render();
@@ -819,9 +819,10 @@ function phpPatch(v: Settings["php"][number]) {
       installing.delete(`update@${v.version}`);
       render();
     });
-    box.append(`${v.available[1]} available`, update);
+    box.append(update);
   } else if (v.updated) {
-    box.textContent = `Updated to ${v.updated}`;
+    box.textContent = "Updated";
+    box.title = `Updated to ${v.updated}`;
   } else return undefined;
   return box;
 }

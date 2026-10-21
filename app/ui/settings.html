@@ -113,16 +113,10 @@
 
       <p class="hint">Installed into Anvil’s folder and used only for the apps Anvil runs; PHP on your system stays untouched.</p>
 
-      <h2>Versions</h2>
+      <h2 class="versions-head">Versions
+        <label title="Once a day, a newer patch release installs in the background, php.ini and extensions kept, and PHP restarts once. Off, a version with one offers Update.">Update automatically <input id="php-auto-update" type="checkbox" role="switch"></label>
+      </h2>
       <div id="versions" class="group versions"></div>
-
-      <h2>Updates</h2>
-      <div class="group">
-        <label class="row">
-          <span>Keep PHP up to date<small>Once a day, a newer patch release of an installed version installs in the background, php.ini and extensions kept, and PHP restarts once. Off, each version offers Update.</small></span>
-          <input id="php-auto-update" type="checkbox" role="switch">
-        </label>
-      </div>
 
       <h2>Defaults for all applications</h2>
       <p class="hint">Empty fields use Anvil’s standard values, shown in grey. Each application can override these.</p>

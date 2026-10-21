@@ -70,7 +70,13 @@ describe("versions", () => {
   test("PHP: the default is marked, missing versions are muted with Install only", async () => {
     await open("php");
     const rows = $$("#versions .ver");
-    expect(rows.map((r) => r.querySelector(".ver-label")?.textContent)).toEqual(["PHP 8.5.8", "PHP 8.4.23", "PHP 8.3", "PHP 8.2", "PHP 8.1"]);
+    expect(rows.map((r) => r.querySelector(".ver-label")?.textContent)).toEqual([
+      "PHP 8.5.8",
+      "PHP 8.4.23",
+      "PHP 8.3",
+      "PHP 8.2",
+      "PHP 8.1",
+    ]);
     const def = rows[1];
     expect(def.classList.contains("is-default")).toBe(true);
     expect(def.querySelector(".ver-mark svg")).not.toBeNull();
@@ -114,8 +120,26 @@ describe("versions", () => {
     await wait(150);
   });
 
-  const phpRow = (v: string) => $$("#versions .ver").find((r) => r.querySelector(".ver-label")?.textContent?.match(/^PHP (\d+\.\d+)/)?.[1] === v)!;
+  const phpRow = (v: string) =>
+    $$("#versions .ver").find((r) => r.querySelector(".ver-label")?.textContent?.match(/^PHP (\d+\.\d+)/)?.[1] === v)!;
   const buttons = (r: HTMLElement) => [...r.querySelectorAll("button")].map((b) => b.textContent);
+
+  test("a newer patch shows before Extensions as Update to it, which runs php_update", async () => {
+    w.mockPhpAvailable = { "8.4": ["8.4.23", "8.4.27"] };
+    w.refresh();
+    try {
+      await open("php");
+      const row = phpRow("8.4");
+      expect(buttons(row).slice(0, 2)).toEqual(["Update to 8.4.27", "Extensions 1/9›"]);
+      (row.querySelector(".ver-patch button") as HTMLElement).click();
+      await wait(10);
+      expect(w.mockCalls).toContainEqual(["php_update", { version: "8.4" }]);
+    } finally {
+      delete w.mockPhpAvailable;
+      w.refresh();
+      await wait(60);
+    }
+  });
   async function withOpcache83(run: () => Promise<void>) {
     w.mockPhpInstalled = ["8.5", "8.4", "8.3"];
     w.mockOpcache = {};

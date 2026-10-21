@@ -1486,8 +1486,14 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   font-size: 12px;
 }
 
-/* PHP: a newer patch, with Update, after Default and Pinned by. */
-.ver-patch { display: inline-flex; align-items: center; gap: 8px; }
+/* PHP: a newer patch at the row's end, before Extensions. */
+.ver-patch { display: inline-flex; flex: none; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.ver-patch + .ext-toggle { margin-left: 8px; }
+
+/* PHP: Versions, with Update automatically at its right. */
+.page h2.versions-head { display: flex; align-items: center; justify-content: space-between; max-width: 600px; }
+.versions-head label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.versions-head input[type="checkbox"][role="switch"] { transform: scale(0.8); transform-origin: right center; }
 
 /* PHP: OPcache in a fixed slot after the version, so Default and Pinned by stay aligned. */
 .ver-opcache {
