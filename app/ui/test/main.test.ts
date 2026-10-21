@@ -2743,6 +2743,18 @@ describe("worktrees", () => {
     await wait();
     expect(sheetOpen()).toBe(true);
     expect($("#ask-label").textContent).toBe("New worktree of shop");
+    // Create says it works while git and the copied files take their time; a refusal stays.
+    ($("#ask-input") as HTMLInputElement).value = "feature/y";
+    w.mockDelay = { worktree_add: 100 };
+    w.mockAddFail = "/Users/x/Sites/shop--feature-y already exists";
+    $("#ask-form").dispatchEvent(new Event("submit", { cancelable: true }));
+    await wait(30);
+    expect($("#ask-ok").textContent).toBe("Creating…");
+    await wait(120);
+    expect($("#ask-ok").textContent).toBe("Create");
+    expect($("#ask-error").textContent).toContain("already exists");
+    w.mockDelay = {};
+    delete w.mockAddFail;
     $("#ask-cancel").click();
     expect(sheetOpen()).toBe(false);
     await select(wt);
@@ -3065,9 +3077,15 @@ describe("worktrees", () => {
     expect(yes.textContent).toBe("Remove anyway");
     expect(calls("worktree_remove").length).toBe(0);
     ($(".pop-confirm input[type=checkbox]") as HTMLInputElement).checked = true;
+    w.mockDelay = { worktree_remove: 120 };
     yes.click();
-    await wait(60);
+    await wait(40);
+    // While it works the row says so, not only once the folder is gone.
+    expect($(`#list [data-name="${wt}"] .removing`).textContent).toBe("Removing…");
+    await wait(150);
+    w.mockDelay = {};
     expect(calls("worktree_remove").at(-1)![1]).toEqual({ site: wt, dropDb: true, force: true });
+    expect($(`#list [data-name="${wt}"] .removing`)).toBeNull();
   });
 
   test("Remove Worktree… names the ignored data that goes with the folder", async () => {

@@ -21,6 +21,8 @@ export const tilde = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 // A standard port (443, or 80 without HTTPS) isn't written out.
 // Sites whose HTTPS is being turned on or off (the web server reloads meanwhile).
 export const securing = new Set<string>();
+// Worktrees being removed: their row says so until they're gone.
+const removing = new Set<string>();
 
 // Compose projects and plain folders get no address from Anvil.
 export const serves = (s) => !["compose", "folder"].includes(s.kind);
@@ -427,7 +429,12 @@ export function row(s, { child = false, kids = 0, path = true, kind: showKind = 
   // A plain PHP app shows only its pinned version, not "PHP" twice.
   // Under a type heading the type would only repeat it.
   if (s.hiddenApp) end.append(el("span", "kind", "hidden"));
-  else if (showKind && !child && s.kind !== "static" && !(s.kind === "php" && s.php_pinned)) {
+  else if (removing.has(s.name)) {
+    // Its processes stop, its databases may go, then its folder: that takes a moment.
+    const busy = el("span", "kind removing", "Removing…");
+    busy.prepend(el("span", "spin-dot"));
+    end.append(busy);
+  } else if (showKind && !child && s.kind !== "static" && !(s.kind === "php" && s.php_pinned)) {
     const kind = document.createElement("span");
     kind.className = `kind kind-${s.kind}`;
     kind.textContent = snap.kinds.find(([id]) => id === s.kind)?.[1] ?? s.kind;
@@ -868,6 +875,8 @@ export type Ask = {
   /** An error it opens with, inline. */
   error?: string;
   ok: string;
+  /** `ok` while `submit` works, for work that takes a while ("Creating…"). */
+  busy?: string;
   /** Does the work: a failure shows in the sheet, which stays open. */
   submit: (value: string, checked: boolean[]) => Promise<unknown>;
 };
@@ -922,6 +931,8 @@ export function ask(o: Ask): Promise<{ value: string; checked: boolean[] } | nul
       if (o.field && !value && !o.optional) return input.focus();
       const checked = boxes.map((b) => b.checked);
       ok.disabled = true;
+      error.hidden = true;
+      if (o.busy) ok.replaceChildren(el("span", "spin-dot"), o.busy);
       try {
         await o.submit(value, checked);
         finish({ value, checked });
@@ -930,6 +941,7 @@ export function ask(o: Ask): Promise<{ value: string; checked: boolean[] } | nul
         error.hidden = false;
       } finally {
         ok.disabled = false;
+        ok.textContent = o.ok;
       }
     };
   });
@@ -997,6 +1009,7 @@ async function newWorktree(s) {
         ]
       : [],
     ok: "Create",
+    busy: "Creating…",
     submit: async (raw, [copy]) => {
       const branch = raw.trim();
       await callOrThrow("worktree_add", { site: s.name, branch, new: !branches.includes(branch), copyDb: copyable ? copy : null });
@@ -1079,24 +1092,39 @@ async function removeWorktree(s) {
   const anchor = $(`#list [data-name="${CSS.escape(s.name)}"]`) ?? $("#site .site-name");
   const close = popAt(anchor, pop, yes);
   no.onclick = close;
-  yes.onclick = async () => {
-    if (force) {
+  // The row says Removing… until the folder is gone; a failure is said under its name.
+  const remove = async (force: boolean) => {
+    removing.add(s.name);
+    render();
+    try {
+      await askSnap("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force });
       close();
-      call("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force });
-      return;
+    } finally {
+      removing.delete(s.name);
+      render();
     }
+  };
+  const anyway = async () => {
+    close();
+    try {
+      await remove(true);
+    } catch (e) {
+      actionErrors.set(s.name, String(e));
+      select(s.name);
+    }
+  };
+  yes.onclick = async () => {
+    if (force) return anyway();
+    yes.disabled = true;
+    yes.replaceChildren(el("span", "spin-dot"), "Removing…");
     // Refused (commits on no branch, say): said here, and the button becomes Remove anyway.
     try {
-      await askSnap("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force: false });
-      close();
-      render();
+      await remove(false);
     } catch (e) {
       $("p", pop).textContent = `${String(e)}.`;
+      yes.disabled = false;
       yes.textContent = "Remove anyway";
-      yes.onclick = () => {
-        close();
-        call("worktree_remove", { site: s.name, dropDb: !!drop?.checked, force: true });
-      };
+      yes.onclick = anyway;
     }
   };
 }

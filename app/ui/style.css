@@ -1580,6 +1580,11 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .app-exts .ver-exts { padding: 4px 0; }
 .app-exts .ver-error { padding: 2px 0 0; }
 
+/* A button or row label at work: its spinner before the words ("Creating…", "Removing…"). */
+#ask-ok .spin-dot,
+.pop-confirm .spin-dot { display: inline-block; margin-right: 6px; vertical-align: -1px; }
+.kind.removing { display: inline-flex; align-items: center; gap: 5px; }
+
 /* The PHP version select while a change builds and restarts, and what it ran without. */
 .php-busy { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; color: var(--muted); font-size: 12px; }
 .php-error { padding: 4px 0 0; white-space: pre-line; }
