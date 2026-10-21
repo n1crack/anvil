@@ -25,6 +25,7 @@ contain breaking changes.
 - Adding a service says what it is downloading and how much has come in, or that Redis is being built.
 - Mail tab: after catching is turned on or off, it offers to restart the processes still sending the old way; inboxes count "messages".
 - Worktree settings say in plain sentences what a new worktree gets; Customize… edits files, env keys and commands as rows with plain choices instead of text boxes.
+- Add Folder of Applications… on a folder that is one project offers to add it as one application instead of serving its subfolders, and an empty folder says it has none yet.
 
 ### Added
 

@@ -3,6 +3,7 @@ import { late } from "./late";
 import { ownError, shown } from "./live";
 import { NAMES, editor, summary } from "./hooksform";
 import { confirmInRow } from "./confirm";
+import { icon } from "./icons";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -558,11 +559,8 @@ export function welcome(root) {
   const icon = el("img");
   icon.src = "icon.png";
   icon.alt = "";
-  const add = el("button", "primary", "Add Projects Folder…");
-  add.onclick = async () => {
-    const path = await window.__TAURI__.dialog.open({ directory: true, title: "Every project inside this folder becomes an application" });
-    if (path) await call("park_folder", { path });
-  };
+  const add = el("button", "primary", "Add Folder of Applications…");
+  add.onclick = addAppsFolder;
   const create = el("button", "link", "or create a new application");
   create.onclick = () => late.openNewApp();
   box.append(
@@ -572,7 +570,63 @@ export function welcome(root) {
     add,
     create,
   );
+  const note = parkedNoteEl();
+  if (note) box.append(note);
   root.replaceChildren(box);
+}
+
+// What the last Add Folder of Applications… added nothing for: a folder that is one
+// project itself (its kind), or one with no applications in it yet (null).
+let parked: { path: string; project: string | null } | null = null;
+
+/** Add a folder of applications. One that is a project itself isn't added (its `vendor`,
+ * `node_modules`… would become apps): a note offers adding it as one application. */
+export async function addAppsFolder() {
+  const path = await window.__TAURI__.dialog.open({ directory: true, title: "Every project inside this folder becomes an application" });
+  if (!path) return;
+  try {
+    const r = await invoke("park_folder", { path });
+    parked = r.project || !r.apps ? { path, project: r.project } : null;
+    await call("state");
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+/** The note for `parked`: on the welcome, or over the list. */
+function parkedNoteEl() {
+  if (!parked) return null;
+  const { path, project } = parked;
+  const note = el("div", "parked-note");
+  const text = project
+    ? `${tilde(path)} is one application (${kindLabel(project)}), not a folder of them.`
+    : `${tilde(path)} has no applications yet. Each folder you put in it becomes one.`;
+  const act = el("button", null, project ? "Add It as One Application" : "Create One…");
+  act.onclick = async () => {
+    if (!project) {
+      parked = null;
+      render();
+      return late.openNewApp();
+    }
+    try {
+      const name = await invoke("link_folder", { path });
+      parked = null;
+      await call("state");
+      select(name);
+    } catch (e) {
+      inlineError(act, String(e));
+    }
+  };
+  const close = el("button", "parked-close");
+  close.append(icon("x"));
+  close.title = "Dismiss";
+  close.setAttribute("aria-label", "Dismiss");
+  close.onclick = () => {
+    parked = null;
+    render();
+  };
+  note.append(close, el("p", null, text), act);
+  return note;
 }
 
 function renderList() {
@@ -581,6 +635,8 @@ function renderList() {
   const note = filterNote("apps", kindLabel);
   const hiddenApps = hiddenSites();
   if (note && (snap.sites.length || hiddenApps.length)) list.append(note);
+  const parkedNote = snap.sites.length && parkedNoteEl();
+  if (parkedNote) list.append(parkedNote);
 
   if (!snap.sites.length && !hiddenApps.length) {
     list.append(el("p", "empty", "No applications yet."));
@@ -2503,19 +2559,11 @@ export async function addAppFolder() {
 
 $("#add").onclick = async () => {
   if (mode === "services") return late.openAddService();
-  const pick = (title) => window.__TAURI__.dialog.open({ directory: true, title });
   const menu = await M.Menu.new({
     items: await Promise.all([
       M.MenuItem.new({ text: "New Application…", accelerator: "CmdOrCtrl+N", action: () => late.openNewApp() }),
       M.PredefinedMenuItem.new({ item: "Separator" }),
-      M.MenuItem.new({
-        text: "Add Folder of Applications…",
-        action: async () => {
-          const path = await pick("Every project inside this folder becomes an application");
-          if (!path) return;
-          await call("park_folder", { path });
-        },
-      }),
+      M.MenuItem.new({ text: "Add Folder of Applications…", action: addAppsFolder }),
       M.MenuItem.new({ text: "Add Application Folder…", action: addAppFolder }),
     ]),
   });
@@ -2672,9 +2720,7 @@ function runAction(name) {
     if (mode === "services") late.openAddService();
     else late.openNewApp();
   } else if (name === "park") {
-    window.__TAURI__.dialog
-      .open({ directory: true, title: "Every project inside this folder becomes an application" })
-      .then((path) => path && call("park_folder", { path }));
+    addAppsFolder();
   } else if (name === "reload") {
     $("#reload").click();
   } else if (name === "find") {

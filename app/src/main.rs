@@ -2455,10 +2455,30 @@ fn link_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
     Ok(name)
 }
 
+/// What adding a folder of applications did: nothing for a folder that is one project
+/// itself (its kind, to offer adding it as one), else how many applications it holds.
+#[derive(Serialize)]
+struct Parked {
+    project: Option<&'static str>,
+    apps: usize,
+}
+
 /// Serve every project inside a folder.
 #[tauri::command(async)]
-fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<()> {
+fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> Res<Parked> {
     let path = anvil::platform::canonicalize(&path).map_err(|e| e.to_string())?;
+    if let Some(kind) = anvil::apps::project_kind(&path) {
+        return Ok(Parked {
+            project: Some(kind),
+            apps: 0,
+        });
+    }
+    let apps = std::fs::read_dir(&path)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.'))
+        .count();
     let (cfg, ()) = edit(|c| {
         if !c.paths.contains(&path) {
             c.paths.push(path);
@@ -2466,7 +2486,10 @@ fn park_folder(handle: AppHandle, app: State<App>, path: std::path::PathBuf) -> 
         Ok(())
     })?;
     sites_changed(&handle, &app, &cfg);
-    Ok(())
+    Ok(Parked {
+        project: None,
+        apps,
+    })
 }
 
 #[tauri::command(async)]

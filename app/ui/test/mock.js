@@ -929,6 +929,8 @@ const mockHandle = (cmd, a) => {
       return null;
     case "link_folder":
       return "notes";
+    case "park_folder":
+      return window.mockParked ?? { project: null, apps: 3 };
     case "create_app":
       if (window.mockCreateFail) throw window.mockCreateFail;
       return "notes";

@@ -3136,6 +3136,22 @@ a.pkg-adv-title:hover { text-decoration: underline; }
 
 .welcome .link:hover { color: var(--text); text-decoration: underline; }
 
+/* What an added folder of applications turned out to be: on the welcome, or over the list. */
+.parked-note {
+  position: relative;
+  margin: 2px 0 6px;
+  padding: 8px 28px 8px 10px;
+  border-radius: var(--radius-s);
+  background: var(--steel-hover);
+  font-size: 12px;
+  text-align: left;
+}
+.welcome .parked-note { align-self: stretch; margin-top: 20px; }
+.parked-note p { margin: 0 0 6px; color: var(--text); }
+.parked-note .inline-action { margin-left: 0; }
+.parked-close { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted); }
+.parked-close:hover { color: var(--text); }
+
 /* Unfinished setup: one quiet line above the panel, a button per missing step. */
 /* Setting up this Mac: a button in the titlebar, for the whole app, not one site. */
 .setup { display: flex; align-items: center; gap: 6px; margin-right: auto; -webkit-app-region: no-drag; }

@@ -963,6 +963,35 @@ describe("audit fixes", () => {
     expect($(".toast")).toBeNull();
   });
 
+  test("Add Folder of Applications: a project folder is offered as one app, an empty one said", async () => {
+    const open = w.__TAURI__.dialog.open;
+    w.__TAURI__.dialog.open = async () => "/Users/x/Code/shop";
+    const addFolder = async () => {
+      $("#add").click();
+      await wait();
+      await w.mockMenu.find((i) => i.text === "Add Folder of Applications…").action();
+      await wait();
+    };
+    w.mockParked = { project: "laravel", apps: 0 };
+    await addFolder();
+    expect($("#list .parked-note p").textContent).toBe("~/Code/shop is one application (Laravel), not a folder of them.");
+    $$("#list .parked-note button")
+      .find((b) => b.textContent === "Add It as One Application")!
+      .click();
+    await wait(80);
+    expect(calls("link_folder").at(-1)![1]).toEqual({ path: "/Users/x/Code/shop" });
+    expect($(".parked-note")).toBeNull();
+    expect($('#list [data-name="notes"]').getAttribute("aria-current")).toBe("true");
+
+    w.mockParked = { project: null, apps: 0 };
+    await addFolder();
+    expect($("#list .parked-note p").textContent).toContain("~/Code/shop has no applications yet");
+    ($("#list .parked-close") as HTMLElement).click();
+    expect($(".parked-note")).toBeNull();
+    delete w.mockParked;
+    w.__TAURI__.dialog.open = open;
+  });
+
   test("New application: a folder can be chosen with nothing parked", async () => {
     const { snap } = await import("../src/app");
     const { openNewApp } = await import("../src/newapp");
