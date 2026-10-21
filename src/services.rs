@@ -156,8 +156,9 @@ pub fn require_license(cfg: &mut Config, kind: &str, version: &str, accept: bool
 
 /// SHA-256 of each MySQL download, pinned: MySQL only publishes MD5, which
 /// catches a broken download but not a forged one. Taken from files whose MD5
-/// matched the published one. Add a row for every version offered above.
-const MYSQL_SHA256: [(&str, &str, &str); 9] = [
+/// matched the published one (Linux: also MySQL's GPG signature). Add a row for every
+/// version offered above.
+const MYSQL_SHA256: [(&str, &str, &str); 12] = [
     (
         "9.7.2",
         "arm64",
@@ -202,6 +203,21 @@ const MYSQL_SHA256: [(&str, &str, &str); 9] = [
         "8.0.46",
         "winx64",
         "28e9eda019d88eff4478d811ea2110b83f02a3966be157fe91cc55def3ab0d4d",
+    ),
+    (
+        "9.7.2",
+        "linux-x86_64",
+        "6fe0baf13792e56afa3d93d6a174b4d5700901db1c8d09665225423dc094d0bb",
+    ),
+    (
+        "8.4.11",
+        "linux-x86_64",
+        "383f54e124d5f325d67f0c6912a8f96814eedc761a17ea30112e52fa4cc6b143",
+    ),
+    (
+        "8.0.46",
+        "linux-x86_64",
+        "e2777d490fcaadc5a4be06db89b6935c78909bd9c3382af859ab284af0c950b0",
     ),
 ];
 
@@ -672,12 +688,15 @@ fn install_now(id: &str, version: &str) -> Result<()> {
     replace_dir(&dir(id, version), |d| {
         match id {
             "mysql" => {
-                // ponytail: macOS and Windows builds only; Linux uses the glibc .tar.xz with the Linux port.
-                if !mac && !windows {
-                    bail!("MySQL install is macOS-only for now");
+                // Linux: the glibc "minimal" builds, x86_64 only (MySQL makes none for ARM).
+                let linux = !mac && !windows;
+                if linux && arm {
+                    bail!("MySQL publishes no minimal build for Linux on ARM");
                 }
                 let arch = if windows {
                     "winx64"
+                } else if linux {
+                    "linux-x86_64"
                 } else if arm {
                     "arm64"
                 } else {
@@ -686,6 +705,10 @@ fn install_now(id: &str, version: &str) -> Result<()> {
                 let minor = version.rsplit_once('.').map_or(version, |m| m.0);
                 let file = if windows {
                     format!("mysql-{version}-winx64.zip")
+                } else if linux {
+                    // 8.0 is built against glibc 2.17, later versions 2.28.
+                    let glibc = if minor == "8.0" { "2.17" } else { "2.28" };
+                    format!("mysql-{version}-linux-glibc{glibc}-x86_64-minimal.tar.xz")
                 } else {
                     format!("mysql-{version}-macos15-{arch}.tar.gz")
                 };
@@ -695,7 +718,12 @@ fn install_now(id: &str, version: &str) -> Result<()> {
                     .find(|(v, a, _)| *v == version && *a == arch)
                     .map(|(_, _, s)| *s)
                     .with_context(|| format!("No pinned checksum for {file}"))?;
-                fetch_tgz(&url, d, true, Some(sum))
+                fetch_tgz(&url, d, true, Some(sum))?;
+                #[cfg(unix)]
+                if linux {
+                    build_mysql_libs(&d.join("lib/private"))?;
+                }
+                Ok(())
             }
             "postgres" => {
                 let target = match (mac, arm) {
@@ -894,6 +922,78 @@ fn build_redis(prefix: &std::path::Path, version: &str) -> Result<()> {
     fs::write(prefix.join("REDIS_VERSION"), v)?;
     let _ = fs::remove_dir_all(src);
     Ok(())
+}
+
+/// The two system libraries Linux's mysqld needs and few distributions have: libaio
+/// (Ubuntu 24.04 renamed its to libaio.so.1t64) and libnuma. Pinned sources: the
+/// projects publish no checksums, so Debian's (signed .dsc) and Fedora's (dist-git).
+#[cfg(unix)]
+const LIBAIO: (&str, &str) = (
+    "https://deb.debian.org/debian/pool/main/liba/libaio/libaio_0.3.113.orig.tar.gz",
+    "2c44d1c5fd0d43752287c9ae1eb9c023f04ef848ea8d4aafa46e9aedb678200b",
+);
+#[cfg(unix)]
+const NUMACTL: (&str, &str) = (
+    "https://github.com/numactl/numactl/releases/download/v2.0.19/numactl-2.0.19.tar.gz",
+    "f2672a0381cb59196e9c246bf8bcc43d5568bc457700a697f1a1df762b9af884",
+);
+
+/// Build libaio and libnuma into `private`, MySQL's own library folder, which mysqld
+/// looks in first (its RUNPATH is `$ORIGIN/../lib/private`): no system package needed.
+#[cfg(unix)]
+fn build_mysql_libs(private: &std::path::Path) -> Result<()> {
+    println!("Building libaio and libnuma, which MySQL needs on Linux (a few seconds)…");
+    let src = home().join("build").join("mysql-libs");
+    let _ = fs::remove_dir_all(&src);
+    let tools = "Building MySQL's libraries failed — are gcc and make installed?";
+    let aio = src.join("libaio");
+    fetch_tgz(LIBAIO.0, &aio, true, Some(LIBAIO.1))?;
+    run(crate::platform::command("make")
+        .args(["-s", "-C", "src"])
+        .current_dir(&aio))
+    .context(tools)?;
+    let numa = src.join("numactl");
+    fetch_tgz(NUMACTL.0, &numa, true, Some(NUMACTL.1))?;
+    run(crate::platform::command("./configure")
+        .arg("-q")
+        .current_dir(&numa))
+    .context(tools)?;
+    run(crate::platform::command("make")
+        .args(["-s", "libnuma.la"])
+        .current_dir(&numa))
+    .context(tools)?;
+    // The soname files are links; the copy is the library itself.
+    fs::copy(aio.join("src/libaio.so.1.0.2"), private.join("libaio.so.1"))?;
+    fs::copy(
+        numa.join(".libs/libnuma.so.1.0.0"),
+        private.join("libnuma.so.1"),
+    )?;
+    let _ = fs::remove_dir_all(src);
+    // The mysql client wants libncurses.so.6; Arch only has the wide-character build,
+    // which serves the same calls.
+    let libs = ["ldconfig", "/sbin/ldconfig"]
+        .iter()
+        .find_map(|l| crate::platform::command(l).arg("-p").output().ok())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    if let Some(wide) = narrow_curses_missing(&libs) {
+        std::os::unix::fs::symlink(wide, private.join("libncurses.so.6"))?;
+    }
+    Ok(())
+}
+
+/// libncursesw.so.6's path from `ldconfig -p` when no libncurses.so.6 is listed.
+#[cfg(unix)]
+fn narrow_curses_missing(ldconfig: &str) -> Option<&str> {
+    let path = |name: &str| {
+        ldconfig
+            .lines()
+            .filter(|l| l.trim_start().starts_with(name))
+            .find_map(|l| l.split_once(" => ").map(|(_, p)| p.trim()))
+    };
+    path("libncurses.so.6 ")
+        .is_none()
+        .then(|| path("libncursesw.so.6 "))?
 }
 
 /// Download a service's program version if it isn't there yet.
@@ -1557,9 +1657,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn mysql_client_gets_ncursesw_only_where_ncurses_is_missing() {
+        let arch = "\tlibncursesw.so.6 (libc6,x86-64) => /usr/lib/libncursesw.so.6\n\
+                    \tlibtinfo.so.6 (libc6,x86-64) => /usr/lib/libtinfo.so.6\n";
+        assert_eq!(
+            narrow_curses_missing(arch),
+            Some("/usr/lib/libncursesw.so.6")
+        );
+        let ubuntu = "\tlibncursesw.so.6 (libc6,x86-64) => /lib/x86_64-linux-gnu/libncursesw.so.6\n\
+                      \tlibncurses.so.6 (libc6,x86-64) => /lib/x86_64-linux-gnu/libncurses.so.6\n";
+        assert_eq!(narrow_curses_missing(ubuntu), None);
+        assert_eq!(narrow_curses_missing(""), None);
+    }
+
+    #[test]
     fn every_mysql_version_has_pinned_checksums() {
         for v in versions("mysql") {
-            for arch in ["arm64", "x86_64"] {
+            for arch in ["arm64", "x86_64", "linux-x86_64"] {
                 let row = MYSQL_SHA256.iter().find(|(pv, a, _)| pv == v && *a == arch);
                 assert!(
                     row.is_some_and(|(_, _, s)| s.len() == 64),

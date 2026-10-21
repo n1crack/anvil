@@ -1120,7 +1120,8 @@ pub(crate) fn download(url: &str, sum: Option<&str>) -> Result<PathBuf> {
 
 /// Download a .tar.gz, verify it against `sum` if given, and unpack it into `dir`.
 /// With `strip`, the archive's single top-level folder is dropped. On Windows a .zip
-/// too: its own tar (bsdtar) reads both.
+/// too: its own tar (bsdtar) reads both. A .tar.xz (MySQL on Linux) is left to tar to
+/// recognise.
 pub(crate) fn fetch_tgz(url: &str, dir: &Path, strip: bool, sum: Option<&str>) -> Result<()> {
     let tmp = download(url, sum)?;
     let mut tar = if cfg!(windows) {
@@ -1130,10 +1131,14 @@ pub(crate) fn fetch_tgz(url: &str, dir: &Path, strip: bool, sum: Option<&str>) -
     } else {
         crate::platform::command("tar")
     };
-    tar.arg(if cfg!(windows) { "-xf" } else { "-xzf" })
-        .arg(&tmp)
-        .arg("-C")
-        .arg(dir);
+    tar.arg(if cfg!(windows) || url.ends_with(".tar.xz") {
+        "-xf"
+    } else {
+        "-xzf"
+    })
+    .arg(&tmp)
+    .arg("-C")
+    .arg(dir);
     if strip {
         tar.arg("--strip-components=1");
     }
