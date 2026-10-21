@@ -282,7 +282,8 @@ describe("overview", () => {
     await select("vuefinder");
     const line = $(".procs .dev-summary");
     expect(line.textContent).toContain("Dev");
-    expect(line.querySelector(".dev-summary-state")!.textContent).toBe("1 of 3 running");
+    // The count is the header's alone.
+    expect(line.querySelector(".dev-summary-state")).toBeNull();
     expect([...line.querySelectorAll(".dot")].map((d) => d.className)).toEqual(["dot ", "dot on", "dot "]);
     expect($$(".procs .proc")).toHaveLength(0);
     expect($$("#site .res-sub").map((h) => h.textContent)).not.toContain("Commands");
@@ -729,7 +730,7 @@ describe("containers", () => {
     await select("stack");
     const line = $(".procs .dev-summary");
     expect(line.querySelector(".dev-summary-title")!.textContent).toBe("Containers");
-    expect(line.querySelector(".dev-summary-state")!.textContent).toBe("3 of 4 running");
+    expect(line.querySelector(".dev-summary-state")).toBeNull();
     // The header counts the exited worker as crashed: red, never green.
     expect($("#site .state-text").textContent).toBe("3 running, 1 crashed");
     expect($("#site .run-box .dot").className).toBe("dot bad");

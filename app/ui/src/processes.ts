@@ -227,8 +227,9 @@ function drawRunBox(name, rows, containers) {
   };
 }
 
-/** "Dev · 3 of 4 running" with a dot per entry (or what went wrong); a click opens `tab`. */
-function summaryLine(title: string, dots: [string, string][], running: number, tab: string, keys: string, error?: string | null) {
+/** "Dev" with a dot per entry (or what went wrong); a click opens `tab`. The counts are
+ * the header's, said once. */
+function summaryLine(title: string, dots: [string, string][], tab: string, keys: string, error?: string | null) {
   const b = el("button", "dev-summary");
   const box = el("span", "dev-summary-dots");
   for (const [name, cls] of dots) {
@@ -236,8 +237,7 @@ function summaryLine(title: string, dots: [string, string][], running: number, t
     d.title = name;
     box.append(d);
   }
-  const state = el("span", `dev-summary-state${error ? " error-text" : ""}`, error ?? `${running} of ${dots.length} running`);
-  b.append(el("span", "dev-summary-title", title), state, box);
+  b.append(el("span", "dev-summary-title", title), ...(error ? [el("span", "dev-summary-state error-text", error)] : []), box);
   b.title = keys ? `Show the ${title} tab (${keys})` : `Show the ${title} tab`;
   b.onclick = () => showTab($("#site"), tab);
   return b;
@@ -260,14 +260,13 @@ export function drawProcs(name) {
   const devTab = !$('#site .tabs [data-tab="dev"]')?.hidden;
   if (dev.length) {
     const dots: [string, string][] = dev.map((r) => [r.name, r.running ? "on" : r.crashed ? "bad" : ""]);
-    box.append(summaryLine("Dev", dots, dev.filter((r) => r.running).length, "dev", "⌘3"));
+    box.append(summaryLine("Dev", dots, "dev", "⌘3"));
   }
   const error = o?.docker_error;
   if (error && !containers.length) box.append(composeError(error, o!.compose_file));
   else if (compose) {
     const dots: [string, string][] = containers.map((c) => [c.service, DOT[containerState(c)]]);
-    const up = containers.filter((c) => c.state === "running").length;
-    const line = summaryLine("Containers", dots, up, "containers", devTab ? "" : "⌘3", error && composeBrief(error, o!.compose_file));
+    const line = summaryLine("Containers", dots, "containers", devTab ? "" : "⌘3", error && composeBrief(error, o!.compose_file));
     if (error) line.title = error;
     box.append(line);
   }
