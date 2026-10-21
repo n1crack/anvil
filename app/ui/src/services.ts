@@ -35,12 +35,19 @@ let svcSelected = localStorage.getItem("service");
 let keptNote = "";
 const ABBR = { mysql: "My", postgres: "Pg", redis: "Rd", mailpit: "Mp", versitygw: "S3", silo: "Si" };
 
+// A service's last failed action, by id: said on its page, under its name.
+const svcErrors = new Map<string, string>();
+
 async function serviceCall(cmd: string, args?: Record<string, unknown>) {
+  const id = typeof args?.id === "string" ? args.id : null;
   try {
     services = await invoke(cmd, args);
     showError(null, cmd);
+    if (id) svcErrors.delete(id);
   } catch (e) {
-    showError(String(e), cmd);
+    // On the service's page when it is shown; else in the banner.
+    if (id && id === svcSelected && mode === "services") svcErrors.set(id, String(e));
+    else showError(String(e), cmd);
   }
   if (mode === "services") renderMain();
   else if (selected)
@@ -174,7 +181,10 @@ async function serviceMenu(svc) {
     items.push(item(svc.kind === "mailpit" ? "Open Inbox" : "Open Web Console", () => invoke("open_url", { url: svc.web }).catch(fail)));
   items.push(item("Show Data in Finder", () => invoke("open_service", { id: svc.id, what: "data" }).catch(fail)));
   if (svc.running) items.push(item("Show Log in Processes", () => invoke("show_processes", { select: `service:${svc.id}` }).catch(fail)));
-  items.push(M.PredefinedMenuItem.new({ item: "Separator" }), item("Remove Service…", () => removeService(svc)));
+  items.push(
+    M.PredefinedMenuItem.new({ item: "Separator" }),
+    item("Remove Service…", () => removeService(svc)),
+  );
   (await M.Menu.new({ items: await Promise.all(items) })).popup();
 }
 
@@ -282,8 +292,9 @@ export function renderService() {
     b.onclick = () => serviceCall("service_run", { id: svc.id, action: b.dataset.svc });
   }
   const err = $(".run-error", root);
-  err.textContent = svc.error ?? "";
-  err.hidden = !svc.error;
+  const failed = svcErrors.get(svc.id) ?? svc.error;
+  err.textContent = failed ?? "";
+  err.hidden = !failed;
 
   const inbox = $('[data-svc-open="inbox"]', root);
   inbox.hidden = !svc.web;
@@ -702,7 +713,8 @@ async function renderContents(svc, root, action?) {
     contents.set(svc.id, c);
     if (root.dataset.service === svc.id) drawContents(svc, root, c);
   } catch (e) {
-    if (action) showError(String(e));
+    // A failed Create, Drop or Flush: said above the contents it was asked from.
+    if (action && cached) box.prepend(el("p", "procs-note error", String(e)));
     else box.replaceChildren(el("p", "procs-note", String(e)));
   }
 }

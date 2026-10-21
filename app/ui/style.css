@@ -587,6 +587,21 @@ button, select, input { font: inherit; color: inherit; }
   -webkit-user-select: text;
 }
 
+/* The banner for an error with no place of its own: over the top of the pane, so
+ * nothing moves. */
+.detail { position: relative; }
+#error {
+  position: absolute;
+  top: var(--titlebar);
+  right: 28px;
+  left: 28px;
+  z-index: 30;
+  margin: 0;
+  background: color-mix(in srgb, var(--danger) 12%, var(--steel-pane));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+.inline-error { margin-left: 8px; font-size: 12px; }
+
 .site {
   --pad: 36px;
   flex: 1;
@@ -1993,7 +2008,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   background: none;
   color: inherit;
 }
-
 
 kbd {
   padding: 2px 8px;

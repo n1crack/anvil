@@ -2992,3 +2992,44 @@ describe("hide", () => {
     expect($('#list .item[data-name="notes"]')).not.toBeNull();
   });
 });
+
+describe("errors where they happen", () => {
+  test("an app's failed action shows in its header, a service's on its page; the banner only for the rest", async () => {
+    $('.modes [data-mode="apps"]').click();
+    await select("shop");
+    w.mockFail = { set_secure: "Caddy didn't reload" };
+    $('#list [data-name="shop"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await wait(80);
+    (w.mockMenu as any[]).find((i) => i.text === "Use HTTPS").action();
+    await wait(120);
+    expect($("#site .run-error").textContent).toBe("Caddy didn't reload");
+    expect($("#site .run-error").hidden).toBe(false);
+    expect($("#error").hidden).toBe(true);
+    // Another app: its own header, without shop's error.
+    await select("vuefinder");
+    expect($("#site .run-error").hidden).toBe(true);
+
+    w.mockFail = { service_run: "Port 5432 is in use" };
+    $('.modes [data-mode="services"]').click();
+    await wait(40);
+    $('#list [data-name="postgres"]').click();
+    await wait(80);
+    ($('#site [data-svc="start"]') as HTMLElement).click();
+    await wait(80);
+    expect($("#site .run-error").textContent).toBe("Port 5432 is in use");
+    expect($("#error").hidden).toBe(true);
+    w.mockFail = null;
+    ($('#site [data-svc="start"]') as HTMLElement).click();
+    await wait(80);
+    expect($("#site .run-error").hidden).toBe(true);
+    $('.modes [data-mode="apps"]').click();
+    await wait(40);
+
+    // An error with no place: the banner, dismissible.
+    const app = await import("../src/app");
+    app.showError("Something else");
+    expect($("#error").hidden).toBe(false);
+    $("#error-close").click();
+    expect($("#error").hidden).toBe(true);
+  });
+});

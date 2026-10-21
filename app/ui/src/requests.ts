@@ -1,4 +1,4 @@
-import { $, el, invoke, seg, selected, showError, snap, tab } from "./app";
+import { $, el, inlineError, invoke, seg, selected, snap, tab } from "./app";
 import { follower } from "./console";
 import { shown } from "./live";
 
@@ -124,8 +124,9 @@ async function more(v) {
     v.page = { ...page, end_offset: v.page.end_offset };
     $(".req-list", v.node).append(...page.requests.map((r) => row(v, r)));
     btn.hidden = !page.truncated;
+    inlineError(btn, null);
   } catch (e) {
-    showError(String(e));
+    inlineError(btn, String(e));
   } finally {
     btn.disabled = false;
   }

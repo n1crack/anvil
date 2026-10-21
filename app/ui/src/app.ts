@@ -68,23 +68,42 @@ async function askSnap(cmd: string, args?: Record<string, unknown>) {
   return true;
 }
 
+// An app's last failed action, by app: said in its header, under its name.
+export const actionErrors = new Map<string, string>();
+
 export async function call(cmd: string, args?: Record<string, unknown>) {
+  const site = typeof args?.site === "string" ? args.site : null;
   try {
     if (!(await askSnap(cmd, args))) return;
     showError(null, cmd);
+    if (site) actionErrors.delete(site);
     render();
   } catch (e) {
-    showError(String(e), cmd);
+    // About the shown app: in its header; else in the banner.
+    if (site && site === selected && mode === "apps") {
+      actionErrors.set(site, String(e));
+      render();
+    } else showError(String(e), cmd);
   }
 }
 
 const errors = new Map<string, string>(); // owner -> its error, see ownError
-/** The error banner: `owner`'s error, or null to clear only that one. Without an owner it
- * stays until dismissed. */
+/** The error banner, over the top of the pane, for an error with no place of its own:
+ * `owner`'s error, or null to clear only that one. Without an owner it stays until
+ * dismissed. */
 export function showError(msg, owner = "") {
   const text = ownError(errors, msg, owner);
   $("#error-text").textContent = text;
   $("#error").hidden = !text;
+}
+
+/** An action's error right after `at`, the button or line it was taken from; null clears
+ * it. The banner only when `at` is gone. */
+export function inlineError(at: Element | null, msg: string | null) {
+  if (at?.nextElementSibling?.classList.contains("inline-error")) at.nextElementSibling.remove();
+  if (!msg) return;
+  if (at?.isConnected) at.after(el("span", "error inline-error", msg));
+  else showError(msg);
 }
 
 window.refresh = () => {
@@ -269,18 +288,20 @@ function hidRow(s) {
 /** Apps hidden from Anvil, shaped like sites, while "Show Hidden Applications" is on. They aren't served. */
 function hiddenSites(): any[] {
   if (!showHidden) return [];
-  return (snap.hidden ?? []).filter((h) => !justHid.has(h.name)).map((h) => ({
-    ...h,
-    hiddenApp: true,
-    host: `${h.name}.${snap.tld}`,
-    root: h.path,
-    secure: false,
-    linked: false,
-    parked_in: h.path.slice(0, h.path.lastIndexOf("/")),
-    modified: 0,
-    php: null,
-    php_pinned: false,
-  }));
+  return (snap.hidden ?? [])
+    .filter((h) => !justHid.has(h.name))
+    .map((h) => ({
+      ...h,
+      hiddenApp: true,
+      host: `${h.name}.${snap.tld}`,
+      root: h.path,
+      secure: false,
+      linked: false,
+      parked_in: h.path.slice(0, h.path.lastIndexOf("/")),
+      modified: 0,
+      php: null,
+      php_pinned: false,
+    }));
 }
 // Sidebar sections folded from their heading, by "mode:title".
 export const folded = new Set(JSON.parse(localStorage.getItem("sections") ?? "[]"));
@@ -1534,7 +1555,8 @@ export function renderSite() {
     for (const x of root.querySelectorAll(".serves-only")) x.remove();
   }
 
-  if (process) renderRun(s, root);
+  renderRunState(s, root);
+  if (process) renderRunSettings(s, root);
   if (s.kind === "django") djangoHint(root);
   if (s.kind === "next" && s.host !== `${s.name}.${snap.tld}`) nextHint(s, root);
 
@@ -2253,19 +2275,14 @@ async function cleanItems(name, items) {
 export const PHP_KINDS = new Set(["laravel", "statamic", "symfony", "php"]);
 export const PROCESS_KINDS = new Set(["next", "nuxt", "vite", "node", "rust", "go", "dotnet", "django", "fastapi", "flask"]);
 
-function renderRun(s, root) {
-  renderRunState(s, root);
-  renderRunSettings(s, root);
-}
-
 /** The run error: safe to redraw while the user types elsewhere. The run box is
  * the Overview's (processes.js), for every process of the app. */
 function renderRunState(s, root) {
-  const error = snap.app_errors[s.name];
+  const error = snap.app_errors[s.name] ?? actionErrors.get(s.name);
   const err = $(".run-error", root);
   err.textContent = error ?? "";
   err.hidden = !error;
-  if (error && $('.tabs [data-tab="logs"]', root)) {
+  if (snap.app_errors[s.name] && $('.tabs [data-tab="logs"]', root)) {
     const logs = el("button", "inline-action", "Show Logs");
     logs.onclick = () => showTab(root, "logs");
     err.append(" ", logs);
@@ -2347,6 +2364,7 @@ export function focusRow(row: HTMLElement | null) {
 }
 
 export function select(name) {
+  if (name !== selected) actionErrors.clear();
   selected = name;
   localStorage.setItem("selected", name);
   renderList();

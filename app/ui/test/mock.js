@@ -712,6 +712,7 @@ const mockCreateOptions = (kind) =>
 const mockHttps = () => ({ ...mockOnOff("https", "HTTPS"), default: window.mockHttpsDefault === false ? "off" : "on" });
 const mockHandle = (cmd, a) => {
   const ov = a?.site && mockOv[a.site];
+  if (window.mockFail?.[cmd]) throw window.mockFail[cmd];
   switch (cmd) {
     case "state":
     case "app_run":

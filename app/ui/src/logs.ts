@@ -1,4 +1,4 @@
-import { $, M, PROCESS_KINDS, ago, bytes, el, invoke, seg, selected, showError, showTab, snap, tab, tilde } from "./app";
+import { $, M, PROCESS_KINDS, ago, bytes, el, inlineError, invoke, seg, selected, showError, showTab, snap, tab, tilde } from "./app";
 import { follower, readTail, tail, termOut } from "./console";
 import { copy } from "./services";
 import { icon } from "./icons";
@@ -413,8 +413,9 @@ export async function more(v) {
       if (token !== v.token) return;
       v.page = { ...page, end_offset: v.page.end_offset };
       v.entries.push(...page.entries);
+      inlineError(btn, null);
     } catch (e) {
-      showError(String(e));
+      inlineError(btn, String(e));
     }
     btn.disabled = false;
     btn.textContent = "Load older";
@@ -822,8 +823,9 @@ async function clearLog(v) {
     drawFiles(v);
     // Show the file as it is now: empty, not the entries read before.
     await loadLogs(v);
+    inlineError($(".logs-menu", v.node), null);
   } catch (e) {
-    showError(String(e));
+    inlineError($(".logs-menu", v.node), String(e));
   }
   loadLogs(v);
 }
