@@ -1095,7 +1095,7 @@ const mockHandle = (cmd, a) => {
         item("PHP 8.4", "php/8.4", 412090368, "PHP", "keep", "Remove versions in Settings › PHP"),
         item("PHP 8.3", "php/8.3", 398458880, "PHP", "keep", "Remove versions in Settings › PHP"),
         item("MySQL", "services/mysql", 318767104, "Services", "keep", "The program, shared by every service of this kind"),
-        item("Node.js", "runtimes/node", 196083712, "Languages", "keep", "Remove versions in Settings › Languages"),
+        item("Node.js", "runtimes/node", 196083712, "Languages", "keep", "Remove versions in Settings › Node.js"),
         item("composer cache", "cache/composer", 88080384, "Cache", "safe", "Downloaded again when a build needs it"),
         item("Web server", "bin", 47185920, "Anvil", "keep", "Needed to serve your apps"),
         item("Logs", "log", 12582912, "Logs", "safe", "Only history; new lines keep coming"),

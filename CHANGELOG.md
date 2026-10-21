@@ -21,6 +21,7 @@ contain breaking changes.
 - Settings › PHP: every version row has the same height, and Extensions stays in place on hover and while Uninstall asks.
 - Software Update: a failed check shows why under its title and offers Try Again; without release notes the window's content sits in the middle.
 - Settings › Storage: Applications no longer says it is measuring and that no applications take space at the same time.
+- Settings › Storage: a language's row points to its own Settings page, not the former Languages page.
 
 ## [0.2.1] - 2026-10-21
 

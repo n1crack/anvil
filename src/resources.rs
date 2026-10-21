@@ -1069,12 +1069,20 @@ pub fn anvil_disk() -> (u64, Vec<DiskItem>) {
     }
     for id in crate::runtimes::RUNTIMES {
         let name = crate::runtimes::name(id);
+        // Each language has its own Settings page, named as in `runtimes::name`.
+        let note = match id {
+            "node" => "Remove versions in Settings › Node.js",
+            "go" => "Remove versions in Settings › Go",
+            "rust" => "Remove versions in Settings › Rust",
+            "python" => "Remove versions in Settings › Python",
+            _ => "Remove versions in Settings › .NET",
+        };
         entries.push((
             name.to_string(),
             h.join("runtimes").join(id),
             "Languages",
             Safety::Keep,
-            "Remove versions in Settings › Languages",
+            note,
         ));
     }
     for id in services::SERVICES {
