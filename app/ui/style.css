@@ -3760,5 +3760,6 @@ body.updates:has(.upd-notes[hidden]) .upd-head { margin: auto 0; padding-bottom:
 .pkg-sheet[open] { display: flex; flex-direction: column; }
 .pkg-sheet-body:focus { outline: none; }
 .pkg-sheet-body { max-height: 70vh; margin: 0 -6px; padding: 0 6px; overflow-y: auto; }
-.pkg-sheet-body .pkg-name { margin: 14px 2px 6px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
-.pkg-sheet-body .pkg-name:first-child { margin-top: 0; }
+/* A manager's heading stays at the top while its list scrolls under it. */
+.pkg-sheet-body .pkg-name { position: sticky; top: 0; z-index: 1; margin: 0; padding: 14px 2px 6px; background: var(--steel-pane); color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.pkg-sheet-body .pkg-name:first-child { padding-top: 0; }
