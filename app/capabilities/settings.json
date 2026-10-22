@@ -44,6 +44,7 @@
     "allow-runtime-install",
     "allow-runtime-uninstall",
     "allow-runtimes",
+    "allow-set-clean-rust-builds",
     "allow-set-db-viewer",
     "allow-set-default-php",
     "allow-set-dock-icon",

@@ -344,6 +344,7 @@ export interface Settings {
   theme: string | null;
   dock_icon: boolean;
   trim_app_logs: boolean;
+  clean_rust_builds: boolean;
   notifications: boolean;
   https_default: boolean;
   worktree_db: DbChoice;

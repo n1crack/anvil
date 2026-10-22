@@ -1559,10 +1559,69 @@ pub fn clean(site: &Site, path: &str, app_running: bool) -> Result<u64> {
     Ok(freed)
 }
 
+/// Days a Rust app's code goes unchanged, with nothing of it running, before its build
+/// (`target`) is deleted.
+const RUST_IDLE_DAYS: u64 = 7;
+/// What the user's own cargo-sweep keeps in an app in use: what a build used lately.
+const SWEEP_DAYS: &str = "30";
+
+/// Settings › Storage › Clean Rust builds, at most daily: a Rust app's `target` goes once
+/// its code is unchanged for `RUST_IDLE_DAYS` and nothing of it runs. With cargo-sweep
+/// on the user's PATH (never installed by Anvil), an app in use loses only the build
+/// files no build used for `SWEEP_DAYS`. The last run is recorded in Anvil's state.
+pub fn clean_rust_builds(home: &Path, sites: &[Site], now: std::time::SystemTime) {
+    let stamp = home.join("run").join("rust-cleaned");
+    let secs = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let last: u64 = std::fs::read_to_string(&stamp)
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(0);
+    if secs.saturating_sub(last) < 86400 {
+        return;
+    }
+    let sweep = crate::runtimes::which("cargo-sweep", &crate::env_path());
+    for s in sites {
+        if !rules_for(s)
+            .iter()
+            .any(|r| r.0 == "target" && r.3 == Safety::Rebuild)
+            || !s.path.join("target").is_dir()
+            || apps::running_anywhere(&s.name)
+        {
+            continue;
+        }
+        if rust_idle(newest_edit(&s.path, false), secs) {
+            let _ = clean(s, "target", false);
+        } else if let Some(sweep) = &sweep {
+            let _ = crate::platform::command(sweep)
+                .args(["sweep", "--time", SWEEP_DAYS])
+                .arg(&s.path)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+    }
+    if crate::state_dirs_in(home).is_ok() {
+        let _ = std::fs::write(&stamp, secs.to_string());
+    }
+}
+
+/// Whether code last changed at `touched` (unix seconds; unknown is never idle) is
+/// `RUST_IDLE_DAYS` old at `now`.
+fn rust_idle(touched: Option<u64>, now: u64) -> bool {
+    touched.is_some_and(|t| now.saturating_sub(t) >= RUST_IDLE_DAYS * 86400)
+}
+
 /// The newest file change under `dir` in unix seconds: when the code was last
 /// edited. Dependency, build and hidden folders are skipped. It stops after 5000
 /// entries or 300 ms and returns the newest seen so far.
 pub fn touched(dir: &Path) -> Option<u64> {
+    newest_edit(dir, true)
+}
+
+/// `touched`, all of it when not `quick`: what decides a deletion reads every file.
+fn newest_edit(dir: &Path, quick: bool) -> Option<u64> {
     const SKIP: [&str; 9] = [
         "node_modules",
         "vendor",
@@ -1584,7 +1643,7 @@ pub fn touched(dir: &Path) -> Option<u64> {
         };
         for e in entries.flatten() {
             seen += 1;
-            if seen > 5000 || start.elapsed() > std::time::Duration::from_millis(300) {
+            if quick && (seen > 5000 || start.elapsed() > std::time::Duration::from_millis(300)) {
                 return newest;
             }
             let Ok(ty) = e.file_type() else { continue };
@@ -1920,6 +1979,16 @@ mod tests {
         assert!(clean(&site, "ios/Pods", false).is_err());
         assert!(outside.join("Pods/keep.txt").exists());
         std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn rust_build_goes_after_a_week_unchanged() {
+        let day = 86400;
+        let now = 100 * day;
+        assert!(!rust_idle(Some(now - 6 * day), now));
+        assert!(rust_idle(Some(now - 7 * day), now));
+        // Unknown (nothing read in time): kept.
+        assert!(!rust_idle(None, now));
     }
 
     #[test]

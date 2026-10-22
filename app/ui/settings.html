@@ -188,6 +188,10 @@
           <span>Trim application logs weekly<small>Logs over 10 MB keep their last 1 MB; daily logs older than 14 days go.</small></span>
           <input id="trim-logs" type="checkbox" role="switch">
         </label>
+        <label class="row">
+          <span>Clean Rust builds<small>A Rust application’s target folder goes after 7 days without a code change while it isn’t running; the next build is slower. With cargo-sweep installed, ones in use lose only build files unused for 30 days.</small></span>
+          <input id="clean-rust" type="checkbox" role="switch">
+        </label>
       </div>
     </section>
     <section id="performance" class="page" hidden>

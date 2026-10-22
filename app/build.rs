@@ -86,6 +86,7 @@ const COMMANDS: &[&str] = &[
     "container_logs_stop",
     "set_dock_icon",
     "set_trim_app_logs",
+    "set_clean_rust_builds",
     "set_notifications",
     "set_worktree_db",
     "set_mcp",

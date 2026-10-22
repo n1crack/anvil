@@ -106,6 +106,8 @@ pub struct Config {
     pub https_default: Option<bool>,
     /// Weekly, trim apps' big `storage/logs/*.log` and delete old daily logs (`logs::trim_app_logs`).
     pub trim_app_logs: bool,
+    /// Daily, delete idle Rust apps' builds, sweep busy ones' (`resources::clean_rust_builds`).
+    pub clean_rust_builds: bool,
     /// macOS notifications for crashes and finished New applications while Anvil isn't in front.
     pub notifications: bool,
     /// Service licenses the user accepted before installing: license id -> date.
@@ -270,6 +272,7 @@ impl Default for Config {
             git_client: None,
             https_default: Some(false),
             trim_app_logs: true,
+            clean_rust_builds: true,
             notifications: true,
             request_log: true,
             accepted_licenses: BTreeMap::new(),

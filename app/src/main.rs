@@ -3680,6 +3680,7 @@ struct Settings {
     theme: Option<String>,
     dock_icon: bool,
     trim_app_logs: bool,
+    clean_rust_builds: bool,
     notifications: bool,
     https_default: bool,
     worktree_db: anvil::worktrees::DbChoice,
@@ -3890,6 +3891,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
         theme: cfg.theme,
         dock_icon: cfg.dock_icon,
         trim_app_logs: cfg.trim_app_logs,
+        clean_rust_builds: cfg.clean_rust_builds,
         notifications: cfg.notifications,
         https_default: cfg.https_default == Some(true),
         worktree_db: cfg.worktree_db,
@@ -4411,6 +4413,19 @@ fn set_trim_app_logs(handle: AppHandle, on: bool) -> Res<Settings> {
     )
 }
 
+/// Settings › Storage › Clean Rust builds (`anvil::resources::clean_rust_builds`).
+#[tauri::command(async)]
+fn set_clean_rust_builds(handle: AppHandle, on: bool) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            cfg.clean_rust_builds = on;
+            Ok(())
+        },
+        false,
+    )
+}
+
 /// Settings › PHP › Keep PHP up to date: turned on, a newer patch found installs now.
 #[tauri::command(async)]
 fn set_php_auto_update(handle: AppHandle, on: bool) -> Res<Settings> {
@@ -4428,18 +4443,18 @@ fn set_php_auto_update(handle: AppHandle, on: bool) -> Res<Settings> {
     Ok(s)
 }
 
-/// Anvil's logs capped, and apps' trimmed weekly when that is on.
+/// Anvil's logs capped, apps' trimmed weekly and Rust builds cleaned daily when on.
 fn trim_logs() {
     let Ok(cfg) = anvil::load() else {
         return;
     };
-    let sites: Vec<std::path::PathBuf> = anvil::sites(&cfg).into_iter().map(|s| s.path).collect();
-    anvil::logs::retention(
-        &anvil::home(),
-        cfg.trim_app_logs,
-        &sites,
-        std::time::SystemTime::now(),
-    );
+    let sites = anvil::sites(&cfg);
+    let paths: Vec<std::path::PathBuf> = sites.iter().map(|s| s.path.clone()).collect();
+    let now = std::time::SystemTime::now();
+    anvil::logs::retention(&anvil::home(), cfg.trim_app_logs, &paths, now);
+    if cfg.clean_rust_builds {
+        anvil::resources::clean_rust_builds(&anvil::home(), &sites, now);
+    }
 }
 
 #[tauri::command(async)]
@@ -5448,6 +5463,7 @@ fn main() {
             container_logs_stop,
             set_dock_icon,
             set_trim_app_logs,
+            set_clean_rust_builds,
             set_notifications,
             set_worktree_db,
             set_mcp,
