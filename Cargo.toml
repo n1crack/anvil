@@ -37,3 +37,7 @@ version = "0.3.1"
 edition = "2024"
 rust-version = "1.90"
 license = "GPL-3.0-only"
+
+# Line numbers in backtraces without full debug info, for a smaller target/.
+[profile.dev]
+debug = "line-tables-only"
