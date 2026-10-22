@@ -1991,6 +1991,91 @@ mod tests {
     }
 
     #[test]
+    fn rust_build_cleaned_only_when_idle_and_stopped() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", home.path()) };
+        std::fs::create_dir_all(home.path().join("run")).unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let dir = project.path();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let day = std::time::Duration::from_secs(86400);
+        let now = std::time::SystemTime::now();
+        let edited = |ago: std::time::Duration| {
+            for f in ["Cargo.toml", "src/main.rs"] {
+                std::fs::write(dir.join(f), "").unwrap();
+                let file = std::fs::File::options().write(true).open(dir.join(f)).unwrap();
+                file.set_modified(now - ago).unwrap();
+            }
+        };
+        let build = || {
+            std::fs::create_dir_all(dir.join("target/debug")).unwrap();
+            std::fs::write(dir.join("target/debug/app"), "x").unwrap();
+        };
+        let site = Site {
+            host: String::new(),
+            secure: false,
+            name: "rusty".into(),
+            path: dir.to_path_buf(),
+            root: dir.to_path_buf(),
+            root_custom: None,
+            root_detected: ".".into(),
+            php: None,
+            php_pinned: false,
+            ext: vec![],
+            own_master: false,
+            octane_ports: None,
+            ini: BTreeMap::new(),
+            linked: true,
+            parked_in: None,
+            modified: 0,
+            kind: "rust".into(),
+            kind_detected: "rust".into(),
+            command: None,
+            command_custom: false,
+            port: None,
+            autostart: false,
+            runtime_version: None,
+            runtime_pinned: false,
+            browser: false,
+            packages_pinned: None,
+            shared_deps: None,
+            worktree_of: None,
+            branch: None,
+            aliases: vec![],
+        };
+        let sites = std::slice::from_ref(&site);
+        let stamp = home.path().join("run/rust-cleaned");
+
+        // Running: kept, even unchanged for 8 days.
+        edited(8 * day);
+        build();
+        let me = std::process::id();
+        let pids = home.path().join("run/app-rusty@dev.pids");
+        std::fs::write(&pids, format!("{me}\n{me} dev\n")).unwrap();
+        clean_rust_builds(home.path(), sites, now);
+        assert!(dir.join("target/debug/app").exists());
+
+        // Stopped and unchanged for 8 days: gone, the code stays.
+        std::fs::remove_file(&pids).unwrap();
+        std::fs::remove_file(&stamp).unwrap();
+        clean_rust_builds(home.path(), sites, now);
+        assert!(!dir.join("target").exists());
+        assert!(dir.join("src/main.rs").exists());
+
+        // Within a day of the last run: nothing is looked at.
+        build();
+        clean_rust_builds(home.path(), sites, now + day / 2);
+        assert!(dir.join("target").exists());
+
+        // Changed 5 days before this run: kept.
+        edited(4 * day);
+        clean_rust_builds(home.path(), sites, now + day);
+        assert!(dir.join("target/debug/app").exists());
+    }
+
+    #[test]
     fn rules_and_env() {
         let rust = rules("rust");
         assert!(

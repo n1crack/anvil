@@ -189,7 +189,7 @@
           <input id="trim-logs" type="checkbox" role="switch">
         </label>
         <label class="row">
-          <span>Clean Rust builds<small>A Rust application’s target folder goes after 7 days without a code change while it isn’t running; the next build is slower. With cargo-sweep installed, ones in use lose only build files unused for 30 days.</small></span>
+          <span>Clean Rust builds<small>After 7 days without a code change, a stopped Rust application’s target folder goes. With cargo-sweep, the rest lose only files unused for 30 days.</small></span>
           <input id="clean-rust" type="checkbox" role="switch">
         </label>
       </div>
