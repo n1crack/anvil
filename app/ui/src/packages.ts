@@ -162,14 +162,17 @@ const output = (name, key, id, command, opener) => {
 };
 
 /** A question asked in place: Cancel goes back to `idle`, the action (in red) does it. */
-function ask(box, question, verb, idle, go) {
-  const no = el("button", "text-act", "Cancel");
-  no.onclick = idle;
-  const yes = el("button", "text-act danger", verb);
-  yes.onclick = go;
-  box.classList.add("asking");
-  box.replaceChildren(el("span", "muted pkg-ask", question), no, yes);
-  no.focus();
+function ask(anchor: HTMLElement, question, verb, go) {
+  const pop = el("div", "pop-confirm wide pkg-ask");
+  const no = el("button", null, "Cancel");
+  const yes = el("button", "primary", verb);
+  pop.append(el("p", null, question), no, yes);
+  const close = popAt(anchor, pop, yes);
+  no.onclick = close;
+  yes.onclick = () => {
+    close();
+    go();
+  };
 }
 
 /** A row's Install and Update…; Update asks first. Running, the buttons' place says so; after,
@@ -189,10 +192,9 @@ function runActs(name, eco, cmds: [string, string][], row: string, missing = fal
         b.onclick = () =>
           update
             ? ask(
-                acts,
+                b,
                 `Run ${command}? Packages move to the newest versions their constraints allow, and the lock file changes.`,
                 "Update",
-                idle,
                 () => runPkg(name, eco, id, command, `${row} .pkg-update`),
               )
             : runPkg(name, eco, id, command, `${row} .pkg-install`);
@@ -616,7 +618,7 @@ function switchFoot(name, e) {
     const b = el("button", "text-act pkg-switch", "Switch…");
     b.title = "Switch to pnpm";
     b.onclick = () =>
-      ask(line, `Replace ${lock} with pnpm-lock.yaml and install node_modules again? Test the app afterwards.`, "Switch", idle, () =>
+      ask(b, `Replace ${lock} with pnpm-lock.yaml and install node_modules again? Test the app afterwards.`, "Switch", () =>
         switchToPnpm(name),
       );
     line.replaceChildren(el("span", "muted", "pnpm is faster and saves disk space."), b);

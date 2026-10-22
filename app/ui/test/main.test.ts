@@ -1958,7 +1958,7 @@ describe("packages", () => {
     expect(document.activeElement).toBe($(".pkg-tile-security"));
   });
 
-  test("Install runs at once, Update asks in the section; either opens its output in a window, then the packages are read again", async () => {
+  test("Install runs at once, Update asks in a bubble at its button; either opens its output in a window, then the packages are read again", async () => {
     const acts = (eco: string) => card(eco).querySelector(".pkg-acts")!;
     const act = (eco: string, text: string) => [...card(eco).querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;
     const log = () => $(".pkg-log-sheet") as HTMLDialogElement;
@@ -1967,14 +1967,18 @@ describe("packages", () => {
       "Install packagesUpdate packages…",
       "Install packagesUpdate packages…",
     ]);
+    const bubble = () => $(".pop.pkg-ask") as HTMLElement | null;
+    const inBubble = (text: string) => [...bubble()!.querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;
     act("composer", "Update packages…").click();
-    expect(acts("composer").textContent).toContain("Run composer update?");
-    expect(document.activeElement!.textContent).toBe("Cancel");
-    act("composer", "Cancel").click();
+    expect(bubble()!.textContent).toContain("Run composer update?");
     expect(acts("composer").textContent).toBe("Install packagesUpdate packages…");
+    expect(document.activeElement!.textContent).toBe("Update");
+    inBubble("Cancel").click();
+    expect(bubble()).toBeNull();
     expect(calls("package_run")).toHaveLength(0);
     act("composer", "Update packages…").click();
-    act("composer", "Update").click();
+    inBubble("Update").click();
+    expect(bubble()).toBeNull();
     // The window opens at once, its output read once the run started.
     expect(log().open).toBe(true);
     expect($("#pkg-log-title").textContent).toBe("composer update");
@@ -2033,17 +2037,18 @@ describe("packages", () => {
     await wait(30);
   });
 
-  test("an npm app offers pnpm at the bottom of its row, asked there first", async () => {
+  test("an npm app offers pnpm at the bottom of its row, asked in a bubble first", async () => {
     expect(card("npm").querySelector(".pkg-foot")).toBeNull();
     w.mockPackages.ecosystems[1].lock = "package-lock.json";
     await w.renderPackages({ name: "shop" });
     const foot = () => card("npm").querySelector(".pkg-foot")!;
     expect(foot().textContent).toBe("pnpm is faster and saves disk space.Switch…");
     (foot().querySelector(".pkg-switch") as HTMLElement).click();
-    expect(foot().textContent).toBe(
+    const pop = $(".pop.pkg-ask");
+    expect(pop.textContent).toBe(
       "Replace package-lock.json with pnpm-lock.yaml and install node_modules again? Test the app afterwards.CancelSwitch",
     );
-    (foot().querySelector(".text-act.danger") as HTMLElement).click();
+    (pop.querySelector(".primary") as HTMLElement).click();
     expect(foot().textContent).toBe("Switching to pnpm…");
     await wait(80);
     expect(calls("switch_to_pnpm").at(-1)![1]).toEqual({ site: "shop" });
