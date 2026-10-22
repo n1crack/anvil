@@ -7,10 +7,12 @@ contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-22
+
 ### Added
 
 - PHP keeps itself on the newest patch release (Settings › PHP › Update automatically); off, a version offers Update to the new one, and `anvil php update` does it from the CLI.
-- Packages tab: Install and Update for Composer and the app's JS package manager, with the output in Dev.
+- Packages tab: Install and Update for Composer and the app's JS package manager, with their output in a window.
 - Settings › PHP lists Composer's global packages with Update, and installs Laravel Forge's CLI (`forge`) on request.
 - Docker services: Anvil runs an image for you or adds a container you already have, and starts, stops and restarts it (`anvil service add --docker mongo:7 --port 27017:27017`).
 - External services: a MySQL, PostgreSQL or Redis server elsewhere, with its .env lines and database apps; its dot is green while it can be reached (`anvil service add --external db.lan:3306 --kind mysql`).
@@ -26,10 +28,12 @@ contain breaking changes.
 - Main window: plainer words on service, Mail and Settings pages; an external server shows Reachable, a crashed container says so.
 - An app's Settings › Worktrees reads as a short checklist, and Customize… is a tidier form with Done at the bottom.
 - Packages: a dashboard, with tiles for the framework, updates and advisories, then the key packages and the package managers, a row each with its Install and Update buttons; what a check finds opens in a window.
+- Resources: space that can be rebuilt has a colour of its own.
 
 ### Fixed
 
 - WordPress can be created on Linux.
+- The update bubble keeps its size while Anvil restarts.
 
 ## [0.3.0] - 2026-10-21
 
@@ -172,7 +176,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/n1crack/anvil/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/n1crack/anvil/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/n1crack/anvil/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/n1crack/anvil/releases/tag/v0.2.0
