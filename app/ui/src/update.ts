@@ -81,10 +81,13 @@ export function updateBar(popAt: (anchor: Element, pop: HTMLElement, focus?: HTM
       later.onclick = close;
       go.onclick = async () => {
         busy = true;
-        later.disabled = true;
+        // The bubble keeps its size while it says how the restart goes: the shorter
+        // text doesn't shrink it, the buttons are gone but still hold their place.
+        pop.style.minHeight = `${pop.offsetHeight}px`;
+        pop.classList.add("restarting");
         await restart(go, what, relaunch);
+        pop.classList.remove("restarting");
         busy = false;
-        later.disabled = false;
       };
     };
     bar.replaceChildren(toggle);

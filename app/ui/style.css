@@ -2179,6 +2179,7 @@ kbd {
 }
 .update-note { color: var(--muted); }
 .update-pop { width: 280px; }
+.update-pop.restarting button { visibility: hidden; }
 .update-pop .update-note { color: var(--text); }
 .update-pop button { border: 1px solid var(--line); border-radius: var(--radius-s); background: none; color: var(--text); }
 .update-pop button:hover:not(:disabled) { background: var(--steel-hover); }
