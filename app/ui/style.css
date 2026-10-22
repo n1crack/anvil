@@ -3789,6 +3789,10 @@ body.updates:has(.upd-notes[hidden]) .upd-head { margin: auto 0; padding-bottom:
 /* An Install or Update's output, live, how it went beside the buttons. */
 .pkg-log { height: auto; min-height: 120px; max-height: 60vh; margin: 0 -2px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--steel-raised); }
 .pkg-log:focus { outline: none; }
+/* The ANSI colours are made for a dark surface: in light, the terminal's own, as .logs-term. */
+@media (prefers-color-scheme: light) {
+  .pkg-log { border-color: transparent; background: #121518; color: #d7dce1; }
+}
 .pkg-log-status { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 12px; }
 .pkg-log-status .spin-dot { flex: none; }
 .pkg-log-status.ok svg { color: var(--ok-text); }
