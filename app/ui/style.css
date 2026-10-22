@@ -3055,7 +3055,6 @@ button.pkg-tile:hover { background: color-mix(in srgb, var(--text) 6%, transpare
 .pkg-sec { max-width: 640px; margin-top: 22px; }
 .pkg-sec .pkg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 24px; margin-bottom: 6px; padding: 0 2px; }
 .pkg-sec .pkg-name { margin: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
-.pkg-sec .pkg-file { font-size: 12px; }
 .pkg-sec > :is(.pkg-ran, .pkg-error, .pkg-none) { margin: 0 0 6px; padding: 0 2px; font-size: 12px; }
 .pkg-sec > .group + .pkg-none { margin-top: 6px; }
 .pkg-found dl { margin: 0; }
@@ -3114,10 +3113,22 @@ button.pkg-tile:hover { background: color-mix(in srgb, var(--text) 6%, transpare
 .pkg-acts.asking { flex: 1 1 100%; margin: 0 0 4px; }
 .pkg-ask { flex: 0 1 auto; min-width: 0; }
 .pkg-acts.asking .text-act { flex: none; }
-.pkg-foot { padding: 4px 2px 0; }
-.pkg-foot .pkg-acts { justify-content: flex-start; margin-left: 0; }
-.pkg-foot .pkg-switch { margin-left: -2px; }
-.pkg-foot .pkg-ran { margin: 4px 0; font-size: 12px; }
+
+/* The package managers: a row each in one box, its name and status at the left, its buttons
+ * at the right (under them in a narrow window); a run's result and the pnpm offer under all. */
+.pkg-mgr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 9px 14px; }
+.pkg-mgr + .pkg-mgr { border-top: 1px solid var(--line); }
+.pkg-mgr-info { flex: 1 1 260px; min-width: 0; }
+.pkg-mgr-info > .pkg-error { margin: 3px 0 0; }
+.pkg-mgr > .pkg-acts { gap: 8px; }
+.pkg-mgr > .pkg-acts.asking { gap: 12px; margin: 0; }
+.pkg-mgr > .pkg-ran { flex: 1 1 100%; margin: 0; font-size: 12px; }
+.pkg-btn.primary { border-color: color-mix(in srgb, var(--text) 28%, transparent); background: color-mix(in srgb, var(--text) 13%, transparent); font-weight: 600; }
+.pkg-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 20%, transparent); }
+.pkg-foot { flex: 1 1 100%; }
+.pkg-foot .pkg-acts { justify-content: flex-start; gap: 6px; margin-left: 0; }
+.pkg-foot .pkg-acts.asking { gap: 12px; }
+.pkg-foot .pkg-ran { margin: 2px 0 0; font-size: 12px; }
 
 .pkg-list .row { grid-template-columns: 1fr auto; min-height: 34px; padding: 5px 14px; }
 .pkg-list dt { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
@@ -3751,11 +3762,11 @@ body.updates:has(.upd-notes[hidden]) .upd-head { margin: auto 0; padding-bottom:
 .upd-foot button:disabled { opacity: 0.5; }
 #upd-status.error-text { color: var(--danger); }
 
-/* Packages: a section's line on what the checks found; the list itself opens in a window. */
-.pkg-sec > .pkg-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; margin: 0 0 6px; padding: 0 2px; font-size: 12px; }
+/* Packages: a manager's line on what's installed and what the checks found; the list itself opens in a window. */
+.pkg-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; margin: 2px 0 0; font-size: 12px; }
 .pkg-sum .bad { color: var(--danger); }
-.pkg-sum .pkg-view { margin-left: 8px; }
-.pkg-missing { padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); border-radius: 9px; color: var(--amber-text); font-size: 11px; white-space: nowrap; }
+.pkg-sum .pkg-view { height: auto; margin-left: 8px; }
+.pkg-missing { color: var(--amber-text); }
 .pkg-sheet { width: min(640px, 92vw); }
 .pkg-sheet[open] { display: flex; flex-direction: column; }
 .pkg-sheet-body:focus { outline: none; }

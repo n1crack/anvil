@@ -1843,16 +1843,20 @@ describe("packages", () => {
     await wait(80);
   });
 
-  const card = (eco: string) => $(`.pkg-sec[data-eco="${eco}"]`);
+  const card = (eco: string) => $(`.pkg-mgr[data-eco="${eco}"]`);
   const sheet = () => $(".pkg-sheet") as HTMLDialogElement;
 
-  test("a section per manager, nothing found until a check runs; Check for updates fills the tile and each section's line", async () => {
+  test("a row per manager in one box, nothing found until a check runs; Check for updates fills the tile and each row's line", async () => {
     expect(calls("package_updates")).toHaveLength(0);
     expect($$(".pkg-checkbar button").map((b) => b.textContent)).toEqual(["Check for updates", "Check security"]);
-    expect(
-      $$(".pkg-sec[data-eco] .pkg-head").map((h) => `${h.querySelector("h3")!.textContent} ${h.querySelector(".pkg-file")!.textContent}`),
-    ).toEqual(["Composer composer.json", "pnpm package.json"]);
-    expect($$(".pkg-sec[data-eco] :is(dl, .pkg-sum), .pkg-foot, .pkg-missing")).toHaveLength(0);
+    expect($(".pkg-mgrs-sec h3").textContent).toBe("Package managers");
+    expect($$(".pkg-mgrs .pkg-mgr-name").map((n) => `${n.textContent} (${n.title})`)).toEqual([
+      "Composer (composer.json · composer 2.8.4)",
+      "pnpm (package.json · pnpm 9.15.0)",
+    ]);
+    expect($$(".pkg-mgr .pkg-sum").map((s) => s.textContent)).toEqual(["vendor/ installed", "node_modules installed"]);
+    expect($$(".pkg-mgr :is(dl, .pkg-view, .pkg-foot, .pkg-missing)")).toHaveLength(0);
+    expect($$(".pkg-mgr .pkg-install").map((b) => b.title)).toEqual(["composer install", "pnpm install"]);
     $(".pkg-check-outdated").click();
     expect($(".pkg-check-outdated").textContent).toBe("Checking…");
     await wait(80);
@@ -1861,9 +1865,9 @@ describe("packages", () => {
     expect($(".pkg-tile-updates").tagName).toBe("BUTTON");
     expect(JSON.parse(localStorage.getItem("pkgUpdates:shop")!).list).toHaveLength(7);
     // The sections say how many, the rows are in the window.
-    expect($$(".pkg-sec[data-eco] dl")).toHaveLength(0);
-    expect(card("composer").querySelector(".pkg-sum")!.textContent).toBe("4 updatesView…");
-    expect(card("npm").querySelector(".pkg-sum")!.textContent).toBe("3 updatesView…");
+    expect($$(".pkg-mgr dl")).toHaveLength(0);
+    expect(card("composer").querySelector(".pkg-sum")!.textContent).toBe("vendor/ installed · 4 updatesView");
+    expect(card("npm").querySelector(".pkg-sum")!.textContent).toBe("node_modules installed · 3 updatesView");
     const view = card("composer").querySelector(".pkg-view") as HTMLElement;
     view.click();
     expect(sheet().open).toBe(true);
@@ -1889,7 +1893,7 @@ describe("packages", () => {
     await wait(80);
     expect($("#pkg-sheet-title").textContent).toBe("3 updates");
     expect($$(".pkg-sheet-body h3").map((h) => h.textContent)).toEqual(["pnpm"]);
-    expect(card("composer").querySelector(".pkg-sum")!.textContent).toBe("Up to date");
+    expect(card("composer").querySelector(".pkg-sum")!.textContent).toBe("vendor/ installed · up to date");
     // ...and one that finds nothing closes it.
     w.mockUpdates = [];
     $(".pkg-check-outdated").click();
@@ -1909,7 +1913,7 @@ describe("packages", () => {
     pkgUpdates.clear();
     drawPackages("shop");
     expect(tile("updates")).toBe("7 updates / 3 major / checked just now");
-    expect(card("composer").querySelector(".pkg-sum")!.textContent).toBe("4 updatesView…");
+    expect(card("composer").querySelector(".pkg-sum")!.textContent).toBe("vendor/ installed · 4 updatesView");
     expect(calls("package_updates")).toHaveLength(4);
   });
 
@@ -1921,10 +1925,10 @@ describe("packages", () => {
     expect(tile("security")).toBe("1 advisory / high / checked just now");
     expect($(".pkg-tile-security .pkg-tile-big").classList.contains("bad")).toBe(true);
     const sum = card("composer").querySelector(".pkg-sum")!;
-    expect(sum.textContent).toBe("4 updates · 1 security advisoryView…");
+    expect(sum.textContent).toBe("vendor/ installed · 4 updates · 1 security advisoryView");
     expect(sum.querySelector(".bad")!.textContent).toBe("1 security advisory");
     expect(card("npm").querySelector(".pkg-error")!.textContent).toBe("pnpm audit failed: request to registry timed out");
-    expect(card("npm").querySelector(".pkg-sum")!.textContent).toBe("3 updatesView…");
+    expect(card("npm").querySelector(".pkg-sum")!.textContent).toBe("node_modules installed · 3 updatesView");
     expect(card("composer").querySelector(".pkg-error")).toBeNull();
     (card("composer").querySelector(".pkg-view") as HTMLElement).click();
     expect($("#pkg-sheet-title").textContent).toBe("Composer — 4 updates, 1 advisory");
@@ -1953,16 +1957,19 @@ describe("packages", () => {
   });
 
   test("Install runs at once, Update asks in the section; either shows in Dev, then the packages are read again", async () => {
-    const acts = (eco: string) => card(eco).querySelector(".pkg-head .pkg-acts")!;
+    const acts = (eco: string) => card(eco).querySelector(".pkg-acts")!;
     const act = (eco: string, text: string) => [...card(eco).querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;
-    expect($$(".pkg-sec[data-eco] .pkg-head .pkg-acts").map((l) => l.textContent)).toEqual(["InstallUpdate…", "InstallUpdate…"]);
-    act("composer", "Update…").click();
+    expect($$(".pkg-mgr > .pkg-acts").map((l) => l.textContent)).toEqual([
+      "Install packagesUpdate packages…",
+      "Install packagesUpdate packages…",
+    ]);
+    act("composer", "Update packages…").click();
     expect(acts("composer").textContent).toContain("Run composer update?");
     expect(document.activeElement!.textContent).toBe("Cancel");
     act("composer", "Cancel").click();
-    expect(acts("composer").textContent).toBe("InstallUpdate…");
+    expect(acts("composer").textContent).toBe("Install packagesUpdate packages…");
     expect(calls("package_run")).toHaveLength(0);
-    act("composer", "Update…").click();
+    act("composer", "Update packages…").click();
     act("composer", "Update").click();
     await wait(30);
     expect(calls("package_run").at(-1)![1]).toEqual({ site: "shop", id: "pkg-composer-update" });
@@ -1974,12 +1981,12 @@ describe("packages", () => {
     const failed = card("composer").querySelector(".pkg-ran")!;
     expect(failed.textContent).toBe("composer update failed (exit code 1). Output");
     expect(failed.classList.contains("pkg-error")).toBe(true);
-    expect(acts("composer").textContent).toBe("InstallUpdate…");
+    expect(acts("composer").textContent).toBe("Install packagesUpdate packages…");
     // The list is read again and, checked before, the outdated ones too.
     expect(calls("packages").length).toBeGreaterThan(reads);
     expect(calls("package_updates")).toHaveLength(checks + 1);
 
-    act("npm", "Install").click();
+    act("npm", "Install packages").click();
     await wait(30);
     expect(calls("package_run").at(-1)![1].id).toBe("pkg-js-install");
     expect(acts("npm").textContent).toBe("Running pnpm install…Output");
@@ -1998,11 +2005,12 @@ describe("packages", () => {
     await wait(30);
   });
 
-  test("an npm app offers Switch to pnpm… at the bottom of its section, asked there first", async () => {
+  test("an npm app offers pnpm at the bottom of its row, asked there first", async () => {
     expect(card("npm").querySelector(".pkg-foot")).toBeNull();
     w.mockPackages.ecosystems[1].lock = "package-lock.json";
     await w.renderPackages({ name: "shop" });
     const foot = () => card("npm").querySelector(".pkg-foot")!;
+    expect(foot().textContent).toBe("pnpm is faster and saves disk space.Switch…");
     (foot().querySelector(".pkg-switch") as HTMLElement).click();
     expect(foot().textContent).toBe(
       "Replace package-lock.json with pnpm-lock.yaml and install node_modules again? Test the app afterwards.CancelSwitch",
@@ -2015,16 +2023,14 @@ describe("packages", () => {
     expect(foot().querySelector(".pkg-switch")).toBeNull();
   });
 
-  test("a manager with nothing installed says so, and Install is its button", async () => {
-    expect($$(".pkg-sec[data-eco] .pkg-install").map((b) => b.className)).toEqual(["text-act pkg-install", "text-act pkg-install"]);
+  test("a manager with nothing installed says so, and Install is the stronger button", async () => {
+    expect($$(".pkg-mgr .pkg-install").map((b) => b.className)).toEqual(["pkg-btn pkg-install", "pkg-btn pkg-install"]);
     await select("vuefinder");
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
-    const tag = card("npm").querySelector(".pkg-missing") as HTMLElement;
-    expect(tag.textContent).toBe("Not installed");
-    expect(tag.title).toBe("node_modules is missing: click Install");
-    expect(card("npm").querySelector(".pkg-install")!.className).toBe("pkg-btn pkg-install");
-    expect(card("npm").querySelector(".pkg-update")!.className).toBe("text-act pkg-update");
+    expect(card("npm").querySelector(".pkg-missing")!.textContent).toBe("node_modules not installed");
+    expect(card("npm").querySelector(".pkg-install")!.className).toBe("pkg-btn primary pkg-install");
+    expect(card("npm").querySelector(".pkg-update")!.className).toBe("pkg-btn pkg-update");
     await select("shop");
     $('.tabs [data-tab="packages"]').click();
     await wait(80);

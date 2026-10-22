@@ -5,9 +5,9 @@ import { askProcs, drawProcs, loadProcs } from "./processes";
 
 /* Packages tab, a dashboard: tiles for the framework, the updates and the advisories with
  * the two checks under them; the key packages (pinned per app, the detected ones by
- * default); then a section per package manager with its Install and Update… and a line on
- * what the checks found for it, the list itself in a window. Scripts live in the Overview's
- * Commands. */
+ * default); then the package managers, a row each with its Install and Update… and a line
+ * on what the checks found for it, the list itself in a window. Scripts live in the
+ * Overview's Commands. */
 
 const pkgCache = new Map<string, any>(); // site name -> packages or { error }
 // site name -> { list, at, error? } once checked
@@ -162,7 +162,7 @@ function ask(box, question, verb, idle, go) {
   no.focus();
 }
 
-/** A section's Install and Update…; Update asks first. Running, the header says so; after,
+/** A row's Install and Update…; Update asks first. Running, the buttons' place says so; after,
  * how it went under it. Either way its output is a click away in Dev. */
 function runActs(name, eco, cmds: [string, string][], missing = false) {
   const key = `${name}:${eco}`;
@@ -172,9 +172,9 @@ function runActs(name, eco, cmds: [string, string][], missing = false) {
     acts.replaceChildren(
       ...cmds.map(([id, command]) => {
         const update = id.endsWith("-update");
-        // Nothing installed yet: Install is the thing to do, a button rather than a word.
-        const look = !update && missing ? "pkg-btn" : "text-act";
-        const b = el("button", `${look} ${update ? "pkg-update" : "pkg-install"}`, update ? "Update…" : "Install");
+        // Nothing installed yet: Install is the thing to do, the stronger button.
+        const look = !update && missing ? "pkg-btn primary" : "pkg-btn";
+        const b = el("button", `${look} ${update ? "pkg-update" : "pkg-install"}`, update ? "Update packages…" : "Install packages");
         b.title = command;
         b.onclick = () =>
           update
@@ -257,7 +257,7 @@ export function drawPackages(name) {
   // The update check asks every registry at once, so its failure is the app's, not a section's.
   if (up?.error) body.append(el("p", "pkg-error", up.error));
   body.append(pinsSection(name, p));
-  for (const e of p.ecosystems) body.append(section(name, p, e, up, AUDITED.has(e.id) ? audits[e.id] : null));
+  body.append(managersSection(name, p, up, audits));
   if (shown?.name === name) drawFound();
 }
 
@@ -323,61 +323,69 @@ function securityTile(checks) {
   return t;
 }
 
-/** A package manager: its name and file, Install and Update…, then what the checks found
- * and, for an npm or yarn app, Switch to pnpm…. */
-function section(name, p, e, up, audit) {
-  const box = el("section", "pkg-sec");
-  box.dataset.eco = e.id;
+/** The package managers in one box, a row each: its name, what's installed and what the
+ * checks found (View opens the list), Install and Update… at the right and, for an npm or
+ * yarn app, a line offering pnpm. */
+function managersSection(name, p, up, audits) {
+  const box = el("section", "pkg-sec pkg-mgrs-sec");
   const head = el("div", "pkg-head");
-  const title = el("h3", "pkg-name", managerLabel(e));
-  if (e.manager) title.title = e.manager;
-  head.append(title);
-  if (FILE[e.id]) head.append(el("span", "muted pkg-file", FILE[e.id]));
-  if (e.installed === false) {
-    const tag = el("span", "pkg-missing", "Not installed");
-    tag.title = `${e.id === "composer" ? "vendor/" : "node_modules"} is missing: click Install`;
-    head.append(tag);
-  }
-  box.append(head);
+  head.append(el("h3", "pkg-name", "Package managers"));
+  const list = el("div", "group pkg-mgrs");
+  for (const e of p.ecosystems) list.append(managerRow(name, p, e, up, AUDITED.has(e.id) ? audits[e.id] : null));
+  box.append(head, list);
+  return box;
+}
+
+function managerRow(name, p, e, up, audit) {
+  const row = el("div", "pkg-mgr");
+  row.dataset.eco = e.id;
+  const info = el("div", "pkg-mgr-info");
+  const title = el("div", "pkg-mgr-name", managerLabel(e));
+  title.title = [FILE[e.id], e.manager].filter(Boolean).join(" · ");
+  info.append(title);
+  const sum = summary(name, e, up, audit);
+  if (sum) info.append(sum);
+  if (audit?.error) info.append(el("p", "pkg-error", audit.error));
+  row.append(info);
   const run = RUN[e.id];
   const cmds = run ? p.commands.filter(([id]) => id.startsWith(`pkg-${run}-`)) : [];
   if (cmds.length) {
     const [acts, msg] = runActs(name, run, cmds, e.installed === false);
-    head.append(acts);
-    if (msg) box.append(msg);
+    row.append(acts);
+    if (msg) row.append(msg);
   }
-
-  if (audit?.error) box.append(el("p", "pkg-error", audit.error));
-  const sum = summary(name, e, up, audit);
-  if (sum) box.append(sum);
   if (e.id === "npm") {
     const foot = switchFoot(name, e);
-    if (foot) box.append(foot);
+    if (foot) row.append(foot);
   }
-  return box;
+  return row;
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const updatesFor = (up, e) => (up?.list ?? []).filter((x) => x.ecosystem === e.id);
+// What Install puts in place, per manager.
+const INSTALLS = { composer: "vendor/", npm: "node_modules" };
 
-/** A section's line on what the checks found, View… opens the list; nothing before a check. */
+/** A row's line: installed or not, then what the checks found; View opens the list. */
 function summary(name, e, up, audit) {
   const updates = up?.at ? updatesFor(up, e).length : null;
   const advisories = audit?.at && !audit.error ? (audit.list ?? []).length : null;
   const parts: Node[] = [];
-  if (updates != null) parts.push(updates ? el("span", null, plural(updates, "update", "updates")) : el("span", "muted", "Up to date"));
+  if (INSTALLS[e.id] && e.installed != null)
+    parts.push(el("span", e.installed ? null : "pkg-missing", `${INSTALLS[e.id]} ${e.installed ? "installed" : "not installed"}`));
+  if (updates != null) parts.push(el("span", null, updates ? plural(updates, "update", "updates") : "up to date"));
   if (advisories != null)
     parts.push(
       advisories
         ? el("span", "bad", plural(advisories, "security advisory", "security advisories"))
-        : el("span", "muted", "No known advisories"),
+        : el("span", null, "no known advisories"),
     );
   if (!parts.length) return null;
-  const line = el("p", "pkg-sum");
-  parts.forEach((x, i) => line.append(...(i ? [el("span", "muted", " · "), x] : [x])));
+  const line = el("p", "muted pkg-sum");
+  parts.forEach((x, i) => line.append(...(i ? [el("span", null, " · "), x] : [x])));
   if (updates || advisories) {
-    const view = el("button", "text-act pkg-view", "View…");
-    view.onclick = () => showFound({ name, eco: e.id, kind: "all", opener: `.pkg-sec[data-eco="${e.id}"] .pkg-view` });
+    const view = el("button", "text-act pkg-view", "View");
+    view.onclick = () => showFound({ name, eco: e.id, kind: "all", opener: `.pkg-mgr[data-eco="${e.id}"] .pkg-view` });
     line.append(view);
   }
   return line;
@@ -466,7 +474,7 @@ function drawFound() {
   sheet!.querySelector(".pkg-sheet-body")!.replaceChildren(...groups);
 }
 
-/** An npm or yarn app can move to pnpm, only when asked and confirmed in its section. */
+/** An npm or yarn app can move to pnpm, only when asked and confirmed in its row. */
 function switchFoot(name, e) {
   const lock = e.lock === "package-lock.json" || e.lock === "yarn.lock" ? e.lock : null;
   const going = busy.has(`${name}:pnpm`);
@@ -476,12 +484,13 @@ function switchFoot(name, e) {
   const line = el("div", "pkg-acts");
   const idle = () => {
     line.classList.remove("asking");
-    const b = el("button", "text-act pkg-switch", "Switch to pnpm…");
+    const b = el("button", "text-act pkg-switch", "Switch…");
+    b.title = "Switch to pnpm";
     b.onclick = () =>
       ask(line, `Replace ${lock} with pnpm-lock.yaml and install node_modules again? Test the app afterwards.`, "Switch", idle, () =>
         switchToPnpm(name),
       );
-    line.replaceChildren(b);
+    line.replaceChildren(el("span", "muted", "pnpm is faster and saves disk space."), b);
   };
   if (going) line.replaceChildren(el("span", "spin-dot"), el("span", "muted", "Switching to pnpm…"));
   else if (lock) idle();
