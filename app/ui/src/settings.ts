@@ -39,8 +39,6 @@ window.refresh = () => {
 export let runtimes: any = null;
 export const installing = new Set<string>(); // "id@version", "php@8.3" for PHP
 
-const CHECK = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.75" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
 /** The page of each language Anvil installs besides PHP, and which version an
  * app uses when it isn't pinned to one (as apps.rs and runtimes.rs decide). */
 const LANGS = [
@@ -88,8 +86,8 @@ function moreButton(label: string, items: { text: string; action: () => void }[]
   return b;
 }
 
-/** One row of a Versions list: muted with Install when missing, a check and
- * "Default" on the default, Make default and Uninstall in a menu at its end otherwise. A version
+/** One row of a Versions list: muted with Install when missing, "Default" on the
+ * default, Make default and Uninstall in a menu at its end otherwise. A version
  * apps are pinned to names them and offers no Uninstall (the core refuses it). */
 function versionRow(
   label: string,
@@ -97,14 +95,21 @@ function versionRow(
   busy: boolean,
   blocked: boolean,
   act: { install: () => void; uninstall: () => void; makeDefault?: () => void; note?: string },
-  extra?: { slot?: HTMLElement; note?: HTMLElement; status?: HTMLElement; end?: HTMLElement; error?: HTMLElement; below?: HTMLElement },
+  extra?: {
+    slot?: HTMLElement;
+    note?: HTMLElement;
+    status?: HTMLElement;
+    end?: HTMLElement;
+    error?: HTMLElement;
+    below?: HTMLElement;
+    toggle?: { open: boolean; flip: () => boolean };
+  },
 ) {
   const row = document.createElement("div");
   row.className = `row ver${v.installed ? "" : " missing"}${v.default ? " is-default" : ""}`;
   const name = document.createElement("span");
   name.className = "ver-name";
-  name.innerHTML = `<span class="ver-mark">${v.default ? CHECK : ""}</span><span class="ver-label"></span>`;
-  $(".ver-label", name).textContent = label;
+  name.append(Object.assign(document.createElement("span"), { className: "ver-label", textContent: label }));
   if (extra?.slot) name.append(extra.slot);
   if (v.default) name.append(Object.assign(document.createElement("span"), { className: "ver-default", textContent: "Default" }));
   const pinned = v.installed && v.pinned_by?.length ? v.pinned_by.join(", ") : "";
@@ -150,6 +155,23 @@ function versionRow(
   // in one place whatever the actions say.
   row.append(name, actions, ...[extra?.status, extra?.end, more].filter((e) => e !== undefined));
   if (extra?.below) row.append(extra.below);
+  if (extra?.toggle) {
+    // The row opens and closes what is below it; its buttons, menu and list stay theirs.
+    const { open, flip } = extra.toggle;
+    const toggle = () => row.setAttribute("aria-expanded", String(flip()));
+    row.classList.add("folds");
+    row.tabIndex = 0;
+    row.setAttribute("aria-expanded", String(open));
+    row.onclick = (e) => {
+      if (!(e.target as Element).closest("button, input, a, .ext-fold, .ver-error, .actions-inline.asking")) toggle();
+    };
+    row.onkeydown = (e) => {
+      if (e.target === row && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        toggle();
+      }
+    };
+  }
   if (extra?.error) {
     row.classList.add("has-error");
     row.append(extra.error);
@@ -893,8 +915,6 @@ function renderGlobals() {
       const row = Object.assign(document.createElement("div"), { className: `row ver${g.version ? "" : " missing"}` });
       const name = Object.assign(document.createElement("span"), { className: "ver-name" });
       name.append(
-        // An empty check column, so the names line up with the versions above.
-        Object.assign(document.createElement("span"), { className: "ver-mark" }),
         Object.assign(document.createElement("span"), {
           className: "ver-label",
           textContent: g.version ? `${g.name} ${g.version}` : g.name,
@@ -939,19 +959,20 @@ const extErrors = new Map<string, string>(); // version -> why its last extensio
 
 const extsOpen = new Set<string>(); // PHP versions whose extension list is open
 
-/** An installed version's "Extensions 2/6 ›" at the row's far end; it slides the version's
- * list open under the row (OPcache first, then the catalog's). After a failed build, the
+/** An installed version's "Extensions 2/6 ›" at the row's far end; a click on the row slides the version's
+ * list open under it (OPcache first, then the catalog's). After a failed build, the
  * reason under the row, with the tools when they are missing. */
 function phpParts(v: Settings["php"][number]) {
   let end: HTMLElement | undefined;
   let below: HTMLElement | undefined;
+  let toggle: { open: boolean; flip: () => boolean } | undefined;
   if (v.installed) {
     const on = v.extensions.filter((e) => e.on && e.built).length + (v.opcache !== "missing" && v.opcache_on ? 1 : 0);
     const busy =
       v.opcache_building ||
       installing.has(`opcache@${v.version}`) ||
       v.extensions.some((e) => e.building || installing.has(`ext@${v.version}@${e.name}`));
-    const t = Object.assign(document.createElement("button"), { type: "button", className: "ext-toggle" });
+    const t = Object.assign(document.createElement("span"), { className: "ext-toggle" });
     // "Extensions" goes in a narrow row (style.css); the count and the tooltip stay.
     t.innerHTML = `<span><span class="ext-word">Extensions </span></span><span class="chevron" aria-hidden="true">›</span>`;
     t.firstElementChild!.append(`${on}/${v.extensions.length + 1}`);
@@ -959,26 +980,27 @@ function phpParts(v: Settings["php"][number]) {
     if (busy) t.prepend(Object.assign(document.createElement("span"), { className: "spin-dot" }));
     below = Object.assign(document.createElement("div"), { className: "ext-fold" });
     below.append(extensionsList(v));
-    const set = (open: boolean) => {
-      t.setAttribute("aria-expanded", String(open));
-      below!.classList.toggle("open", open);
-    };
-    set(extsOpen.has(v.version));
+    const fold = below;
+    fold.classList.toggle("open", extsOpen.has(v.version));
     // Opened and closed in place, not redrawn, so it slides.
-    t.onclick = () => {
-      const open = !extsOpen.has(v.version);
-      if (open) extsOpen.add(v.version);
-      else extsOpen.delete(v.version);
-      set(open);
+    toggle = {
+      open: extsOpen.has(v.version),
+      flip: () => {
+        const open = !extsOpen.has(v.version);
+        if (open) extsOpen.add(v.version);
+        else extsOpen.delete(v.version);
+        fold.classList.toggle("open", open);
+        return open;
+      },
     };
     end = t;
   }
   const reason = opcacheErrors.get(v.version) ?? extErrors.get(v.version);
-  if (!reason) return { end, below };
+  if (!reason) return { end, below, toggle };
   const error = Object.assign(document.createElement("div"), { className: "ver-error" });
   error.append(Object.assign(document.createElement("span"), { textContent: reason }));
   if (reason.includes("xcode-select --install")) error.append(button("Install command line tools", () => invoke("xcode_tools_install")));
-  return { end, error, below };
+  return { end, error, below, toggle };
 }
 
 /** A version's extensions, one line each. OPcache, built in or built once for the version,

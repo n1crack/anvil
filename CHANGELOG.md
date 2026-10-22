@@ -17,6 +17,7 @@ contain breaking changes.
 
 - Esc closes Settings.
 - Settings: a version's Make default and Uninstall, and a package manager's Uninstall, are in a ⋯ menu at the end of its row.
+- Settings › PHP: a click on an installed version opens its extensions; the default is marked by "Default" alone, without a check.
 - Packages: the window of updates and advisories has Check again and an Update per package manager.
 
 ### Fixed

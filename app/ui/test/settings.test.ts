@@ -92,7 +92,6 @@ describe("versions", () => {
     ]);
     const def = rows[1];
     expect(def.classList.contains("is-default")).toBe(true);
-    expect(def.querySelector(".ver-mark svg")).not.toBeNull();
     expect(def.querySelector(".ver-default")?.textContent).toBe("Default");
     expect(def.querySelector("button.ver-more")).toBeNull();
     // Make default and Uninstall wait in the More menu, not on hover.
@@ -156,13 +155,14 @@ describe("versions", () => {
     $$("#versions .ver").find((r) => r.querySelector(".ver-label")?.textContent?.match(/^PHP (\d+\.\d+)/)?.[1] === v)!;
   const buttons = (r: HTMLElement) => [...r.querySelectorAll("button")].map((b) => b.textContent);
 
-  test("a newer patch shows before Extensions as Update to it, which runs php_update", async () => {
+  test("a newer patch shows before the extension count as Update to it, which runs php_update", async () => {
     w.mockPhpAvailable = { "8.4": ["8.4.23", "8.4.27"] };
     w.refresh();
     try {
       await open("php");
       const row = phpRow("8.4");
-      expect(buttons(row).slice(0, 2)).toEqual(["Update to 8.4.27", "Extensions 1/9›"]);
+      expect(buttons(row)[0]).toBe("Update to 8.4.27");
+      expect(row.querySelector(".ver-patch + .ext-toggle")!.textContent).toBe("Extensions 1/9›");
       (row.querySelector(".ver-patch button") as HTMLElement).click();
       await wait(10);
       expect(w.mockCalls).toContainEqual(["php_update", { version: "8.4" }]);
@@ -251,7 +251,8 @@ describe("versions", () => {
 
   const toggle = (v: string) => phpRow(v).querySelector(".ext-toggle") as HTMLElement | null;
   async function openExts(v: string) {
-    if (toggle(v)!.getAttribute("aria-expanded") !== "true") toggle(v)!.click();
+    // A click anywhere on the row's own space opens it; the count is part of the row.
+    if (phpRow(v).getAttribute("aria-expanded") !== "true") toggle(v)!.click();
     await wait(10);
   }
   const lines = (v: string) => [...phpRow(v).querySelectorAll<HTMLElement>(".ext-fold.open .ext-line")];
@@ -288,6 +289,18 @@ describe("versions", () => {
       expect(line("8.5", "OPcache").textContent).toBe("OPcacheBuilt in");
       // The list slides open in place: no redraw.
       expect(phpRow("8.5").querySelector(".ext-fold")!.classList.contains("open")).toBe(true);
+      // Inside the list, a click is the list's: it stays open.
+      (phpRow("8.5").querySelector(".ext-list") as HTMLElement).click();
+      expect(phpRow("8.5").getAttribute("aria-expanded")).toBe("true");
+      // The version's name closes it again; Enter opens it from the keyboard.
+      (phpRow("8.5").querySelector(".ver-label") as HTMLElement).click();
+      expect(phpRow("8.5").getAttribute("aria-expanded")).toBe("false");
+      phpRow("8.5").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(phpRow("8.5").getAttribute("aria-expanded")).toBe("true");
+      // The More menu is its own: it doesn't fold the row.
+      (phpRow("8.3").querySelector("button.ver-more") as HTMLElement).click();
+      await wait(10);
+      expect(phpRow("8.3").getAttribute("aria-expanded")).toBe("false");
       await openExts("8.4");
       expect(line("8.4", "OPcache").textContent).toBe("OPcacheRemove");
       await openExts("8.3");

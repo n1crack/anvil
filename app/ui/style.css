@@ -1477,27 +1477,13 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .nav-head:empty { margin: 8px 0 0; }
 
-/* Versions: a check and "Default" on the default, missing ones muted with Install,
+/* Versions: "Default" on the default, missing ones muted with Install,
  * Make default and Uninstall on hover; the row keeps its height either way. */
 .page .row.ver > .ver-name {
   flex-direction: row;
   align-items: center;
   font-variant-numeric: tabular-nums;
 }
-
-.ver-mark {
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  margin-right: 8px;
-  color: var(--ok);
-}
-
-.ver-mark svg { width: 14px; height: 14px; }
-
-/* No default in the list (only PHP has one): no empty column for the check. */
-.versions:not(:has(.is-default)):not(#composer-globals) .ver-mark { display: none; }
-.versions:not(:has(.is-default)):not(#composer-globals) .ver-error { padding-left: 0; }
 
 .ver.missing .ver-label { color: var(--muted); }
 
@@ -1552,10 +1538,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .ver:has(.asking) .ext-toggle { display: none; }
 .ver .actions-inline.asking { flex: 1 1 0; min-width: 0; justify-content: flex-end; }
 .ver .actions-inline.asking .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.page .row.ver { container-type: inline-size; }
-@container (max-width: 440px) {
-  .ext-word { display: none; }
-}
 
 /* A version's More (Make default, Uninstall): quiet until hovered; its empty place on the
  * default keeps the controls before it lined up. */
@@ -1564,30 +1546,30 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .page button.ver-more:hover { background: var(--steel-hover); color: var(--text); }
 .page .ver-more svg { width: 15px; height: 15px; }
 
-/* PHP: "Extensions 2/6 ›" after the version opens its list under the row. */
+.page .row.ver { container-type: inline-size; }
+@container (max-width: 440px) {
+  .ext-word { display: none; }
+}
+
+/* PHP: "Extensions 2/6 ›" at the version's end; a click on the row opens its list. */
 .ext-toggle {
   display: inline-flex;
   margin-left: 14px;
   align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 11px;
-  background: var(--steel-raised);
+  gap: 6px;
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-.ext-toggle:hover { color: var(--text); }
+.row.folds:hover .ext-toggle { color: var(--text); }
 .ext-toggle .chevron { display: inline-block; transition: transform 0.2s ease; }
-.ext-toggle[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+.row[aria-expanded="true"] .ext-toggle .chevron { transform: rotate(90deg); }
 /* The list slides open: a grid row from 0 to its height. */
 .ext-fold { display: grid; flex-basis: 100%; grid-template-rows: 0fr; transition: grid-template-rows 0.22s ease; }
 .ext-fold.open { grid-template-rows: 1fr; }
 .ext-fold > .ext-list { min-height: 0; overflow: hidden; }
 /* A step darker than the rows around it: a list inside the version. */
-.ext-list { display: grid; margin-left: 24px; padding: 0 10px; border-radius: var(--radius-s); background: var(--ext-well); }
+.ext-list { display: grid; padding: 0 10px; border-radius: var(--radius-s); background: var(--ext-well); }
 .ext-fold.open > .ext-list { margin-top: 6px; margin-bottom: 10px; }
 .ext-line { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 32px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .ext-line:last-child { border-bottom: 0; }
@@ -1625,7 +1607,6 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   flex-basis: 100%;
   align-items: center;
   gap: 8px;
-  padding-left: 24px;
   color: var(--danger);
   font-size: 12px;
 }
