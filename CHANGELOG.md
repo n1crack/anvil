@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- OPcache can be turned off per PHP version (Settings › PHP › Extensions); it stays on unless you do.
+
 ### Changed
 
 - Esc closes Settings.

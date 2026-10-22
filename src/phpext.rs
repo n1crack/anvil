@@ -436,6 +436,10 @@ pub fn php_args(cfg: &Config, minor: &str) -> Vec<String> {
 pub fn php_args_with(cfg: &Config, minor: &str, site: Option<&crate::Site>) -> Vec<String> {
     let mut ini = cfg.ini.clone();
     ini.extend(site.map(|s| s.ini.clone()).unwrap_or_default());
+    // Turned off in Settings: over any opcache.enable of the user's.
+    if cfg.php_opcache_off.contains(minor) {
+        ini.insert("opcache.enable".into(), "0".into());
+    }
     let mut args = crate::opcache::fpm_args(&ini, minor);
     let names = names_for(cfg, minor, site);
     if !names.is_empty() {

@@ -66,6 +66,7 @@ const COMMANDS: &[&str] = &[
     "php_opcache",
     "php_mysqli",
     "php_opcache_remove",
+    "php_opcache_on",
     "php_ext",
     "app_ext",
     "xcode_tools_install",

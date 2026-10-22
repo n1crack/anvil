@@ -34,6 +34,7 @@
     "allow-php-install",
     "allow-php-opcache",
     "allow-php-opcache-remove",
+    "allow-php-opcache-on",
     "allow-php-uninstall",
     "allow-php-update",
     "allow-pnpm-prune",

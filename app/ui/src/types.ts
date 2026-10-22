@@ -324,6 +324,7 @@ export interface Settings {
     full: string | null;
     opcache: "builtin" | "ready" | "missing";
     opcache_building: boolean;
+    opcache_on: boolean;
     /** The catalog, each on or off for every app on the version. */
     /** `needs`: what it needs first that isn't here; it can't be turned on. */
     extensions: { name: string; on: boolean; built: boolean; building: boolean; needs?: string | null }[];

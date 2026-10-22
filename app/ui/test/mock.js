@@ -1273,6 +1273,7 @@ const mockHandle = (cmd, a) => {
           pinned_by: window.mockPhpPins?.[version] ?? [],
           opcache: version === "8.5" ? "builtin" : (window.mockOpcache?.[version] ?? (version === "8.4" ? "ready" : "missing")),
           opcache_building: window.mockOpcacheBuilding?.includes(version) ?? false,
+          opcache_on: !window.mockOpcacheOff?.includes(version),
           available: window.mockPhpAvailable?.[version] ?? null,
           updated: window.mockPhpUpdated?.[version] ?? null,
           updating: window.mockPhpUpdating?.includes(version) ?? false,
@@ -1375,6 +1376,9 @@ const mockHandle = (cmd, a) => {
       return mockHandle("settings");
     case "pnpm_store":
       return window.mockPnpmStore ?? { path: "/Users/x/Library/pnpm/store/v11", bytes: 4_400_000_000 };
+    case "php_opcache_on":
+      window.mockOpcacheOff = (window.mockOpcacheOff ?? []).filter((v) => v !== a.version).concat(a.on ? [] : [a.version]);
+      return mockHandle("settings");
     case "php_opcache_remove":
       (window.mockOpcache ??= {})[a.version] = "missing";
       return mockHandle("settings");

@@ -3633,6 +3633,8 @@ struct PhpVersion {
     /// Apps pinned to it: it can't be uninstalled until they are unpinned.
     pinned_by: Vec<String>,
     opcache: anvil::opcache::State,
+    /// OPcache is on for this version (off only when turned off in Settings).
+    opcache_on: bool,
     /// An OPcache build for it is running, so a window opened meanwhile says so too.
     opcache_building: bool,
     /// The catalog (`phpext::CATALOG`), each on or off for every app on this version.
@@ -3861,6 +3863,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                     .is_some_and(|(_, p)| *p),
                 pinned_by: anvil::pinned_to(&cfg, "php", v),
                 opcache: anvil::opcache::state(v),
+                opcache_on: !cfg.php_opcache_off.contains(*v),
                 opcache_building: anvil::lock(&OPCACHE_BUILDS).iter().any(|b| b == v),
                 extensions: anvil::phpext::offered()
                     .map(|e| PhpExt {
@@ -4541,6 +4544,24 @@ async fn php_opcache_remove(handle: AppHandle, version: String) -> Res<Settings>
     tauri::async_runtime::spawn_blocking(move || -> Res<()> {
         anvil::opcache::remove(&version).map_err(err)?;
         let cfg = anvil::load().map_err(err)?;
+        let app = h.state::<App>();
+        if running(&app) {
+            start(&app, &cfg);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    changed(&handle);
+    settings(handle)
+}
+
+/// Turns OPcache on or off for every app on `version`, then restarts PHP-FPM.
+#[tauri::command]
+async fn php_opcache_on(handle: AppHandle, version: String, on: bool) -> Res<Settings> {
+    let h = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Res<()> {
+        let cfg = anvil::opcache::set_on(&version, on).map_err(err)?;
         let app = h.state::<App>();
         if running(&app) {
             start(&app, &cfg);
@@ -5407,6 +5428,7 @@ fn main() {
             php_opcache,
             php_mysqli,
             php_opcache_remove,
+            php_opcache_on,
             php_ext,
             app_ext,
             xcode_tools_install,

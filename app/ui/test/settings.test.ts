@@ -274,9 +274,27 @@ describe("versions", () => {
       // The list slides open in place: no redraw.
       expect(phpRow("8.5").querySelector(".ext-fold")!.classList.contains("open")).toBe(true);
       await openExts("8.4");
-      expect(line("8.4", "OPcache").textContent).toBe("OPcacheOnRemove");
+      expect(line("8.4", "OPcache").textContent).toBe("OPcacheRemove");
       await openExts("8.3");
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheNot builtBuild");
+      expect(line("8.3", "OPcache").querySelector("input")).toBeNull();
+    }));
+
+  test("OPcache has a switch, on unless turned off; off leaves it out of the count", () =>
+    withOpcache83(async () => {
+      await openExts("8.5");
+      const sw = () => line("8.5", "OPcache").querySelector("input[role=switch]") as HTMLInputElement;
+      expect(sw().checked).toBe(true);
+      sw().checked = false;
+      sw().dispatchEvent(new Event("change"));
+      await wait(30);
+      expect(w.mockCalls.filter(([c]: [string]) => c === "php_opcache_on").at(-1)[1]).toEqual({ version: "8.5", on: false });
+      expect(sw().checked).toBe(false);
+      expect(toggle("8.5")!.textContent).toMatch(/^Extensions 0\/9/);
+      sw().checked = true;
+      sw().dispatchEvent(new Event("change"));
+      await wait(30);
+      expect(sw().checked).toBe(true);
     }));
 
   test("a window opened during a build says Building… on OPcache too", () =>
@@ -305,7 +323,7 @@ describe("versions", () => {
       expect(w.mockCalls.at(-1)).toEqual(["php_opcache", { version: "8.3" }]);
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheBuilding… a few minutes");
       await wait(150);
-      expect(line("8.3", "OPcache").textContent).toBe("OPcacheOnRemove");
+      expect(line("8.3", "OPcache").textContent).toBe("OPcacheRemove");
       expect(toggle("8.3")!.textContent).toBe("Extensions 1/9›");
       // Remove asks in the row too, then it's Not built again.
       (line("8.3", "OPcache").querySelector(".text-act") as HTMLElement).click();

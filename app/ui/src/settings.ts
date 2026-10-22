@@ -928,7 +928,7 @@ function phpParts(v: Settings["php"][number]) {
   let end: HTMLElement | undefined;
   let below: HTMLElement | undefined;
   if (v.installed) {
-    const on = v.extensions.filter((e) => e.on && e.built).length + (v.opcache === "missing" ? 0 : 1);
+    const on = v.extensions.filter((e) => e.on && e.built).length + (v.opcache !== "missing" && v.opcache_on ? 1 : 0);
     const busy =
       v.opcache_building ||
       installing.has(`opcache@${v.version}`) ||
@@ -963,8 +963,8 @@ function phpParts(v: Settings["php"][number]) {
   return { end, error, below };
 }
 
-/** A version's extensions, one line each. OPcache is built once for the version and then
- * always on: unbuilt, "Build" asks first (minutes). The others switch on for every app on the
+/** A version's extensions, one line each. OPcache, built in or built once for the version,
+ * has a switch, on unless turned off; unbuilt, "Build" asks first (minutes). The others switch on for every app on the
  * version; one being built says so and holds its switch; one on without a build for this
  * PHP (a failed build, a PHP installed since) shows off, "Not built": on builds it. */
 function extensionsList(v: Settings["php"][number]) {
@@ -987,7 +987,6 @@ function extensionsList(v: Settings["php"][number]) {
     // Built by Anvil: removable, asked first since building it again takes minutes.
     const idle = () =>
       opEnd.replaceChildren(
-        Object.assign(document.createElement("span"), { className: "muted", textContent: "On" }),
         textAct("Remove", () =>
           confirmInRow(
             opEnd,
@@ -997,9 +996,10 @@ function extensionsList(v: Settings["php"][number]) {
             idle,
           ),
         ),
+        opcacheSwitch(v),
       );
     idle();
-  } else opEnd.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Built in" }));
+  } else opEnd.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Built in" }), opcacheSwitch(v));
   op.append(opName, opEnd);
   list.append(op);
   for (const e of v.extensions) {
@@ -1041,6 +1041,23 @@ async function setExtension(version: string, name: string, on: boolean) {
   }
   installing.delete(key);
   render();
+}
+
+/** OPcache on or off for every app on the version; on unless turned off here. */
+function opcacheSwitch(v: Settings["php"][number]) {
+  const input = Object.assign(document.createElement("input"), { type: "checkbox", checked: v.opcache_on });
+  input.setAttribute("role", "switch");
+  input.setAttribute("aria-label", `OPcache for PHP ${v.version}`);
+  input.onchange = async () => {
+    opcacheErrors.delete(v.version);
+    try {
+      s = (await invoke("php_opcache_on", { version: v.version, on: input.checked })) ?? s;
+    } catch (e) {
+      opcacheErrors.set(v.version, String(e));
+    }
+    render();
+  };
+  return input;
 }
 
 /** The build takes minutes; the row says so meanwhile and holds a second click. */

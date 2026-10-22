@@ -82,6 +82,20 @@ pub fn remove(minor: &str) -> Result<()> {
     Ok(std::fs::remove_file(so_path(minor))?)
 }
 
+/// Turn OPcache on or off for every app on `minor` (`Config::php_opcache_off`); the
+/// saved config. PHP-FPM reads it when it starts.
+pub fn set_on(minor: &str, on: bool) -> Result<crate::Config> {
+    let (cfg, ()) = crate::update(|c| {
+        if on {
+            c.php_opcache_off.remove(minor);
+        } else {
+            c.php_opcache_off.insert(minor.to_string());
+        }
+        Ok(())
+    })?;
+    Ok(cfg)
+}
+
 /// PHP-FPM's `-d` arguments: the extension when built, then the dev settings the user
 /// hasn't set in `ini` (the php.ini overrides of the master's apps: global, or with one
 /// app's own over them), then theirs.
@@ -503,6 +517,18 @@ mod tests {
         let args = fpm_args(&cfg.ini, "8.5");
         assert!(args.contains(&"opcache.memory_consumption=512".into()));
         assert!(!args.contains(&"opcache.memory_consumption=256".into()));
+    }
+
+    #[test]
+    fn turned_off_wins_over_the_users_enable() {
+        let mut cfg = Config::default();
+        cfg.ini.insert("opcache.enable".into(), "1".into());
+        cfg.php_opcache_off.insert("8.5".into());
+        let args = crate::phpext::php_args(&cfg, "8.5");
+        assert!(args.contains(&"opcache.enable=0".into()), "{args:?}");
+        assert!(!args.contains(&"opcache.enable=1".into()));
+        // Only that version.
+        assert!(!crate::phpext::php_args(&cfg, "8.6").contains(&"opcache.enable=0".into()));
     }
 
     #[test]

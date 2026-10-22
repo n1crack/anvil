@@ -152,6 +152,10 @@ pub struct Config {
     /// every app on a version, by minor version. Stored only when there are some.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub php_ext: BTreeMap<String, Vec<String>>,
+    /// Settings › PHP › Extensions › OPcache: the minor versions it is turned off for
+    /// (`opcache.enable=0`). On everywhere else; stored only when off somewhere.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub php_opcache_off: BTreeSet<String>,
     /// Settings › PHP › Keep PHP up to date: a newer patch of an installed version
     /// installs on its own (`php_updates`). On unless turned off; stored only when off.
     #[serde(skip_serializing_if = "is_true")]
@@ -279,6 +283,7 @@ impl Default for Config {
             db_viewer: false,
             mail_port: None,
             php_ext: BTreeMap::new(),
+            php_opcache_off: BTreeSet::new(),
             php_auto_update: true,
         }
     }
