@@ -79,6 +79,15 @@ for (const [id, name, note] of LANGS) {
 /** Newest first, numerically: "22" > "9", "1.27.2" > "1.9". */
 const newest = (a: string, b: string) => b.localeCompare(a, undefined, { numeric: true });
 
+/** A row's ⋯ at its end: a menu of what it does less often. */
+function moreButton(label: string, items: { text: string; action: () => void }[]) {
+  const b = Object.assign(document.createElement("button"), { type: "button", className: "icon-btn ver-more", title: "More" });
+  b.setAttribute("aria-label", label);
+  b.append(icon("more"));
+  b.onclick = async () => (await M.Menu.new({ items: await Promise.all(items.map((i) => M.MenuItem.new(i))) })).popup();
+  return b;
+}
+
 /** One row of a Versions list: muted with Install when missing, a check and
  * "Default" on the default, Make default and Uninstall in a menu at its end otherwise. A version
  * apps are pinned to names them and offers no Uninstall (the core refuses it). */
@@ -125,22 +134,15 @@ function versionRow(
   // in the row.
   let more: HTMLElement | undefined;
   if (v.installed && !busy && !v.default && (act.makeDefault || !pinned)) {
-    more = Object.assign(document.createElement("button"), { type: "button", className: "icon-btn ver-more", title: "More" });
-    more.setAttribute("aria-label", `More for ${label}`);
-    more.append(icon("more"));
     const idle = () => actions.replaceChildren();
-    more.onclick = async () => {
-      const items: Promise<any>[] = [];
-      if (act.makeDefault) items.push(M.MenuItem.new({ text: "Make default", action: act.makeDefault }));
-      if (!pinned)
-        items.push(
-          M.MenuItem.new({
-            text: "Uninstall…",
-            action: () => confirmInRow(actions, `Uninstall? ${act.note ?? ""}`.trim(), "Uninstall", act.uninstall, idle),
-          }),
-        );
-      (await M.Menu.new({ items: await Promise.all(items) })).popup();
-    };
+    const items: { text: string; action: () => void }[] = [];
+    if (act.makeDefault) items.push({ text: "Make default", action: act.makeDefault });
+    if (!pinned)
+      items.push({
+        text: "Uninstall…",
+        action: () => confirmInRow(actions, `Uninstall? ${act.note ?? ""}`.trim(), "Uninstall", act.uninstall, idle),
+      });
+    more = moreButton(`More for ${label}`, items);
   }
   // An installed row without one keeps its place, so every Extensions lines up.
   else if (v.installed) more = Object.assign(document.createElement("span"), { className: "ver-more" });
@@ -290,10 +292,12 @@ function renderPackageManagers() {
         b.disabled = [...pmBusy.values()].includes("Installing…");
         actions.append(b);
       } else if (pm.anvil) {
-        actions.classList.add("on-hover");
-        const idle = () =>
-          actions.replaceChildren(
-            textAct("Uninstall", () =>
+        // Uninstall waits in a menu, as a version's does, and then asks in the row.
+        const idle = () => actions.replaceChildren(more);
+        const more = moreButton(`More for ${pm.name}`, [
+          {
+            text: "Uninstall…",
+            action: () =>
               confirmInRow(
                 actions,
                 pm.name === "pnpm"
@@ -303,8 +307,8 @@ function renderPackageManagers() {
                 () => pmAction(pm.name, "package_manager_uninstall", "Uninstalling…"),
                 idle,
               ),
-            ),
-          );
+          },
+        ]);
         idle();
       }
       row.append(name, where, actions);

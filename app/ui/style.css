@@ -14,6 +14,7 @@
   --cold: #5b636d;
   /* Disk space that can be deleted and made again: a calm blue, apart from state colors. */
   --rebuild: #5b8fd4;
+  --safe-del: color-mix(in srgb, var(--text) 80%, transparent);
 
   --heat-white: #ffd166;
   --heat: #ff8a1f;
@@ -76,6 +77,8 @@
     --muted: #5f636b;
     --cold: #a1a6ad;
     --rebuild: #3f74c4;
+    /* A soft slate, not the near black 80% of the text would be. */
+    --safe-del: #6b7480;
     --heat-text: #c2410c;
     --danger: #c42127;
     --ok: #1f9d3e;
@@ -1557,9 +1560,9 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 /* A version's More (Make default, Uninstall): quiet until hovered; its empty place on the
  * default keeps the controls before it lined up. */
 .page .ver > .actions-inline { margin-left: auto; }
-.page .ver .ver-more { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -8px; padding: 0; border: 0; border-radius: var(--radius-s); background: none; color: var(--muted); }
-.page .ver button.ver-more:hover { background: var(--steel-hover); color: var(--text); }
-.page .ver .ver-more svg { width: 15px; height: 15px; }
+.page .ver-more { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -8px; padding: 0; border: 0; border-radius: var(--radius-s); background: none; color: var(--muted); }
+.page button.ver-more:hover { background: var(--steel-hover); color: var(--text); }
+.page .ver-more svg { width: 15px; height: 15px; }
 
 /* PHP: "Extensions 2/6 ›" after the version opens its list under the row. */
 .ext-toggle {
@@ -2052,10 +2055,10 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; }
 .swatch.keep { background: var(--cold); }
-/* Keep grey, rebuildable blue, safe to delete near white: no state's color (amber is
+/* Keep grey, rebuildable blue, safe to delete near white (a slate in light): no state's color (amber is
  * starting), no brand orange. */
 .swatch.rebuild { background: var(--rebuild); }
-.swatch.safe { background: color-mix(in srgb, var(--text) 80%, transparent); }
+.swatch.safe { background: var(--safe-del); }
 
 .res-bar {
   display: flex;
@@ -2070,7 +2073,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .res-bar .seg { flex-basis: 0; min-width: 3px; }
 .res-bar .keep { background: var(--cold); }
 .res-bar .rebuild { background: var(--rebuild); }
-.res-bar .safe { background: color-mix(in srgb, var(--text) 80%, transparent); }
+.res-bar .safe { background: var(--safe-del); }
 
 .res-list .row { grid-template-columns: 1fr auto; }
 

@@ -16,13 +16,13 @@ contain breaking changes.
 ### Changed
 
 - Esc closes Settings.
-- Settings: a version's Make default and Uninstall are in a ⋯ menu at the end of its row.
+- Settings: a version's Make default and Uninstall, and a package manager's Uninstall, are in a ⋯ menu at the end of its row.
 - Packages: the window of updates and advisories has Check again and an Update per package manager.
 
 ### Fixed
 
 - `laravel` no longer installs the Laravel installer by itself: it runs yours, else the one Settings › PHP installs, as `forge` does.
-- The update and Settings windows open in the middle of Anvil's window.
+- The update, Settings and Processes windows open in the middle of Anvil's window.
 - Software Update is small when Anvil is up to date, and grows for a release's notes.
 - The Update bubble keeps showing the download if a click elsewhere hid it.
 

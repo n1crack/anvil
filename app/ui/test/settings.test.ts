@@ -547,7 +547,17 @@ describe("Node.js package managers", () => {
     expect(rows[2].querySelector(".pm-from")?.textContent).toBe("Applications: Not found");
     expect([...rows[2].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Install"]);
     expect((rows[3].querySelector(".pm-from .pm-src") as HTMLElement).title).toBe("~/.anvil/runtimes/bun/bin/bun");
-    expect(rows[3].querySelector(".on-hover button")?.textContent).toBe("Uninstall");
+    // Anvil's own: Uninstall in its More menu, asked in the row.
+    w.mockMenu = null;
+    (rows[3].querySelector("button.ver-more") as HTMLElement).click();
+    await wait(10);
+    expect((w.mockMenu as any[]).map((i) => i.text)).toEqual(["Uninstall…"]);
+    (w.mockMenu as any[])[0].action();
+    expect(rows[3].querySelector(".actions-inline")!.textContent).toBe(
+      "Uninstall? Applications find the next one on their PATH.CancelUninstall",
+    );
+    (rows[3].querySelectorAll(".actions-inline button")[0] as HTMLElement).click();
+    expect(rows[3].querySelector("button.ver-more")).not.toBeNull();
     expect(rows[0].querySelectorAll("button").length).toBe(0);
     expect(rows[1].querySelectorAll("button").length).toBe(0);
   });
