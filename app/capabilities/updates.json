@@ -12,6 +12,7 @@
     "allow-show-updates",
     "allow-update-check",
     "allow-update-install",
-    "allow-update-state"
+    "allow-update-state",
+    "allow-updates-fit"
   ]
 }

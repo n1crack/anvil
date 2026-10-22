@@ -170,6 +170,7 @@ const COMMANDS: &[&str] = &[
     "runtime_uninstall",
     "update_state",
     "update_check",
+    "updates_fit",
     "update_install",
     "relaunch",
 ];

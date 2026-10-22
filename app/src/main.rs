@@ -4817,8 +4817,8 @@ fn open_updates(handle: &AppHandle) {
     let built = titlebar(
         WebviewWindowBuilder::new(handle, "updates", WebviewUrl::App("updates.html".into()))
             .title("Software Update")
-            .inner_size(480.0, 520.0)
-            .min_inner_size(400.0, 360.0)
+            .inner_size(480.0, UPDATES_SHORT)
+            .min_inner_size(400.0, UPDATES_SHORT)
             .visible(false),
     )
     .build();
@@ -4836,6 +4836,20 @@ fn open_updates(handle: &AppHandle) {
 #[tauri::command(async)]
 fn show_updates(handle: AppHandle) {
     open_updates(&handle);
+}
+
+/// The Software Update window's height while it checks or says Anvil is up to date.
+const UPDATES_SHORT: f64 = 220.0;
+
+/// The Software Update window grows for a release's notes and is short again without
+/// them, staying in the middle of the main window.
+#[tauri::command(async)]
+fn updates_fit(handle: AppHandle, tall: bool) {
+    if let Some(w) = handle.get_webview_window("updates") {
+        let height = if tall { 520.0 } else { UPDATES_SHORT };
+        let _ = w.set_size(tauri::LogicalSize::new(480.0, height));
+        center_on_main(&handle, &w);
+    }
 }
 
 /// The menu bar's item and the tray name a release once a check finds one.
@@ -5497,6 +5511,7 @@ fn main() {
             runtime_uninstall,
             update_state,
             update_check,
+            updates_fit,
             update_install,
             relaunch
         ])

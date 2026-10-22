@@ -1518,3 +1518,11 @@ document.addEventListener("contextmenu", (e) => {
 });
 
 window.refresh();
+
+// Esc closes Settings, as its red button does: after a bubble's own Esc (which stops
+// there), and not while a field is being typed in, so an edit isn't lost.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.defaultPrevented) return;
+  if ((e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable]")) return;
+  window.__TAURI__.window.getCurrentWindow().close();
+});

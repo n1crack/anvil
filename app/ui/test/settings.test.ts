@@ -793,3 +793,24 @@ describe("worktrees", () => {
     expect(w.mockCalls.at(-1)).toEqual(["set_worktree_preset", { id: "laravel", field: null, value: null }]);
   });
 });
+
+describe("Esc", () => {
+  test("closes Settings, but not while typing in a field or from a bubble", async () => {
+    let closed = 0;
+    w.__TAURI__.window = { ...w.__TAURI__.window, getCurrentWindow: () => ({ close: () => closed++ }) };
+    const esc = (target: EventTarget) => target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    const field = document.createElement("input");
+    document.body.append(field);
+    esc(field);
+    expect(closed).toBe(0);
+    field.remove();
+    const pop = document.createElement("div");
+    pop.addEventListener("keydown", (e) => e.stopPropagation());
+    document.body.append(pop);
+    esc(pop);
+    expect(closed).toBe(0);
+    pop.remove();
+    esc(document.body);
+    expect(closed).toBe(1);
+  });
+});

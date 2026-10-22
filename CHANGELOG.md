@@ -7,9 +7,15 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- Esc closes Settings.
+
 ### Fixed
 
 - The update and Settings windows open in the middle of Anvil's window.
+- Software Update is small when Anvil is up to date, and grows for a release's notes.
+- The Update bubble keeps showing the download if a click elsewhere hid it.
 
 ## [0.3.1] - 2026-10-22
 

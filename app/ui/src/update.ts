@@ -33,6 +33,9 @@ export function updateBar(popAt: (anchor: Element, pop: HTMLElement, focus?: HTM
   const bar = document.querySelector("#update") as HTMLElement;
   let close: (() => void) | null = null;
   let busy = false;
+  // The bubble that is restarting: a click elsewhere hides it, the toggle brings the
+  // same one back, its progress still going.
+  let restarting: HTMLElement | null = null;
   // The bubble closes on the mousedown before the toggle's click: that click must not
   // open it again. Window capture runs before the bubble's own document listener.
   let wasOpen = false;
@@ -49,6 +52,7 @@ export function updateBar(popAt: (anchor: Element, pop: HTMLElement, focus?: HTM
     toggle.title = update ? "A new version of Anvil" : "A newer build of Anvil is on disk";
     toggle.onclick = () => {
       if (wasOpen) return (wasOpen = false);
+      if (restarting) return void popAt(toggle, restarting);
       const pop = el("div", "pop-confirm wide update-pop", "");
       const note = el("p", "update-note", update ? `Anvil ${update.version} is ready.` : "A newer build of Anvil is on disk.");
       const what = el("p", "muted", "Anvil restarts; the apps running now start again.");
@@ -81,12 +85,14 @@ export function updateBar(popAt: (anchor: Element, pop: HTMLElement, focus?: HTM
       later.onclick = close;
       go.onclick = async () => {
         busy = true;
+        restarting = pop;
         // The bubble keeps its size while it says how the restart goes: the shorter
         // text doesn't shrink it, the buttons are gone but still hold their place.
         pop.style.minHeight = `${pop.offsetHeight}px`;
         pop.classList.add("restarting");
         await restart(go, what, relaunch);
         pop.classList.remove("restarting");
+        restarting = null;
         busy = false;
       };
     };

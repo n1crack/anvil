@@ -48,6 +48,9 @@ export function renderNotes(notes: string) {
 
 let busy = false;
 
+/** Short while it says Anvil is up to date or couldn't check; tall for a release's notes. */
+const fit = (tall: boolean) => invoke("updates_fit", { tall }).catch(() => {});
+
 async function check() {
   if (busy) return;
   const title = $("#upd-title");
@@ -73,9 +76,11 @@ async function check() {
     sub.classList.add("error-text");
     $("#upd-retry").hidden = false;
     $("#upd-retry").focus();
+    fit(false);
     return;
   }
   if (!found) {
+    fit(false);
     title.textContent = "Anvil is up to date";
     sub.textContent = `Version ${current}`;
     $("#upd-close").textContent = "Close";
@@ -91,6 +96,7 @@ async function check() {
     notes.replaceChildren(...renderNotes(found.notes));
     notes.hidden = false;
   }
+  fit(!!found.notes);
 }
 
 const close = () => window.__TAURI__.window.getCurrentWindow().close();

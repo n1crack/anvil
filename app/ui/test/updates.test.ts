@@ -7,6 +7,7 @@ const w = window as any;
 const wait = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 const $ = (sel: string) => document.querySelector(sel) as HTMLElement;
 let recheck: () => void;
+const fits = () => (w.mockCalls as [string, any][]).filter(([c]) => c === "updates_fit").map(([, a]) => a.tall);
 
 beforeAll(async () => {
   const html = readFileSync(resolve(import.meta.dirname, "../updates.html"), "utf8");
@@ -29,6 +30,8 @@ test("up to date: the version, Close, no Restart", () => {
   expect($("#upd-go").hidden).toBe(true);
   expect($("#upd-notes").hidden).toBe(true);
   expect(document.activeElement).toBe($("#upd-close"));
+  // Short: nothing to read.
+  expect(fits().at(-1)).toBe(false);
 });
 
 test("a newer release: what's new as headings and bullets, Later and Restart to update", async () => {
@@ -49,6 +52,8 @@ test("a newer release: what's new as headings and bullets, Later and Restart to 
   expect(notes.querySelector("li code")!.textContent).toBe("anvil");
   expect(notes.querySelectorAll("li")).toHaveLength(3);
   expect(notes.querySelectorAll("h2")[1].textContent).toBe("Fixed");
+  // Tall for the notes.
+  expect(fits().at(-1)).toBe(true);
 });
 
 test("a failed check: the reason under the title, Try Again checks again", async () => {
