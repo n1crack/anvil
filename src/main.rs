@@ -1593,13 +1593,9 @@ fn run() -> Result<()> {
             for s in &all {
                 let indent = if s.worktree_of.is_some() { "  " } else { "" };
                 println!(
-                    "{:<host$} {} {} {}",
+                    "{:<host$}  {}  {}",
                     format!("{indent}{}", s.host),
                     dim(format!("{:<kind$}", apps::label(&s.kind))),
-                    match &s.php {
-                        Some(v) => green(format!("{v:<5}")),
-                        None => dim(format!("{:<5}", "-")),
-                    },
                     dim(s.root.display())
                 );
             }
