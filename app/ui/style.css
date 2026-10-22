@@ -3798,6 +3798,8 @@ body.updates:has(.upd-notes[hidden]) .upd-head { margin: auto 0; padding-bottom:
 .pkg-log-status.ok svg { color: var(--ok-text); }
 .pkg-log-status.bad { color: var(--danger); }
 .pkg-sheet { width: min(640px, 92vw); }
+/* Update's question in the foot, where Check again and the Updates were. */
+.pkg-sheet-ask { flex: 1; min-width: 0; margin: 0; }
 .pkg-sheet[open] { display: flex; flex-direction: column; }
 .pkg-sheet-body:focus { outline: none; }
 .pkg-sheet-body { max-height: 70vh; margin: 0 -6px; padding: 0 6px; overflow-y: auto; }

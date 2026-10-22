@@ -1877,6 +1877,14 @@ describe("packages", () => {
     expect(rows).toHaveLength(4);
     const fw = rows.find((r) => r.querySelector("a")?.textContent === "laravel/framework")!;
     expect(fw.querySelector(".pkg-ver")?.textContent).toBe("11.36.1→12.4.0major");
+    // Its foot: check again, and update this manager after a question there.
+    const foot = () => $$(".pkg-sheet-acts > *").map((b) => b.textContent);
+    expect(foot()).toEqual(["Check again", "", "Update…", "Close"]);
+    $(".pkg-sheet-up").click();
+    expect(foot()).toEqual(["Run composer update? The lock file changes.", "Cancel", "Update"]);
+    expect(document.activeElement).toBe($(".pkg-sheet-update"));
+    $$(".pkg-sheet-acts button")[0].click();
+    expect(foot()).toEqual(["Check again", "", "Update…", "Close"]);
     $(".pkg-sheet-close").click();
     await wait(10);
     expect(sheet().open).toBe(false);
@@ -1886,6 +1894,7 @@ describe("packages", () => {
     expect($("#pkg-sheet-title").textContent).toBe("7 updates");
     expect($$(".pkg-sheet-body h3").map((h) => h.textContent)).toEqual(["Composer", "pnpm"]);
     expect(sheet().querySelectorAll(".pkg-list .row")).toHaveLength(7);
+    expect(foot()).toEqual(["Check again", "", "Update Composer…", "Update pnpm…", "Close"]);
     // A check that ends while it's open shows in it at once.
     const before = w.mockUpdates;
     w.mockUpdates = before.filter((x: any) => x.ecosystem === "npm");

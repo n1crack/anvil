@@ -10,6 +10,7 @@ contain breaking changes.
 ### Changed
 
 - Esc closes Settings.
+- Packages: the window of updates and advisories has Check again and an Update per package manager.
 
 ### Fixed
 

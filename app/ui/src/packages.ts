@@ -420,6 +420,8 @@ function summary(name, e, up, audit) {
  * open shows at once; closed when nothing is left in it. */
 type Found = { name: string; eco: string | null; kind: "all" | "updates" | "advisories"; opener: string };
 let shown: Found | null = null;
+// The manager whose Update the window's foot is asking about.
+let asking: string | null = null;
 let sheet: HTMLDialogElement | null = null;
 
 function showFound(f: Found) {
@@ -428,11 +430,7 @@ function showFound(f: Found) {
     sheet.setAttribute("aria-labelledby", "pkg-sheet-title");
     const title = el("h2");
     title.id = "pkg-sheet-title";
-    const close = el("button", "pkg-sheet-close", "Close");
-    close.type = "button";
-    close.onclick = () => sheet!.close();
-    const actions = el("div", "sheet-actions");
-    actions.append(el("span", "spacer"), close);
+    const actions = el("div", "sheet-actions pkg-sheet-acts");
     // The list takes the focus on open: arrows scroll it, Tab goes on to its links and Close.
     const body = el("div", "pkg-sheet-body");
     body.tabIndex = -1;
@@ -447,6 +445,7 @@ function showFound(f: Found) {
     sheet.onclose = () => {
       const opener = shown?.opener;
       shown = null;
+      asking = null;
       if (opener) ($(`.pkg-body ${opener}`) as HTMLElement | null)?.focus();
     };
     document.body.append(sheet);
@@ -496,6 +495,56 @@ function drawFound() {
   const counts = [nUp && plural(nUp, "update", "updates"), nAdv && plural(nAdv, "advisory", "advisories")].filter(Boolean).join(", ");
   $("#pkg-sheet-title").textContent = f.eco ? `${managerLabel(ecos[0])} — ${counts}` : counts;
   sheet!.querySelector(".pkg-sheet-body")!.replaceChildren(...groups);
+  drawFoundActs(f, ecos);
+}
+
+/** The window's foot: Check again (what it shows), an Update… per manager it lists, Close.
+ * Update asks in the foot itself, as a dialog's second step, then shows its output. */
+function drawFoundActs(f: Found, ecos) {
+  const acts = sheet!.querySelector(".pkg-sheet-acts")!;
+  const close = el("button", "pkg-sheet-close", "Close");
+  close.onclick = () => sheet!.close();
+  const p = pkgCache.get(f.name);
+  const updates = ecos
+    .map((e) => [e, p?.commands.find(([id]) => id === `pkg-${RUN[e.id]}-update`)])
+    .filter(([e, cmd]) => cmd && !running.has(`${f.name}:${RUN[e.id]}`));
+  const ask = updates.find(([e]) => e.id === asking);
+  if (ask) {
+    const [e, [id, command]] = ask;
+    const no = el("button", null, "Cancel");
+    no.onclick = () => {
+      asking = null;
+      drawFound();
+    };
+    const yes = el("button", "primary pkg-sheet-update", "Update");
+    yes.onclick = () => {
+      sheet!.close();
+      runPkg(f.name, RUN[e.id], id, command, `.pkg-mgr[data-eco="${e.id}"] .pkg-update`);
+    };
+    acts.replaceChildren(el("p", "pkg-sheet-ask", `Run ${command}? The lock file changes.`), no, yes);
+    yes.focus();
+    return;
+  }
+  asking = null;
+  // Check again runs what found what's shown: the updates, the advisories, or both.
+  const audited = ecos.filter((e) => f.kind !== "updates" && AUDITED.has(e.id));
+  const checking = (f.kind !== "advisories" && busy.has(f.name)) || audited.some((e) => busy.has(`${f.name}:${e.id}`));
+  const again = el("button", "pkg-sheet-again", checking ? "Checking…" : "Check again");
+  again.disabled = checking;
+  again.onclick = () => {
+    if (f.kind !== "advisories") checkUpdates(f.name);
+    audited.forEach((e) => checkAudit(f.name, e.id));
+  };
+  const ups = updates.map(([e]) => {
+    const b = el("button", "pkg-sheet-up", updates.length > 1 ? `Update ${managerLabel(e)}…` : "Update…");
+    b.title = `Packages move to the newest versions their constraints allow`;
+    b.onclick = () => {
+      asking = e.id;
+      drawFound();
+    };
+    return b;
+  });
+  acts.replaceChildren(again, el("span", "spacer"), ...ups, close);
 }
 
 /* An Install or Update's output, in a window: live while it runs, how it ended under it.
