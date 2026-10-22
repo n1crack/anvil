@@ -401,7 +401,10 @@ function showFound(f: Found) {
     close.onclick = () => sheet!.close();
     const actions = el("div", "sheet-actions");
     actions.append(el("span", "spacer"), close);
-    sheet.append(title, el("div", "pkg-sheet-body"), actions);
+    // The list takes the focus on open: arrows scroll it, Tab goes on to its links and Close.
+    const body = el("div", "pkg-sheet-body");
+    body.tabIndex = -1;
+    sheet.append(title, body, actions);
     // A click on the backdrop lands on the dialog itself, outside its box.
     sheet.onclick = (ev) => {
       const r = sheet!.getBoundingClientRect();
@@ -420,7 +423,7 @@ function showFound(f: Found) {
   drawFound();
   if (!shown) return;
   if (!sheet.open) sheet.showModal();
-  (sheet.querySelector(".pkg-sheet-close") as HTMLElement).focus();
+  (sheet.querySelector(".pkg-sheet-body") as HTMLElement).focus();
 }
 
 function drawFound() {

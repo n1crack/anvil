@@ -1868,7 +1868,7 @@ describe("packages", () => {
     view.click();
     expect(sheet().open).toBe(true);
     expect($("#pkg-sheet-title").textContent).toBe("Composer — 4 updates");
-    expect(document.activeElement).toBe($(".pkg-sheet-close"));
+    expect(document.activeElement).toBe($(".pkg-sheet-body"));
     const rows = [...sheet().querySelectorAll(".pkg-list .row")];
     expect(rows).toHaveLength(4);
     const fw = rows.find((r) => r.querySelector("a")?.textContent === "laravel/framework")!;

@@ -3758,6 +3758,7 @@ body.updates:has(.upd-notes[hidden]) .upd-head { margin: auto 0; padding-bottom:
 .pkg-missing { padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); border-radius: 9px; color: var(--amber-text); font-size: 11px; white-space: nowrap; }
 .pkg-sheet { width: min(640px, 92vw); }
 .pkg-sheet[open] { display: flex; flex-direction: column; }
+.pkg-sheet-body:focus { outline: none; }
 .pkg-sheet-body { max-height: 70vh; margin: 0 -6px; padding: 0 6px; overflow-y: auto; }
 .pkg-sheet-body .pkg-name { margin: 14px 2px 6px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
 .pkg-sheet-body .pkg-name:first-child { margin-top: 0; }
