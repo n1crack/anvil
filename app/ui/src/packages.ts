@@ -1,6 +1,8 @@
 import { $, ago, call, el, invoke, popAt, renderMain, selected, showError, snap } from "./app";
+import { type Tail, readTail, tail, termOut } from "./console";
 import { icon } from "./icons";
 import { showRun } from "./dev";
+import { clean, colorize } from "./term";
 import { askProcs, drawProcs, loadProcs } from "./processes";
 
 /* Packages tab, a dashboard: tiles for the framework, the updates and the advisories with
@@ -114,19 +116,25 @@ async function switchToPnpm(name) {
 // "site:composer" or "site:js" -> the Install or Update running (its id), then how it went.
 const running = new Map<string, string>();
 const ran = new Map<string, { ok: boolean; text: string; id: string }>();
+// Runs asked for whose old output may still be there: the window reads it once started.
+const starting = new Set<string>();
 
 /** Run Install or Update as Dev runs a script, then read the packages (and, when they
  * were checked, the outdated ones) again. */
-async function runPkg(name, eco, id, command) {
+async function runPkg(name, eco, id, command, opener) {
   const key = `${name}:${eco}`;
   running.set(key, id);
   ran.delete(key);
+  starting.add(key);
   drawPackages(name);
+  showLog({ name, key, id, command, opener });
   let started = false;
   let result;
   try {
     await askProcs(name, "package_run", { id });
     started = true;
+    starting.delete(key);
+    drawLog();
     if (selected === name) drawProcs(name); // Dev lists the run from now on
     const exit = await invoke("package_wait", { site: name, id });
     result = !exit
@@ -137,17 +145,19 @@ async function runPkg(name, eco, id, command) {
   } catch (e) {
     result = { ok: false, text: String(e), id: started ? id : "" };
   }
+  starting.delete(key);
   await loadProcs(name);
   running.delete(key);
   ran.set(key, result);
+  drawLog();
   const s = snap.sites.find((x) => x.name === name);
   if (s && selected === name) await window.renderPackages(s);
   if (updatesOf(name)?.at) checkUpdates(name);
 }
 
-const output = (name, id) => {
+const output = (name, key, id, command, opener) => {
   const b = el("button", "text-act pkg-output", "Output");
-  b.onclick = () => showRun(name, id);
+  b.onclick = () => showLog({ name, key, id, command, opener: `${opener} .pkg-output` });
   return b;
 };
 
@@ -164,7 +174,7 @@ function ask(box, question, verb, idle, go) {
 
 /** A row's Install and Update…; Update asks first. Running, the buttons' place says so; after,
  * how it went under it. Either way its output is a click away in Dev. */
-function runActs(name, eco, cmds: [string, string][], missing = false) {
+function runActs(name, eco, cmds: [string, string][], row: string, missing = false) {
   const key = `${name}:${eco}`;
   const acts = el("div", "pkg-acts");
   const idle = () => {
@@ -183,9 +193,9 @@ function runActs(name, eco, cmds: [string, string][], missing = false) {
                 `Run ${command}? Packages move to the newest versions their constraints allow, and the lock file changes.`,
                 "Update",
                 idle,
-                () => runPkg(name, eco, id, command),
+                () => runPkg(name, eco, id, command, `${row} .pkg-update`),
               )
-            : runPkg(name, eco, id, command);
+            : runPkg(name, eco, id, command, `${row} .pkg-install`);
         return b;
       }),
     );
@@ -193,12 +203,14 @@ function runActs(name, eco, cmds: [string, string][], missing = false) {
   const going = running.get(key);
   if (going) {
     const command = cmds.find(([id]) => id === going)?.[1] ?? eco;
-    acts.replaceChildren(el("span", "spin-dot"), el("span", "muted", `Running ${command}…`), output(name, going));
+    acts.replaceChildren(el("span", "spin-dot"), el("span", "muted", `Running ${command}…`), output(name, key, going, command, row));
   } else idle();
   const done = ran.get(key);
   if (!done) return [acts, null];
-  const msg = el("p", done.ok ? "muted pkg-ran" : "pkg-error pkg-ran", done.text);
-  if (done.id) msg.append(" ", output(name, done.id));
+  const msg = el("p", done.ok ? "pkg-ran ok" : "pkg-error pkg-ran", done.text);
+  if (done.ok) msg.prepend(icon("check"));
+  const command = cmds.find(([id]) => id === done.id)?.[1] ?? eco;
+  if (done.id) msg.append(" ", output(name, key, done.id, command, row));
   return [acts, msg];
 }
 
@@ -350,7 +362,7 @@ function managerRow(name, p, e, up, audit) {
   const run = RUN[e.id];
   const cmds = run ? p.commands.filter(([id]) => id.startsWith(`pkg-${run}-`)) : [];
   if (cmds.length) {
-    const [acts, msg] = runActs(name, run, cmds, e.installed === false);
+    const [acts, msg] = runActs(name, run, cmds, `.pkg-mgr[data-eco="${e.id}"]`, e.installed === false);
     row.append(acts);
     if (msg) row.append(msg);
   }
@@ -370,23 +382,30 @@ const INSTALLS = { composer: "vendor/", npm: "node_modules" };
 function summary(name, e, up, audit) {
   const updates = up?.at ? updatesFor(up, e).length : null;
   const advisories = audit?.at && !audit.error ? (audit.list ?? []).length : null;
-  const parts: Node[] = [];
-  if (INSTALLS[e.id] && e.installed != null)
-    parts.push(el("span", e.installed ? null : "pkg-missing", `${INSTALLS[e.id]} ${e.installed ? "installed" : "not installed"}`));
-  if (updates != null) parts.push(el("span", null, updates ? plural(updates, "update", "updates") : "up to date"));
-  if (advisories != null)
-    parts.push(
-      advisories
-        ? el("span", "bad", plural(advisories, "security advisory", "security advisories"))
-        : el("span", null, "no known advisories"),
-    );
+  const parts: HTMLElement[] = [];
+  if (INSTALLS[e.id] && e.installed != null) {
+    const state = el("span", e.installed ? "pkg-state" : "pkg-state pkg-missing");
+    state.append(el("span", "pkg-dot"), `${INSTALLS[e.id]} ${e.installed ? "installed" : "not installed"}`);
+    parts.push(state);
+  }
+  if (updates != null) parts.push(el("span", updates ? "pkg-sum-n" : null, updates ? plural(updates, "update", "updates") : "up to date"));
+  if (advisories != null) {
+    const adv = el("span", advisories ? "pkg-sum-adv" : null);
+    if (advisories) adv.append(el("b", null, String(advisories)), advisories === 1 ? " security advisory" : " security advisories");
+    else adv.append("no known advisories");
+    parts.push(adv);
+  }
   if (!parts.length) return null;
   const line = el("p", "muted pkg-sum");
-  parts.forEach((x, i) => line.append(...(i ? [el("span", null, " · "), x] : [x])));
+  parts.forEach((x, i) => line.append(...(i ? [el("span", "pkg-sep", " · "), x] : [x])));
   if (updates || advisories) {
     const view = el("button", "text-act pkg-view", "View");
     view.onclick = () => showFound({ name, eco: e.id, kind: "all", opener: `.pkg-mgr[data-eco="${e.id}"] .pkg-view` });
-    line.append(view);
+    // View goes with the last piece, so a narrow row never wraps it onto a line alone.
+    const last = parts.at(-1)!;
+    const tie = el("span", "pkg-tie");
+    last.replaceWith(tie);
+    tie.append(last, view);
   }
   return line;
 }
@@ -472,6 +491,96 @@ function drawFound() {
   const counts = [nUp && plural(nUp, "update", "updates"), nAdv && plural(nAdv, "advisory", "advisories")].filter(Boolean).join(", ");
   $("#pkg-sheet-title").textContent = f.eco ? `${managerLabel(ecos[0])} — ${counts}` : counts;
   sheet!.querySelector(".pkg-sheet-body")!.replaceChildren(...groups);
+}
+
+/* An Install or Update's output, in a window: live while it runs, how it ended under it.
+ * Closing it leaves the run going; the row's Output opens it again. */
+type Log = { name: string; key: string; id: string; command: string; opener: string; t?: Tail };
+let logShown: Log | null = null;
+let logSheet: HTMLDialogElement | null = null;
+let logTerm: ReturnType<typeof termOut>;
+let logTimer = 0;
+
+function showLog(l: Log) {
+  if (!logSheet) {
+    logSheet = el("dialog", "sheet pkg-sheet pkg-log-sheet") as HTMLDialogElement;
+    logSheet.setAttribute("aria-labelledby", "pkg-log-title");
+    const title = el("h2");
+    title.id = "pkg-log-title";
+    logTerm = termOut("console-out pkg-log");
+    logTerm.out.tabIndex = -1;
+    const status = el("span", "pkg-log-status");
+    status.setAttribute("role", "status");
+    const dev = el("button", "link pkg-log-dev", "Show in Dev");
+    dev.type = "button";
+    dev.onclick = () => {
+      const { name, id } = logShown!;
+      logSheet!.close();
+      showRun(name, id);
+    };
+    const close = el("button", "pkg-log-close", "Close");
+    close.type = "button";
+    close.onclick = () => logSheet!.close();
+    const actions = el("div", "sheet-actions");
+    actions.append(status, el("span", "spacer"), dev, close);
+    logSheet.append(title, logTerm.out, actions);
+    logSheet.onclick = (ev) => {
+      const r = logSheet!.getBoundingClientRect();
+      if (ev.target === logSheet && (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom))
+        logSheet!.close();
+    };
+    logSheet.onclose = () => {
+      clearInterval(logTimer);
+      const opener = logShown?.opener;
+      logShown = null;
+      if (opener) ($(`.pkg-body ${opener}`) as HTMLElement | null)?.focus();
+    };
+    document.body.append(logSheet);
+  }
+  logShown = l;
+  logTerm.out.replaceChildren();
+  logTerm.end();
+  $("#pkg-log-title").textContent = l.command;
+  drawLog();
+  clearInterval(logTimer);
+  logTimer = window.setInterval(readLog, 300);
+  readLog();
+  if (!logSheet.open) logSheet.showModal();
+  logTerm.out.focus();
+}
+
+/** New output, once the run has started (before, the log is still the last run's). */
+async function readLog() {
+  const l = logShown;
+  if (!l || starting.has(l.key)) return;
+  l.t ??= tail(l.name, `once:${l.id}`);
+  const text = await readTail(l.t);
+  if (logShown !== l || (!text && !l.t.cleared)) return;
+  l.t.cleared = false;
+  // ponytail: redraws the whole run each time (a \r redraws an earlier line); Dev's line
+  // buffer if runs get long enough for that to show.
+  logTerm.out.replaceChildren(colorize(clean(l.t.raw, true)));
+  logTerm.follow();
+}
+
+/** The status under the output: running, finished or how it failed. */
+function drawLog() {
+  const l = logShown;
+  if (!l || !logSheet) return;
+  const status = logSheet.querySelector(".pkg-log-status")!;
+  const going = running.get(l.key) === l.id;
+  const done = going ? null : ran.get(l.key);
+  status.className = `pkg-log-status ${done ? (done.ok ? "ok" : "bad") : ""}`.trim();
+  if (!going && !done) status.replaceChildren();
+  else if (!done) status.replaceChildren(el("span", "spin-dot"), starting.has(l.key) ? "Starting…" : "Running…");
+  else if (done.ok) status.replaceChildren(icon("check"), "Finished");
+  else
+    status.replaceChildren(
+      done.text
+        .replace(`${l.command} `, "")
+        .replace(/^./, (c) => c.toUpperCase())
+        .replace(/\.$/, ""),
+    );
 }
 
 /** An npm or yarn app can move to pnpm, only when asked and confirmed in its row. */

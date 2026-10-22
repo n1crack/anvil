@@ -3125,7 +3125,9 @@ button.pkg-tile:hover { background: color-mix(in srgb, var(--text) 6%, transpare
 .pkg-mgr > .pkg-ran { flex: 1 1 100%; margin: 0; font-size: 12px; }
 .pkg-btn.primary { border-color: color-mix(in srgb, var(--text) 28%, transparent); background: color-mix(in srgb, var(--text) 13%, transparent); font-weight: 600; }
 .pkg-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 20%, transparent); }
-.pkg-foot { flex: 1 1 100%; }
+/* The pnpm offer is a suggestion, not a status: smaller, under a faint rule. */
+.pkg-foot { flex: 1 1 100%; margin-top: 2px; padding-top: 7px; border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent); font-size: 11.5px; }
+.pkg-foot .pkg-acts { font-size: inherit; }
 .pkg-foot .pkg-acts { justify-content: flex-start; gap: 6px; margin-left: 0; }
 .pkg-foot .pkg-acts.asking { gap: 12px; }
 .pkg-foot .pkg-ran { margin: 2px 0 0; font-size: 12px; }
@@ -3763,10 +3765,29 @@ body.updates:has(.upd-notes[hidden]) .upd-head { margin: auto 0; padding-bottom:
 #upd-status.error-text { color: var(--danger); }
 
 /* Packages: a manager's line on what's installed and what the checks found; the list itself opens in a window. */
-.pkg-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; margin: 2px 0 0; font-size: 12px; }
-.pkg-sum .bad { color: var(--danger); }
-.pkg-sum .pkg-view { height: auto; margin-left: 8px; }
+/* Inline, each piece unbroken: a narrow row wraps between them, and View stays with the last. */
+.pkg-sum { margin: 2px 0 0; font-size: 12px; line-height: 1.6; }
+.pkg-sum > :not(.pkg-sep), .pkg-tie > * { white-space: nowrap; }
+.pkg-tie { white-space: nowrap; }
+.pkg-sep { opacity: 0.6; }
+.pkg-state { display: inline-flex; align-items: baseline; gap: 6px; }
+.pkg-dot { flex: none; align-self: center; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .pkg-missing { color: var(--amber-text); }
+.pkg-missing .pkg-dot { background: var(--amber); }
+.pkg-sum-n { color: var(--text); }
+.pkg-sum-adv { color: color-mix(in srgb, var(--danger) 72%, var(--text)); }
+.pkg-sum-adv b { font-weight: 600; }
+.pkg-sum .pkg-view { height: auto; margin-left: 8px; }
+/* A run's result: done is quiet with a green check, a failure red. */
+.pkg-ran.ok { color: var(--muted); }
+.pkg-ran.ok > svg { margin-right: 5px; color: var(--ok-text); vertical-align: -1px; }
+/* An Install or Update's output, live, how it went beside the buttons. */
+.pkg-log { height: auto; min-height: 120px; max-height: 60vh; margin: 0 -2px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--steel-raised); }
+.pkg-log:focus { outline: none; }
+.pkg-log-status { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 12px; }
+.pkg-log-status .spin-dot { flex: none; }
+.pkg-log-status.ok svg { color: var(--ok-text); }
+.pkg-log-status.bad { color: var(--danger); }
 .pkg-sheet { width: min(640px, 92vw); }
 .pkg-sheet[open] { display: flex; flex-direction: column; }
 .pkg-sheet-body:focus { outline: none; }

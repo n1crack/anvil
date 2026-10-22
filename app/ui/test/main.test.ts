@@ -1926,7 +1926,9 @@ describe("packages", () => {
     expect($(".pkg-tile-security .pkg-tile-big").classList.contains("bad")).toBe(true);
     const sum = card("composer").querySelector(".pkg-sum")!;
     expect(sum.textContent).toBe("vendor/ installed · 4 updates · 1 security advisoryView");
-    expect(sum.querySelector(".bad")!.textContent).toBe("1 security advisory");
+    expect(sum.querySelector(".pkg-sum-adv b")!.textContent).toBe("1");
+    // View stays with the last piece, so it never wraps onto a line alone.
+    expect(sum.querySelector(".pkg-tie")!.textContent).toBe("1 security advisoryView");
     expect(card("npm").querySelector(".pkg-error")!.textContent).toBe("pnpm audit failed: request to registry timed out");
     expect(card("npm").querySelector(".pkg-sum")!.textContent).toBe("node_modules installed · 3 updatesView");
     expect(card("composer").querySelector(".pkg-error")).toBeNull();
@@ -1956,9 +1958,11 @@ describe("packages", () => {
     expect(document.activeElement).toBe($(".pkg-tile-security"));
   });
 
-  test("Install runs at once, Update asks in the section; either shows in Dev, then the packages are read again", async () => {
+  test("Install runs at once, Update asks in the section; either opens its output in a window, then the packages are read again", async () => {
     const acts = (eco: string) => card(eco).querySelector(".pkg-acts")!;
     const act = (eco: string, text: string) => [...card(eco).querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;
+    const log = () => $(".pkg-log-sheet") as HTMLDialogElement;
+    const status = () => $(".pkg-log-status").textContent;
     expect($$(".pkg-mgr > .pkg-acts").map((l) => l.textContent)).toEqual([
       "Install packagesUpdate packages…",
       "Install packagesUpdate packages…",
@@ -1971,13 +1975,30 @@ describe("packages", () => {
     expect(calls("package_run")).toHaveLength(0);
     act("composer", "Update packages…").click();
     act("composer", "Update").click();
-    await wait(30);
+    // The window opens at once, its output read once the run started.
+    expect(log().open).toBe(true);
+    expect($("#pkg-log-title").textContent).toBe("composer update");
+    await wait(300);
     expect(calls("package_run").at(-1)![1]).toEqual({ site: "shop", id: "pkg-composer-update" });
+    expect(calls("log_text").some(([, a]) => a.source === "once:pkg-composer-update")).toBe(true);
+    expect($(".pkg-log").textContent).toContain("> composer update\nLoading composer repositories");
+    expect(status()).toBe("Running…");
+    expect(document.activeElement).toBe($(".pkg-log"));
+    // Closing it leaves the run going; the row's Output opens it again.
+    $(".pkg-log-close").click();
+    expect(log().open).toBe(false);
     expect(acts("composer").textContent).toBe("Running composer update…Output");
+    (acts("composer").querySelector(".pkg-output") as HTMLElement).click();
+    expect(log().open).toBe(true);
+    await wait(100);
+    expect($(".pkg-log").textContent).toContain("Loading composer repositories");
     const reads = calls("packages").length;
     const checks = calls("package_updates").length;
     w.mockPackageExit({ code: 1, at: 1 });
     await wait(80);
+    expect(status()).toBe("Failed (exit code 1)");
+    expect($(".pkg-log-status").classList.contains("bad")).toBe(true);
+    $(".pkg-log-close").click();
     const failed = card("composer").querySelector(".pkg-ran")!;
     expect(failed.textContent).toBe("composer update failed (exit code 1). Output");
     expect(failed.classList.contains("pkg-error")).toBe(true);
@@ -1987,15 +2008,22 @@ describe("packages", () => {
     expect(calls("package_updates")).toHaveLength(checks + 1);
 
     act("npm", "Install packages").click();
+    expect($("#pkg-log-title").textContent).toBe("pnpm install");
     await wait(30);
     expect(calls("package_run").at(-1)![1].id).toBe("pkg-js-install");
+    $(".pkg-log-close").click();
     expect(acts("npm").textContent).toBe("Running pnpm install…Output");
     w.mockPackageExit({ code: 0, at: 2 });
     await wait(80);
     const done = card("npm").querySelector(".pkg-ran")!;
     expect(done.textContent).toBe("pnpm install finished. Output");
-    // Output: Dev, at the run, which Run ▾ doesn't offer.
+    expect(done.classList.contains("ok")).toBe(true);
     (done.querySelector(".pkg-output") as HTMLElement).click();
+    expect(log().open).toBe(true);
+    expect(status()).toBe("Finished");
+    // Show in Dev: Dev, at the run, which Run ▾ doesn't offer.
+    $(".pkg-log-dev").click();
+    expect(log().open).toBe(false);
     await wait(30);
     expect($('.tabs [data-tab="dev"]').getAttribute("aria-selected")).toBe("true");
     expect($('.dev-item[data-key="once:pkg-js-install"]').getAttribute("aria-selected")).toBe("true");

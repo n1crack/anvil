@@ -82,6 +82,13 @@ fn once_log(site: &str, script: &str) -> (String, PathBuf) {
     )
 }
 
+/// What runs once: the app's scripts, and the Packages tab's Install and Update.
+fn once_scripts(site: &Site) -> impl Iterator<Item = crate::processes::Script> {
+    crate::processes::one_off_scripts(site)
+        .into_iter()
+        .chain(crate::packages::runs(&site.path))
+}
+
 /// The log files an app has, newest modified first, then Anvil's own.
 pub fn sources(site: &Site) -> Vec<LogSource> {
     let dir = match site.kind.as_str() {
@@ -113,7 +120,7 @@ pub fn sources(site: &Site) -> Vec<LogSource> {
         out.extend(source(&id, &p.name, &path));
     }
     // Commands run once, once they have written something.
-    for script in crate::processes::one_off_scripts(site) {
+    for script in once_scripts(site) {
         let (id, path) = once_log(&site.name, &script.id);
         out.extend(source(&id, &script.name, &path));
     }
@@ -1019,6 +1026,11 @@ mod tests {
         };
         let ids: Vec<String> = sources(&site).into_iter().map(|s| s.id).collect();
         assert_eq!(ids, ["laravel.log"]);
+        // Install and Update from the Packages tab have their output read too.
+        fs::write(dir.join("composer.json"), "{}").unwrap();
+        let once: Vec<String> = once_scripts(&site).map(|s| s.id).collect();
+        assert_eq!(once, ["pkg-composer-install", "pkg-composer-update"]);
+        fs::remove_file(dir.join("composer.json")).unwrap();
         assert!(clear(&site, "evil.log").is_err());
         assert!(clear(&site, "../../other.log").is_err());
         assert!(clear(&site, dir.join("other.log").to_str().unwrap()).is_err());

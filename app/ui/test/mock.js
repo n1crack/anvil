@@ -990,6 +990,16 @@ const mockHandle = (cmd, a) => {
       const name = window.mockPackages.commands.find(([id]) => id === a.id)[1];
       ov.commands = ov.commands.filter((c) => c.id !== a.id);
       ov.commands.push({ name, id: a.id, command: name, source: "Packages", running: true, exit: null });
+      // Its output, a line at a time, as a run writes it.
+      const src = `once:${a.id}`;
+      window.mockLogs = { ...window.mockLogs, [src]: "" };
+      const lines = [`\x1b[32m> ${name}\x1b[39m`, "Loading composer repositories with package information"];
+      for (let i = 1; i <= 24; i++) lines.push(`  - Installing vendor/package-${i} (v1.${i}.0): Extracting archive`);
+      lines.push("Generating optimized autoload files", "\x1b[32m81 packages you are using are looking for funding.\x1b[39m");
+      const timer = setInterval(() => {
+        if (!lines.length || !window.mockLogs) return clearInterval(timer);
+        window.mockLogs[src] += `${lines.shift()}\n`;
+      }, 60);
       return ov;
     }
     case "package_wait":
