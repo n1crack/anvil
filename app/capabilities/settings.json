@@ -23,6 +23,7 @@
     "allow-mail-read",
     "allow-mail-save",
     "allow-mail-source",
+    "allow-menu-origin",
     "allow-open",
     "allow-open-config-dir",
     "allow-open-url",

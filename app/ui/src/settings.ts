@@ -4,6 +4,8 @@ import { ownError } from "./live";
 import { bubbleKeys, confirmInRow, textAct } from "./confirm";
 import { NAMES, editor } from "./hooksform";
 import { inboxView, type Inbox } from "./inbox";
+import { icon } from "./icons";
+import { M } from "./menu";
 
 export const { invoke } = window.__TAURI__.core;
 
@@ -78,7 +80,7 @@ for (const [id, name, note] of LANGS) {
 const newest = (a: string, b: string) => b.localeCompare(a, undefined, { numeric: true });
 
 /** One row of a Versions list: muted with Install when missing, a check and
- * "Default" on the default, Make default and Uninstall on hover otherwise. A version
+ * "Default" on the default, Make default and Uninstall in a menu at its end otherwise. A version
  * apps are pinned to names them and offers no Uninstall (the core refuses it). */
 function versionRow(
   label: string,
@@ -118,22 +120,33 @@ function versionRow(
     const b = button("Install", act.install);
     b.disabled = blocked;
     actions.append(b);
-  } else if (!v.default) {
-    actions.classList.add("on-hover");
-    const idle = () => {
-      const acts: HTMLElement[] = [];
-      if (act.makeDefault) acts.push(textAct("Make default", act.makeDefault));
-      if (!pinned)
-        acts.push(
-          textAct("Uninstall", () => confirmInRow(actions, `Uninstall? ${act.note ?? ""}`.trim(), "Uninstall", act.uninstall, idle)),
-        );
-      actions.replaceChildren(...acts);
-    };
-    idle();
   }
-  // The row's own control (PHP's Extensions) at the far end, after the actions: it stays
-  // in one place whether they show or not.
-  row.append(name, actions, ...[extra?.status, extra?.end].filter((e) => e !== undefined));
+  // Make default and Uninstall wait in a menu at the row's far end; Uninstall then asks
+  // in the row.
+  let more: HTMLElement | undefined;
+  if (v.installed && !busy && !v.default && (act.makeDefault || !pinned)) {
+    more = Object.assign(document.createElement("button"), { type: "button", className: "icon-btn ver-more", title: "More" });
+    more.setAttribute("aria-label", `More for ${label}`);
+    more.append(icon("more"));
+    const idle = () => actions.replaceChildren();
+    more.onclick = async () => {
+      const items: Promise<any>[] = [];
+      if (act.makeDefault) items.push(M.MenuItem.new({ text: "Make default", action: act.makeDefault }));
+      if (!pinned)
+        items.push(
+          M.MenuItem.new({
+            text: "Uninstall…",
+            action: () => confirmInRow(actions, `Uninstall? ${act.note ?? ""}`.trim(), "Uninstall", act.uninstall, idle),
+          }),
+        );
+      (await M.Menu.new({ items: await Promise.all(items) })).popup();
+    };
+  }
+  // An installed row without one keeps its place, so every Extensions lines up.
+  else if (v.installed) more = Object.assign(document.createElement("span"), { className: "ver-more" });
+  // The row's own control (PHP's Extensions), then the menu, at the far end: they stay
+  // in one place whatever the actions say.
+  row.append(name, actions, ...[extra?.status, extra?.end, more].filter((e) => e !== undefined));
   if (extra?.below) row.append(extra.below);
   if (extra?.error) {
     row.classList.add("has-error");

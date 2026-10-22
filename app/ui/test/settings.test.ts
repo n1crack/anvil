@@ -67,6 +67,19 @@ describe("sidebar", () => {
 });
 
 describe("versions", () => {
+  // A row's More menu: its items' names, or one of them chosen.
+  const menu = async (row: Element) => {
+    w.mockMenu = null;
+    (row.querySelector(".ver-more") as HTMLElement | null)?.click();
+    await wait(10);
+    return ((w.mockMenu as any[] | null) ?? []).map((i) => i.text);
+  };
+  const choose = async (row: Element, text: string) => {
+    await menu(row);
+    (w.mockMenu as any[]).find((i) => i.text === text).action();
+    await wait(10);
+  };
+
   test("PHP: the default is marked, missing versions are muted with Install only", async () => {
     await open("php");
     const rows = $$("#versions .ver");
@@ -81,15 +94,17 @@ describe("versions", () => {
     expect(def.classList.contains("is-default")).toBe(true);
     expect(def.querySelector(".ver-mark svg")).not.toBeNull();
     expect(def.querySelector(".ver-default")?.textContent).toBe("Default");
-    expect(def.querySelectorAll(".actions-inline button").length).toBe(0);
-    expect([...rows[0].querySelectorAll(".actions-inline button")].map((b) => b.textContent)).toEqual(["Make default", "Uninstall"]);
-    // Uninstall asks in the row, no dialog; Cancel puts the actions back.
-    (rows[0].querySelectorAll(".actions-inline button")[1] as HTMLElement).click();
+    expect(def.querySelector("button.ver-more")).toBeNull();
+    // Make default and Uninstall wait in the More menu, not on hover.
+    expect(rows[0].querySelectorAll(".actions-inline button").length).toBe(0);
+    expect(await menu(rows[0])).toEqual(["Make default", "Uninstall…"]);
+    // Uninstall asks in the row, no dialog; Cancel empties it again.
+    await choose(rows[0], "Uninstall…");
     expect(rows[0].querySelector(".actions-inline")!.textContent).toBe(
       "Uninstall? Applications asking for it use the default.CancelUninstall",
     );
     (rows[0].querySelectorAll(".actions-inline button")[0] as HTMLElement).click();
-    expect([...rows[0].querySelectorAll(".actions-inline button")].map((b) => b.textContent)).toEqual(["Make default", "Uninstall"]);
+    expect(rows[0].querySelector(".actions-inline")!.textContent).toBe("");
     for (const r of rows.slice(2)) {
       expect(r.classList.contains("missing")).toBe(true);
       expect([...r.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Install"]);
@@ -103,7 +118,7 @@ describe("versions", () => {
       await open("php");
       const row = $$("#versions .ver")[0];
       expect(row.querySelector(".ver-pinned")?.textContent).toBe("Pinned by shop");
-      expect([...row.querySelectorAll(".actions-inline button")].map((b) => b.textContent)).toEqual(["Make default"]);
+      expect(await menu(row)).toEqual(["Make default"]);
     } finally {
       delete w.mockPhpPins;
       w.refresh();
@@ -445,7 +460,7 @@ describe("versions", () => {
     expect(rows.map((r) => r.querySelector(".ver-label")?.textContent)).toEqual(["Node.js 26", "Node.js 24", "Node.js 22", "Node.js 20"]);
     expect(rows.map((r) => r.classList.contains("missing"))).toEqual([true, false, false, true]);
     expect($$("#node .is-default").length).toBe(0);
-    expect([...rows[1].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Uninstall"]);
+    expect(await menu(rows[1])).toEqual(["Uninstall…"]);
     // Apps are pinned to 22: named, and no Uninstall until they are unpinned.
     expect(rows[2].querySelector(".ver-pinned")?.textContent).toBe("Pinned by blog, shop");
     expect(rows[2].querySelectorAll("button").length).toBe(0);
@@ -501,13 +516,13 @@ describe("versions", () => {
     w.mockFail = { php_uninstall: "PHP 8.5 is in use" };
     try {
       const row = () => $$("#versions .ver")[0];
-      (row().querySelectorAll(".actions-inline button")[1] as HTMLElement).click(); // Uninstall
+      await choose(row(), "Uninstall…");
       (row().querySelectorAll(".actions-inline button")[1] as HTMLElement).click(); // confirm
       await wait(60);
       expect(row().querySelector(".ver-error")?.textContent).toBe("PHP 8.5 is in use");
       expect($("#error").hidden).toBe(true);
       w.mockFail = {};
-      (row().querySelectorAll(".actions-inline button")[0] as HTMLElement).click(); // Make default
+      await choose(row(), "Make default");
       await wait(60);
       expect(row().querySelector(".ver-error")).toBeNull();
     } finally {

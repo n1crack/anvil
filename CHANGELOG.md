@@ -14,6 +14,7 @@ contain breaking changes.
 ### Changed
 
 - Esc closes Settings.
+- Settings: a version's Make default and Uninstall are in a ⋯ menu at the end of its row.
 - Packages: the window of updates and advisories has Check again and an Update per package manager.
 
 ### Fixed

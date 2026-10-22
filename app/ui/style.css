@@ -1554,6 +1554,13 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   .ext-word { display: none; }
 }
 
+/* A version's More (Make default, Uninstall): quiet until hovered; its empty place on the
+ * default keeps the controls before it lined up. */
+.page .ver > .actions-inline { margin-left: auto; }
+.page .ver .ver-more { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -8px; padding: 0; border: 0; border-radius: var(--radius-s); background: none; color: var(--muted); }
+.page .ver button.ver-more:hover { background: var(--steel-hover); color: var(--text); }
+.page .ver .ver-more svg { width: 15px; height: 15px; }
+
 /* PHP: "Extensions 2/6 ›" after the version opens its list under the row. */
 .ext-toggle {
   display: inline-flex;
