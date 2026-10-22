@@ -70,7 +70,7 @@ The CLI alone is `anvil-<version>-x86_64-pc-windows-msvc.zip`.
 
 x86_64 with glibc 2.35 or later: Ubuntu 22.04+, Debian 12+, Fedora, Arch. From the [releases page](https://github.com/n1crack/anvil/releases), `Anvil_<version>_amd64.AppImage` runs on any of them and updates itself; on Debian and Ubuntu, `sudo apt install ./Anvil_<version>_amd64.deb`. The app needs WebKitGTK 4.1 (the .deb brings it).
 
-In this beta, applications answer at `http://<name>.localhost:8080`: `.test` addresses, ports 80/443 and HTTPS trust come later, and `anvil setup` says so. OPcache comes with PHP 8.5; PHP extensions can't be added yet. MySQL and Redis build part of themselves the first time, which needs gcc and make.
+In this beta, applications answer at `http://<name>.localhost:8080`: `.test` addresses, ports 80/443 and HTTPS trust come later, and `anvil setup` says so. OPcache is built into every PHP version; other PHP extensions can't be added yet. MySQL and Redis build part of themselves the first time, which needs gcc and make.
 
 The CLI alone is `anvil-<version>-x86_64-unknown-linux-gnu.tar.gz`.
 
