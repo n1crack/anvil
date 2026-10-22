@@ -4712,6 +4712,7 @@ fn titlebar<'a, R: tauri::Runtime, M: Manager<R>>(
 
 fn open_settings(handle: &AppHandle) {
     if let Some(w) = handle.get_webview_window("settings") {
+        center_on_main(handle, &w);
         let _ = w.show();
         let _ = w.set_focus();
         return;
@@ -4720,9 +4721,15 @@ fn open_settings(handle: &AppHandle) {
         WebviewWindowBuilder::new(handle, "settings", WebviewUrl::App("settings.html".into()))
             .title("Anvil Settings")
             .inner_size(780.0, 640.0)
-            .min_inner_size(640.0, 480.0),
+            .min_inner_size(640.0, 480.0)
+            .visible(false),
     )
     .build();
+    if let Ok(w) = &built {
+        center_on_main(handle, w);
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
     if built.is_ok() {
         apply_theme(handle, anvil::load().ok().and_then(|c| c.theme).as_deref());
         update_dock(handle);

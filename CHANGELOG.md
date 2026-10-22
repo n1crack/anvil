@@ -9,7 +9,7 @@ contain breaking changes.
 
 ### Fixed
 
-- The update window opens in the middle of Anvil's window.
+- The update and Settings windows open in the middle of Anvil's window.
 
 ## [0.3.1] - 2026-10-22
 
