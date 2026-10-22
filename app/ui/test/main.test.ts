@@ -62,6 +62,20 @@ describe("setup", () => {
     expect($("#setup").hidden).toBe(true);
   });
 
+  test("another program on .test or ports 80/443 is said under Set up Anvil", async () => {
+    const line = "Port 80 is used by nginx (/opt/homebrew/bin/nginx). Quit it so .test addresses reach Anvil.";
+    Object.assign(w.mockSetup, { resolver: false, conflicts: [line] });
+    (w as any).refresh();
+    await wait(80);
+    $("#setup .setup-go").click();
+    await wait();
+    expect($$(".setup-pop .setup-conflict").map((p) => p.textContent)).toEqual([line]);
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    Object.assign(w.mockSetup, { resolver: true, conflicts: undefined });
+    (w as any).refresh();
+    await wait(80);
+  });
+
   test("several installs left: Finish setup with their count", async () => {
     Object.assign(w.mockSetup, { node: false, git: false });
     (w as any).refresh();

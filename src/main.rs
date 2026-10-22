@@ -1018,6 +1018,9 @@ fn print_hooks(h: &worktrees::Resolved) {
 
 fn print_setup(cfg: &Config) -> Result<()> {
     let status = setup_status(cfg);
+    for c in &status.conflicts {
+        eprintln!("{}", style::warn(c));
+    }
     if cfg!(windows) {
         return print_setup_windows(cfg, &status);
     }

@@ -2358,6 +2358,9 @@ pub struct Setup {
     /// A Node.js is installed, or no app needs one: none is a Node.js app or has a
     /// package.json (a Laravel app's Vite).
     pub node: bool,
+    /// Another program already holding what setup takes over (`.<tld>` or ports 80/443),
+    /// one line each. Setup still runs; these say what to quit.
+    pub conflicts: Vec<String>,
 }
 
 /// Whether `git` runs here. Once it has, it is not asked again: every window refresh
@@ -2553,17 +2556,23 @@ pub fn setup_status(cfg: &Config) -> Setup {
     // ponytail: Linux can't forward 80/443 or trust the authority yet; offering those
     // steps would only refuse, so they count as done until it can.
     let linux = cfg!(target_os = "linux");
+    let resolver = !needs_resolver(cfg)
+        || if cfg!(windows) {
+            nrpt_ready(cfg)
+        } else {
+            fs::read_to_string(&file).is_ok_and(|s| resolver_target(&s, &want).is_none())
+        };
+    let ports = linux || ports_forwarded(cfg);
     Setup {
-        resolver: !needs_resolver(cfg)
-            || if cfg!(windows) {
-                nrpt_ready(cfg)
-            } else {
-                fs::read_to_string(file)
-                    .is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace()))
-            },
+        conflicts: if cfg!(target_os = "macos") {
+            setup_conflicts(cfg, resolver, ports)
+        } else {
+            vec![]
+        },
+        resolver,
         trusted: linux || !root.exists() || cert_trusted(&root),
         php: !installed_php().is_empty(),
-        ports: linux || ports_forwarded(cfg),
+        ports,
         shims: shims::ready(),
         git: git_installed(),
         node: !runtimes::installed("node").is_empty()
@@ -2571,6 +2580,110 @@ pub fn setup_status(cfg: &Config) -> Setup {
                 apps::runtime(&s.kind) == Some("node") || s.path.join("package.json").is_file()
             }),
     }
+}
+
+/// Where a resolver file other than `want` sends its domain: (nameserver, port). None
+/// when it is Anvil's own, or names no server.
+fn resolver_target(text: &str, want: &str) -> Option<(String, u16)> {
+    if text.split_whitespace().eq(want.split_whitespace()) {
+        return None;
+    }
+    let value = |key: &str| {
+        text.lines()
+            .find_map(|l| l.trim().strip_prefix(key)?.split_whitespace().next())
+    };
+    let ns = value("nameserver ")?.to_string();
+    Some((
+        ns,
+        value("port ").and_then(|p| p.parse().ok()).unwrap_or(53),
+    ))
+}
+
+/// Whether a listener is Anvil's: this process, or a program under its home (Caddy).
+fn own_process(pid: u32, path: Option<&str>, home: &Path, me: u32) -> bool {
+    pid == me || path.is_some_and(|p| Path::new(p).starts_with(home))
+}
+
+/// What another program holds that setup takes over, on macOS: `.<tld>` sent to another
+/// DNS server, or ports 80/443. Asked only while that step is left, so a set-up Mac runs
+/// no lsof on every refresh.
+// ponytail: lsof without root doesn't see other users' processes (a root nginx); a port
+// held by one shows unnamed, through a connect. `netstat -anv` names them if that matters.
+fn setup_conflicts(cfg: &Config, resolver: bool, ports: bool) -> Vec<String> {
+    let tld = &cfg.tld;
+    let (file, want) = resolver_file(cfg);
+    let elsewhere = if resolver {
+        None
+    } else {
+        fs::read_to_string(file)
+            .ok()
+            .and_then(|s| resolver_target(&s, &want))
+    };
+    let mut asked = Vec::new();
+    if let Some((ns, port)) = &elsewhere
+        && resources::is_local(Some(ns))
+    {
+        asked.push(*port);
+    }
+    if !ports {
+        asked.extend([80, 443]);
+    }
+    let held = resources::listeners(&asked);
+    // port -> Some((name, path)) for another program's, None for Anvil's own.
+    let holder = |port: u16| {
+        held.get(&port).map(|(pid, name)| {
+            let path = platform::command("ps")
+                .args(["-o", "comm=", "-p", &pid.to_string()])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .filter(|p| p.starts_with('/'));
+            (!own_process(*pid, path.as_deref(), &home(), std::process::id()))
+                .then(|| (name.clone(), path))
+        })
+    };
+    let mut out = Vec::new();
+    if let Some((ns, port)) = elsewhere {
+        match holder(port) {
+            Some(None) => {} // Anvil's own, from an earlier DNS port
+            h => out.push(format!(
+                ".{tld} addresses already go to another program ({ns}:{port}{}). Setup replaces this; its .{tld} sites stop working.",
+                h.flatten().map(|(n, _)| format!(", {n}")).unwrap_or_default()
+            )),
+        }
+    }
+    if !ports {
+        let mut by: Vec<(Vec<u16>, String)> = Vec::new();
+        for port in [80, 443] {
+            let who = match holder(port) {
+                Some(None) => continue,
+                Some(Some((name, path))) => path.map_or(name.clone(), |p| format!("{name} ({p})")),
+                None if std::net::TcpStream::connect_timeout(
+                    &([127, 0, 0, 1], port).into(),
+                    std::time::Duration::from_millis(300),
+                )
+                .is_ok() =>
+                {
+                    "another program".into()
+                }
+                None => continue,
+            };
+            match by.iter_mut().find(|(_, w)| *w == who) {
+                Some((ps, _)) => ps.push(port),
+                None => by.push((vec![port], who)),
+            }
+        }
+        for (ps, who) in by {
+            let (what, verb) = match ps[..] {
+                [p] => (format!("Port {p}"), "is"),
+                _ => ("Ports 80 and 443".into(), "are"),
+            };
+            out.push(format!(
+                "{what} {verb} used by {who}. Quit it so .{tld} addresses reach Anvil."
+            ));
+        }
+    }
+    out
 }
 
 /// Whether the system trusts `root`: the Mac's `security verify-cert`; on Windows, the
@@ -3575,6 +3688,36 @@ mod tests {
             let _ = c.kill();
             let _ = c.wait();
         }
+    }
+
+    #[test]
+    fn setup_conflict_parts() {
+        let want = "nameserver 127.0.0.1\nport 5354\n";
+        assert_eq!(
+            resolver_target("nameserver 127.0.0.1\nport 5354", want),
+            None
+        );
+        assert_eq!(
+            resolver_target("nameserver 127.0.0.1\n", want),
+            Some(("127.0.0.1".into(), 53))
+        );
+        assert_eq!(
+            resolver_target("# other\nnameserver 127.0.0.1\nport 5300\n", want),
+            Some(("127.0.0.1".into(), 5300))
+        );
+        assert_eq!(resolver_target("domain test\n", want), None);
+
+        let home = Path::new("/Users/me/.anvil");
+        assert!(own_process(7, None, home, 7));
+        assert!(own_process(8, Some("/Users/me/.anvil/bin/caddy"), home, 7));
+        assert!(!own_process(8, Some("/opt/homebrew/bin/nginx"), home, 7));
+        assert!(!own_process(
+            8,
+            Some("/Users/me/.anvil-other/caddy"),
+            home,
+            7
+        ));
+        assert!(!own_process(8, None, home, 7));
     }
 
     #[test]

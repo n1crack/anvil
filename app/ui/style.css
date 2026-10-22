@@ -3316,6 +3316,7 @@ a.pkg-adv-title:hover { text-decoration: underline; }
 /* Its bubble: each missing step, what it does, and its own button beside it. */
 .pop-confirm.setup-pop { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px 14px; width: 360px; max-width: none; }
 .setup-pop p { line-height: 1.4; }
+.setup-pop .setup-conflict { grid-column: 1 / -1; color: var(--amber-text); }
 .setup-pop button { border: 1px solid var(--line); border-radius: var(--radius-s); background: none; color: var(--text); white-space: nowrap; }
 .setup-pop button:hover { background: var(--steel-hover); }
 

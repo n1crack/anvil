@@ -200,6 +200,8 @@ async function loadSetup(busy?: string) {
         loadSetup();
       };
       pop.append(el("p", null, what), go);
+      // Another program holding .test or ports 80/443: said before the password, not blocking.
+      if (step === "all") for (const c of st.conflicts ?? []) pop.append(el("p", "setup-conflict", c));
     }
     const close = popAt(b, pop, pop.querySelector("button"), "left");
   };

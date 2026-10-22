@@ -11,6 +11,7 @@ contain breaking changes.
 
 - Clean Rust builds (Settings › Storage, on): a Rust application's target folder goes after 7 days without a code change; with cargo-sweep installed, ones in use lose build files unused for 30 days.
 - OPcache can be turned off per PHP version (Settings › PHP › Extensions); it stays on unless you do.
+- Setup warns when another program already uses .test or ports 80/443.
 
 ### Changed
 

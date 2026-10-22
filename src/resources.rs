@@ -774,17 +774,20 @@ pub(crate) fn is_local(host: Option<&str>) -> bool {
     )
 }
 
-/// Port -> name of the process listening on it, from `lsof -Fpcn` output.
-fn parse_lsof(out: &str) -> BTreeMap<u16, String> {
+/// Port -> (pid, name) of the process listening on it, from `lsof -Fpcn` output.
+fn parse_lsof(out: &str) -> BTreeMap<u16, (u32, String)> {
     let mut map = BTreeMap::new();
-    let mut command = "";
+    let (mut pid, mut command) = (0, "");
     for l in out.lines() {
-        if let Some(c) = l.strip_prefix('c') {
+        if let Some(p) = l.strip_prefix('p') {
+            pid = p.parse().unwrap_or(0);
+        } else if let Some(c) = l.strip_prefix('c') {
             command = c;
         } else if let Some(n) = l.strip_prefix('n')
             && let Some(port) = n.rsplit(':').next().and_then(|p| p.parse().ok())
         {
-            map.entry(port).or_insert_with(|| command.to_string());
+            map.entry(port)
+                .or_insert_with(|| (pid, command.to_string()));
         }
     }
     map
@@ -793,7 +796,7 @@ fn parse_lsof(out: &str) -> BTreeMap<u16, String> {
 /// Linux: the listening sockets on `ports` in /proc/net/tcp{,6}, named by the process
 /// holding each socket. Another user's processes can't be looked into, so a port held by
 /// one (a system service) is left out, as lsof leaves it out without root.
-fn proc_listeners(ports: &[u16]) -> BTreeMap<u16, String> {
+fn proc_listeners(ports: &[u16]) -> BTreeMap<u16, (u32, String)> {
     let mut inodes = BTreeMap::new();
     for f in ["/proc/net/tcp", "/proc/net/tcp6"] {
         if let Ok(text) = std::fs::read_to_string(f) {
@@ -810,14 +813,9 @@ fn proc_listeners(ports: &[u16]) -> BTreeMap<u16, String> {
     }
     for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
         let pid = e.path();
-        if !e
-            .file_name()
-            .to_string_lossy()
-            .bytes()
-            .all(|b| b.is_ascii_digit())
-        {
+        let Ok(id) = e.file_name().to_string_lossy().parse::<u32>() else {
             continue;
-        }
+        };
         for fd in std::fs::read_dir(pid.join("fd"))
             .into_iter()
             .flatten()
@@ -836,7 +834,8 @@ fn proc_listeners(ports: &[u16]) -> BTreeMap<u16, String> {
             };
             if let Some(port) = inodes.get(&inode) {
                 let comm = std::fs::read_to_string(pid.join("comm")).unwrap_or_default();
-                map.entry(*port).or_insert_with(|| comm.trim().to_string());
+                map.entry(*port)
+                    .or_insert_with(|| (id, comm.trim().to_string()));
             }
         }
     }
@@ -895,7 +894,7 @@ fn is_docker(process: &str) -> bool {
 
 /// Who listens on these ports, with one `lsof` call; on Linux from /proc, as not every
 /// distribution has lsof (Arch doesn't).
-fn listeners(ports: &[u16]) -> BTreeMap<u16, String> {
+pub(crate) fn listeners(ports: &[u16]) -> BTreeMap<u16, (u32, String)> {
     if ports.is_empty() {
         return BTreeMap::new();
     }
@@ -1023,7 +1022,7 @@ pub fn services_used(cfg: &Config, site: &Site, live: &BTreeMap<String, u32>) ->
         .filter_map(|w| w.1)
         .collect();
     let listening = listeners(&local_ports);
-    let docker = if listening.values().any(|p| is_docker(p)) {
+    let docker = if listening.values().any(|(_, p)| is_docker(p)) {
         containers()
     } else {
         BTreeMap::new()
@@ -1051,7 +1050,7 @@ pub fn services_used(cfg: &Config, site: &Site, live: &BTreeMap<String, u32>) ->
                 .and_then(|id| live.get(id).copied())
                 .and_then(|pid| table.iter().find(|p| p.pid == pid));
             let running = anvil.as_deref().is_some_and(|id| live.contains_key(id));
-            let listener = port.and_then(|p| listening.get(&p));
+            let listener = port.and_then(|p| listening.get(&p)).map(|(_, n)| n);
             let (source, detail) = match (&host, port) {
                 (Some(h), _) if !is_local(Some(h)) => {
                     if compose_service(&site.path, h) {
@@ -2143,8 +2142,8 @@ mod tests {
         let lsof = "p4437\ncmariadbd\nf643\nn*:3306\nf644\nn*:3306\n\
                     p9919\nccom.docker.backend\nf629\nn127.0.0.1:6379\nf631\nn127.0.0.1:3307\n";
         let l = parse_lsof(lsof);
-        assert_eq!(l.get(&3306).map(String::as_str), Some("mariadbd"));
-        assert_eq!(l.get(&3307).map(String::as_str), Some("com.docker.backend"));
+        assert_eq!(l.get(&3306), Some(&(4437, "mariadbd".into())));
+        assert_eq!(l.get(&3307), Some(&(9919, "com.docker.backend".into())));
 
         let tcp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
                    0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 52731 1 0\n\

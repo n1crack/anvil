@@ -173,6 +173,8 @@ export interface Setup {
   php: boolean;
   ports: boolean;
   shims: boolean;
+  /** Another program already using .test or ports 80/443, one line each. */
+  conflicts?: string[];
 }
 
 interface Exit {
