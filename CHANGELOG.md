@@ -22,6 +22,7 @@ contain breaking changes.
 
 ### Fixed
 
+- Setup no longer blames another program for ports 80/443 that an earlier Anvil's forwarding still answers, and a long program path stays inside its warning.
 - `laravel` no longer installs the Laravel installer by itself: it runs yours, else the one Settings › PHP installs, as `forge` does.
 - The update, Settings and Processes windows open in the middle of Anvil's window.
 - Software Update is small when Anvil is up to date, and grows for a release's notes.

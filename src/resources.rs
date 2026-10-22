@@ -2005,7 +2005,10 @@ mod tests {
         let edited = |ago: std::time::Duration| {
             for f in ["Cargo.toml", "src/main.rs"] {
                 std::fs::write(dir.join(f), "").unwrap();
-                let file = std::fs::File::options().write(true).open(dir.join(f)).unwrap();
+                let file = std::fs::File::options()
+                    .write(true)
+                    .open(dir.join(f))
+                    .unwrap();
                 file.set_modified(now - ago).unwrap();
             }
         };

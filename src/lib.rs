@@ -2666,16 +2666,20 @@ fn setup_conflicts(cfg: &Config, resolver: bool, ports: bool) -> Vec<String> {
         }
     }
     if !ports {
+        // An earlier Anvil's forwarding (another port, an older file) still answers on
+        // 80/443 with nothing listening there: that is Anvil, not another program.
+        let own_forward = ports_daemon(cfg).0.exists();
         let mut by: Vec<(Vec<u16>, String)> = Vec::new();
         for port in [80, 443] {
             let who = match holder(port) {
                 Some(None) => continue,
                 Some(Some((name, path))) => path.map_or(name.clone(), |p| format!("{name} ({p})")),
-                None if std::net::TcpStream::connect_timeout(
-                    &([127, 0, 0, 1], port).into(),
-                    std::time::Duration::from_millis(300),
-                )
-                .is_ok() =>
+                None if !own_forward
+                    && std::net::TcpStream::connect_timeout(
+                        &([127, 0, 0, 1], port).into(),
+                        std::time::Duration::from_millis(300),
+                    )
+                    .is_ok() =>
                 {
                     "another program".into()
                 }
