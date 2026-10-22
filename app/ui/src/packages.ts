@@ -131,7 +131,7 @@ async function runPkg(name, eco, id, command, opener) {
   let started = false;
   let result;
   try {
-    await askProcs(name, "package_run", { id });
+    await askProcs(name, "package_run", { id, ...logColumns() });
     started = true;
     starting.delete(key);
     drawLog();
@@ -550,6 +550,23 @@ function showLog(l: Log) {
   readLog();
   if (!logSheet.open) logSheet.showModal();
   logTerm.out.focus();
+}
+
+/** The window's output box in characters, for COLUMNS: tools that pad lines to the
+ * terminal (artisan's dotted DONE lines) then fit it instead of wrapping. */
+function logColumns(): { columns?: number } {
+  const out = logTerm?.out;
+  if (!out?.clientWidth) return {};
+  const probe = el("span", null, "0".repeat(20));
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+  out.append(probe);
+  const width = probe.getBoundingClientRect().width;
+  probe.remove();
+  if (!width) return {};
+  const css = getComputedStyle(out);
+  const pad = (parseFloat(css.paddingLeft) || 0) + (parseFloat(css.paddingRight) || 0);
+  // Less one for the scrollbar.
+  return { columns: Math.max(20, Math.floor((out.clientWidth - pad) / (width / 20)) - 1) };
 }
 
 /** New output, once the run has started (before, the log is still the last run's). */
