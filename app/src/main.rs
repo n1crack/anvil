@@ -4784,6 +4784,7 @@ fn open_processes(handle: &AppHandle, select: Option<&str>) {
         if let Some(key) = select {
             let _ = handle.emit_to("processes", "activity-select", key);
         }
+        center_on_main(handle, &w);
         let _ = w.show();
         let _ = w.set_focus();
         return;
@@ -4804,9 +4805,15 @@ fn open_processes(handle: &AppHandle, select: Option<&str>) {
         .initialization_script(format!("window.activitySelect = {pick};"))
         .title("Processes")
         .inner_size(820.0, 560.0)
-        .min_inner_size(640.0, 420.0),
+        .min_inner_size(640.0, 420.0)
+        .visible(false),
     )
     .build();
+    if let Ok(w) = &built {
+        center_on_main(handle, w);
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
     if built.is_ok() {
         apply_theme(handle, anvil::load().ok().and_then(|c| c.theme).as_deref());
         update_dock(handle);
