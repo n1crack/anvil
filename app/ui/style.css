@@ -11,6 +11,8 @@
   --text: #e8ebee;
   --muted: #9aa2ac;
   --cold: #5b636d;
+  /* Disk space that can be deleted and made again: a calm blue, apart from state colors. */
+  --rebuild: #5b8fd4;
 
   --heat-white: #ffd166;
   --heat: #ff8a1f;
@@ -71,6 +73,7 @@
     --text: #1d1d1f;
     --muted: #5f636b;
     --cold: #a1a6ad;
+    --rebuild: #3f74c4;
     --heat-text: #c2410c;
     --danger: #c42127;
     --ok: #1f9d3e;
@@ -2039,8 +2042,9 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; }
 .swatch.keep { background: var(--cold); }
-/* Greys from keep to safe to delete: no state's color (amber is starting), no brand orange. */
-.swatch.rebuild { background: color-mix(in srgb, var(--muted) 55%, transparent); }
+/* Keep grey, rebuildable blue, safe to delete near white: no state's color (amber is
+ * starting), no brand orange. */
+.swatch.rebuild { background: var(--rebuild); }
 .swatch.safe { background: color-mix(in srgb, var(--text) 80%, transparent); }
 
 .res-bar {
@@ -2055,7 +2059,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 .res-bar .seg { flex-basis: 0; min-width: 3px; }
 .res-bar .keep { background: var(--cold); }
-.res-bar .rebuild { background: color-mix(in srgb, var(--muted) 55%, transparent); }
+.res-bar .rebuild { background: var(--rebuild); }
 .res-bar .safe { background: color-mix(in srgb, var(--text) 80%, transparent); }
 
 .res-list .row { grid-template-columns: 1fr auto; }
