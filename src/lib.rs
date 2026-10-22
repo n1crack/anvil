@@ -2599,6 +2599,17 @@ fn resolver_target(text: &str, want: &str) -> Option<(String, u16)> {
     ))
 }
 
+/// Whether a resolver file is Anvil's but for its port: one an earlier Anvil wrote.
+fn same_but_port(text: &str, want: &str) -> bool {
+    fn rest(t: &str) -> Vec<&str> {
+        t.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("port "))
+            .collect()
+    }
+    rest(text) == rest(want)
+}
+
 /// Whether a listener is Anvil's: this process, or a program under its home (Caddy).
 fn own_process(pid: u32, path: Option<&str>, home: &Path, me: u32) -> bool {
     pid == me || path.is_some_and(|p| Path::new(p).starts_with(home))
@@ -2612,13 +2623,12 @@ fn own_process(pid: u32, path: Option<&str>, home: &Path, me: u32) -> bool {
 fn setup_conflicts(cfg: &Config, resolver: bool, ports: bool) -> Vec<String> {
     let tld = &cfg.tld;
     let (file, want) = resolver_file(cfg);
-    let elsewhere = if resolver {
+    let text = if resolver {
         None
     } else {
-        fs::read_to_string(file)
-            .ok()
-            .and_then(|s| resolver_target(&s, &want))
+        fs::read_to_string(file).ok()
     };
+    let elsewhere = text.as_deref().and_then(|s| resolver_target(s, &want));
     let mut asked = Vec::new();
     if let Some((ns, port)) = &elsewhere
         && resources::is_local(Some(ns))
@@ -2643,9 +2653,12 @@ fn setup_conflicts(cfg: &Config, resolver: bool, ports: bool) -> Vec<String> {
         })
     };
     let mut out = Vec::new();
+    let earlier_anvil = text.as_deref().is_some_and(|t| same_but_port(t, &want));
     if let Some((ns, port)) = elsewhere {
         match holder(port) {
             Some(None) => {} // Anvil's own, from an earlier DNS port
+            // An earlier Anvil's file with nothing behind it any more: setup just rewrites it.
+            None if earlier_anvil => {}
             h => out.push(format!(
                 ".{tld} addresses already go to another program ({ns}:{port}{}). Setup replaces this; its .{tld} sites stop working.",
                 h.flatten().map(|(n, _)| format!(", {n}")).unwrap_or_default()
@@ -3706,6 +3719,13 @@ mod tests {
             Some(("127.0.0.1".into(), 5300))
         );
         assert_eq!(resolver_target("domain test\n", want), None);
+        // An earlier Anvil's, another port: no warning once nothing listens there.
+        assert!(same_but_port("nameserver 127.0.0.1\nport 5300\n", want));
+        assert!(!same_but_port("nameserver 10.0.0.2\nport 5354\n", want));
+        assert!(!same_but_port(
+            "nameserver 127.0.0.1\nsearch_order 1\n",
+            want
+        ));
 
         let home = Path::new("/Users/me/.anvil");
         assert!(own_process(7, None, home, 7));
