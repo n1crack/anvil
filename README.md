@@ -6,7 +6,7 @@
 
 **Your tools. Your rules.**
 
-A local development environment for web projects.<br>
+A local development environment for PHP, Node.js, Python, Go, Rust and .NET projects.<br>
 Free and open source, in beta. Runs on macOS, Windows and Linux.
 
 </div>
@@ -21,14 +21,15 @@ Anvil turns the folders on your computer into running applications at local doma
 
 ## What you get
 
-- **An address per project.** Park a folder and every project in it answers at `<folder>.test`, with HTTPS from a local certificate authority.
-- **Versions per project.** PHP 8.1–8.5 (8.6 as a preview), Node.js, Go, Rust, .NET and Python, pinned per project. `php` and `node` in your terminal follow the folder you're in. PHP extensions such as Xdebug, MongoDB and Memcached build on your Mac, per version or per app; Imagick needs Homebrew's ImageMagick.
-- **Services.** MySQL, PostgreSQL, Redis, Mailpit and S3 storage (Versity S3 Gateway or SILO), as many as you need, on the ports you pick.
-- **Dev processes.** Queue workers, Vite and other dev scripts run in the background with live output, restart and a crash alert.
+- **An address per project.** Park a folder and every project in it gets a `.test` address with HTTPS from a local certificate authority (on Linux, `http://<name>.localhost:8080` for now).
+- **Versions per project.** Pin PHP or Node.js per project; `php`, `composer` and `node` in your terminal follow the folder you're in.
+- **Dev processes.** Queue workers, Vite and your other dev scripts run in the background, each with live output, restart and a crash alert.
+- **Services.** MySQL, PostgreSQL, Redis, Mailpit and S3 storage, any number of each; Docker containers and external servers too.
+- **Packages.** Key versions, updates and security advisories per app, with Install and Update.
 - **Branches side by side.** A Git worktree gets its own address, processes and database while main keeps running.
-- **Readable logs and requests.** Laravel, Symfony and PHP-FPM logs as entries with stack frames that open in your editor, and every request the app served.
-- **Features, off by default.** A mail inbox per app, a database viewer, a public address through a Cloudflare tunnel, browser errors, and an MCP server for AI agents.
-- **Docker Compose.** If a project brings its own compose file, Anvil shows and controls its containers too.
+- **Readable logs.** Laravel, Symfony and PHP-FPM logs as entries whose stack frames open in your editor.
+- **Requests.** Every request an app served, with its headers.
+- **Extras, off until you turn them on.** A Mail tab that catches each app's mail, a database viewer, a public tunnel and an MCP server for AI agents.
 
 Everything runs natively and lives in `~/.anvil`; your system packages stay untouched. The few system changes Anvil makes are ones you approve, and `anvil uninstall` removes them.
 
