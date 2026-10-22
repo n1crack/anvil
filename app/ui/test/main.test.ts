@@ -2057,6 +2057,8 @@ describe("packages", () => {
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
     expect(card("npm").querySelector(".pkg-missing")!.textContent).toBe("node_modules not installed");
+    // The first tile names what the app was detected as (Vite), not the first framework found.
+    expect($(".pkg-tile-app .pkg-tile-big").textContent).toBe("Vite 6.0.6");
     expect(card("npm").querySelector(".pkg-install")!.className).toBe("pkg-btn primary pkg-install");
     expect(card("npm").querySelector(".pkg-update")!.className).toBe("pkg-btn pkg-update");
     await select("shop");

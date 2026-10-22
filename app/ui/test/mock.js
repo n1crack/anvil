@@ -972,10 +972,14 @@ const mockHandle = (cmd, a) => {
       return { requests: fresh, start_offset: a.from, end_offset: a.from + fresh.length * 100, truncated: false };
     }
     case "packages":
-      // vuefinder: a Node app whose node_modules isn't there yet.
+      // vuefinder: a Vite app (Tailwind found first) whose node_modules isn't there yet.
       if (a.site === "vuefinder") {
         const npm = window.mockPackages.ecosystems.find((e) => e.id === "npm");
-        return { ...window.mockPackages, highlights: [], defaults: [], ecosystems: [{ ...npm, installed: false }] };
+        const highlights = [
+          ["Tailwind", "3.4.17"],
+          ["Vite", "6.0.6"],
+        ];
+        return { ...window.mockPackages, highlights, defaults: [], ecosystems: [{ ...npm, installed: false }] };
       }
       return window.mockPackages;
     case "package_updates":

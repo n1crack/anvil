@@ -284,10 +284,13 @@ const tile = (cls, big, subs: (string | Node)[], tag = "div") => {
   return t;
 };
 
-/** The app's framework and version (or its first key package), its platform requirements under it. */
+/** The app's framework and version (the one it was detected as, as its header says; else
+ * the first found, else its first key package), its platform requirements under it. */
 function frameworkTile(name, p) {
   const facts: [string, string][] = p.ecosystems.flatMap((e) => e.facts);
-  let [label, version] = p.highlights[0] ?? [];
+  const kind = snap.sites.find((x) => x.name === name)?.kind;
+  const detected = snap.kinds?.find(([id]) => id === kind)?.[1];
+  let [label, version] = p.highlights.find(([l]) => l === detected) ?? p.highlights[0] ?? [];
   if (!label) {
     const factKeys = new Set(facts.map(([l]) => l));
     const k = pinsOf(name, p).find((x) => !factKeys.has(x));
