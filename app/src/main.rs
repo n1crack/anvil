@@ -4775,10 +4775,34 @@ fn show_processes(handle: AppHandle, select: Option<String>) {
     open_processes(&handle, select.as_deref());
 }
 
+/// Puts `w` in the middle of the main window, wherever that is; without a visible main
+/// window, in the middle of the screen.
+fn center_on_main(handle: &AppHandle, w: &tauri::WebviewWindow) {
+    let main = handle
+        .get_webview_window("main")
+        .filter(|m| m.is_visible().unwrap_or(false) && !m.is_minimized().unwrap_or(false));
+    let spot = main.and_then(|m| {
+        let (at, size, own) = (
+            m.outer_position().ok()?,
+            m.outer_size().ok()?,
+            w.outer_size().ok()?,
+        );
+        Some(tauri::PhysicalPosition::new(
+            at.x + (size.width as i32 - own.width as i32) / 2,
+            at.y + (size.height as i32 - own.height as i32) / 2,
+        ))
+    });
+    let _ = match spot {
+        Some(p) => w.set_position(p),
+        None => w.center(),
+    };
+}
+
 /// The update window: checks on opening, shows what's new, installs on Restart.
 fn open_updates(handle: &AppHandle) {
     if let Some(w) = handle.get_webview_window("updates") {
         let _ = w.emit("update-recheck", ());
+        center_on_main(handle, &w);
         let _ = w.show();
         let _ = w.set_focus();
         return;
@@ -4787,9 +4811,15 @@ fn open_updates(handle: &AppHandle) {
         WebviewWindowBuilder::new(handle, "updates", WebviewUrl::App("updates.html".into()))
             .title("Software Update")
             .inner_size(480.0, 520.0)
-            .min_inner_size(400.0, 360.0),
+            .min_inner_size(400.0, 360.0)
+            .visible(false),
     )
     .build();
+    if let Ok(w) = &built {
+        center_on_main(handle, w);
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
     if built.is_ok() {
         apply_theme(handle, anvil::load().ok().and_then(|c| c.theme).as_deref());
         update_dock(handle);

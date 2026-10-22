@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- The update window opens in the middle of Anvil's window.
+
 ## [0.3.1] - 2026-10-22
 
 ### Added
