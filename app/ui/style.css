@@ -3775,7 +3775,7 @@ body.updates:has(.upd-notes[hidden]) .upd-head { margin: auto 0; padding-bottom:
 .pkg-missing { color: var(--amber-text); }
 .pkg-missing .pkg-dot { background: var(--amber); }
 .pkg-sum-n { color: var(--text); }
-.pkg-sum-adv { color: color-mix(in srgb, var(--danger) 72%, var(--text)); }
+.pkg-sum-adv { color: color-mix(in srgb, var(--danger) 62%, var(--text)); }
 .pkg-sum-adv b { font-weight: 600; }
 .pkg-sum .pkg-view { height: auto; margin-left: 8px; }
 /* A run's result: done is quiet with a green check, a failure red. */
