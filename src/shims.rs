@@ -2,7 +2,7 @@
 //! `~/.anvil/shims` run `anvil shim <tool>`, which picks the version of the site
 //! the current folder belongs to.
 
-use crate::{Config, Site, apps, create, home, installed_php, run, runtimes, sites};
+use crate::{Config, Site, apps, create, home, installed_php, runtimes, sites};
 use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -160,7 +160,7 @@ fn path_with(dir: &Path) -> (String, String) {
 pub type Resolved = (PathBuf, Vec<String>, Vec<(String, String)>);
 
 /// What `tool` runs in `cwd`: the program, the arguments before the user's, and
-/// extra environment. `fetch` downloads Composer or the Laravel installer when missing,
+/// extra environment. `fetch` downloads Composer when missing,
 /// and makes a worktree's own database on its first use.
 pub fn resolve(tool: &str, cwd: &Path, cfg: &Config) -> Result<Resolved> {
     resolve_with(tool, cwd, cfg, true)
@@ -314,32 +314,27 @@ fn resolve_for(
                 return Ok((php, vec![phar.display().to_string()], env));
             }
             let composer_home = h.join("composer");
-            // Laravel Forge's CLI: the user's own (their Composer's) when they have one, run
-            // with the app's PHP; else the one Settings › PHP installs.
-            if tool == "forge" {
-                let shims = h.join("shims");
-                let path = std::env::join_paths(
-                    std::env::split_paths(&crate::env_path()).filter(|d| *d != shims),
-                )?;
-                if let Some(own) = runtimes::which("forge", &path.to_string_lossy()) {
-                    return Ok((own, vec![], env));
-                }
-                let forge = composer_home.join("vendor/bin/forge");
-                if !forge.exists() {
-                    bail!("Laravel Forge CLI isn't installed: install it in Settings › PHP");
-                }
-                env.push(("COMPOSER_HOME".into(), composer_home.display().to_string()));
-                return Ok((forge, vec![], env));
+            // The Laravel installer and Forge's CLI: the user's own (their Composer's) when
+            // they have one, run with the app's PHP; else the one Settings › PHP installs.
+            // Never installed behind the user's back: one they removed stays removed.
+            let shims = h.join("shims");
+            let path = std::env::join_paths(
+                std::env::split_paths(&crate::env_path()).filter(|d| *d != shims),
+            )?;
+            if let Some(own) = runtimes::which(tool, &path.to_string_lossy()) {
+                return Ok((own, vec![], env));
+            }
+            let program = composer_home.join("vendor/bin").join(tool);
+            if !program.exists() {
+                let package = if tool == "forge" {
+                    "Laravel Forge CLI"
+                } else {
+                    "Laravel installer"
+                };
+                bail!("The {package} isn't installed: install it in Settings › PHP");
             }
             env.push(("COMPOSER_HOME".into(), composer_home.display().to_string()));
-            let laravel = composer_home.join("vendor/bin/laravel");
-            if fetch && !laravel.exists() {
-                run(crate::platform::command(&php)
-                    .arg(&phar)
-                    .args(["global", "require", "laravel/installer"])
-                    .envs(env.clone()))?;
-            }
-            Ok((laravel, vec![], env))
+            Ok((program, vec![], env))
         }
         "node" | "npm" | "npx" => {
             let v = match site {
@@ -512,9 +507,11 @@ pub fn setup() -> Result<Vec<PathBuf>> {
         // .NET's SetEnvironmentVariable keeps REG_EXPAND_SZ and announces the change.
         let script = "$d = $env:ANVIL_SHIMS; $p = [Environment]::GetEnvironmentVariable('Path', 'User'); \
              if ($p) { $p = \"$d;$p\" } else { $p = $d }; [Environment]::SetEnvironmentVariable('Path', $p, 'User')";
-        run(crate::platform::command("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .env("ANVIL_SHIMS", &dir))?;
+        crate::run(
+            crate::platform::command("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", script])
+                .env("ANVIL_SHIMS", &dir),
+        )?;
     }
     Ok(vec![])
 }

@@ -14,6 +14,7 @@ contain breaking changes.
 
 ### Fixed
 
+- `laravel` no longer installs the Laravel installer by itself: it runs yours, else the one Settings › PHP installs, as `forge` does.
 - The update and Settings windows open in the middle of Anvil's window.
 - Software Update is small when Anvil is up to date, and grows for a release's notes.
 - The Update bubble keeps showing the download if a click elsewhere hid it.
