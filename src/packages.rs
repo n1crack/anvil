@@ -37,6 +37,8 @@ pub struct Ecosystem {
     /// Every package in the lock file as (name, version).
     pub locked: Vec<(String, String)>,
     pub scripts: Vec<(String, String)>,
+    /// Whether vendor/ (Composer) or node_modules (Node) is there; None for the others.
+    pub installed: Option<bool>,
 }
 
 #[derive(Serialize, Clone, Default, Debug, PartialEq)]
@@ -133,6 +135,8 @@ static CACHE: Mutex<BTreeMap<PathBuf, (Stamp, Packages)>> = Mutex::new(BTreeMap:
 pub fn cached(dir: &Path) -> Packages {
     let mut files: Vec<PathBuf> = FILES.iter().map(|f| dir.join(f)).collect();
     files.extend(csprojs(dir));
+    // An Install makes these appear, so the installed flags follow.
+    files.extend([dir.join("vendor/autoload.php"), dir.join("node_modules")]);
     let stamp: Vec<_> = files
         .iter()
         .map(|f| fs::metadata(f).and_then(|m| m.modified()).ok())
@@ -168,6 +172,7 @@ fn composer(dir: &Path) -> Option<Ecosystem> {
     let mut e = Ecosystem {
         id: "composer",
         label: "Composer",
+        installed: Some(dir.join("vendor/autoload.php").is_file()),
         ..Default::default()
     };
     let mut locked = HashMap::new();
@@ -241,6 +246,7 @@ fn node(dir: &Path) -> Option<Ecosystem> {
     let mut e = Ecosystem {
         id: "npm",
         label: "Node",
+        installed: Some(dir.join("node_modules").is_dir()),
         ..Default::default()
     };
     // The newest lock wins when a project has more than one.
@@ -2032,6 +2038,40 @@ renamed = { package = "real-name", version = "0.3" }
         };
         assert!(audit_command(&cargo, &dir).is_err());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn installed_follows_vendor_and_node_modules() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        fs::write(d.join("composer.json"), "{}").unwrap();
+        fs::write(d.join("package.json"), "{}").unwrap();
+        fs::write(d.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        let flags = |p: Packages| {
+            p.ecosystems
+                .iter()
+                .map(|e| (e.id, e.installed))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            flags(cached(d)),
+            [
+                ("composer", Some(false)),
+                ("npm", Some(false)),
+                ("cargo", None)
+            ]
+        );
+        fs::create_dir_all(d.join("vendor")).unwrap();
+        fs::write(d.join("vendor/autoload.php"), "<?php").unwrap();
+        fs::create_dir(d.join("node_modules")).unwrap();
+        assert_eq!(
+            flags(cached(d)),
+            [
+                ("composer", Some(true)),
+                ("npm", Some(true)),
+                ("cargo", None)
+            ]
+        );
     }
 
     #[test]

@@ -5,8 +5,9 @@ import { askProcs, drawProcs, loadProcs } from "./processes";
 
 /* Packages tab, a dashboard: tiles for the framework, the updates and the advisories with
  * the two checks under them; the key packages (pinned per app, the detected ones by
- * default); then a section per package manager with its Install and Update… and what the
- * checks found for it. Scripts live in the Overview's Commands. */
+ * default); then a section per package manager with its Install and Update… and a line on
+ * what the checks found for it, the list itself in a window. Scripts live in the Overview's
+ * Commands. */
 
 const pkgCache = new Map<string, any>(); // site name -> packages or { error }
 // site name -> { list, at, error? } once checked
@@ -163,7 +164,7 @@ function ask(box, question, verb, idle, go) {
 
 /** A section's Install and Update…; Update asks first. Running, the header says so; after,
  * how it went under it. Either way its output is a click away in Dev. */
-function runActs(name, eco, cmds: [string, string][]) {
+function runActs(name, eco, cmds: [string, string][], missing = false) {
   const key = `${name}:${eco}`;
   const acts = el("div", "pkg-acts");
   const idle = () => {
@@ -171,7 +172,9 @@ function runActs(name, eco, cmds: [string, string][]) {
     acts.replaceChildren(
       ...cmds.map(([id, command]) => {
         const update = id.endsWith("-update");
-        const b = el("button", `text-act ${update ? "pkg-update" : "pkg-install"}`, update ? "Update…" : "Install");
+        // Nothing installed yet: Install is the thing to do, a button rather than a word.
+        const look = !update && missing ? "pkg-btn" : "text-act";
+        const b = el("button", `${look} ${update ? "pkg-update" : "pkg-install"}`, update ? "Update…" : "Install");
         b.title = command;
         b.onclick = () =>
           update
@@ -255,6 +258,7 @@ export function drawPackages(name) {
   if (up?.error) body.append(el("p", "pkg-error", up.error));
   body.append(pinsSection(name, p));
   for (const e of p.ecosystems) body.append(section(name, p, e, up, AUDITED.has(e.id) ? audits[e.id] : null));
+  if (shown?.name === name) drawFound();
 }
 
 const tile = (cls, big, subs: (string | Node)[], tag = "div") => {
@@ -297,7 +301,7 @@ function updatesTile(up) {
   if (!n) return tile("pkg-tile-updates", el("div", "pkg-tile-big", "Up to date"), subs);
   const t = tile("pkg-tile-updates", el("div", "pkg-tile-big", `${n} ${n === 1 ? "update" : "updates"}`), subs, "button");
   t.title = "Show the updates";
-  t.onclick = () => $(".pkg-body .pkg-sec:has(.pkg-list.updates)")?.scrollIntoView({ block: "start", behavior: "smooth" });
+  t.onclick = () => showFound({ name: selected!, eco: null, kind: "updates", opener: ".pkg-tile-updates" });
   return t;
 }
 
@@ -313,7 +317,10 @@ function securityTile(checks) {
   if (!all.length) return tile("pkg-tile-security", el("div", "pkg-tile-big", "No known advisories"), [when]);
   const worst = all.map((v) => v.severity).sort((a, b) => rank(a) - rank(b))[0];
   const big = el("div", "pkg-tile-big bad", `${all.length} ${all.length === 1 ? "advisory" : "advisories"}`);
-  return tile("pkg-tile-security", big, [el("span", `pkg-sev ${worst}`, worst), when]);
+  const t = tile("pkg-tile-security", big, [el("span", `pkg-sev ${worst}`, worst), when], "button");
+  t.title = "Show the advisories";
+  t.onclick = () => showFound({ name: selected!, eco: null, kind: "advisories", opener: ".pkg-tile-security" });
+  return t;
 }
 
 /** A package manager: its name and file, Install and Update…, then what the checks found
@@ -326,45 +333,134 @@ function section(name, p, e, up, audit) {
   if (e.manager) title.title = e.manager;
   head.append(title);
   if (FILE[e.id]) head.append(el("span", "muted pkg-file", FILE[e.id]));
+  if (e.installed === false) {
+    const tag = el("span", "pkg-missing", "Not installed");
+    tag.title = `${e.id === "composer" ? "vendor/" : "node_modules"} is missing: click Install`;
+    head.append(tag);
+  }
   box.append(head);
   const run = RUN[e.id];
   const cmds = run ? p.commands.filter(([id]) => id.startsWith(`pkg-${run}-`)) : [];
   if (cmds.length) {
-    const [acts, msg] = runActs(name, run, cmds);
+    const [acts, msg] = runActs(name, run, cmds, e.installed === false);
     head.append(acts);
     if (msg) box.append(msg);
   }
 
-  const updates = (up?.list ?? []).filter((x) => x.ecosystem === e.id);
-  const advisories = audit?.list ?? [];
   if (audit?.error) box.append(el("p", "pkg-error", audit.error));
-  if (advisories.length || updates.length) {
+  const sum = summary(name, e, up, audit);
+  if (sum) box.append(sum);
+  if (e.id === "npm") {
+    const foot = switchFoot(name, e);
+    if (foot) box.append(foot);
+  }
+  return box;
+}
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const updatesFor = (up, e) => (up?.list ?? []).filter((x) => x.ecosystem === e.id);
+
+/** A section's line on what the checks found, View… opens the list; nothing before a check. */
+function summary(name, e, up, audit) {
+  const updates = up?.at ? updatesFor(up, e).length : null;
+  const advisories = audit?.at && !audit.error ? (audit.list ?? []).length : null;
+  const parts: Node[] = [];
+  if (updates != null) parts.push(updates ? el("span", null, plural(updates, "update", "updates")) : el("span", "muted", "Up to date"));
+  if (advisories != null)
+    parts.push(
+      advisories
+        ? el("span", "bad", plural(advisories, "security advisory", "security advisories"))
+        : el("span", "muted", "No known advisories"),
+    );
+  if (!parts.length) return null;
+  const line = el("p", "pkg-sum");
+  parts.forEach((x, i) => line.append(...(i ? [el("span", "muted", " · "), x] : [x])));
+  if (updates || advisories) {
+    const view = el("button", "text-act pkg-view", "View…");
+    view.onclick = () => showFound({ name, eco: e.id, kind: "all", opener: `.pkg-sec[data-eco="${e.id}"] .pkg-view` });
+    line.append(view);
+  }
+  return line;
+}
+
+/* What the checks found, in a window: one manager's (View…) or every manager's updates or
+ * advisories (the tiles). Drawn again whenever the tab is, so a check that ends while it's
+ * open shows at once; closed when nothing is left in it. */
+type Found = { name: string; eco: string | null; kind: "all" | "updates" | "advisories"; opener: string };
+let shown: Found | null = null;
+let sheet: HTMLDialogElement | null = null;
+
+function showFound(f: Found) {
+  if (!sheet) {
+    sheet = el("dialog", "sheet pkg-sheet") as HTMLDialogElement;
+    sheet.setAttribute("aria-labelledby", "pkg-sheet-title");
+    const title = el("h2");
+    title.id = "pkg-sheet-title";
+    const close = el("button", "pkg-sheet-close", "Close");
+    close.type = "button";
+    close.onclick = () => sheet!.close();
+    const actions = el("div", "sheet-actions");
+    actions.append(el("span", "spacer"), close);
+    sheet.append(title, el("div", "pkg-sheet-body"), actions);
+    // A click on the backdrop lands on the dialog itself, outside its box.
+    sheet.onclick = (ev) => {
+      const r = sheet!.getBoundingClientRect();
+      if (ev.target === sheet && (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom))
+        sheet!.close();
+    };
+    // Esc, Close or the backdrop: the focus goes back to what opened it.
+    sheet.onclose = () => {
+      const opener = shown?.opener;
+      shown = null;
+      if (opener) ($(`.pkg-body ${opener}`) as HTMLElement | null)?.focus();
+    };
+    document.body.append(sheet);
+  }
+  shown = f;
+  drawFound();
+  if (!shown) return;
+  if (!sheet.open) sheet.showModal();
+  (sheet.querySelector(".pkg-sheet-close") as HTMLElement).focus();
+}
+
+function drawFound() {
+  const f = shown!;
+  const p = pkgCache.get(f.name);
+  const up = updatesOf(f.name);
+  const audits = auditsOf(f.name);
+  const ecos = (p?.ecosystems ?? []).filter((e) => !f.eco || e.id === f.eco);
+  const groups: Node[] = [];
+  let [nUp, nAdv] = [0, 0];
+  for (const e of ecos) {
+    const advisories = f.kind === "updates" ? [] : (audits[e.id]?.list ?? []);
+    const newer = new Map<string, any>(f.kind === "advisories" ? [] : updatesFor(up, e).map((x) => [x.name, x]));
+    const rows = e.packages.filter((x) => newer.has(x.name)).sort((a, b) => a.name.localeCompare(b.name));
+    if (!advisories.length && !rows.length) continue;
+    nUp += rows.length;
+    nAdv += advisories.length;
+    if (!f.eco) groups.push(el("h3", "pkg-name", managerLabel(e)));
     const group = el("div", "group pkg-found");
     if (advisories.length) {
       const dl = el("dl", "pkg-adv-list");
       for (const v of advisories) dl.append(auditRow(v));
       group.append(dl);
     }
-    if (updates.length) {
-      const newer = new Map(updates.map((x) => [x.name, x]));
+    if (rows.length) {
       const dl = el("dl", "pkg-list updates");
-      for (const x of e.packages.filter((x) => newer.has(x.name)).sort((a, b) => a.name.localeCompare(b.name)))
-        dl.append(pkgRow(e.id, x, newer.get(x.name)));
+      for (const x of rows) dl.append(pkgRow(e.id, x, newer.get(x.name)));
       group.append(dl);
     }
-    box.append(group);
+    groups.push(group);
   }
-  // Checked and nothing found: said once, quietly; before a check, nothing.
-  const none = [
-    up?.at && !updates.length ? "Up to date" : "",
-    audit?.at && !audit.error && !advisories.length ? "No known advisories" : "",
-  ].filter(Boolean);
-  if (none.length) box.append(el("p", "muted pkg-none", none.join(" · ")));
-  if (e.id === "npm") {
-    const foot = switchFoot(name, e);
-    if (foot) box.append(foot);
+  // A check that found nothing this time leaves nothing to show.
+  if (!groups.length) {
+    if (sheet?.open) sheet.close();
+    else shown = null;
+    return;
   }
-  return box;
+  const counts = [nUp && plural(nUp, "update", "updates"), nAdv && plural(nAdv, "advisory", "advisories")].filter(Boolean).join(", ");
+  $("#pkg-sheet-title").textContent = f.eco ? `${managerLabel(ecos[0])} — ${counts}` : counts;
+  sheet!.querySelector(".pkg-sheet-body")!.replaceChildren(...groups);
 }
 
 /** An npm or yarn app can move to pnpm, only when asked and confirmed in its section. */

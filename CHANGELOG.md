@@ -16,6 +16,7 @@ contain breaking changes.
 - External services: a MySQL, PostgreSQL or Redis server elsewhere, with its .env lines and database apps; its dot is green while it can be reached (`anvil service add --external db.lan:3306 --kind mysql`).
 - A service's right-click menu has Restart and Rename….
 - PHP 8.6 as a preview.
+- Packages shows when vendor or node_modules isn't installed.
 
 ### Changed
 
@@ -24,7 +25,7 @@ contain breaking changes.
 - Settings: "Features" in the sidebar, Tunnel explained in its row instead of a page of its own, "Applications" throughout, and storage sizes lined up.
 - Main window: plainer words on service, Mail and Settings pages; an external server shows Reachable, a crashed container says so.
 - An app's Settings › Worktrees reads as a short checklist, and Customize… is a tidier form with Done at the bottom.
-- Packages: a dashboard, with tiles for the framework, updates and advisories, then the key packages and a section per package manager.
+- Packages: a dashboard, with tiles for the framework, updates and advisories, then the key packages and a section per package manager; what a check finds opens in a window.
 
 ### Fixed
 

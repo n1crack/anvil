@@ -1844,31 +1844,64 @@ describe("packages", () => {
   });
 
   const card = (eco: string) => $(`.pkg-sec[data-eco="${eco}"]`);
+  const sheet = () => $(".pkg-sheet") as HTMLDialogElement;
 
-  test("a section per manager, nothing found until a check runs; Check for updates fills the tile and each section", async () => {
+  test("a section per manager, nothing found until a check runs; Check for updates fills the tile and each section's line", async () => {
     expect(calls("package_updates")).toHaveLength(0);
     expect($$(".pkg-checkbar button").map((b) => b.textContent)).toEqual(["Check for updates", "Check security"]);
     expect(
       $$(".pkg-sec[data-eco] .pkg-head").map((h) => `${h.querySelector("h3")!.textContent} ${h.querySelector(".pkg-file")!.textContent}`),
     ).toEqual(["Composer composer.json", "pnpm package.json"]);
-    expect($$(".pkg-sec[data-eco] :is(dl, .pkg-none), .pkg-foot")).toHaveLength(0);
+    expect($$(".pkg-sec[data-eco] :is(dl, .pkg-sum), .pkg-foot, .pkg-missing")).toHaveLength(0);
     $(".pkg-check-outdated").click();
     expect($(".pkg-check-outdated").textContent).toBe("Checking…");
     await wait(80);
     expect(calls("package_updates")).toHaveLength(1);
     expect(tile("updates")).toBe("7 updates / 3 major / checked just now");
     expect($(".pkg-tile-updates").tagName).toBe("BUTTON");
-    expect(card("composer").querySelector(".pkg-none")).toBeNull();
     expect(JSON.parse(localStorage.getItem("pkgUpdates:shop")!).list).toHaveLength(7);
-    const rows = [...card("composer").querySelectorAll(".pkg-list .row")];
+    // The sections say how many, the rows are in the window.
+    expect($$(".pkg-sec[data-eco] dl")).toHaveLength(0);
+    expect(card("composer").querySelector(".pkg-sum")!.textContent).toBe("4 updatesView…");
+    expect(card("npm").querySelector(".pkg-sum")!.textContent).toBe("3 updatesView…");
+    const view = card("composer").querySelector(".pkg-view") as HTMLElement;
+    view.click();
+    expect(sheet().open).toBe(true);
+    expect($("#pkg-sheet-title").textContent).toBe("Composer — 4 updates");
+    expect(document.activeElement).toBe($(".pkg-sheet-close"));
+    const rows = [...sheet().querySelectorAll(".pkg-list .row")];
     expect(rows).toHaveLength(4);
     const fw = rows.find((r) => r.querySelector("a")?.textContent === "laravel/framework")!;
     expect(fw.querySelector(".pkg-ver")?.textContent).toBe("11.36.1→12.4.0major");
-    expect(card("npm").querySelectorAll(".pkg-list .row")).toHaveLength(3);
+    $(".pkg-sheet-close").click();
+    await wait(10);
+    expect(sheet().open).toBe(false);
+    expect(document.activeElement).toBe(card("composer").querySelector(".pkg-view"));
+    // The tile: every manager's updates, under their names.
+    $(".pkg-tile-updates").click();
+    expect($("#pkg-sheet-title").textContent).toBe("7 updates");
+    expect($$(".pkg-sheet-body h3").map((h) => h.textContent)).toEqual(["Composer", "pnpm"]);
+    expect(sheet().querySelectorAll(".pkg-list .row")).toHaveLength(7);
+    // A check that ends while it's open shows in it at once.
+    const before = w.mockUpdates;
+    w.mockUpdates = before.filter((x: any) => x.ecosystem === "npm");
+    $(".pkg-check-outdated").click();
+    await wait(80);
+    expect($("#pkg-sheet-title").textContent).toBe("3 updates");
+    expect($$(".pkg-sheet-body h3").map((h) => h.textContent)).toEqual(["pnpm"]);
+    expect(card("composer").querySelector(".pkg-sum")!.textContent).toBe("Up to date");
+    // ...and one that finds nothing closes it.
+    w.mockUpdates = [];
+    $(".pkg-check-outdated").click();
+    await wait(80);
+    expect(sheet().open).toBe(false);
+    w.mockUpdates = before;
+    $(".pkg-check-outdated").click();
+    await wait(80);
     $('.tabs [data-tab="logs"]').click();
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
-    expect(calls("package_updates")).toHaveLength(1);
+    expect(calls("package_updates")).toHaveLength(4);
   });
 
   test("a saved check comes back after a restart", async () => {
@@ -1876,24 +1909,35 @@ describe("packages", () => {
     pkgUpdates.clear();
     drawPackages("shop");
     expect(tile("updates")).toBe("7 updates / 3 major / checked just now");
-    expect(card("composer").querySelectorAll(".pkg-list .row")).toHaveLength(4);
-    expect(calls("package_updates")).toHaveLength(1);
+    expect(card("composer").querySelector(".pkg-sum")!.textContent).toBe("4 updatesView…");
+    expect(calls("package_updates")).toHaveLength(4);
   });
 
-  test("Check security audits each manager: the tile counts, advisories first in the section; a failure in its section", async () => {
+  test("Check security audits each manager: the tile counts, advisories first in the window; a failure in its section", async () => {
     $(".pkg-check-security").click();
     expect($(".pkg-check-security").textContent).toBe("Checking…");
     await wait(80);
     expect(calls("package_audit").map(([, a]) => a.ecosystem)).toEqual(["composer", "npm"]);
     expect(tile("security")).toBe("1 advisory / high / checked just now");
     expect($(".pkg-tile-security .pkg-tile-big").classList.contains("bad")).toBe(true);
-    const found = card("composer").querySelector(".pkg-found")!;
-    expect([...found.children].map((d) => d.className)).toEqual(["pkg-adv-list", "pkg-list updates"]);
+    const sum = card("composer").querySelector(".pkg-sum")!;
+    expect(sum.textContent).toBe("4 updates · 1 security advisoryView…");
+    expect(sum.querySelector(".bad")!.textContent).toBe("1 security advisory");
     expect(card("npm").querySelector(".pkg-error")!.textContent).toBe("pnpm audit failed: request to registry timed out");
-    expect(card("npm").querySelector(".pkg-none")).toBeNull();
+    expect(card("npm").querySelector(".pkg-sum")!.textContent).toBe("3 updatesView…");
     expect(card("composer").querySelector(".pkg-error")).toBeNull();
-    expect(card("npm").querySelectorAll(".pkg-advisory")).toHaveLength(0);
-    const adv = card("composer").querySelector(".pkg-advisory")!;
+    (card("composer").querySelector(".pkg-view") as HTMLElement).click();
+    expect($("#pkg-sheet-title").textContent).toBe("Composer — 4 updates, 1 advisory");
+    const found = sheet().querySelector(".pkg-found")!;
+    expect([...found.children].map((d) => d.className)).toEqual(["pkg-adv-list", "pkg-list updates"]);
+    $(".pkg-sheet-close").click();
+    await wait(10);
+    // The Security tile: the advisories only.
+    expect($(".pkg-tile-security").tagName).toBe("BUTTON");
+    $(".pkg-tile-security").click();
+    expect($("#pkg-sheet-title").textContent).toBe("1 advisory");
+    expect(sheet().querySelectorAll(".pkg-list")).toHaveLength(0);
+    const adv = sheet().querySelector(".pkg-advisory")!;
     expect(adv.querySelector(".pkg-sev")!.textContent).toBe("high");
     expect(adv.querySelector("a")!.textContent).toBe("Noncanonical host can bypass host-based checks");
     expect(adv.textContent).toContain("guzzlehttp/guzzle 7.9.2");
@@ -1903,6 +1947,9 @@ describe("packages", () => {
     (adv.querySelector("a") as HTMLElement).click();
     await wait(30);
     expect(calls("open_url").at(-1)![1].url).toBe("https://github.com/advisories/GHSA-v5mv-p594-2x33");
+    $(".pkg-sheet-close").click();
+    await wait(10);
+    expect(document.activeElement).toBe($(".pkg-tile-security"));
   });
 
   test("Install runs at once, Update asks in the section; either shows in Dev, then the packages are read again", async () => {
@@ -1966,6 +2013,21 @@ describe("packages", () => {
     expect(calls("switch_to_pnpm").at(-1)![1]).toEqual({ site: "shop" });
     expect(foot().textContent).toBe("Switched to pnpm: package-lock.json is gone and node_modules was installed again. Test the app.");
     expect(foot().querySelector(".pkg-switch")).toBeNull();
+  });
+
+  test("a manager with nothing installed says so, and Install is its button", async () => {
+    expect($$(".pkg-sec[data-eco] .pkg-install").map((b) => b.className)).toEqual(["text-act pkg-install", "text-act pkg-install"]);
+    await select("vuefinder");
+    $('.tabs [data-tab="packages"]').click();
+    await wait(80);
+    const tag = card("npm").querySelector(".pkg-missing") as HTMLElement;
+    expect(tag.textContent).toBe("Not installed");
+    expect(tag.title).toBe("node_modules is missing: click Install");
+    expect(card("npm").querySelector(".pkg-install")!.className).toBe("pkg-btn pkg-install");
+    expect(card("npm").querySelector(".pkg-update")!.className).toBe("text-act pkg-update");
+    await select("shop");
+    $('.tabs [data-tab="packages"]').click();
+    await wait(80);
   });
 });
 

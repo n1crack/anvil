@@ -603,6 +603,7 @@ window.mockContainers = [
     manager: "composer 2.8.4",
     lock: "composer.lock",
     facts: [["PHP", "^8.2"]],
+    installed: true,
     packages: [
       P("laravel/framework", "^11.31", "11.36.1", false, "2024-12-17"),
       P("laravel/tinker", "^2.9", "2.10.0", false, "2024-09-19"),
@@ -635,6 +636,7 @@ window.mockContainers = [
     manager: "pnpm 9.15.0",
     lock: localStorage.getItem("mockJsLock") ?? "pnpm-lock.yaml",
     facts: [["Node", ">=20"]],
+    installed: true,
     packages: [
       N("axios", "^1.7.4", "1.7.9", false),
       N("alpinejs", "^3.14.0", "3.14.8", false),
@@ -970,6 +972,11 @@ const mockHandle = (cmd, a) => {
       return { requests: fresh, start_offset: a.from, end_offset: a.from + fresh.length * 100, truncated: false };
     }
     case "packages":
+      // vuefinder: a Node app whose node_modules isn't there yet.
+      if (a.site === "vuefinder") {
+        const npm = window.mockPackages.ecosystems.find((e) => e.id === "npm");
+        return { ...window.mockPackages, highlights: [], defaults: [], ecosystems: [{ ...npm, installed: false }] };
+      }
       return window.mockPackages;
     case "package_updates":
       return window.mockUpdates;
