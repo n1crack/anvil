@@ -141,6 +141,11 @@ pub fn request(method: &str, params: Value, client: &str) -> Result<Option<Value
     Ok(Some(reply["result"].take()))
 }
 
+/// Whether the app listens, so a change applies without restarting anything.
+pub fn app_running() -> bool {
+    checked_path().is_ok_and(|p| UnixStream::connect(p).is_ok())
+}
+
 /// Tells a running app the config changed; nothing when none runs.
 pub fn notify_changed() {
     let _ = request("config_changed", json!({}), "Terminal");

@@ -181,7 +181,7 @@ enum Cmd {
         #[arg(long)]
         accept_license: bool,
     },
-    /// Trust Anvil's local HTTPS certificate authority (asks for your password)
+    /// Trust Anvil's local HTTPS certificate authority (asks for permission)
     Trust,
     /// Run DNS, PHP-FPM and the web server in the foreground
     Start,
@@ -208,8 +208,8 @@ enum Cmd {
         /// The new suffix, e.g. test or localhost
         tld: Option<String>,
     },
-    /// List what Anvil changed on this Mac (resolver files, keychain, login item,
-    /// ~/.anvil); with --yes, remove it all
+    /// List what Anvil changed on this computer (resolver files, trusted certificate,
+    /// login item, ~/.anvil); with --yes, remove it all
     Uninstall {
         /// Remove it all, without asking
         #[arg(long)]
@@ -756,7 +756,7 @@ enum PhpCmd {
         /// An installed version, e.g. 8.4
         version: String,
     },
-    /// Extensions for every app on a PHP version, built on this Mac (xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached, imagick)
+    /// Extensions for every app on a PHP version (xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached, imagick)
     Ext {
         #[command(subcommand)]
         cmd: ExtCmd,
@@ -1172,7 +1172,8 @@ fn add_docker(
             let found = found.with_context(|| format!("Docker has no container named {c}"))?;
             found.port.zip(found.container_port)
         }
-        (_, p) => p,
+        // Docker there first, so nothing is added or said to pull without it.
+        (_, p) => services::containers().map(|_| p)?,
     };
     let (outer, inner) = (ports.map(|p| p.0), ports.map(|p| p.1));
     let id = edit(cfg, |c| {
@@ -1336,7 +1337,9 @@ fn edit<T>(cfg: &mut Config, f: impl FnOnce(&mut Config) -> Result<T>) -> Result
 /// Asks the running app, which owns every process; an error when none runs.
 fn ask_app(method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
     control::request(method, params, "Terminal")?
-        .context("Anvil isn't running. Open the Anvil app, then try again.")
+        .context(
+        "The Anvil app isn't running, and it runs apps' processes: `anvil start` serves PHP and static apps only. Open the app, then try again.",
+    )
 }
 
 /// `name: running` for each row `keep` picks from the app's reply.
@@ -1936,6 +1939,12 @@ fn run() -> Result<()> {
                         commands("No services yet. Add one with `anvil service add mysql`.")
                     );
                 }
+                // Columns as wide as their longest value: generated names run past 12.
+                let width =
+                    |f: fn(&services::ServiceInfo) -> usize| list.iter().map(f).max().unwrap_or(0);
+                let id = width(|s| s.id.chars().count());
+                let kind = width(|s| s.kind.chars().count());
+                let version = width(|s| s.host.as_deref().unwrap_or(&s.version).chars().count());
                 for s in list {
                     let state = match (s.kind, s.installed, s.enabled) {
                         (services::DOCKER, ..) => match (&s.problem, s.running) {
@@ -1958,9 +1967,9 @@ fn run() -> Result<()> {
                         })
                         .unwrap_or_default();
                     println!(
-                        "{} {} {:<9} port {:<6} {state}{inbox}",
-                        bold(format!("{:<12}", s.id)),
-                        dim(format!("{:<10}", s.kind)),
+                        "{}  {}  {:<version$}  port {:<5}  {state}{inbox}",
+                        bold(format!("{:<id$}", s.id)),
+                        dim(format!("{:<kind$}", s.kind)),
                         // An external one's host; a Docker one's image.
                         s.host.as_deref().unwrap_or(&s.version),
                         // A container that publishes none.
@@ -2077,8 +2086,14 @@ fn run() -> Result<()> {
                     println!("{n:<32} {:>10} KB", b / 1024);
                 }
             }
-            ServiceCmd::CreateDb { id, name } => anvil::databases::create(&cfg, &id, &name)?,
-            ServiceCmd::DropDb { id, name } => anvil::databases::drop_database(&cfg, &id, &name)?,
+            ServiceCmd::CreateDb { id, name } => {
+                anvil::databases::create(&cfg, &id, &name)?;
+                println!("Created database {} in {id}.", bold(&name));
+            }
+            ServiceCmd::DropDb { id, name } => {
+                anvil::databases::drop_database(&cfg, &id, &name)?;
+                println!("Dropped database {} from {id}.", bold(&name));
+            }
             ServiceCmd::Versions => {
                 for kind in services::SERVICES {
                     let installed = services::installed_versions(kind);
@@ -2163,6 +2178,17 @@ fn run() -> Result<()> {
                 phpext::build_missing_for(&cfg, &site);
                 control::notify_changed();
                 changed(&site, "PHP", version.as_deref(), "default");
+                // Pinned all the same: the user may be about to change composer.json.
+                if let Some(v) = &version
+                    && let Some(req) = composer_php_too_low(&find_site(&cfg, &site)?.path, v)
+                {
+                    eprintln!(
+                        "{}",
+                        style::warn(format!(
+                            "composer.json requires PHP {req}: Composer, and the app itself, may refuse to run on {v}."
+                        ))
+                    );
+                }
             }
             AppCmd::Root {
                 site,
@@ -2425,6 +2451,9 @@ fn run() -> Result<()> {
                 cfg = load()?; // with the HTTPS creation chose
             }
             println!("Created {}", path.display());
+            if let Some(note) = create::git_note(&name, &path, &opts) {
+                eprintln!("{}", style::warn(note));
+            }
             // A running app serves it now, not once its window next looks.
             control::notify_changed();
             if let Some(s) = sites(&cfg).into_iter().find(|s| s.path == path) {
@@ -2477,9 +2506,10 @@ fn run() -> Result<()> {
             let mut svc = services::Services::default();
             for u in resources::services_used(&cfg, &s, &svc.pids()) {
                 println!(
-                    "  uses {:<12} port {:<6} {}{}",
+                    "  uses {:<12} {:<12}{}{}",
                     u.label,
-                    u.port.map_or("-".into(), |p| p.to_string()),
+                    // One whose port the app doesn't name leaves the column blank.
+                    u.port.map_or(String::new(), |p| format!("port {p}")),
                     match u.source {
                         resources::Source::Anvil => "Anvil",
                         resources::Source::Docker => "Docker",
@@ -2687,11 +2717,16 @@ fn run() -> Result<()> {
             }
             edit(&mut cfg, |c| set_secure(c, &s.name, !off))?;
             let s = sites(&cfg).into_iter().find(|x| x.name == s.name).unwrap();
-            println!(
-                "{} {}",
-                cyan(site_url(&cfg, &s)),
-                commands("(restart `anvil start` to apply)")
-            );
+            // The app restarts its server on the change; `anvil start` reads it once.
+            if control::app_running() {
+                println!("{}", cyan(site_url(&cfg, &s)));
+            } else {
+                println!(
+                    "{} {}",
+                    cyan(site_url(&cfg, &s)),
+                    commands("(restart `anvil start` to apply)")
+                );
+            }
         }
         Cmd::Setup => {
             ensure_caddy()?;
@@ -2731,7 +2766,10 @@ fn run() -> Result<()> {
                 if !setup_status(&cfg).resolver {
                     print_resolver_step(&cfg);
                 }
-                println!("{}", commands("Restart `anvil start` if it is running."));
+                // The app restarts its server on the change; `anvil start` reads it once.
+                if !control::app_running() {
+                    println!("{}", commands("Restart `anvil start` if it is running."));
+                }
             } else {
                 println!("{}", cfg.tld);
             }

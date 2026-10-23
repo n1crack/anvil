@@ -476,11 +476,16 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 /* Running: a badge on the mark's corner, with a ring cut out of the mark so it
- * reads on any row background (the native vibrancy, hover, selection). */
+ * reads on any row background (the native vibrancy, hover, selection). An SVG, not a
+ * radial-gradient: WebKitGTK masked the whole mark away with one. */
 .item .mark-box { position: relative; width: 32px; height: 32px; }
 .item .mark-box.running .mark {
-  -webkit-mask: radial-gradient(circle at calc(100% - 3px) calc(100% - 3px), transparent 6px, #000 6.5px);
-  mask: radial-gradient(circle at calc(100% - 3px) calc(100% - 3px), transparent 6px, #000 6.5px);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill-rule='evenodd' d='M0 0H32V32H0Z M22.75 29a6.25 6.25 0 1 0 12.5 0a6.25 6.25 0 1 0 -12.5 0Z'/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill-rule='evenodd' d='M0 0H32V32H0Z M22.75 29a6.25 6.25 0 1 0 12.5 0a6.25 6.25 0 1 0 -12.5 0Z'/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
+}
+.item.child .mark-box.running .mark {
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M0 0H24V24H0Z M14.75 21a6.25 6.25 0 1 0 12.5 0a6.25 6.25 0 1 0 -12.5 0Z'/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M0 0H24V24H0Z M14.75 21a6.25 6.25 0 1 0 12.5 0a6.25 6.25 0 1 0 -12.5 0Z'/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
 }
 .run-badge {
   position: absolute;

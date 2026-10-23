@@ -1181,6 +1181,21 @@ pub(crate) fn fetch_tgz(url: &str, dir: &Path, strip: bool, sum: Option<&str>) -
 
 /// Install into a hidden sibling of `dir` and swap it in only once `fill`
 /// succeeds, so a failed reinstall leaves the working one untouched.
+/// A rename, tried again for a few seconds on Windows, where a program that just ran
+/// from the folder leaves it held while its files are scanned (Access is denied).
+fn rename_soon(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut tries = if cfg!(windows) { 20 } else { 1 };
+    loop {
+        match fs::rename(from, to) {
+            Err(e) if tries > 1 && e.kind() == std::io::ErrorKind::PermissionDenied => {
+                tries -= 1;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            r => return r,
+        }
+    }
+}
+
 pub(crate) fn replace_dir(dir: &Path, fill: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
     let parent = dir.parent().context("no parent folder")?;
     let name = dir.file_name().context("no folder name")?.to_string_lossy();
@@ -1198,12 +1213,12 @@ pub(crate) fn replace_dir(dir: &Path, fill: impl FnOnce(&Path) -> Result<()>) ->
         return Err(e);
     }
     if dir.exists()
-        && let Err(e) = fs::rename(dir, &old)
+        && let Err(e) = rename_soon(dir, &old)
     {
         let _ = fs::remove_dir_all(&new);
         return Err(e.into());
     }
-    if let Err(e) = fs::rename(&new, dir) {
+    if let Err(e) = rename_soon(&new, dir) {
         let _ = fs::rename(&old, dir);
         let _ = fs::remove_dir_all(&new);
         return Err(e.into());
@@ -1409,6 +1424,27 @@ fn php_runs(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Windows scans each DLL the first time it's loaded, over a minute for PHP's (ICU's
+/// alone is 30 MB), and PHP-CGI doesn't listen meanwhile: the sites would answer 502.
+/// Loading the extensions once here, before the folder replaces the one in use, does
+/// that wait during the install instead.
+fn php_warm(dir: &Path, full: &str) -> Result<()> {
+    println!("Loading PHP {full}'s extensions once, as Windows checks each the first time…");
+    let ok = platform::command(dir.join(platform::exe("php")))
+        .arg("-c")
+        .arg(dir.join("php.ini"))
+        // php.ini names the folder it will live in; until then the extensions are here.
+        .arg("-d")
+        .arg(format!("extension_dir={}", dir.join("ext").display()))
+        .arg("-m")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !ok {
+        bail!("the new PHP {full} doesn't start with its extensions");
+    }
+    Ok(())
+}
+
 pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
     php_offered(minor).map_err(anyhow::Error::msg)?;
     let index = php_index()?;
@@ -1529,7 +1565,7 @@ fn php_install_windows(cfg: &mut Config, minor: &str, list: &serde_json::Value) 
                 ),
             )?;
         }
-        Ok(())
+        php_warm(new, &full)
     })?;
     *cfg = update(|c| {
         c.php.get_or_insert_with(|| minor.into());
@@ -1577,6 +1613,46 @@ pub fn set_site_php(cfg: &mut Config, site: &str, version: Option<String>) -> Re
     }
     cfg.sites.entry(site_name(site)).or_default().php = version;
     save(cfg)
+}
+
+/// composer.json's `require.php` when PHP `minor` (8.2) is below every version it
+/// allows: Composer and the app's own platform check then refuse to run. Only the
+/// lower bound counts; an alternative without one (`<9`) allows anything below.
+pub fn composer_php_too_low(dir: &Path, minor: &str) -> Option<String> {
+    let text = fs::read_to_string(dir.join("composer.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let req = json["require"]["php"].as_str()?.trim().to_string();
+    let num = |v: &str| -> Option<(u32, u32)> {
+        let mut it = v
+            .split('.')
+            .map(|n| n.trim_end_matches(|c: char| !c.is_ascii_digit()));
+        Some((
+            it.next()?.parse().ok()?,
+            it.next().and_then(|n| n.parse().ok()).unwrap_or(0),
+        ))
+    };
+    let have = num(minor)?;
+    // `>= 8.2` as `>=8.2`, so each comparison is one word.
+    let mut joined = String::new();
+    for c in req.chars() {
+        if !(c == ' ' && joined.ends_with(['<', '>', '=', '^', '~', '!'])) {
+            joined.push(c);
+        }
+    }
+    let lowest = joined
+        .split('|')
+        .filter(|alt| !alt.trim().is_empty())
+        .map(|alt| {
+            alt.split([' ', ','])
+                .map(|c| c.trim_start_matches('v'))
+                .find(|c| {
+                    c.starts_with(['^', '~', '>', '='])
+                        || c.starts_with(|c: char| c.is_ascii_digit())
+                })
+                .and_then(|c| num(c.trim_start_matches(['^', '~', '>', '=', 'v'])))
+        })
+        .min()??;
+    (have < lowest).then_some(req)
 }
 
 fn caddy() -> PathBuf {
@@ -2102,15 +2178,18 @@ pub fn caddyfile(cfg: &Config, sites: &[Site]) -> String {
             s += &browser::site_lines(&site.name);
             params.push(("ANVIL_INJECT".into(), "1".into()));
         }
-        let fpm = php_upstream(site).map(|upstream| match params.is_empty() {
+        let mut inner: String = params
+            .iter()
+            .map(|(k, v)| format!("\t\tenv {k} \"{v}\"\n"))
+            .collect();
+        // On Windows Caddy's file matcher doesn't take a folder for `{path}`, so `/` of a
+        // static app went to index.php's fallback: PHP's "No input file specified", 404.
+        if cfg!(windows) {
+            inner += "\t\ttry_files {path} {path}/index.php {path}/index.html index.php\n";
+        }
+        let fpm = php_upstream(site).map(|upstream| match inner.is_empty() {
             true => format!("php_fastcgi {upstream}\n"),
-            false => format!(
-                "php_fastcgi {upstream} {{\n{}\t}}\n",
-                params
-                    .iter()
-                    .map(|(k, v)| format!("\t\tenv {k} \"{v}\"\n"))
-                    .collect::<String>()
-            ),
+            false => format!("php_fastcgi {upstream} {{\n{inner}\t}}\n"),
         });
         // Octane's row while it runs; PHP-FPM when it doesn't answer (stopped, crashed).
         // A file served for an error keeps the error's status unless told otherwise.
@@ -3216,6 +3295,35 @@ pub struct Server {
     pub mail_error: Option<String>,
     /// The browser bridge's proxy, while an app it serves has the switch on.
     browser: Option<browser::proxy::Proxy>,
+    /// Windows: how each php-cgi worker started, by its label, to start it again.
+    cgi: BTreeMap<String, CgiWorker>,
+}
+
+/// One php-cgi worker's command, kept to start it again (`Server::respawn_cgi`).
+struct CgiWorker {
+    program: PathBuf,
+    args: Vec<std::ffi::OsString>,
+    env: Vec<(String, String)>,
+    log: PathBuf,
+    /// When it last started.
+    since: std::time::Instant,
+}
+
+impl CgiWorker {
+    fn spawn(&mut self) -> std::io::Result<Child> {
+        let err = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log)?;
+        let mut cmd = platform::command(&self.program);
+        cmd.args(&self.args)
+            // 0: no request limit, so a worker never leaves its port unanswered.
+            .env("PHP_FCGI_MAX_REQUESTS", "0")
+            .envs(self.env.iter().map(|(k, v)| (k, v)))
+            .stdout(std::process::Stdio::null())
+            .stderr(err);
+        platform::no_window(&mut cmd).spawn()
+    }
 }
 
 impl Server {
@@ -3252,6 +3360,7 @@ impl Server {
             mail: None,
             mail_error: None,
             browser: None,
+            cgi: BTreeMap::new(),
         };
         for v in versions.iter().filter(|_| cfg!(windows)) {
             server.start_cgi(cfg, v, &sites)?;
@@ -3316,16 +3425,7 @@ impl Server {
                 .spawn()?,
         );
 
-        // Each child with its start time, so a later Anvil never mistakes another
-        // process that got the pid for one of these (`kill_orphans`).
-        let pids: Vec<String> = std::iter::once(owner_line())
-            .chain(server.pids().into_iter().map(|(_, p)| {
-                format!("{p} {}", started(p).unwrap_or_default())
-                    .trim_end()
-                    .to_string()
-            }))
-            .collect();
-        fs::write(pid_file(), pids.join("\n"))?;
+        server.write_pids()?;
 
         // Adminer again after an upgrade pinned another version or its folder was cleaned;
         // the web server runs without it.
@@ -3386,37 +3486,132 @@ impl Server {
             pools.push((pool(site), ini, env, Some(site)));
         }
         let log = php_fpm_log(v);
+        // Windows' OPcache is one per user and PHP build, shared by every php-cgi of it
+        // unless they name a cache: one per pool and start, so pools with opcache values
+        // of their own, or the workers of a server just stopped, never share memory.
+        let start = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let mut workers = vec![];
         for (name, ini, mut env, site) in pools {
             // As FPM's `php_values`: Anvil's prepend for every pool while any app's bridge is on.
             let (ini, theirs) = browser::pool_ini(sites, ini);
             env.extend(theirs.map(|p| ("ANVIL_PREPEND".to_string(), p)));
-            for port in cgi_ports(&name) {
-                let err = fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&log)?;
-                let mut cmd = platform::command(php_dir(v).join(PHP_SERVER));
-                cmd.arg("-b")
-                    .arg(format!("127.0.0.1:{port}"))
-                    .arg("-c")
-                    .arg(php_dir(v).join("php.ini"))
-                    .args(phpext::php_args_with(cfg, v, site));
-                for (k, val) in &ini {
-                    cmd.arg("-d").arg(format!("{k}={val}"));
-                }
-                // 0: no request limit, so a worker never leaves its port unanswered.
-                cmd.env("PHP_FCGI_MAX_REQUESTS", "0")
-                    .envs(env.iter().map(|(k, v)| (k, v)))
-                    .stdout(std::process::Stdio::null())
-                    .stderr(err);
-                self.labels.push(format!("PHP {v} ({name}, port {port})"));
-                self.children.push(
-                    platform::no_window(&mut cmd)
-                        .spawn()
-                        .with_context(|| format!("failed to start PHP {v}"))?,
+            for (i, port) in cgi_ports(&name).enumerate() {
+                let mut args: Vec<std::ffi::OsString> = vec![
+                    "-b".into(),
+                    format!("127.0.0.1:{port}").into(),
+                    "-c".into(),
+                    php_dir(v).join("php.ini").into(),
+                ];
+                args.extend(
+                    phpext::php_args_with(cfg, v, site)
+                        .into_iter()
+                        .map(Into::into),
                 );
+                args.extend([
+                    "-d".into(),
+                    format!("opcache.cache_id={name}-{start}").into(),
+                ]);
+                for (k, val) in &ini {
+                    args.extend(["-d".into(), format!("{k}={val}").into()]);
+                }
+                let worker = CgiWorker {
+                    program: php_dir(v).join(PHP_SERVER),
+                    args,
+                    env: env.clone(),
+                    log: log.clone(),
+                    since: std::time::Instant::now(),
+                };
+                workers.push((
+                    i == 0,
+                    port,
+                    format!("PHP {v} ({name}, port {port})"),
+                    worker,
+                ));
             }
         }
+        // A pool's first worker sets up its OPcache memory; one started alongside it
+        // attached before that was done and crashed in php_opcache.dll reading it
+        // (accel_post_startup). The rest start once the first one listens.
+        let (first, rest): (Vec<_>, Vec<_>) = workers.into_iter().partition(|w| w.0);
+        let first: Vec<u16> = first
+            .into_iter()
+            .map(|w| self.spawn_cgi(v, w.2, w.3).map(|()| w.1))
+            .collect::<Result<_>>()?;
+        let started = self.children.len() - first.len();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let listening = |port: u16| {
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(200))
+                .is_ok()
+        };
+        let mut waiting = first;
+        // Windows scans a PHP the first time it runs, which can take a minute; one
+        // that ends meanwhile shows up as `exited` as any other.
+        while !waiting.is_empty()
+            && std::time::Instant::now() < deadline
+            && self.children[started..]
+                .iter_mut()
+                .all(|c| matches!(c.try_wait(), Ok(None)))
+        {
+            waiting.retain(|&p| !listening(p));
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        for (_, _, label, cmd) in rest {
+            self.spawn_cgi(v, label, cmd)?;
+        }
+        Ok(())
+    }
+
+    fn spawn_cgi(&mut self, v: &str, label: String, mut worker: CgiWorker) -> Result<()> {
+        let child = worker
+            .spawn()
+            .with_context(|| format!("failed to start PHP {v}"))?;
+        self.labels.push(label.clone());
+        self.children.push(child);
+        self.cgi.insert(label, worker);
+        Ok(())
+    }
+
+    /// Windows: a php-cgi worker that ended on its own starts again in its place, as
+    /// PHP-FPM's master does for its children elsewhere: one crash in a request no
+    /// longer stops every app. One that ends again within 10 s is left ended.
+    fn respawn_cgi(&mut self, i: usize) -> bool {
+        let Some(worker) = self.cgi.get_mut(&self.labels[i]) else {
+            return false;
+        };
+        if worker.since.elapsed() < std::time::Duration::from_secs(10) {
+            return false;
+        }
+        let how = match self.children[i].try_wait() {
+            Ok(Some(st)) => format!(" ({st})"),
+            _ => String::new(),
+        };
+        worker.since = std::time::Instant::now();
+        let Ok(child) = worker.spawn() else {
+            return false;
+        };
+        if let Ok(mut f) = fs::OpenOptions::new().append(true).open(&worker.log) {
+            use std::io::Write;
+            let _ = writeln!(f, "Anvil: {} stopped{how}; started again", self.labels[i]);
+        }
+        self.children[i] = child;
+        let _ = self.write_pids();
+        true
+    }
+
+    /// Each child with its start time, so a later Anvil never mistakes another
+    /// process that got the pid for one of these (`kill_orphans`).
+    fn write_pids(&self) -> Result<()> {
+        let pids: Vec<String> = std::iter::once(owner_line())
+            .chain(self.pids().into_iter().map(|(_, p)| {
+                format!("{p} {}", started(p).unwrap_or_default())
+                    .trim_end()
+                    .to_string()
+            }))
+            .collect();
+        fs::write(pid_file(), pids.join("\n"))?;
         Ok(())
     }
 
@@ -3433,10 +3628,15 @@ impl Server {
     /// Caddyfile, a port taken). That child is reaped and dropped from the list, so
     /// stopping the rest never signals its pid again.
     pub fn exited(&mut self) -> Option<String> {
-        let i = self
-            .children
-            .iter_mut()
-            .position(|c| !matches!(c.try_wait(), Ok(None)))?;
+        let i = loop {
+            let i = self
+                .children
+                .iter_mut()
+                .position(|c| !matches!(c.try_wait(), Ok(None)))?;
+            if !self.respawn_cgi(i) {
+                break i;
+            }
+        };
         let mut child = self.children.remove(i);
         let label = self.labels.remove(i);
         let how = match child.try_wait() {
@@ -3451,10 +3651,25 @@ impl Server {
         Some(format!("{label} stopped unexpectedly{how}{log}"))
     }
 
-    /// Blocks until the web server exits.
+    /// Blocks until the web server exits; meanwhile Windows' php-cgi workers that end
+    /// start again (`respawn_cgi`).
     pub fn wait(&mut self) -> Result<()> {
-        self.children.last_mut().unwrap().wait()?;
-        Ok(())
+        if self.cgi.is_empty() {
+            self.children.last_mut().unwrap().wait()?;
+            return Ok(());
+        }
+        loop {
+            if self.children.last_mut().unwrap().try_wait()?.is_some() {
+                return Ok(());
+            }
+            let ended: Vec<usize> = (0..self.children.len() - 1)
+                .filter(|&i| !matches!(self.children[i].try_wait(), Ok(None)))
+                .collect();
+            for i in ended {
+                self.respawn_cgi(i);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
     }
 
     pub fn stop(&mut self) {
@@ -3465,6 +3680,7 @@ impl Server {
     /// first, the pid it names.
     pub fn take_all(&mut self) -> Vec<Stopping> {
         self.labels.clear();
+        self.cgi.clear();
         self.mail = None;
         self.browser = None;
         let mut files = vec![pid_file()];
@@ -3499,6 +3715,45 @@ mod tests {
             c.replace_range(at..to, "");
         }
         c
+    }
+
+    /// Only a version below every alternative's lower bound is too low.
+    #[test]
+    fn composer_php_lower_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        let low = |req: &str, minor: &str| {
+            fs::write(
+                dir.path().join("composer.json"),
+                format!(r#"{{"require":{{"php":"{req}"}}}}"#),
+            )
+            .unwrap();
+            composer_php_too_low(dir.path(), minor).is_some()
+        };
+        for (req, minor) in [
+            ("^8.2", "8.1"),
+            (">=8.3", "8.2"),
+            (">= 8.3 <9", "8.2"),
+            ("~8.4.0", "8.3"),
+            ("8.4.*", "8.3"),
+            ("^8.3 || ^9.0", "8.2"),
+        ] {
+            assert!(low(req, minor), "{req} {minor}");
+        }
+        for (req, minor) in [
+            ("^8.2", "8.2"),
+            ("^8.2", "8.5"),
+            (">8.2", "8.2"),
+            ("^7.4|^8.0", "8.1"),
+            ("<9", "7.4"),
+            ("*", "8.1"),
+        ] {
+            assert!(!low(req, minor), "{req} {minor}");
+        }
+        // None at all, or no composer.json.
+        fs::write(dir.path().join("composer.json"), "{}").unwrap();
+        assert_eq!(composer_php_too_low(dir.path(), "8.1"), None);
+        fs::remove_file(dir.path().join("composer.json")).unwrap();
+        assert_eq!(composer_php_too_low(dir.path(), "8.1"), None);
     }
 
     /// A group leader is stopped with its group (a grandchild that ignores nothing
@@ -3682,6 +3937,7 @@ mod tests {
             mail: None,
             mail_error: None,
             browser: None,
+            cgi: BTreeMap::new(),
         };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let why = loop {

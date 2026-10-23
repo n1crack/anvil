@@ -28,6 +28,20 @@ contain breaking changes.
 - The update, Settings and Processes windows open in the middle of Anvil's window.
 - Software Update is small when Anvil is up to date, and grows for a release's notes.
 - The Update bubble keeps showing the download if a click elsewhere hid it.
+- Windows: PHP no longer crashes in OPcache when Anvil starts or switches versions, which took every app down until a restart; a PHP worker that stops in a request starts again on its own.
+- Windows: a static app's address serves its index.html instead of "No input file specified" (404).
+- Windows: a new PHP's first start no longer answers 502 for a minute while Windows checks its files; installing it does that wait.
+- Linux: a running app's icon shows in the list again, not only its green dot.
+- `anvil uninstall` removes ~/.anvil after the Database viewer, Mail catcher, browser bridge or Share were used.
+- `anvil service list` lines up its columns for long service names.
+- `anvil https` and `anvil tld` no longer say to restart `anvil start` while the app runs; `anvil app start` says the app, not `anvil start`, runs an app's processes.
+- A new Django app keeps answering after `anvil tld` changes the suffix: its settings.py reads the suffix when the app starts, rather than having it written in.
+- A Nuxt app's loading and error pages open at its .test address instead of answering "Forbidden: this host is not allowed" (403) while it builds.
+- `anvil app php` warns when composer.json requires a newer PHP than the one pinned.
+- `anvil service add --docker` says Docker isn't installed or running before it adds anything, instead of "Pulling…".
+- `anvil service create-db` and `drop-db` say what they did.
+- `anvil new` says when the new repository has no first commit, e.g. because Git has no name or email yet, or when Git isn't installed.
+- `anvil usage <app>` leaves the port blank for a service the app names no port for, instead of "port -".
 
 ## [0.3.1] - 2026-10-22
 

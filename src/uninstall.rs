@@ -244,7 +244,8 @@ fn plan_windows() -> Vec<Step> {
 }
 
 /// What Anvil creates in its home folder.
-const ANVIL_ENTRIES: [&str; 16] = [
+const ANVIL_ENTRIES: [&str; 20] = [
+    "adminer",
     "bin",
     "build",
     "cache",
@@ -252,7 +253,9 @@ const ANVIL_ENTRIES: [&str; 16] = [
     "config.lock",
     "config.toml",
     "data",
+    "inject",
     "log",
+    "mail",
     "php",
     "run",
     "runtimes",
@@ -260,6 +263,7 @@ const ANVIL_ENTRIES: [&str; 16] = [
     "shims",
     "octane",
     "tools",
+    "tunnel",
     ".DS_Store",
 ];
 
@@ -404,6 +408,9 @@ pub fn uninstall(cfg: &Config, config_ok: bool, yes: bool) -> Result<()> {
         commands(if cfg!(windows) {
             "Your projects are not touched. Anvil and the anvil command itself stay:\n\
              remove Anvil in Settings › Apps afterwards."
+        } else if cfg!(target_os = "linux") {
+            "Your projects are not touched. Anvil and the anvil command itself stay:\n\
+             delete Anvil's AppImage, or `sudo apt remove anvil` if you installed the .deb."
         } else {
             "Your projects are not touched. Anvil.app and the anvil command itself stay:\n\
              drag Anvil.app to the Trash, and `cargo uninstall anvil` if you installed it with cargo."
@@ -612,6 +619,11 @@ mod tests {
         fs::write(h.join("config.toml"), "").unwrap();
         let user = base.join("me");
         fs::create_dir_all(&user).unwrap();
+        assert_eq!(home_problem(&h, &user, &[]), None);
+        // What the Database viewer, the browser bridge, the Mail catcher and Share make.
+        for d in ["adminer", "inject", "mail", "tunnel"] {
+            fs::create_dir_all(h.join(d)).unwrap();
+        }
         assert_eq!(home_problem(&h, &user, &[]), None);
         // A project parked inside it, or something Anvil didn't make, keeps it.
         fs::create_dir_all(h.join("data/site")).unwrap();

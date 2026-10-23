@@ -793,7 +793,14 @@ impl Apps {
                 "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS".into(),
                 format!(".{}", cfg.tld),
             ),
+            // Django's ALLOWED_HOSTS reads it (create's settings.py).
+            ("ANVIL_TLD".into(), cfg.tld.clone()),
         ]);
+        // Nuxt's CLI answers 403 to a host it doesn't know on its loading and error
+        // pages, and reads no allowed hosts but portless's: Anvil is that proxy here.
+        if site.kind == "nuxt" {
+            env.push(("PORTLESS_URL".into(), crate::site_url(cfg, site)));
+        }
         self.spawn(&site.name, &site.path, &command, env)
     }
 

@@ -503,7 +503,7 @@ fn app_start_without_anvil() {
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
-        "Error: Anvil isn't running. Open the Anvil app, then try again.\n"
+        "Error: The Anvil app isn't running, and it runs apps' processes: `anvil start` serves PHP and static apps only. Open the app, then try again.\n"
     );
 }
 

@@ -171,12 +171,9 @@ def root():
 "#;
 
 /// Appended to a new Django project's settings.py: what Django needs behind
-/// Anvil's HTTPS proxy at `.<tld>`, and only in debug.
-fn django_settings(tld: &str) -> String {
-    format!(
-        "\n\n# Anvil serves this app over HTTPS at its local address.\nif DEBUG:\n    ALLOWED_HOSTS += [\".{tld}\", \"localhost\", \"127.0.0.1\"]\n    SECURE_PROXY_SSL_HEADER = (\"HTTP_X_FORWARDED_PROTO\", \"https\")\n"
-    )
-}
+/// Anvil's HTTPS proxy, and only in debug. The tld is the app's `ANVIL_TLD` when it
+/// starts, so a later `anvil tld` needs no edit here.
+const DJANGO_SETTINGS: &str = "\n\n# Anvil serves this app over HTTPS at its local address.\nif DEBUG:\n    import os\n\n    ALLOWED_HOSTS += [\".\" + os.environ.get(\"ANVIL_TLD\", \"test\"), \"localhost\", \"127.0.0.1\"]\n    SECURE_PROXY_SSL_HEADER = (\"HTTP_X_FORWARDED_PROTO\", \"https\")\n";
 
 /// What each template needs installed first: a PHP version or a runtime id.
 pub fn needs(kind: &str) -> Option<&'static str> {
@@ -288,6 +285,39 @@ http
 
 pub fn log_file(name: &str) -> PathBuf {
     home().join("log").join(format!("create-{name}.log"))
+}
+
+/// What became of the repository `opts` asked for in the new app at `dir`, when it isn't
+/// one with a first commit: the CLI says so, the app's window shows the log.
+pub fn git_note(name: &str, dir: &Path, opts: &Options) -> Option<String> {
+    if !on(opts, "git") {
+        return None;
+    }
+    if !crate::git_installed() {
+        return Some("Git isn't installed, so the app has no repository.".into());
+    }
+    let git = |args: &[&str]| {
+        crate::platform::command("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success() && !o.stdout.trim_ascii().is_empty())
+    };
+    if git(&["rev-parse", "-q", "--verify", "HEAD"]).is_some() {
+        return None;
+    }
+    Some(
+        if git(&["config", "user.name"]).is_none() || git(&["config", "user.email"]).is_none() {
+            "The repository has no first commit: Git has no name or email yet. Set them with `git config --global user.name \"Your Name\"` and `git config --global user.email you@example.com`, then commit.".into()
+        } else {
+            format!(
+                "The repository has no first commit: `git commit` failed, see {}.",
+                log_file(name).display()
+            )
+        },
+    )
 }
 
 /// A template's choices, by option key: `{"kit": "livewire", "git": "on"}`.
@@ -809,10 +839,7 @@ fn build(
             )?;
             let settings = dir.join("config").join("settings.py");
             let mut text = fs::read_to_string(&settings)?;
-            let tld = crate::load()
-                .map(|c| c.tld)
-                .unwrap_or_else(|_| "test".into());
-            text.push_str(&django_settings(&tld));
+            text.push_str(DJANGO_SETTINGS);
             fs::write(settings, text)?;
             fs::write(dir.join("requirements.txt"), "django\n")?;
         }
