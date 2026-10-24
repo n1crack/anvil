@@ -28,6 +28,7 @@ contain breaking changes.
 - The update, Settings and Processes windows open in the middle of Anvil's window.
 - Software Update is small when Anvil is up to date, and grows for a release's notes.
 - The Update bubble keeps showing the download if a click elsewhere hid it.
+- Selecting an application or service in the sidebar no longer scrolls the list.
 - Windows: PHP no longer crashes in OPcache when Anvil starts or switches versions, which took every app down until a restart; a PHP worker that stops in a request starts again on its own.
 - Windows: a static app's address serves its index.html instead of "No input file specified" (404).
 - Windows: a new PHP's first start no longer answers 502 for a minute while Windows checks its files; installing it does that wait.

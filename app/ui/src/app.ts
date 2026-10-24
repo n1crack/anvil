@@ -663,6 +663,8 @@ function parkedNoteEl() {
 
 function renderList() {
   const list = $("#list");
+  // WebKit drops the scroll to the top the moment the list empties: it goes back once redrawn.
+  const top = list.scrollTop;
   list.replaceChildren();
   const note = filterNote("apps", kindLabel);
   const hiddenApps = hiddenSites();
@@ -785,6 +787,7 @@ function renderList() {
     p.textContent = filter ? `No ${what} match “${filter}”.` : `No ${f.running ? "running " : ""}${what}.`;
     list.append(p);
   }
+  list.scrollTop = top;
 }
 
 /* ---------- Context menu ---------- */

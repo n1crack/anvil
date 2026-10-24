@@ -260,6 +260,7 @@ function renameService(svc) {
 
 export function renderServiceList() {
   const list = $("#list");
+  const top = list.scrollTop; // WebKit loses it as the list empties, as in renderList
   list.replaceChildren();
   if (keptNote) list.append(el("p", "muted svc-kept", keptNote));
   if (!services.length) {
@@ -282,6 +283,7 @@ export function renderServiceList() {
     list.append(...listSection(`services:${cat}`, cat, rows, rows.length));
   }
   if (!count) list.append(el("p", "empty", filter ? `No services match “${filter}”.` : "No services match the filter."));
+  list.scrollTop = top;
 }
 
 export function selectService(id) {
