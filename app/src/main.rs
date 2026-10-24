@@ -4572,21 +4572,20 @@ async fn php_opcache_remove(handle: AppHandle, version: String) -> Res<Settings>
 }
 
 /// Turns OPcache on or off for every app on `version`, then restarts PHP-FPM.
-#[tauri::command]
-async fn php_opcache_on(handle: AppHandle, version: String, on: bool) -> Res<Settings> {
-    let h = handle.clone();
-    tauri::async_runtime::spawn_blocking(move || -> Res<()> {
-        let cfg = anvil::opcache::set_on(&version, on).map_err(err)?;
-        let app = h.state::<App>();
-        if running(&app) {
-            start(&app, &cfg);
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    changed(&handle);
-    settings(handle)
+#[tauri::command(async)]
+fn php_opcache_on(handle: AppHandle, version: String, on: bool) -> Res<Settings> {
+    apply(
+        &handle,
+        |cfg| {
+            if on {
+                cfg.php_opcache_off.remove(&version);
+            } else {
+                cfg.php_opcache_off.insert(version.clone());
+            }
+            Ok(())
+        },
+        true,
+    )
 }
 
 /// Versions whose OPcache is being built: a second click (or window) doesn't start another.

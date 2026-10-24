@@ -82,20 +82,6 @@ pub fn remove(minor: &str) -> Result<()> {
     Ok(std::fs::remove_file(so_path(minor))?)
 }
 
-/// Turn OPcache on or off for every app on `minor` (`Config::php_opcache_off`); the
-/// saved config. PHP-FPM reads it when it starts.
-pub fn set_on(minor: &str, on: bool) -> Result<crate::Config> {
-    let (cfg, ()) = crate::update(|c| {
-        if on {
-            c.php_opcache_off.remove(minor);
-        } else {
-            c.php_opcache_off.insert(minor.to_string());
-        }
-        Ok(())
-    })?;
-    Ok(cfg)
-}
-
 /// PHP-FPM's `-d` arguments: the extension when built, then the dev settings the user
 /// hasn't set in `ini` (the php.ini overrides of the master's apps: global, or with one
 /// app's own over them), then theirs.
