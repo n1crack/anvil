@@ -1178,7 +1178,7 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-pane.is-empty .dev-head-start { display: none; }
 .dev-out { height: max(260px, calc(100vh - 360px)); }
 .dev-out:empty::before { content: none; }
-.dev-empty { position: absolute; top: 44px; left: 14px; display: flex; align-items: center; gap: 8px; color: #8d959f; font: 11px ui-monospace, "SF Mono", Menlo, monospace; }
+.dev-empty { position: absolute; top: 44px; left: 14px; display: flex; align-items: center; gap: 8px; min-height: 20px; /* a ▶ or not, the text stays put */ color: #8d959f; font: 11px ui-monospace, "SF Mono", Menlo, monospace; }
 .dev-empty[hidden] { display: none; }
 /* The compose file can't be read: its error and hint, wrapped in the pane. */
 .dev-empty.is-error { right: 14px; display: block; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
@@ -2723,7 +2723,7 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
 
 .seg button[aria-pressed="true"],
 .seg button[aria-selected="true"] {
-  background: var(--steel-raised);
+  background: rgba(255, 255, 255, 0.14); /* --steel-raised barely parts from the track in dark */
   color: var(--text);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
@@ -3382,7 +3382,7 @@ a.pkg-adv-title:hover { text-decoration: underline; }
 .logs-large-actions button,
 .res-cells .del,
 .clean-all,
-.dev-bar button,
+.dev-bar button:not(.seg button),
 .dev-conf-foot button,
 .dev-conf-draft button:not(.dev-conf-remove),
 .git-btn,
