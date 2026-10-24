@@ -7,6 +7,8 @@ contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-24
+
 ### Added
 
 - Clean Rust builds (Settings › Storage, off unless you turn it on): after 7 days without a code change, a stopped Rust application's target folder goes; with cargo-sweep, the other stopped ones lose only files unused for 30 days.
@@ -213,7 +215,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/n1crack/anvil/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/n1crack/anvil/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/n1crack/anvil/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/n1crack/anvil/compare/v0.2.0...v0.2.1
