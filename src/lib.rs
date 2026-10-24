@@ -2639,7 +2639,7 @@ pub fn setup_status(cfg: &Config) -> Setup {
         || if cfg!(windows) {
             nrpt_ready(cfg)
         } else {
-            fs::read_to_string(&file).is_ok_and(|s| resolver_target(&s, &want).is_none())
+            fs::read_to_string(&file).is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace()))
         };
     let ports = linux || ports_forwarded(cfg);
     Setup {
@@ -3582,6 +3582,7 @@ impl Server {
             return false;
         };
         if worker.since.elapsed() < std::time::Duration::from_secs(10) {
+            self.cgi.remove(&self.labels[i]);
             return false;
         }
         let how = match self.children[i].try_wait() {
