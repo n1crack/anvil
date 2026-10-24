@@ -1293,7 +1293,7 @@ const mockHandle = (cmd, a) => {
         theme: null,
         dock_icon: true,
         trim_app_logs: true,
-        clean_rust_builds: window.mockCleanRust ?? true,
+        clean_rust_builds: window.mockCleanRust ?? false,
         notifications: true,
         https_default: true,
         worktree_db: "copy",

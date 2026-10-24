@@ -272,7 +272,7 @@ impl Default for Config {
             git_client: None,
             https_default: Some(false),
             trim_app_logs: true,
-            clean_rust_builds: true,
+            clean_rust_builds: false,
             notifications: true,
             request_log: true,
             accepted_licenses: BTreeMap::new(),
@@ -2639,7 +2639,8 @@ pub fn setup_status(cfg: &Config) -> Setup {
         || if cfg!(windows) {
             nrpt_ready(cfg)
         } else {
-            fs::read_to_string(&file).is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace()))
+            fs::read_to_string(&file)
+                .is_ok_and(|s| s.split_whitespace().eq(want.split_whitespace()))
         };
     let ports = linux || ports_forwarded(cfg);
     Setup {

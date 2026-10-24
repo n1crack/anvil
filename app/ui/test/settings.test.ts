@@ -872,13 +872,13 @@ describe("Esc", () => {
 });
 
 describe("Storage › Automatic cleanup", () => {
-  test("Clean Rust builds is on by default and saves when switched", async () => {
+  test("Clean Rust builds is off by default and saves when switched", async () => {
     await open("storage");
     const sw = $("#clean-rust") as HTMLInputElement;
-    expect(sw.checked).toBe(true);
-    sw.checked = false;
+    expect(sw.checked).toBe(false);
+    sw.checked = true;
     sw.dispatchEvent(new Event("change"));
     await wait(30);
-    expect(w.mockCalls.filter(([c]: [string]) => c === "set_clean_rust_builds").at(-1)[1]).toEqual({ on: false });
+    expect(w.mockCalls.filter(([c]: [string]) => c === "set_clean_rust_builds").at(-1)[1]).toEqual({ on: true });
   });
 });
