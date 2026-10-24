@@ -4747,7 +4747,10 @@ fn titlebar<'a, R: tauri::Runtime, M: Manager<R>>(
 
 fn open_settings(handle: &AppHandle) {
     if let Some(w) = handle.get_webview_window("settings") {
-        center_on_main(handle, &w);
+        // One already in view stays where the user put it.
+        if !w.is_visible().unwrap_or(false) {
+            center_on_main(handle, &w);
+        }
         let _ = w.show();
         let _ = w.set_focus();
         return;
@@ -4783,7 +4786,10 @@ fn open_processes(handle: &AppHandle, select: Option<&str>) {
         if let Some(key) = select {
             let _ = handle.emit_to("processes", "activity-select", key);
         }
-        center_on_main(handle, &w);
+        // One already in view stays where the user put it.
+        if !w.is_visible().unwrap_or(false) {
+            center_on_main(handle, &w);
+        }
         let _ = w.show();
         let _ = w.set_focus();
         return;
@@ -4851,7 +4857,10 @@ fn center_on_main(handle: &AppHandle, w: &tauri::WebviewWindow) {
 fn open_updates(handle: &AppHandle) {
     if let Some(w) = handle.get_webview_window("updates") {
         let _ = w.emit("update-recheck", ());
-        center_on_main(handle, &w);
+        // One already in view stays where the user put it.
+        if !w.is_visible().unwrap_or(false) {
+            center_on_main(handle, &w);
+        }
         let _ = w.show();
         let _ = w.set_focus();
         return;
