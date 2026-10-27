@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- On macOS, `node`, `php` and the other terminal commands keep working after Anvil.app is moved or deleted; with Anvil gone they run the system's own.
+
 ## [0.3.2] - 2026-10-24
 
 ### Added

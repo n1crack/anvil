@@ -36,23 +36,45 @@ pub fn pick_cli(exe: &Path, user_home: &Path, exists: impl Fn(&Path) -> bool) ->
 
 use crate::user_home;
 
-/// `cli`, or when it lies inside a Linux AppImage (`appdir`, its mount, gone once the app
-/// quits) a copy of it in `<home>/bin` the shims can still run, made anew each time so
-/// an updated AppImage brings its CLI.
+/// `cli`, or a copy of it in `<home>/bin` when the app made the shims (`exe` isn't `cli`)
+/// or `cli` lies in an app bundle or a Linux AppImage (`appdir`, gone once it quits):
+/// the shims then outlive the app being moved, deleted or rebuilt. Made anew each time
+/// so an updated app brings its CLI. A CLI that set up the shims itself stays where it
+/// is, so `cargo install` updates reach them.
 #[cfg(unix)]
-fn lasting_cli(cli: PathBuf, appdir: Option<&Path>, home: &Path) -> Result<PathBuf> {
-    if !appdir.is_some_and(|d| cli.starts_with(d)) {
+fn lasting_cli(cli: PathBuf, exe: &Path, appdir: Option<&Path>, home: &Path) -> Result<PathBuf> {
+    let lasting = home.join("bin").join("anvil");
+    let bundled = appdir.is_some_and(|d| cli.starts_with(d))
+        || cli
+            .ancestors()
+            .any(|a| a.extension().is_some_and(|e| e == "app"));
+    if !cli.is_absolute() || cli == lasting || (cli == exe && !bundled) {
         return Ok(cli);
     }
-    let bin = home.join("bin");
-    fs::create_dir_all(&bin)?;
+    fs::create_dir_all(home.join("bin"))?;
     // Beside it first, then renamed over: a shim running the old copy keeps it.
-    let tmp = bin.join(".anvil.new");
+    let tmp = home.join("bin").join(".anvil.new");
     fs::copy(&cli, &tmp)?;
     crate::platform::set_mode(&tmp, 0o755)?;
-    let lasting = bin.join("anvil");
     fs::rename(&tmp, &lasting)?;
     Ok(lasting)
+}
+
+/// The shim for `tool`: Anvil's CLI picks the version; with the CLI gone, the `tool` on
+/// PATH without `shims`, as before Anvil, so a deleted app never breaks the terminal.
+#[cfg(unix)]
+fn shim_script(cli: &Path, tool: &str, shims: &Path) -> String {
+    let cli = sh_quote(&cli.to_string_lossy());
+    if !cli.starts_with("'/") {
+        return format!("#!/bin/sh\nexec {cli} shim {tool} \"$@\"\n");
+    }
+    format!(
+        "#!/bin/sh\n[ -x {cli} ] && exec {cli} shim {tool} \"$@\"\n\
+         set -f; p=; IFS=:; for d in $PATH; do [ \"$d\" = {dir} ] || p=${{p:+$p:}}$d; done; unset IFS; PATH=$p\n\
+         command -v {tool} >/dev/null || {{ echo \"{tool}: not found, and Anvil's CLI is gone: reinstall Anvil, or delete its lines in your shell's rc file\" >&2; exit 127; }}\n\
+         exec {tool} \"$@\"\n",
+        dir = sh_quote(&shims.to_string_lossy()),
+    )
 }
 
 /// Write the shims into `<home>/shims`.
@@ -97,18 +119,12 @@ pub fn install(home: &Path) -> Result<()> {
     let exe = std::env::current_exe().unwrap_or_default();
     let cli = pick_cli(&exe, &user_home(), Path::exists);
     let appdir = std::env::var_os("APPDIR").map(PathBuf::from);
-    let cli = lasting_cli(cli, appdir.as_deref(), home)?;
+    let cli = lasting_cli(cli, &exe, appdir.as_deref(), home)?;
     let dir = home.join("shims");
     fs::create_dir_all(&dir)?;
     for tool in TOOLS {
         let file = dir.join(tool);
-        fs::write(
-            &file,
-            format!(
-                "#!/bin/sh\nexec {} shim {tool} \"$@\"\n",
-                sh_quote(&cli.to_string_lossy())
-            ),
-        )?;
+        fs::write(&file, shim_script(&cli, tool, &dir))?;
         fs::set_permissions(&file, fs::Permissions::from_mode(0o755))?;
     }
     // `anvil` itself, so the CLI inside the app works in a terminal. Only a known
@@ -605,8 +621,8 @@ mod tests {
         for tool in TOOLS {
             let f = d.join("shims").join(tool);
             let text = fs::read_to_string(&f).unwrap();
-            assert!(text.starts_with("#!/bin/sh\nexec '"), "{text}");
-            assert!(text.ends_with(&format!("' shim {tool} \"$@\"\n")), "{text}");
+            assert!(text.starts_with("#!/bin/sh\n"), "{text}");
+            assert!(text.contains(&format!("' shim {tool} \"$@\"\n")), "{text}");
             assert_eq!(
                 fs::metadata(&f).unwrap().permissions().mode() & 0o777,
                 0o755
@@ -637,16 +653,58 @@ mod tests {
         fs::create_dir_all(&mount).unwrap();
         fs::write(mount.join("anvil"), "cli").unwrap();
         let home = d.join("home");
-        let cli = lasting_cli(mount.join("anvil"), Some(&d.join("mount")), &home).unwrap();
+        let appimage = mount.join("anvil-app");
+        let cli = lasting_cli(
+            mount.join("anvil"),
+            &appimage,
+            Some(&d.join("mount")),
+            &home,
+        )
+        .unwrap();
         assert_eq!(cli, home.join("bin/anvil"));
         assert_eq!(fs::read_to_string(&cli).unwrap(), "cli");
-        // Outside an AppImage the CLI is used where it is.
+        // From an app bundle, a dev build's too, the shims get a copy.
+        let bundle = d.join("target/release/bundle/macos/Anvil.app/Contents/MacOS");
+        fs::create_dir_all(&bundle).unwrap();
+        fs::write(bundle.join("anvil"), "app cli").unwrap();
+        let cli =
+            lasting_cli(bundle.join("anvil"), &bundle.join("anvil-app"), None, &home).unwrap();
+        assert_eq!(fs::read_to_string(&cli).unwrap(), "app cli");
+        // A CLI that set up the shims itself is used where it is.
         let own = Path::new("/usr/bin/anvil").to_path_buf();
-        assert_eq!(lasting_cli(own.clone(), None, &home).unwrap(), own);
+        assert_eq!(lasting_cli(own.clone(), &own, None, &home).unwrap(), own);
         assert_eq!(
-            lasting_cli(own.clone(), Some(&d.join("mount")), &home).unwrap(),
+            lasting_cli(own.clone(), &own, Some(&d.join("mount")), &home).unwrap(),
             own
         );
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_shim_whose_cli_is_gone_runs_the_tool_on_path() {
+        let d = tmp("gone");
+        let (shims, bin) = (d.join("shims"), d.join("bin"));
+        fs::create_dir_all(&shims).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        let shim = shims.join("node");
+        fs::write(&shim, shim_script(&d.join("gone/anvil"), "node", &shims)).unwrap();
+        crate::platform::set_mode(&shim, 0o755).unwrap();
+        let path = format!("{}:{}:/usr/bin:/bin", shims.display(), bin.display());
+        let run = || {
+            std::process::Command::new(&shim)
+                .arg("a b")
+                .env("PATH", &path)
+                .output()
+                .unwrap()
+        };
+        let out = run();
+        assert_eq!(out.status.code(), Some(127));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("Anvil's CLI is gone"));
+        fs::write(bin.join("node"), "#!/bin/sh\necho \"real $1\"\n").unwrap();
+        crate::platform::set_mode(&bin.join("node"), 0o755).unwrap();
+        let out = run();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "real a b\n");
         fs::remove_dir_all(d).unwrap();
     }
 
