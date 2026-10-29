@@ -1266,6 +1266,7 @@ export function showTab(root, name, fallback = false) {
   $(".res-reload", root).hidden = name !== "resources";
   window.logsTab?.(root, name === "logs");
   window.requestsTab?.(root, name === "requests");
+  window.requestsPreview?.(root, name === "overview");
   window.mailTab?.(root, name === "mail");
   if (name === "dev") late.devTab?.();
   if (name === "containers") late.containersTab?.();

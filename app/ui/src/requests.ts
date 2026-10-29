@@ -1,4 +1,4 @@
-import { $, el, inlineError, invoke, seg, selected, snap, tab } from "./app";
+import { $, el, inlineError, invoke, seg, selected, showTab, snap, tab } from "./app";
 import { follower } from "./console";
 import { shown } from "./live";
 
@@ -149,12 +149,12 @@ function size(n: number) {
 const CLOCK = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 /** One row: time, method, status (its colour only as text), host when not the app's own,
- * path with query, duration, size. */
-function row(v, r) {
+ * path with query, duration, size. A button that opens it, or a plain line (`div`). */
+function row(v, r, tag = "button") {
   const li = el("li", "log req");
   li.req = r;
-  const head = el("button", "log-head");
-  head.setAttribute("aria-expanded", "false");
+  const head = el(tag, "log-head");
+  if (tag === "button") head.setAttribute("aria-expanded", "false");
   const d = new Date(r.ts * 1000);
   const time = el("span", "log-time", CLOCK.format(d));
   time.title = d.toLocaleString();
@@ -257,5 +257,75 @@ export async function tick() {
   v.list.follow();
 }
 
+/* The Overview's preview: the newest few requests, live while the Overview is shown, for an
+ * app that has the Requests tab. app.ts calls requestsPreview() from showTab. One poll at
+ * a time: every call stops the last one. */
+const PREVIEW_ROWS = 6;
+let pv: any = null; // { site, host, node, list, from, busy } and the tab's unfiltered view
+let pvTimer = 0;
+
+window.requestsPreview = (root, visible) => {
+  window.clearInterval(pvTimer);
+  pvTimer = 0;
+  const box = $(".req-preview", root);
+  if (!box) return;
+  const s = $('.tabs [data-tab="requests"]', root)?.hidden === false && snap.sites.find((x) => x.name === selected);
+  box.hidden = !s;
+  if (!s || !visible) return;
+  if (pv?.site !== s.name) pv = previewCard(s);
+  box.replaceChildren(pv.node);
+  pvTimer = window.setInterval(previewTick, 1500);
+};
+
+function previewCard(s) {
+  const node = el("div", "run-card");
+  const head = el("button", "run-card-head");
+  head.title = "Show the Requests tab";
+  head.append(el("span", "run-card-title", "Requests"), el("span", "run-card-count", "live"));
+  head.onclick = () => showTab($("#site"), "requests");
+  const list = el("ol", "req-preview-list");
+  node.append(head, list);
+  const p: any = { site: s.name, host: s.host, node, list, from: null, busy: true, status: "all", method: "", query: "", assets: false };
+  invoke("requests_read", { site: s.name, filter: filter(p), before: null })
+    .then((page: any) => {
+      p.from = page.end_offset;
+      list.replaceChildren(...page.requests.slice(0, PREVIEW_ROWS).map((r) => row(p, r, "div")));
+      if (!page.requests.length) list.append(el("li", "empty", "No requests yet."));
+    })
+    .catch((e) => list.replaceChildren(el("li", "empty error-text", String(e))))
+    .finally(() => (p.busy = false));
+  return p;
+}
+
+/** What came in since the last look goes on top, opening a slot (.req-new); the rows
+ * already there stay as drawn. */
+async function previewTick() {
+  const p = pv;
+  if (!p?.node.isConnected || p.node.closest("[hidden]")) {
+    window.clearInterval(pvTimer);
+    pvTimer = 0;
+    return;
+  }
+  if (!shown() || p.busy || p.from == null) return;
+  p.busy = true;
+  let page;
+  try {
+    page = await invoke("requests_tail", { site: p.site, filter: filter(p), from: p.from });
+  } catch {
+    return;
+  } finally {
+    p.busy = false;
+  }
+  if (pv !== p) return;
+  p.from = page.end_offset;
+  if (!page.requests.length) return;
+  p.list.querySelector(".empty")?.remove();
+  const fresh = page.requests.slice(0, PREVIEW_ROWS).map((r) => row(p, r, "div"));
+  for (const li of fresh) li.classList.add("req-new");
+  p.list.prepend(...fresh);
+  for (const old of [...p.list.children].slice(PREVIEW_ROWS)) old.remove();
+}
+
 // app.ts may have drawn the tab before this file loaded.
 if (tab === "requests") window.requestsTab($("#site"), true);
+if (tab === "overview") window.requestsPreview($("#site"), true);

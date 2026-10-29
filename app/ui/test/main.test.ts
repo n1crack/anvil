@@ -1756,6 +1756,107 @@ describe("requests", () => {
   });
 });
 
+describe("overview requests preview", () => {
+  const rows = () => $$(".req-preview .req");
+  const paths = () => rows().map((r) => r.querySelector(".log-msg")!.textContent);
+
+  test("the latest requests on the Overview, live: new ones open a slot at the top", async () => {
+    await select("notes");
+    await select("shop");
+    $('.tabs [data-tab="overview"]').click();
+    await wait(80);
+    const box = $(".req-preview");
+    expect(box.hidden).toBe(false);
+    expect(box.querySelector(".run-card-title")!.textContent).toBe("Requests");
+    expect(box.querySelector(".run-card-count")!.textContent).toBe("live");
+    // The first fill is what was there: no flash.
+    expect(paths()).toEqual(["/login?next=%2F", "shop--docs.test/docs/intro", "/"]);
+    expect(box.querySelector(".req-new")).toBeNull();
+    // Rows aren't buttons: only the header opens the tab.
+    expect(box.querySelector(".req button")).toBeNull();
+    const first = rows()[0];
+    const n = calls("requests_tail").length;
+    w.mockRequestsTail = [w.mockRequest({ uri: "/new", status: 302 })];
+    await wait(1600);
+    expect(calls("requests_tail").length).toBeGreaterThan(n);
+    expect(calls("requests_tail").at(-1)![1]).toEqual({
+      site: "shop",
+      filter: { status: null, method: null, query: "", assets: false },
+      from: 1200,
+    });
+    expect(paths()[0]).toBe("/new");
+    expect(rows()[0].classList.contains("req-new")).toBe(true);
+    // The rows already there stay as they were, not drawn again.
+    expect(rows()[1]).toBe(first);
+    expect(first.classList.contains("req-new")).toBe(false);
+    w.mockRequestsTail = Array.from({ length: 7 }, (_, i) => w.mockRequest({ uri: `/burst${i}` }));
+    await wait(1600);
+    expect(rows()).toHaveLength(6);
+    expect(paths()[0]).toBe("/burst0");
+  });
+
+  test("its header opens the Requests tab", async () => {
+    const head = $(".req-preview .run-card-head");
+    expect(head.tagName).toBe("BUTTON");
+    head.click();
+    await wait(80);
+    expect($('.tabs [data-tab="requests"]').getAttribute("aria-selected")).toBe("true");
+    $('.tabs [data-tab="overview"]').click();
+    await wait(80);
+  });
+
+  test("no looks once the Overview isn't shown", async () => {
+    $('.tabs [data-tab="git"]').click();
+    await wait(80);
+    const n = calls("requests_tail").length;
+    await wait(1600);
+    expect(calls("requests_tail").length).toBe(n);
+    $('.tabs [data-tab="overview"]').click();
+    await wait(80);
+  });
+
+  test("an app without a web address has none, and nothing polls", async () => {
+    await select("notes");
+    expect($(".req-preview").hidden).toBe(true);
+    const n = calls("requests_tail").length;
+    await wait(1600);
+    expect(calls("requests_tail").length).toBe(n);
+    await select("stack");
+    expect($(".req-preview").hidden).toBe(true);
+  });
+
+  test("one poll across rapid app switches, none after leaving the Overview", async () => {
+    const live = new Set<number>();
+    const [set, clear] = [window.setInterval, window.clearInterval];
+    w.setInterval = (fn: any, ms?: number, ...a: any[]) => {
+      const h = set(fn, ms, ...a);
+      if (fn?.name === "previewTick") live.add(h);
+      return h;
+    };
+    w.clearInterval = (h?: number) => {
+      live.delete(h!);
+      clear(h);
+    };
+    try {
+      for (const n of ["shop", "vuefinder", "notes", "vuefinder", "shop"]) {
+        $(`#list [data-name="${n}"]`).click();
+        await wait(5);
+      }
+      await select("shop");
+      expect(live.size).toBe(1);
+      $('.tabs [data-tab="git"]').click();
+      expect(live.size).toBe(0);
+      $('.tabs [data-tab="overview"]').click();
+      expect(live.size).toBe(1);
+      await select("notes");
+      expect(live.size).toBe(0);
+    } finally {
+      w.setInterval = set;
+      w.clearInterval = clear;
+    }
+  });
+});
+
 describe("polls and races", () => {
   const entry = (message: string) => ({ time: "2026-10-17 10:00:00", env: "local", level: "error", message, context: null, trace: [] });
 

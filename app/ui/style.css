@@ -1361,6 +1361,22 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 .proc-end button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); font-size: 12px; }
 .proc-end button:hover { background: var(--steel-hover); }
 
+/* The Overview's Requests preview: the newest few, method, status, path and duration. A
+ * new one opens a slot at the top and glows warm for a moment; the rows aren't buttons. */
+[data-panel="overview"] > .req-preview { margin-bottom: 12px; }
+.req-preview-list { margin: 0; padding: 0; list-style: none; }
+.req-preview .req { height: 31px; overflow: hidden; border-top: 1px solid var(--line); border-bottom: 0; }
+.req-preview .log-head { align-items: center; height: 100%; min-height: 0; padding: 0 14px; }
+.req-preview .log-time,
+.req-preview .req-size { display: none; }
+.req-preview .st-2,
+.req-preview .st-3 { color: var(--ok-text); }
+.req-preview .empty { padding: 8px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.req-preview .empty.error-text { color: var(--danger); overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+.req-preview .req-new { animation: req-slot 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both, req-flash 1.6s ease-out both; }
+@keyframes req-slot { from { height: 0; opacity: 0; border-top-color: transparent; } 40% { opacity: 0; } }
+@keyframes req-flash { from { background: var(--flash); } }
+
 /* Runs on, Folder and Web root side by side above the rows; a long path is cut short,
  * the whole one in its tooltip. */
 .facts { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; margin: 0 0 12px; border-radius: var(--radius-m); background: var(--steel-raised); box-shadow: var(--card-shadow); }
