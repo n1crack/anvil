@@ -16,7 +16,10 @@ Desktop app and CLI for macOS, Windows and Linux. Free and open source, in beta.
 Each project runs at its own address, such as `shop.test`, with its own language version and its own database.
 
 <p align="center">
-  <img src="https://anvil.tr/screenshots/overview.webp" width="820" alt="The Anvil app: the applications list and a Laravel app's Overview">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="https://anvil.tr/screenshots/overview-light.webp">
+    <img src="https://anvil.tr/screenshots/overview.webp" width="820" alt="The Anvil app: the applications list and a Laravel app's Overview">
+  </picture>
 </p>
 
 ## What you get
@@ -27,6 +30,8 @@ Each project runs at its own address, such as `shop.test`, with its own language
 - **Services.** MySQL, PostgreSQL, Redis, Mailpit and S3 storage; Docker containers too.
 - **Branches side by side.** A Git worktree gets its own address, processes and database.
 - **Per-project tabs.** Logs, requests, packages and caught mail.
+- **AI agents.** `anvil mcp` gives Claude Code and other MCP clients an app's logs, requests, browser errors and caught mail, and lets them restart processes, start services and add worktrees. Nothing that can't be undone is offered.
+- **Share.** A temporary public address for an app through a Cloudflare quick tunnel.
 
 Anvil keeps its files in `~/.anvil`. Outside it, `anvil setup` asks for your password, then sends `.test` lookups to Anvil, forwards ports 80/443 to it, trusts its local certificate and puts its commands on your shell's PATH. `anvil uninstall` lists everything first, then removes it.
 
