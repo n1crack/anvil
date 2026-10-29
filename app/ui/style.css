@@ -561,6 +561,8 @@ button, select, input { font: inherit; color: inherit; }
   transition: transform 0.4s cubic-bezier(0.3, 1.25, 0.5, 1);
 }
 .sel-hl[hidden] { display: none; }
+/* The selected row keeps its look under the pointer: no hover fill on the highlight. */
+.item[aria-current="true"]:hover { background: none; }
 
 /* The first draw: rows rise in one after another (their delays are set in renderList). */
 .item.enter { animation: rise 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
@@ -907,7 +909,7 @@ button, select, input { font: inherit; color: inherit; }
   border-radius: 1px;
   background: var(--ink);
   pointer-events: none;
-  transition: left 0.45s, width 0.45s cubic-bezier(0.3, 1.3, 0.5, 1);
+  transition: left 0.45s cubic-bezier(0.3, 1.3, 0.5, 1), width 0.45s cubic-bezier(0.3, 1.3, 0.5, 1);
 }
 .tabs .tab-ink[hidden] { display: none; }
 

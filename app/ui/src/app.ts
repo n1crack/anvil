@@ -331,6 +331,7 @@ export function listSection(key, title, rows, count) {
     localStorage.setItem("sections", JSON.stringify([...folded]));
     head.setAttribute("aria-expanded", String(opening));
     fold.classList.toggle("closed", !opening);
+    placeSel($("#list"));
   };
   const h = el("h2");
   h.append(head);
@@ -349,6 +350,7 @@ export function toggle(name, open = collapsed.has(name)) {
   parent.setAttribute("aria-expanded", String(open));
   $(".disclosure", parent).title = open ? "Hide worktrees" : "Show worktrees";
   parent.nextElementSibling?.classList.toggle("closed", !open);
+  placeSel($("#list"));
 }
 
 /** A sidebar mark with its run state as a badge on the corner: `on`, `warm` (starting)
@@ -828,8 +830,9 @@ export function placeSel(list: HTMLElement) {
   hl.style.height = `${row.offsetHeight}px`;
   hl.style.transform = `translate(${x}px, ${y}px)`;
 }
-// Folding a group or worktrees moves the rows under it: the highlight follows once it ends.
-$("#list").addEventListener("transitionend", () => placeSel($("#list")));
+// Folding a group or worktrees moves the rows under it: placed at once by the fold (right
+// without motion), and again once the slide ends.
+$("#list").addEventListener("transitionend", (e) => (e.target as Element).matches(".fold, .kids") && placeSel($("#list")));
 
 /* ---------- Context menu ---------- */
 
@@ -1224,7 +1227,7 @@ function keepTabSelected(root) {
       if (tab !== wanted) showTab(root, wanted, true);
     } else if (!has(tab)) showTab(root, shown[0].dataset.tab, true);
     // A tab shown or hidden moves the ones after it.
-    else placeInk(root);
+    placeInk(root);
   };
   if (!watchedTabs.has(bar)) {
     watchedTabs.add(bar);

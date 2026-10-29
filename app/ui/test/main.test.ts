@@ -4082,6 +4082,30 @@ describe("motion", () => {
     expect($$("#list .sel-hl")).toHaveLength(1);
   });
 
+  test("folding places the highlight at once, with no slide to wait for", async () => {
+    await select("shop");
+    const row = $('#list .item[data-name="shop"]');
+    Object.defineProperty(row, "offsetTop", { configurable: true, value: 123 });
+    const head = row.closest(".fold")!.previousElementSibling!.querySelector("button") as HTMLElement;
+    head.click();
+    expect($("#list .sel-hl").hidden).toBe(true);
+    head.click();
+    expect($("#list .sel-hl").hidden).toBe(false);
+    expect($("#list .sel-hl").style.transform).toContain("123px");
+  });
+
+  test("the ink moves when another tab is shown or hidden", async () => {
+    $('#site .tabs [data-tab="git"]').click();
+    const git = $('#site .tabs [data-tab="git"]');
+    Object.defineProperty(git, "offsetLeft", { configurable: true, value: 100 });
+    $('#site .tabs [data-tab="dev"]').hidden = true;
+    await wait();
+    expect($("#site .tabs .tab-ink").style.left).toBe("106px");
+    $('#site .tabs [data-tab="dev"]').hidden = false;
+    await wait();
+    $('#site .tabs [data-tab="overview"]').click();
+  });
+
   test("tab ink follows the tab", async () => {
     $('#site .tabs [data-tab="git"]').click();
     expect($("#site .tabs .tab-ink").dataset.tab).toBe("git");

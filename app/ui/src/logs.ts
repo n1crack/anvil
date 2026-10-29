@@ -160,7 +160,6 @@ function drawFiles(v) {
   const pick = (id) => {
     v.source = v.sources.find((x) => x.id === id);
     logSource.set(v.site, id);
-    drawFiles(v);
     loadLogs(v);
   };
   const tip = (src) => `${tilde(src.path)}\n${bytes(src.bytes)}${src.modified ? `, changed ${ago(new Date(src.modified * 1000))}` : ""}`;
