@@ -3844,7 +3844,7 @@ describe("worktrees", () => {
     }
   });
 
-  test("the Settings tab's Worktrees section: a checklist, its source as a tag, Customize… opens the editors, Done and Reset to preset", async () => {
+  test("the Settings tab's Worktrees section: a checklist, its source as a tag, Customize… opens the editors in a sheet, Done and Reset to preset", async () => {
     w.mockProblems = ["this app: copyy isn't a hooks field, or its value isn't the right kind"];
     await show({}, "shop");
     await wait(80);
@@ -3871,13 +3871,17 @@ describe("worktrees", () => {
     expect(box.querySelector("textarea")).toBeNull();
     btn("Customize…").click();
     await wait(60);
-    const rows = [...box.querySelectorAll(".row")].map((r) => r.querySelector("dt")!.textContent);
-    expect(rows).toEqual(["Worktrees", "Copy files", "Database", "Env keys", "After create", ""]);
-    expect(box.querySelector(".wt-lead")!.textContent).toBe("Changes save as you make them, for this app only.");
-    expect(btn("Customize…")).toBeUndefined();
-    // The footer: Done, and Reset to preset as this app has its own changes.
-    expect([...box.querySelectorAll(".wt-foot button")].map((b) => b.textContent)).toEqual(["Done", "Reset to preset"]);
-    const [copy, db, keys, after] = [...box.querySelectorAll(".hk")] as HTMLElement[];
+    // The editors open in a sheet; the section keeps its summary.
+    const sheet = $(".wt-sheet") as HTMLDialogElement;
+    expect(sheet.open).toBe(true);
+    expect(box.querySelectorAll(".row").length).toBe(1);
+    const sbtn = (t: string) => [...sheet.querySelectorAll("button")].find((b) => b.textContent === t) as HTMLButtonElement;
+    const rows = [...sheet.querySelectorAll(".row")].map((r) => r.querySelector("dt")!.textContent);
+    expect(rows).toEqual(["Copy files", "Database", "Env keys", "After create"]);
+    expect(sheet.querySelector(".wt-lead")!.textContent).toBe("Changes save as you make them, for this app only.");
+    // The footer: Reset to preset as this app has its own changes, and Done.
+    expect([...sheet.querySelectorAll(".sheet-actions button")].map((b) => b.textContent)).toEqual(["Reset to preset", "Done"]);
+    const [copy, db, keys, after] = [...sheet.querySelectorAll(".hk")] as HTMLElement[];
     // Copy files: a row per path with ×, Add.
     (copy.querySelector(".hk-add input") as HTMLInputElement).value = ".env.local";
     (copy.querySelector(".hk-add .inline-action:last-child") as HTMLButtonElement).click();
@@ -3891,7 +3895,7 @@ describe("worktrees", () => {
     await wait(60);
     expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "copy_database", value: true });
     // Env keys: a plain chooser, no placeholders to learn; Custom… takes free text.
-    const keysBox = () => [...box.querySelectorAll(".hk")][2] as HTMLElement;
+    const keysBox = () => [...sheet.querySelectorAll(".hk")][2] as HTMLElement;
     const sels = [...keys.querySelectorAll("select")] as HTMLSelectElement[];
     expect(sels.map((s) => s.selectedOptions[0].textContent)).toEqual([
       "This worktree’s address",
@@ -3930,11 +3934,12 @@ describe("worktrees", () => {
     ([...after.querySelectorAll("button")].find((b) => b.textContent === "Add Package Install") as HTMLButtonElement).click();
     await wait(60);
     expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: "after_create", value: ["composer install", "{install}"] });
-    btn("Reset to preset").click();
+    sbtn("Reset to preset").click();
     await wait(60);
     expect(calls("set_app_hooks").at(-1)![1]).toEqual({ site: "shop", field: null, value: null });
-    btn("Done").click();
+    sbtn("Done").click();
     await wait(60);
+    expect(sheet.open).toBe(false);
     expect(box.querySelectorAll(".row").length).toBe(1);
   });
 

@@ -1500,7 +1500,12 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 .wt-actions { display: flex; align-items: center; gap: 12px; }
 .wt-actions .inline-action { margin-left: 0; }
 .wt-actions small.error-text { margin: 0; }
-.wt-foot { min-height: 0; }
+/* The Settings tab's groups stand apart, like the cards elsewhere. */
+[data-panel="settings"] > .group + .group { margin-top: 14px; }
+/* Customize…: the editors in a sheet, wide enough for a key, its value and a custom one. */
+.wt-sheet { width: min(760px, 92vw); }
+.wt-sheet .wt-title { margin-bottom: 12px; }
+.wt-sheet .group { max-width: none; }
 .hk { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; flex: 1; min-width: 0; max-width: 520px; }
 .hk-switch { gap: 8px; }
 .hk-row { display: flex; align-items: center; gap: 6px; min-height: 26px; }

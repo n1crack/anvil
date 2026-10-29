@@ -2047,8 +2047,6 @@ function webRoot(s, root) {
   reset.onclick = () => save(null);
 }
 
-const hooksOpen = new Set<string>(); // apps whose Worktrees editor is open
-
 /** Where an app's hooks come from, said once: "From the Laravel preset", changed here. */
 function hooksFrom(from: Record<string, string>): string {
   const layers = [...new Set(Object.values(from))].filter((l) => l !== "Settings");
@@ -2066,9 +2064,9 @@ function hooksTag(from: Record<string, string>): string {
 }
 
 /** The Settings tab's Worktrees section, for a git repository: what a new worktree gets as a
- * short checklist, where that comes from as a tag, Customize… at its top right. Open, the
- * editors (hooksform.ts) save each change for this app only; Done and Reset to preset
- * (drops this app's own) sit at the bottom. */
+ * short checklist, where that comes from as a tag, Customize… at its top right. Customize…
+ * opens the editors (hooksform.ts) in a sheet; each change saves for this app only; Done and
+ * Reset to preset (drops this app's own) sit at its bottom. */
 async function renderHooks(s, root) {
   const box = $(".wt-hooks", root);
   let v;
@@ -2077,62 +2075,75 @@ async function renderHooks(s, root) {
   } catch {
     return; // not a git repository: no worktrees to set up
   }
-  if (box.contains(document.activeElement) && document.activeElement?.tagName !== "BUTTON") return; // being typed in
-  const open = hooksOpen.has(s.name);
-  const toggle = () => {
-    if (open) hooksOpen.delete(s.name);
-    else hooksOpen.add(s.name);
-    renderHooks(s, root);
-  };
+  const typing = (n: Element | null) => n?.contains(document.activeElement) && document.activeElement?.tagName !== "BUTTON";
+  if (typing(box) || typing(wtSheet)) return; // being typed in
   const head = el("dd", "wt-summary");
   const top = el("div", "wt-head");
   const title = el("div", "wt-title");
-  title.append(el("span", "wt-lead", open ? "Changes save as you make them, for this app only." : "A new worktree of this app gets:"));
+  title.append(el("span", "wt-lead", "A new worktree of this app gets:"));
   const tag = el("span", "wt-tag", hooksTag(v.hooks.from));
   tag.title = hooksFrom(v.hooks.from);
   title.append(tag);
-  top.append(title);
-  if (!open) {
-    const b = el("button", "inline-action wt-toggle", "Customize…");
-    b.onclick = toggle;
-    top.append(b);
-  }
+  const b = el("button", "inline-action wt-toggle", "Customize…");
+  b.onclick = () => {
+    hooksOpen = s.name;
+    renderHooks(s, root);
+  };
+  top.append(title, b);
   head.append(top);
-  if (!open) {
-    const { gets, offers } = summary(v.hooks, v.install);
-    const list = el("ul", "wt-gets");
-    for (const line of gets) {
-      const li = el("li");
-      li.append(icon("check"), el("span", null, line.text));
-      if (line.title) li.title = line.title;
-      list.append(li);
-    }
-    head.append(list);
-    if (offers) head.append(el("div", "wt-offers", offers));
+  const { gets, offers } = summary(v.hooks, v.install);
+  const list = el("ul", "wt-gets");
+  for (const line of gets) {
+    const li = el("li");
+    li.append(icon("check"), el("span", null, line.text));
+    if (line.title) li.title = line.title;
+    list.append(li);
   }
+  head.append(list);
+  if (offers) head.append(el("div", "wt-offers", offers));
   // A layer with a mistake (a typo in config.toml or .anvil.toml): one line each.
   for (const p of v.hooks.problems ?? []) head.append(el("small", "error-text", p));
   const row = el("div", "row row-top");
   row.append(el("dt", null, "Worktrees"), head);
-  if (!open) {
-    box.replaceChildren(row);
-    box.hidden = false;
-    return;
+  box.replaceChildren(row);
+  box.hidden = false;
+  if (hooksOpen === s.name) hooksSheet(s, root, v);
+}
+
+let hooksOpen: string | null = null; // the app whose Worktrees sheet is open
+let wtSheet: HTMLDialogElement | null = null;
+
+/** The Worktrees editors in a sheet, drawn again after each change. */
+function hooksSheet(s, root, v) {
+  if (!wtSheet) {
+    wtSheet = el("dialog", "sheet wt-sheet") as HTMLDialogElement;
+    wtSheet.setAttribute("aria-labelledby", "wt-sheet-title");
+    document.body.append(wtSheet);
   }
+  const sheet = wtSheet;
+  sheet.onclose = () => {
+    hooksOpen = null;
+    renderHooks(s, root);
+  };
+  const title = el("h2", null, `Worktrees of ${s.name}`);
+  title.id = "wt-sheet-title";
+  const lead = el("div", "wt-title");
+  const tag = el("span", "wt-tag", hooksTag(v.hooks.from));
+  tag.title = hooksFrom(v.hooks.from);
+  lead.append(el("span", "wt-lead", "Changes save as you make them, for this app only."), tag);
   const save = (field: string, value: unknown) => invoke("set_app_hooks", { site: s.name, field, value }).then(() => renderHooks(s, root));
   const fields = ["copy", "copy_database", "keys", "after_create"] as const;
-  const rows = fields.map((field) => {
-    const r = el("div", "row row-top");
-    const dd = el("dd");
-    dd.append(editor(field, v.hooks, { save, install: v.install, root: s.path }));
-    r.append(el("dt", null, NAMES[field]), dd);
-    return r;
-  });
-  const foot = el("div", "row wt-foot");
-  const actions = el("dd", "wt-actions");
-  const done = el("button", "inline-action primary", "Done");
-  done.onclick = toggle;
-  actions.append(done);
+  const group = el("dl", "group wt-hooks");
+  group.append(
+    ...fields.map((field) => {
+      const r = el("div", "row row-top");
+      const dd = el("dd");
+      dd.append(editor(field, v.hooks, { save, install: v.install, root: s.path }));
+      r.append(el("dt", null, NAMES[field]), dd);
+      return r;
+    }),
+  );
+  const actions = el("div", "sheet-actions wt-actions");
   const fail = el("small", "error-text");
   fail.hidden = true;
   if (Object.keys(v.own).length) {
@@ -2148,10 +2159,11 @@ async function renderHooks(s, root) {
       );
     actions.append(reset);
   }
-  actions.append(fail);
-  foot.append(el("dt"), actions);
-  box.replaceChildren(row, ...rows, foot);
-  box.hidden = false;
+  const done = el("button", "primary", "Done");
+  done.onclick = () => sheet.close();
+  actions.append(fail, el("span", "spacer"), done);
+  sheet.replaceChildren(title, lead, group, actions);
+  if (!sheet.open) sheet.showModal();
 }
 
 /** Django checks the host name and, behind HTTPS, the scheme: two settings it needs once. */
