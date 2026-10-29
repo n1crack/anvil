@@ -67,10 +67,10 @@ describe("keyboard", () => {
 });
 
 describe("state in words", () => {
-  test("the Dev line's dots and the sidebar's badges say their state, not only their colour", async () => {
+  test("the Dev card's dots and the sidebar's badges say their state, not only their colour", async () => {
     $('#list [data-name="vuefinder"]').click();
     await wait(80);
-    const dots = $$(".procs .dev-summary .dot");
+    const dots = $$(".procs .dev-card .dot");
     expect(dots.length).toBeGreaterThan(0);
     for (const d of dots) {
       expect(d.getAttribute("role")).toBe("img");

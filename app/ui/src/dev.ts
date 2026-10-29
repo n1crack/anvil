@@ -857,6 +857,11 @@ function drawConf(name: string, force = false) {
 }
 
 late.drawDev = drawDev;
+// The Overview's Restart for a crashed process, as the Dev tab's.
+late.restartProc = (name: string, id: string) => {
+  const x = procItems(name).find((x) => x.row?.id === id);
+  if (x) runProc(name, x, "restart");
+};
 late.devTab = pane.shownTab;
 
 // Only while the tab is shown: output twice a second, the processes' states every two.

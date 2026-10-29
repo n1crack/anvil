@@ -373,21 +373,72 @@ describe("sidebar", () => {
 });
 
 describe("overview", () => {
-  test("one Dev line with a dot per process, and no process or command lists", async () => {
+  test("uptime formats", async () => {
+    const { uptime } = await import("../src/processes");
+    expect([uptime(59), uptime(3600 + 61), uptime(600)]).toEqual(["0:59", "1:01:01", "10:00"]);
+  });
+
+  test("a Dev card with a row per process, its header opens Dev; no command lists", async () => {
     await select("vuefinder");
-    const line = $(".procs .dev-summary");
-    expect(line.textContent).toContain("Dev");
-    // The count is the header's alone.
-    expect(line.querySelector(".dev-summary-state")).toBeNull();
-    expect([...line.querySelectorAll(".dot")].map((d) => d.className)).toEqual(["dot ", "dot on", "dot "]);
-    expect($$(".procs .proc")).toHaveLength(0);
+    const card = $(".procs .dev-card");
+    expect(card.querySelector(".dev-card-title")!.textContent).toBe("Dev · 3 processes");
+    expect($$(".dev-card .proc .dot").map((d) => d.className)).toEqual(["dot ", "dot on", "dot "]);
     expect($$("#site .res-sub").map((h) => h.textContent)).not.toContain("Commands");
-    expect($$("#site .res-sub").map((h) => h.textContent)).not.toContain("Processes");
-    expect($('[data-field="path"]').textContent).toBe("~/Sites/vuefinder");
-    line.click();
+    expect($('#site .facts [data-field="path"]').textContent).toBe("~/Sites/vuefinder");
+    (card.querySelector(".dev-card-head") as HTMLElement).click();
     await wait(80);
     expect($('.tabs [data-tab="dev"]').getAttribute("aria-selected")).toBe("true");
     $('.tabs [data-tab="overview"]').click();
+  });
+
+  test("dev card lists processes: uptime ticks, a crash says how it ended, with Restart", async () => {
+    await select("shop");
+    const procs = $$(".dev-card .proc");
+    expect(procs).toHaveLength(3);
+    expect($(".dev-card .dev-card-count").textContent).toBe("1 running · 1 crashed");
+    const [queue, logs, vite] = procs;
+    expect(queue.querySelector(".cmd")!.textContent).toBe("php artisan queue:listen --tries=1");
+    expect(queue.querySelector("[data-started]")!.textContent).toMatch(/^2:1\d:\d\d$/);
+    expect(logs.classList.contains("crashed")).toBe(true);
+    expect(logs.textContent).toContain("exited 1");
+    expect(vite.querySelector("[data-started]")).toBeNull();
+    const restart = logs.querySelector("button")!;
+    expect(restart.textContent).toBe("Restart");
+    restart.click();
+    await wait(80);
+    expect(calls("process_run").at(-1)![1]).toMatchObject({ site: "shop", name: "logs", action: "restart" });
+    expect($('.tabs [data-tab="overview"]').getAttribute("aria-selected")).toBe("true");
+  });
+
+  test("one ticker: only on the Overview, one across app switches", async () => {
+    for (const n of ["vuefinder", "shop", "notes", "stack", "shop"]) await select(n);
+    expect(w.__uptimeTimers).toBe(1);
+    $('.tabs [data-tab="dev"]').click();
+    await wait();
+    expect(w.__uptimeTimers).toBe(0);
+    $('.tabs [data-tab="overview"]').click();
+    await wait();
+    expect(w.__uptimeTimers).toBe(1);
+    await select("notes");
+    expect(w.__uptimeTimers).toBe(0);
+  });
+
+  test("long names truncate", async () => {
+    const shop = structuredClone(w.mockOv.shop);
+    w.mockOv.shop.rows[1].command = "x".repeat(200);
+    try {
+      await select("notes");
+      await select("shop");
+      const cmd = $(".dev-card .proc .cmd");
+      expect(cmd.textContent).toHaveLength(200);
+      // The page has no stylesheet here: the rule is read from style.css.
+      const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
+      expect(css).toMatch(/\.dev-card \.cmd,[^{]*\{[^}]*text-overflow: ellipsis/);
+      const card = $(".dev-card");
+      expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth);
+    } finally {
+      w.mockOv.shop = shop;
+    }
   });
 
   test("the header says what runs and opens Dev; Dev's Start leaves out what Dev start does", async () => {
@@ -833,17 +884,19 @@ describe("containers", () => {
   const keyDown = (key: string) => $(".containers .dev-list").dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
   let saved: any;
 
-  test("the Overview has one Containers line with a dot each, which opens the tab", async () => {
+  test("the Overview has a Containers card with a row each, whose header opens the tab", async () => {
     saved = structuredClone(w.mockOv.stack);
     await select("stack");
-    const line = $(".procs .dev-summary");
-    expect(line.querySelector(".dev-summary-title")!.textContent).toBe("Containers");
-    expect(line.querySelector(".dev-summary-state")).toBeNull();
+    const card = $(".procs .dev-card");
+    const line = card.querySelector(".dev-card-head") as HTMLElement;
+    expect(card.querySelector(".dev-card-title")!.textContent).toBe("Containers · 4");
+    expect(card.querySelector(".dev-card-count")!.textContent).toBe("3 running · 1 crashed");
     // The header counts the exited worker as crashed: red, never green.
     expect($("#site .state-text").textContent).toBe("3 running, 1 crashed");
     expect($("#site .run-box .dot").className).toBe("dot bad");
-    expect([...line.querySelectorAll(".dot")].map((d) => d.className)).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
-    expect($$(".procs .proc, .procs .proc-log")).toHaveLength(0);
+    expect($$(".dev-card .proc .dot").map((d) => d.className)).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
+    expect($$(".dev-card .proc.crashed").map((p) => p.querySelector(".proc-name")!.textContent)).toEqual(["worker"]);
+    expect($$(".dev-card [data-started], .dev-card .proc button")).toHaveLength(0);
     expect($('.tabs [data-tab="dev"]').hidden).toBe(true);
     expect(tabBtn().hidden).toBe(false);
     line.click();
@@ -3084,7 +3137,8 @@ describe("wordpress", () => {
       await state();
       await select("press");
       expect($('#site [data-field="runtime"]').textContent).toBe("WordPress on PHP 8.4 (default)");
-      const row = $('#site [data-field="runtime"]').closest(".row")!.nextElementSibling as HTMLElement;
+      // First under the facts strip, which has Runs on.
+      const row = $('#site [data-panel="overview"] .group > .row') as HTMLElement;
       expect(row.textContent).toBe("mysqliPHP 8.4 lacks mysqli, which WordPress needs for MySQL. Build mysqli");
       w.mockSnap.php_no_mysqli = [];
       (row.querySelector(".inline-action") as HTMLElement).click();
@@ -4176,7 +4230,10 @@ describe("motion", () => {
       await select("notes");
       await select("stack");
       expect(alive()).toBe(false);
-      w.mockOv.shop = { ...shop, rows: shop.rows.map((r) => ({ ...r, running: false, crashed: r.id === "logs" ? { code: 1, at: 1 } : null })) };
+      w.mockOv.shop = {
+        ...shop,
+        rows: shop.rows.map((r) => ({ ...r, running: false, crashed: r.id === "logs" ? { code: 1, at: 1 } : null })),
+      };
       await select("shop");
       expect(alive()).toBe(true);
     } finally {

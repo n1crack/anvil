@@ -1269,6 +1269,7 @@ export function showTab(root, name, fallback = false) {
   window.mailTab?.(root, name === "mail");
   if (name === "dev") late.devTab?.();
   if (name === "containers") late.containersTab?.();
+  late.syncUptime?.();
   // Measuring (du, lsof, docker) only happens when someone looks at it.
   if (name === "resources" && selected) loadResources(selected);
   placeInk(root);
@@ -1733,8 +1734,8 @@ export function renderSite() {
   const runs =
     s.kind === "compose" ? "Docker Compose" : !engine || kind === engine.split(" ")[0] ? (engine ?? kind) : `${kind} on ${engine}`;
   $('[data-field="runtime"]', root).textContent = s.kind === s.kind_detected ? runs : `${runs} (type set by you)`;
-  // A plain folder runs on nothing; its path row says what it is.
-  if (s.kind === "folder") $('[data-field="runtime"]', root).closest(".row")?.remove();
+  // A plain folder runs on nothing; its path says what it is.
+  if (s.kind === "folder") $('[data-field="runtime"]', root).closest(".fact")?.remove();
   if (PHP_KINDS.has(s.kind) && !s.php && !fromFile(s, "php")) {
     const install = el("button", "inline-action", "Install PHP 8.4");
     install.onclick = async () => {
@@ -1751,11 +1752,12 @@ export function renderSite() {
   projectNeeds(s, root);
   worktreeLines(s, root);
   leftoverLines(s, root);
-  $('[data-field="path"]', root).textContent = tilde(s.path);
-  $('[data-field="root"]', root).textContent = tilde(s.root);
+  // The strip cuts a long path short; the whole one is its tooltip.
+  Object.assign($('[data-field="path"]', root), { textContent: tilde(s.path), title: tilde(s.path) });
+  Object.assign($('[data-field="root"]', root), { textContent: tilde(s.root), title: tilde(s.root) });
   // Nothing is served from a folder or a Compose project: no web root, no HTTPS.
   if (!serves(s)) {
-    $('[data-field="root"]', root).closest(".row")?.remove();
+    $('[data-field="root"]', root).closest(".fact")?.remove();
     for (const x of root.querySelectorAll(".serves-only")) x.remove();
   }
 
@@ -2165,7 +2167,7 @@ function mysqliLine(s, root) {
   if (mysqliErrors.has(v)) dd.append(el("small", "error-text", ` ${mysqliErrors.get(v)}`));
   const row = el("div", "row");
   row.append(el("dt", null, "mysqli"), dd);
-  $('[data-field="runtime"]', root).closest(".row")?.after(row);
+  $('[data-panel="overview"] .group', root).prepend(row);
 }
 
 const installing = new Set<string>(); // "php:8.3" while it installs, across re-renders
@@ -2234,9 +2236,7 @@ function projectNeeds(s, root) {
   dd.append(fail);
   const row = el("div", "row");
   row.append(el("dt", null, "Project"), dd);
-  const runsOn = $('[data-field="runtime"]', root)?.closest(".row");
-  if (runsOn) runsOn.after(row);
-  else $('[data-panel="overview"] .group', root).prepend(row);
+  $('[data-panel="overview"] .group', root).prepend(row);
 }
 
 const prepareErrors = new Map<string, string>(); // a failed Prepare database, across re-renders

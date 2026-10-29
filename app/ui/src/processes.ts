@@ -1,13 +1,13 @@
-import type { AgentAction, Container, Overview } from "./types";
-import { $, el, invoke, mode, popAt, renderSite, selected, showError, showTab, snap, tab } from "./app";
+import type { AgentAction, Container, Overview, ProcessRow } from "./types";
+import { $, ago, el, invoke, mode, popAt, renderSite, selected, showError, showTab, snap, tab } from "./app";
 import { late } from "./late";
 import { clock, shown } from "./live";
 import { keys } from "./platform";
 
 /* An app's processes as the Overview and the header see them: the backend's overview
- * (rows, one-off scripts, Docker Compose containers), the header's Dev start/stop, one
- * "Dev · 3 of 4 running" line that opens the Dev tab (dev.ts), and the same line for the
- * containers, which opens the Containers tab (containers.ts). */
+ * (rows, one-off scripts, Docker Compose containers), the header's Dev start/stop, a Dev
+ * card with a row per process whose header opens the Dev tab (dev.ts), and the same card
+ * for the containers, which opens the Containers tab (containers.ts). */
 
 export const procCache = new Map<string, Overview>(); // site name -> overview from the backend
 export const procLoading = new Set<string>(); // site names with a request on its way
@@ -240,24 +240,59 @@ function drawRunBox(name, rows, containers) {
   };
 }
 
-/** "Dev" with a dot per entry (or what went wrong); a click opens `tab`. The counts are
- * the header's, said once. */
-function summaryLine(title: string, dots: [string, string][], tab: string, keys: string, error?: string | null) {
-  const b = el("button", "dev-summary");
-  const box = el("span", "dev-summary-dots");
-  for (const [name, cls] of dots) {
+/** How long a process has run: "m:ss", "h:mm:ss" from an hour. */
+export function uptime(sec: number) {
+  const s = Math.max(0, Math.floor(sec));
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return s < 3600 ? `${mm}:${ss}` : `${Math.floor(s / 3600)}:${String(mm).padStart(2, "0")}:${ss}`;
+}
+
+/** A card row: dot class, name, command, the right column, crashed. */
+type Entry = [string, string, string, Node[], boolean];
+
+/** A card: its header (title, counts or what went wrong) opens `tab`; one row per entry. */
+function devCard(title: string, state: Node, rows: Entry[], tab: string, keys: string) {
+  const card = el("div", "dev-card");
+  const head = el("button", "dev-card-head");
+  head.append(el("span", "dev-card-title", title), state);
+  const label = tab === "dev" ? "Dev" : "Containers";
+  head.title = keys ? `Show the ${label} tab (${keys})` : `Show the ${label} tab`;
+  head.onclick = () => showTab($("#site"), tab);
+  card.append(head);
+  for (const [cls, name, cmd, end, crashed] of rows) {
+    const row = el("div", crashed ? "proc crashed" : "proc");
     const d = el("span", `dot ${cls}`);
     // The state in words too, not only the colour.
-    const state = Object.keys(DOT).find((k) => DOT[k] === cls) ?? "stopped";
-    d.title = `${name}: ${state}`;
     d.setAttribute("role", "img");
-    d.setAttribute("aria-label", d.title);
-    box.append(d);
+    d.setAttribute("aria-label", `${name}: ${Object.keys(DOT).find((k) => DOT[k] === cls) ?? "stopped"}`);
+    const n = el("span", "proc-name", name);
+    const c = el("span", "cmd", cmd);
+    n.title = name;
+    c.title = cmd;
+    const right = el("span", "proc-end");
+    right.append(...end);
+    row.append(d, n, c, right);
+    card.append(row);
   }
-  b.append(el("span", "dev-summary-title", title), ...(error ? [el("span", "dev-summary-state error-text", error)] : []), box);
-  b.title = keys ? `Show the ${title} tab (${keys})` : `Show the ${title} tab`;
-  b.onclick = () => showTab($("#site"), tab);
-  return b;
+  return card;
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** A Dev row's right column: its uptime, how it ended with Restart, or its state. */
+function procEnd(name: string, r: ProcessRow): Node[] {
+  if (r.running && r.started) {
+    const up = el("span", "up", uptime(Date.now() / 1000 - r.started));
+    up.dataset.started = String(r.started);
+    return [up];
+  }
+  if (!r.crashed || r.running) return [el("span", "up", r.starting ? "starting" : "stopped")];
+  const how = r.crashed.code == null ? "ended by a signal" : `exited ${r.crashed.code}`;
+  return [
+    el("span", "up bad", `${how} · ${ago(new Date(r.crashed.at * 1000))}`),
+    procBtn("Restart", `Restart ${r.name}`, () => late.restartProc?.(name, r.id)),
+  ];
 }
 
 /** Something of the app is live: a process or container runs or has crashed (the site's own
@@ -279,21 +314,70 @@ export function drawProcs(name) {
   late.drawContainers?.(name);
   box.hidden = !(dev.length || compose);
   box.replaceChildren();
-  if (box.hidden) return;
+  if (box.hidden) return syncUptime();
   const devTab = !$('#site .tabs [data-tab="dev"]')?.hidden;
+  const counts = (running: number, crashed: number) =>
+    el(
+      "span",
+      "dev-card-count",
+      [running && `${running} running`, crashed && `${crashed} crashed`].filter(Boolean).join(" · ") || "none running",
+    );
   if (dev.length) {
-    const dots: [string, string][] = dev.map((r) => [r.name, r.running ? "on" : r.crashed ? "bad" : ""]);
-    box.append(summaryLine("Dev", dots, "dev", keys("⌘3")));
+    const running = dev.filter((r) => r.running).length;
+    const crashed = dev.filter((r) => r.crashed && !r.running).length;
+    const rows = dev.map((r): Entry => {
+      const cls = r.running ? (r.starting ? "amber" : "on") : r.crashed ? "bad" : "";
+      return [cls, r.name, r.command, procEnd(name, r), cls === "bad"];
+    });
+    box.append(devCard(`Dev · ${plural(dev.length, "process", "processes")}`, counts(running, crashed), rows, "dev", keys("⌘3")));
   }
   const error = o?.docker_error;
   if (error && !containers.length) box.append(composeError(error, o!.compose_file));
   else if (compose) {
-    const dots: [string, string][] = containers.map((c) => [c.service, DOT[containerState(c)]]);
-    const line = summaryLine("Containers", dots, "containers", devTab ? "" : keys("⌘3"), error && composeBrief(error, o!.compose_file));
-    if (error) line.title = error;
-    box.append(line);
+    const states = containers.map(containerState);
+    const state = error
+      ? el("span", "dev-card-count error-text", composeBrief(error, o!.compose_file))
+      : counts(containers.filter((c) => c.state === "running").length, states.filter((s) => s === "crashed").length);
+    const rows = containers.map((c, i): Entry => {
+      const s = states[i];
+      const word = s === "crashed" ? `exited ${c.exit_code}` : s;
+      return [
+        DOT[s],
+        c.service,
+        c.ports.map((p) => `:${p}`).join(" "),
+        [el("span", s === "crashed" ? "up bad" : "up", word)],
+        s === "crashed",
+      ];
+    });
+    const card = devCard(`Containers · ${containers.length}`, state, rows, "containers", devTab ? "" : keys("⌘3"));
+    if (error) card.firstElementChild!.setAttribute("title", error);
+    box.append(card);
+  }
+  syncUptime();
+}
+
+/** The Dev card's uptimes tick once a second, in place: one timer, alive only while the
+ * Overview shows a card with a running process. Called on every draw and tab change. */
+let uptimeTimer = 0;
+export function syncUptime() {
+  const want = mode === "apps" && tab === "overview" && !!$("#site .dev-card [data-started]");
+  if (want && !uptimeTimer) uptimeTimer = window.setInterval(tickUptime, 1000);
+  else if (!want && uptimeTimer) {
+    clearInterval(uptimeTimer);
+    uptimeTimer = 0;
+  }
+  window.__uptimeTimers = uptimeTimer ? 1 : 0; // for the tests
+}
+
+function tickUptime() {
+  syncUptime();
+  const now = Date.now() / 1000;
+  for (const u of document.querySelectorAll<HTMLElement>("#site .dev-card [data-started]")) {
+    u.textContent = uptime(now - Number(u.dataset.started));
   }
 }
+
+late.syncUptime = syncUptime;
 
 /** What a compose error says in one line: a short one as it is ("Docker isn't running"),
  * else that the file can't be read; the whole message is its tooltip. */

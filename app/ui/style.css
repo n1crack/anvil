@@ -1326,20 +1326,51 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-json-msg { min-height: 1.5em; margin: 8px 0 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .dev-json-msg.error-text { color: var(--danger); }
 
-/* The Overview's one line about Dev. */
+/* The Overview's line for a compose file that can't be read; a click shows why. */
 button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--steel-raised); color: var(--text); font-size: 13px; text-align: left; }
 .dev-summary-title { font-weight: 600; }
 .dev-summary-state { color: var(--muted); }
 .dev-summary-state::before { content: "·"; margin-right: 8px; }
-.dev-summary-dots { display: flex; gap: 4px; margin-left: auto; }
 .dev-summary.is-muted .dev-summary-title { font-weight: 500; color: var(--muted); }
-/* A chevron says the line opens its tab. */
-button.dev-summary:not(.is-muted)::after { content: ""; flex: none; width: 6px; height: 6px; margin: 0 2px 0 6px; border-top: 1.5px solid var(--muted); border-right: 1.5px solid var(--muted); transform: rotate(45deg); }
-button.dev-summary:not(.is-muted):hover::after { border-color: var(--text); }
 .dev-summary-detail { margin: 6px 12px 0; color: var(--muted); font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
 .dev-summary-detail[hidden] { display: none; }
 /* The Dev and Containers lines, apart. */
 .procs > * + * { margin-top: 8px; }
+
+/* The Overview's Dev and Containers cards: the header opens the tab, a row per entry
+ * (dot, name, command, then uptime or how it ended). Names and commands cut short.
+ * Dev's own list is a .dev-card too, hence .procs. */
+[data-panel="overview"] > .procs { margin-bottom: 12px; }
+.procs .dev-card { overflow: hidden; border-radius: var(--radius-m); background: var(--steel-raised); box-shadow: var(--card-shadow); }
+.procs .dev-card-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 8px 14px; border: 0; background: none; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-align: left; text-transform: uppercase; }
+.procs .dev-card-head:hover { color: var(--text); }
+.procs .dev-card-count { margin-left: auto; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+/* A chevron says the header opens its tab. */
+.procs .dev-card-head::after { content: ""; flex: none; width: 6px; height: 6px; margin: 0 2px 0 4px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); }
+.procs .dev-card .proc { grid-template-columns: 8px minmax(0, 140px) minmax(0, 1fr) auto; min-height: 36px; border-top: 1px solid var(--line); }
+.procs .dev-card .proc:hover { background: none; }
+.procs .dev-card .proc.crashed { background: linear-gradient(90deg, var(--danger-soft), transparent 60%); box-shadow: none; }
+.procs .dev-card .cmd,
+.procs .dev-card .proc-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.procs .dev-card .cmd { color: var(--muted); font: 11.5px ui-monospace, "SF Mono", Menlo, monospace; }
+.procs .proc-end { display: flex; align-items: center; gap: 10px; justify-self: end; }
+.procs .proc-end .up { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.procs .proc-end .up.bad { color: var(--danger); }
+.procs .proc-end button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); font-size: 12px; }
+.procs .proc-end button:hover { background: var(--steel-hover); }
+
+/* Runs on, Folder and Web root side by side above the rows; a long path is cut short,
+ * the whole one in its tooltip. */
+.facts { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; margin: 0 0 12px; border-radius: var(--radius-m); background: var(--steel-raised); box-shadow: var(--card-shadow); }
+.fact { min-width: 0; padding: 9px 14px 10px; }
+.fact + .fact { border-left: 1px solid var(--line); }
+.fact dt { margin-bottom: 3px; color: var(--muted); font-size: 11px; }
+.fact dd { min-width: 0; margin: 0; }
+.fact .path-cell { gap: 4px; }
+.fact .path { overflow: hidden; font: 12px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; text-overflow: ellipsis; overflow-wrap: normal; }
+.fact .path-open { width: 20px; height: 20px; }
+/* No rows left under the strip (a plain folder): no empty card. */
+[data-panel="overview"] > .group:not(:has(> :not([hidden]))) { display: none; }
 
 .path {
   overflow-wrap: anywhere;
