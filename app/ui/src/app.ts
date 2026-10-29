@@ -829,7 +829,14 @@ export function placeSel(list: HTMLElement) {
   }
   hl.style.width = `${row.offsetWidth}px`;
   hl.style.height = `${row.offsetHeight}px`;
+  // The first place is where it starts: it lands there, it doesn't slide in from the corner.
+  const first = !hl.style.transform;
+  if (first) hl.style.transition = "none";
   hl.style.transform = `translate(${x}px, ${y}px)`;
+  if (first) {
+    void hl.offsetWidth;
+    hl.style.transition = "";
+  }
 }
 // Folding a group or worktrees moves the rows under it: placed at once by the fold (right
 // without motion), and again once the slide ends.
@@ -1249,6 +1256,14 @@ const RUNTIME = {
   fastapi: "Python",
   flask: "Python",
 };
+
+/** A run card's header: a button with the title and the state at its end, opening `tab`. */
+export function cardHead(title: string, state: Node, tab: string) {
+  const head = el("button", "run-card-head");
+  head.append(el("span", "run-card-title", title), state);
+  head.onclick = () => showTab($("#site"), tab);
+  return head;
+}
 
 /** Show a tab. The user's choice is remembered; a `fallback` (the app lacks the chosen
  * tab) shows another without forgetting it, so the choice comes back with an app that has it. */
@@ -1685,6 +1700,8 @@ export function renderSite() {
   const process = PROCESS_KINDS.has(s.kind);
 
   root.replaceChildren($("#site-tpl").content.cloneNode(true));
+  // A new glow would restart its drift: join the cycle where the last one was.
+  $(".glow", root).style.animationDelay = `-${performance.now() % 7000}ms`;
   topSize.disconnect();
   topSize.observe($(".site-top", root));
   $(".site-name", root).textContent = s.name;

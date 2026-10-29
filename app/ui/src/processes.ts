@@ -1,5 +1,5 @@
 import type { AgentAction, Container, Overview, ProcessRow } from "./types";
-import { $, ago, el, invoke, mode, popAt, renderSite, selected, showError, showTab, snap, tab } from "./app";
+import { $, ago, cardHead, el, invoke, mode, popAt, renderSite, selected, showError, showTab, snap, tab } from "./app";
 import { late } from "./late";
 import { clock, shown } from "./live";
 import { keys } from "./platform";
@@ -252,13 +252,11 @@ export function uptime(sec: number) {
 type Entry = [string, string, string, Node[], boolean];
 
 /** A card: its header (title, counts or what went wrong) opens `tab`; one row per entry. */
-function devCard(title: string, state: Node, rows: Entry[], tab: string, keys: string) {
+function runCard(title: string, state: Node, rows: Entry[], tab: string, keys: string) {
   const card = el("div", "run-card");
-  const head = el("button", "run-card-head");
-  head.append(el("span", "run-card-title", title), state);
+  const head = cardHead(title, state, tab);
   const label = tab === "dev" ? "Dev" : "Containers";
   head.title = keys ? `Show the ${label} tab (${keys})` : `Show the ${label} tab`;
-  head.onclick = () => showTab($("#site"), tab);
   card.append(head);
   for (const [cls, name, cmd, end, crashed] of rows) {
     const row = el("div", crashed ? "proc crashed" : "proc");
@@ -330,7 +328,7 @@ export function drawProcs(name) {
       const cls = r.running ? (r.starting ? "amber" : "on") : r.crashed ? "bad" : "";
       return [cls, r.name, r.command, procEnd(name, r), cls === "bad"];
     });
-    box.append(devCard(`Dev · ${plural(dev.length, "process", "processes")}`, counts(running, crashed), rows, "dev", keys("⌘3")));
+    box.append(runCard(`Dev · ${plural(dev.length, "process", "processes")}`, counts(running, crashed), rows, "dev", keys("⌘3")));
   }
   const error = o?.docker_error;
   if (error && !containers.length) box.append(composeError(error, o!.compose_file));
@@ -350,7 +348,7 @@ export function drawProcs(name) {
         s === "crashed",
       ];
     });
-    const card = devCard(`Containers · ${containers.length}`, state, rows, "containers", devTab ? "" : keys("⌘3"));
+    const card = runCard(`Containers · ${containers.length}`, state, rows, "containers", devTab ? "" : keys("⌘3"));
     if (error) card.firstElementChild!.setAttribute("title", error);
     box.append(card);
   }

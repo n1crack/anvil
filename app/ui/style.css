@@ -28,7 +28,6 @@
   /* Running: green, so it never reads as a warning. */
   --ok: #3ddc84;
   --ok-text: #5fe39a;
-  --ok-soft: rgba(61, 220, 132, 0.1);
 
   /* An address's lock: muted green for HTTPS, muted red for HTTP; quiet beside the name. */
   --lock-on: #6aa97a;
@@ -49,7 +48,6 @@
   /* Cards (grouped lists, bubbles): a top highlight, a hairline ring and a soft drop;
    * hovered, the ring warms. */
   --card-shadow: inset 0 1px 0 rgba(255, 230, 210, 0.05), 0 0 0 1px rgba(255, 230, 210, 0.06), 0 10px 30px -14px rgba(0, 0, 0, 0.9);
-  --card-shadow-hi: inset 0 1px 0 rgba(255, 200, 150, 0.09), 0 0 0 1px rgba(255, 138, 31, 0.18), 0 16px 34px -14px rgba(255, 90, 20, 0.18);
   /* Bubbles float over cards of their own tone: a firmer ring and a deeper drop. */
   --pop-shadow: inset 0 1px 0 rgba(255, 230, 210, 0.07), 0 0 0 1px rgba(255, 230, 210, 0.13), 0 12px 32px -6px rgba(0, 0, 0, 0.7);
   /* The selected sidebar row: a warm fill fading right, a faint ring of the same hue. */
@@ -103,7 +101,6 @@
     --danger-soft: rgba(217, 45, 45, 0.1);
     --ok: #1fa84a;
     --ok-text: #137a33;
-    --ok-soft: rgba(31, 168, 74, 0.1);
     --lock-on: #4e8a5d;
     --lock-off: #b0675e;
     --amber: #b87400;
@@ -119,7 +116,6 @@
     --switch-on: #3f8f56;
 
     --card-shadow: 0 0 0 1px rgba(60, 30, 10, 0.07), 0 1px 2px rgba(60, 30, 10, 0.04), 0 8px 22px -12px rgba(60, 30, 10, 0.14);
-    --card-shadow-hi: 0 0 0 1px rgba(232, 101, 12, 0.25), 0 2px 4px rgba(60, 30, 10, 0.05), 0 14px 30px -14px rgba(232, 101, 12, 0.25);
     --pop-shadow: 0 0 0 1px rgba(60, 30, 10, 0.1), 0 10px 28px -6px rgba(60, 30, 10, 0.25);
     --sel-fill: linear-gradient(90deg, rgba(232, 101, 12, 0.1), rgba(232, 101, 12, 0.02) 70%);
     --sel-ring: inset 0 0 0 1px rgba(232, 101, 12, 0.12);

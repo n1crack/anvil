@@ -1,4 +1,4 @@
-import { $, el, inlineError, invoke, seg, selected, showTab, snap, tab } from "./app";
+import { $, cardHead, el, inlineError, invoke, seg, selected, showTab, snap, tab } from "./app";
 import { follower } from "./console";
 import { shown } from "./live";
 
@@ -285,10 +285,8 @@ function stopPreview() {
 
 function previewCard(s) {
   const node = el("div", "run-card");
-  const head = el("button", "run-card-head");
+  const head = cardHead("Requests", el("span", "run-card-count", "live"), "requests");
   head.title = "Show the Requests tab";
-  head.append(el("span", "run-card-title", "Requests"), el("span", "run-card-count", "live"));
-  head.onclick = () => showTab($("#site"), "requests");
   const list = el("ol", "req-preview-list");
   node.append(head, list);
   const p: any = { site: s.name, host: s.host, node, list, from: null, busy: true, status: "all", method: "", query: "", assets: false };
