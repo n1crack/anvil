@@ -56,7 +56,12 @@
   --flash: rgba(255, 138, 31, 0.1); /* a new row, for a moment */
   --ink: #f1ece8; /* the selected tab's underline */
   /* Ember behind the header of an app that is alive. */
-  --glow: radial-gradient(closest-side, rgba(255, 120, 30, 0.2), rgba(232, 65, 12, 0.07) 55%, transparent);
+  /* The header's silk threads (silk.ts): three sheet colours, a strength and how they mix. */
+  --silk-1: rgb(255, 168, 70);
+  --silk-2: rgb(255, 140, 50);
+  --silk-3: rgb(255, 196, 110);
+  --silk-k: 0.45;
+  --silk-blend: lighter;
   /* A sidebar tile: lit from the top, with an inner hairline (an outer one would be cut by the badge's mask). */
   --tile: linear-gradient(160deg, #2c2724, #1d1a18);
   --tile-fg: #d9cfc8;
@@ -121,7 +126,11 @@
     --sel-ring: inset 0 0 0 1px rgba(232, 101, 12, 0.12);
     --flash: rgba(232, 101, 12, 0.08);
     --ink: #1f1a17;
-    --glow: radial-gradient(closest-side, rgba(255, 150, 60, 0.22), rgba(255, 120, 30, 0.06) 55%, transparent);
+    --silk-1: rgb(194, 65, 12);
+    --silk-2: rgb(217, 119, 6);
+    --silk-3: rgb(180, 83, 9);
+    --silk-k: 1;
+    --silk-blend: multiply;
     --tile: linear-gradient(160deg, #ffffff, #f3eee9);
     --tile-fg: #4a3f38;
     --tile-shadow: inset 0 1px 0 #ffffff, inset 0 0 0 1px rgba(60, 30, 10, 0.1);
@@ -693,8 +702,6 @@ button, select, input { font: inherit; color: inherit; }
   --pad: 36px;
   flex: 1;
   overflow-y: auto;
-  /* The header's glow drifts past the edge; it is cut there, not scrolled to. */
-  overflow-x: clip;
   padding: 8px var(--pad) var(--pad);
 }
 
@@ -720,24 +727,24 @@ button, select, input { font: inherit; color: inherit; }
   margin-bottom: 12px;
 }
 
-/* An ember behind the header's right side while the app is alive; it fades in and out and drifts slowly. */
-.glow {
+/* Silk threads behind the header and tabs while the app is alive (drawn by silk.ts); they fade in and out. */
+.silk {
   position: absolute;
-  inset: -80px calc(-1 * var(--pad)) auto auto; /* to the pane's edge, no further: no sideways scroll */
+  inset: 0;
   z-index: -1;
-  width: 560px;
-  height: 360px;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  background: var(--glow);
   opacity: 0;
   transition: opacity 0.8s;
+  -webkit-mask: linear-gradient(#000 60%, transparent);
+  mask: linear-gradient(#000 60%, transparent);
 }
 
-#site.alive .glow { opacity: 1; animation: heat 7s ease-in-out infinite; }
+#site.alive .silk { opacity: 1; }
 
 @keyframes breathe { 50% { opacity: 0.6; } }
 
-@keyframes heat { 50% { transform: translate(-30px, 14px) scale(1.08); } }
 
 /* The name keeps its line; Start/Stop move under it when the pane is narrow. */
 .site-title {

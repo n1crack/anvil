@@ -9,7 +9,7 @@ contain breaking changes.
 
 ### Changed
 
-- A warmer, layered look with motion: selection and tabs slide, the header glows while an app runs, the sidebar shows what kind each app is, and Overview shows what runs, with uptime and the latest requests.
+- A warmer, layered look with motion: selection and tabs slide, threads of fire drift behind the header while an app runs, the sidebar shows what kind each app is, and Overview shows what runs, with uptime and the latest requests.
 
 ### Fixed
 

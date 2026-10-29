@@ -4485,11 +4485,12 @@ describe("motion", () => {
     }
   });
 
-  test("the glow is behind the header, inert, and stops for reduced motion", () => {
+  test("the silk sits behind the header, inert, shown only while alive", () => {
     const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
-    expect($("#site .site-head .glow")).toBeTruthy();
-    expect(css).toMatch(/\.glow\s*{[^}]*pointer-events: none/);
-    expect(css).toContain("#site.alive .glow");
+    expect($("#site .site-top > canvas.silk")).toBeTruthy();
+    expect(css).toMatch(/\.silk\s*{[^}]*pointer-events: none/);
+    expect(css).toContain("#site.alive .silk { opacity: 1; }");
+    expect(css).not.toContain(".glow");
     expect(css).toMatch(/\.power\[data-on="true"\] \.ingot\s*{[^}]*breathe 2\.4s/);
   });
 

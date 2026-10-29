@@ -1700,8 +1700,6 @@ export function renderSite() {
   const process = PROCESS_KINDS.has(s.kind);
 
   root.replaceChildren($("#site-tpl").content.cloneNode(true));
-  // A new glow would restart its drift: join the cycle where the last one was.
-  $(".glow", root).style.animationDelay = `-${performance.now() % 7000}ms`;
   topSize.disconnect();
   topSize.observe($(".site-top", root));
   $(".site-name", root).textContent = s.name;
