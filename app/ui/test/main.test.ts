@@ -1795,6 +1795,37 @@ describe("overview requests preview", () => {
     expect(paths()[0]).toBe("/burst0");
   });
 
+  test("a new row flashes once: shown again, it doesn't open and flash anew", async () => {
+    const fresh = rows().filter((r) => r.classList.contains("req-new"));
+    expect(fresh.length).toBeGreaterThan(0);
+    // happy-dom runs no animations: their end by hand.
+    const end = (name: string) => Object.assign(new Event("animationend"), { animationName: name });
+    for (const r of fresh) r.dispatchEvent(end("req-slot"));
+    expect(fresh[0].classList.contains("req-new")).toBe(true); // the flash still runs
+    for (const r of fresh) r.dispatchEvent(end("req-flash"));
+    $('.tabs [data-tab="git"]').click();
+    $('.tabs [data-tab="overview"]').click();
+    await wait(30);
+    expect($(".req-preview .req-new")).toBeNull();
+    expect(rows()[0]).toBe(fresh[0]); // the same row, not drawn again
+  });
+
+  test("a first read that failed is tried again when the Overview is shown next", async () => {
+    w.mockFail = { requests_read: "permission denied" };
+    try {
+      await select("vuefinder");
+      expect($(".req-preview .empty.error-text").textContent).toBe("permission denied");
+    } finally {
+      w.mockFail = null;
+    }
+    $('.tabs [data-tab="git"]').click();
+    $('.tabs [data-tab="overview"]').click();
+    await wait(30);
+    expect($(".req-preview .empty")).toBeNull();
+    expect(rows()).toHaveLength(3);
+    await select("shop");
+  });
+
   test("its header opens the Requests tab", async () => {
     const head = $(".req-preview .run-card-head");
     expect(head.tagName).toBe("BUTTON");
@@ -1827,10 +1858,14 @@ describe("overview requests preview", () => {
 
   test("one poll across rapid app switches, none after leaving the Overview", async () => {
     const live = new Set<number>();
+    let made = 0;
     const [set, clear] = [window.setInterval, window.clearInterval];
     w.setInterval = (fn: any, ms?: number, ...a: any[]) => {
       const h = set(fn, ms, ...a);
-      if (fn?.name === "previewTick") live.add(h);
+      if (fn?.name === "previewTick") {
+        live.add(h);
+        made++;
+      }
       return h;
     };
     w.clearInterval = (h?: number) => {
@@ -1843,6 +1878,12 @@ describe("overview requests preview", () => {
         await wait(5);
       }
       await select("shop");
+      expect(live.size).toBe(1);
+      // The same app drawn again keeps its poll rather than starting it over.
+      const before = made;
+      $('.tabs [data-tab="overview"]').click();
+      await select("shop");
+      expect(made).toBe(before);
       expect(live.size).toBe(1);
       $('.tabs [data-tab="git"]').click();
       expect(live.size).toBe(0);

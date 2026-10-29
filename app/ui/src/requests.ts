@@ -265,17 +265,23 @@ let pv: any = null; // { site, host, node, list, from, busy } and the tab's unfi
 let pvTimer = 0;
 
 window.requestsPreview = (root, visible) => {
+  const box = $(".req-preview", root);
+  const s = box && $('.tabs [data-tab="requests"]', root)?.hidden === false && snap.sites.find((x) => x.name === selected);
+  if (box) box.hidden = !s;
+  if (!s || !visible) return stopPreview();
+  if (pv?.site !== s.name) {
+    stopPreview();
+    pv = previewCard(s);
+  }
+  if (pv.node.parentElement !== box) box.replaceChildren(pv.node);
+  // The same app redrawn keeps its poll: restarting it on each draw could starve it.
+  if (!pvTimer) pvTimer = window.setInterval(previewTick, 1500);
+};
+
+function stopPreview() {
   window.clearInterval(pvTimer);
   pvTimer = 0;
-  const box = $(".req-preview", root);
-  if (!box) return;
-  const s = $('.tabs [data-tab="requests"]', root)?.hidden === false && snap.sites.find((x) => x.name === selected);
-  box.hidden = !s;
-  if (!s || !visible) return;
-  if (pv?.site !== s.name) pv = previewCard(s);
-  box.replaceChildren(pv.node);
-  pvTimer = window.setInterval(previewTick, 1500);
-};
+}
 
 function previewCard(s) {
   const node = el("div", "run-card");
@@ -292,7 +298,10 @@ function previewCard(s) {
       list.replaceChildren(...page.requests.slice(0, PREVIEW_ROWS).map((r) => row(p, r, "div")));
       if (!page.requests.length) list.append(el("li", "empty", "No requests yet."));
     })
-    .catch((e) => list.replaceChildren(el("li", "empty error-text", String(e))))
+    .catch((e) => {
+      list.replaceChildren(el("li", "empty error-text", String(e)));
+      if (pv === p) pv = null; // read again when the Overview is shown next
+    })
     .finally(() => (p.busy = false));
   return p;
 }
@@ -301,11 +310,7 @@ function previewCard(s) {
  * already there stay as drawn. */
 async function previewTick() {
   const p = pv;
-  if (!p?.node.isConnected || p.node.closest("[hidden]")) {
-    window.clearInterval(pvTimer);
-    pvTimer = 0;
-    return;
-  }
+  if (!p?.node.isConnected || p.node.closest("[hidden]")) return stopPreview();
   if (!shown() || p.busy || p.from == null) return;
   p.busy = true;
   let page;
@@ -321,7 +326,11 @@ async function previewTick() {
   if (!page.requests.length) return;
   p.list.querySelector(".empty")?.remove();
   const fresh = page.requests.slice(0, PREVIEW_ROWS).map((r) => row(p, r, "div"));
-  for (const li of fresh) li.classList.add("req-new");
+  for (const li of fresh) {
+    li.classList.add("req-new");
+    // Once: shown again (another tab and back, a redraw) it would open and flash anew.
+    li.addEventListener("animationend", (e) => e.animationName === "req-flash" && li.classList.remove("req-new"));
+  }
   p.list.prepend(...fresh);
   for (const old of [...p.list.children].slice(PREVIEW_ROWS)) old.remove();
 }
