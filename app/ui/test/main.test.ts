@@ -4165,11 +4165,34 @@ describe("motion", () => {
     }
   });
 
+  test("a Compose app's containers and a crashed-only row make the header glow", async () => {
+    const alive = () => $("#site").classList.contains("alive");
+    const stack = w.mockOv.stack;
+    const shop = w.mockOv.shop;
+    try {
+      await select("stack");
+      expect(alive()).toBe(true);
+      w.mockOv.stack = { ...stack, containers: stack.containers.map((c) => ({ ...c, state: "exited", exit_code: 0 })) };
+      await select("notes");
+      await select("stack");
+      expect(alive()).toBe(false);
+      w.mockOv.shop = { ...shop, rows: shop.rows.map((r) => ({ ...r, running: false, crashed: r.id === "logs" ? { code: 1, at: 1 } : null })) };
+      await select("shop");
+      expect(alive()).toBe(true);
+    } finally {
+      w.mockOv.stack = stack;
+      w.mockOv.shop = shop;
+      await select("notes");
+      await select("shop");
+    }
+  });
+
   test("the glow is behind the header, inert, and stops for reduced motion", () => {
     const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
     expect($("#site .site-head .glow")).toBeTruthy();
     expect(css).toMatch(/\.glow\s*{[^}]*pointer-events: none/);
     expect(css).toContain("#site.alive .glow");
+    expect(css).toMatch(/\.power\[data-on="true"\] \.ingot\s*{[^}]*breathe 2\.4s/);
   });
 
   test("reduced motion stops animations but not spinners", () => {

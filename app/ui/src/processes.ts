@@ -260,9 +260,10 @@ function summaryLine(title: string, dots: [string, string][], tab: string, keys:
   return b;
 }
 
-/** Something of the app is live: a process runs or has crashed (the site's own row counts
- * once Caddy serves it). Containers and the address don't: a folder stays cold. */
-const isAlive = (o?: Overview | null) => !!o?.rows.some((r) => r.running || r.crashed);
+/** Something of the app is live: a process or container runs or has crashed (the site's own
+ * row counts once Caddy serves it). The address alone doesn't: a folder stays cold. */
+const isAlive = (o?: Overview | null) =>
+  !!o?.rows.some((r) => r.running || r.crashed) || !!o?.containers?.some((c) => c.state === "running" || containerState(c) === "crashed");
 
 export function drawProcs(name) {
   const box = $("#site .procs");

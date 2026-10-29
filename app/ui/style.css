@@ -626,6 +626,7 @@ button, select, input { font: inherit; color: inherit; }
 .power[data-on="true"] { color: var(--ok-text); }
 
 .power[data-on="true"] .ingot {
+  animation: breathe 2.4s ease-in-out infinite;
   background: linear-gradient(180deg, color-mix(in srgb, var(--ok) 55%, white), var(--ok) 55%, color-mix(in srgb, var(--ok) 70%, black));
   box-shadow: 0 0 10px 1px color-mix(in srgb, var(--ok) 60%, transparent);
 }
@@ -678,6 +679,8 @@ button, select, input { font: inherit; color: inherit; }
   --pad: 36px;
   flex: 1;
   overflow-y: auto;
+  /* The header's glow drifts past the edge; it is cut there, not scrolled to. */
+  overflow-x: clip;
   padding: 8px var(--pad) var(--pad);
 }
 
@@ -691,8 +694,6 @@ button, select, input { font: inherit; color: inherit; }
   margin: -8px calc(-1 * var(--pad)) 0;
   padding: 8px var(--pad) 0;
   background: var(--steel-pane);
-  /* The glow reaches past the header; clip it here so the pane never scrolls sideways. */
-  overflow: clip;
 }
 
 /* Header: name and address on the left, run state on the right. */
@@ -708,7 +709,7 @@ button, select, input { font: inherit; color: inherit; }
 /* An ember behind the header's right side while the app is alive; it fades in and out and drifts slowly. */
 .glow {
   position: absolute;
-  inset: -80px -60px auto auto;
+  inset: -80px calc(-1 * var(--pad)) auto auto; /* to the pane's edge, no further: no sideways scroll */
   z-index: -1;
   width: 560px;
   height: 360px;
@@ -719,6 +720,8 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 #site.alive .glow { opacity: 1; animation: heat 7s ease-in-out infinite; }
+
+@keyframes breathe { 50% { opacity: 0.6; } }
 
 @keyframes heat { 50% { transform: translate(-30px, 14px) scale(1.08); } }
 
