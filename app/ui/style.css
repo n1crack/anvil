@@ -38,7 +38,7 @@
   --amber: var(--heat-white);
   --amber-text: var(--heat-white);
 
-  /* Split from --line/--heat so the light theme can differ; same look in dark. */
+  /* Split from --line/--heat so the themes can differ: controls get a firmer edge than hairlines. */
   --edge: rgba(255, 240, 230, 0.1); /* the border of buttons, fields and chips */
   --group-bg: color-mix(in srgb, var(--heat) 6%, transparent);
   --group-text: #c98a5a;
@@ -50,6 +50,8 @@
    * hovered, the ring warms. */
   --card-shadow: inset 0 1px 0 rgba(255, 230, 210, 0.05), 0 0 0 1px rgba(255, 230, 210, 0.06), 0 10px 30px -14px rgba(0, 0, 0, 0.9);
   --card-shadow-hi: inset 0 1px 0 rgba(255, 200, 150, 0.09), 0 0 0 1px rgba(255, 138, 31, 0.18), 0 16px 34px -14px rgba(255, 90, 20, 0.18);
+  /* Bubbles float over cards of their own tone: a firmer ring and a deeper drop. */
+  --pop-shadow: inset 0 1px 0 rgba(255, 230, 210, 0.07), 0 0 0 1px rgba(255, 230, 210, 0.13), 0 12px 32px -6px rgba(0, 0, 0, 0.7);
   /* The selected sidebar row: a warm fill fading right, a faint ring of the same hue. */
   --sel-fill: linear-gradient(90deg, rgba(255, 138, 31, 0.12), rgba(255, 138, 31, 0.02) 70%);
   --sel-ring: inset 0 0 0 1px rgba(255, 138, 31, 0.12);
@@ -114,6 +116,7 @@
 
     --card-shadow: 0 0 0 1px rgba(60, 30, 10, 0.07), 0 1px 2px rgba(60, 30, 10, 0.04), 0 8px 22px -12px rgba(60, 30, 10, 0.14);
     --card-shadow-hi: 0 0 0 1px rgba(232, 101, 12, 0.25), 0 2px 4px rgba(60, 30, 10, 0.05), 0 14px 30px -14px rgba(232, 101, 12, 0.25);
+    --pop-shadow: 0 0 0 1px rgba(60, 30, 10, 0.1), 0 10px 28px -6px rgba(60, 30, 10, 0.25);
     --sel-fill: linear-gradient(90deg, rgba(232, 101, 12, 0.1), rgba(232, 101, 12, 0.02) 70%);
     --sel-ring: inset 0 0 0 1px rgba(232, 101, 12, 0.12);
     --flash: rgba(232, 101, 12, 0.08);
@@ -532,7 +535,7 @@ button, select, input { font: inherit; color: inherit; }
   padding: 8px 10px;
   border-radius: var(--radius-s);
   background: var(--steel-raised);
-  box-shadow: var(--card-shadow);
+  box-shadow: var(--pop-shadow);
   font-size: 12px;
   pointer-events: none;
 }
@@ -548,7 +551,7 @@ button, select, input { font: inherit; color: inherit; }
   background: var(--sel-fill);
   box-shadow: var(--sel-ring);
 }
-/* Quiet text on a selection's grey: a step brighter, so it keeps 4.5:1 there too. */
+/* Quiet text on a selection's fill: a step brighter, so it keeps 4.5:1 there too. */
 .item[aria-current="true"] :is(.kind, .sub),
 .storage-tabs [aria-selected="true"] span { color: color-mix(in srgb, var(--muted) 50%, var(--text)); }
 
@@ -1071,16 +1074,16 @@ button.proc-name:hover { text-decoration: underline; }
   height: 22px;
   margin: -22px 0 0 auto;
   padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 240, 230, 0.16);
   border-radius: 11px;
-  background: rgba(48, 54, 61, 0.94);
+  background: rgba(42, 37, 34, 0.94);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   color: #f1ece8;
   font: 600 11px/20px -apple-system, system-ui, sans-serif;
   white-space: nowrap;
 }
 .follow-pill::before { content: attr(data-label); }
-.follow-pill:hover { background: rgba(64, 71, 79, 0.96); }
+.follow-pill:hover { background: rgba(56, 50, 46, 0.96); }
 .logs-list > .follow-pill { top: 8px; bottom: auto; margin: 0 8px -22px auto; }
 /* A URL in output: nothing special until ⌘ is held, then it reads as a link. */
 .link-mod .term-link:hover { text-decoration: underline; cursor: pointer; }
@@ -1941,7 +1944,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .tag {
   padding: 2px 8px;
   border-radius: 10px;
-  background: var(--steel-raised);
+  background: var(--selected); /* apart from the card it sits on */
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
@@ -1981,7 +1984,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   gap: 2px;
   padding: 1px 2px 1px 8px;
   border-radius: 10px;
-  background: var(--steel-raised);
+  background: var(--selected);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -2136,8 +2139,8 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 }
 
 .safety.safe { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text); }
-.safety.rebuild { background: var(--steel-raised); color: var(--text); }
-.safety.keep { background: var(--steel-raised); color: var(--muted); }
+.safety.rebuild { background: var(--selected); color: var(--text); }
+.safety.keep { background: var(--selected); color: var(--muted); }
 
 .res-cells .del { color: var(--muted); width: 60px; }
 .res-cells .del:hover { color: var(--danger); }
@@ -3617,7 +3620,7 @@ body.activity {
   padding: 8px 10px;
   border-radius: var(--radius-s);
   background: var(--steel-raised);
-  box-shadow: var(--card-shadow);
+  box-shadow: var(--pop-shadow);
   font-size: 12px;
 }
 .pop-confirm { display: flex; align-items: center; gap: 8px; }
