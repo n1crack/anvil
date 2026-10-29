@@ -38,7 +38,21 @@
   --amber-text: var(--heat-white);
 
   /* Split from --line/--heat so the themes can differ: controls get a firmer edge than hairlines. */
-  --edge: rgba(255, 240, 230, 0.1); /* the border of buttons, fields and chips */
+  --edge: rgba(255, 240, 230, 0.14); /* the border of buttons and chips */
+  /* Controls: a field is a darker well with an edge firm enough to find (3:1); a button or
+   * pop-up is raised a little, a top highlight in dark and a soft drop in light. */
+  --field: rgba(0, 0, 0, 0.22);
+  --field-edge: rgba(255, 240, 230, 0.36);
+  --field-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  --btn: rgba(255, 240, 230, 0.06);
+  --btn-hover: rgba(255, 240, 230, 0.1);
+  --btn-shadow: inset 0 1px 0 rgba(255, 240, 230, 0.06), 0 1px 1px rgba(0, 0, 0, 0.3);
+  --track: rgba(0, 0, 0, 0.25); /* a segmented control's groove */
+  --knob: rgba(255, 240, 230, 0.2); /* its pressed segment, raised */
+  --knob-shadow: inset 0 1px 0 rgba(255, 240, 230, 0.08), 0 1px 2px rgba(0, 0, 0, 0.35);
+  --switch-off: rgba(255, 240, 230, 0.16);
+  /* Keyboard focus: a quiet neutral ring, not the brand orange; 3:1 on pane and card. */
+  --focus: color-mix(in srgb, var(--text) 50%, transparent);
   --group-bg: color-mix(in srgb, var(--heat) 6%, transparent);
   --group-text: #c98a5a;
   --sidebar-bg: rgba(14, 12, 11, 0.55); /* a warm tint; the native vibrancy shows through */
@@ -111,7 +125,17 @@
     --amber: #b87400;
     --amber-text: #8f5600;
 
-    --edge: rgba(60, 30, 10, 0.14);
+    --edge: rgba(60, 30, 10, 0.2);
+    --field: #ffffff;
+    --field-edge: rgba(60, 30, 10, 0.5);
+    --field-shadow: inset 0 1px 1px rgba(60, 30, 10, 0.05);
+    --btn: #ffffff;
+    --btn-hover: color-mix(in srgb, var(--text) 4%, #ffffff);
+    --btn-shadow: 0 1px 1.5px rgba(60, 30, 10, 0.1);
+    --track: rgba(60, 30, 10, 0.07);
+    --knob: #ffffff;
+    --knob-shadow: 0 1px 2px rgba(60, 30, 10, 0.14), 0 0 0 0.5px rgba(60, 30, 10, 0.1);
+    --switch-off: rgba(60, 30, 10, 0.13);
     --group-bg: #f6f2ee;
     --group-text: #b2541a;
     --sidebar-bg: rgba(246, 242, 238, 0.72);
@@ -165,7 +189,7 @@ body {
 button, select, input { font: inherit; color: inherit; }
 
 :focus-visible {
-  outline: 2px solid var(--heat);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -209,9 +233,10 @@ button, select, input { font: inherit; color: inherit; }
   width: 100%;
   height: 28px;
   padding: 0 10px;
-  border: 0;
+  border: 1px solid var(--field-edge);
   border-radius: var(--radius-s);
-  background: var(--steel-hover);
+  background: var(--field);
+  box-shadow: var(--field-shadow);
   outline-offset: 0;
 }
 
@@ -223,11 +248,12 @@ button, select, input { font: inherit; color: inherit; }
   padding: 0;
   border: 0;
   border-radius: var(--radius-s);
-  background: var(--steel-hover);
+  background: var(--btn);
+  box-shadow: inset 0 0 0 1px var(--edge), var(--btn-shadow);
   color: var(--muted);
 }
 
-.icon-btn:hover { color: var(--text); }
+.icon-btn:hover { background: var(--btn-hover); color: var(--text); }
 
 .icon-btn svg { width: 15px; height: 15px; }
 
@@ -235,7 +261,7 @@ button, select, input { font: inherit; color: inherit; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.search input::placeholder { color: var(--muted); }
+::placeholder { color: var(--muted); }
 
 .list {
   position: relative;
@@ -634,7 +660,8 @@ button, select, input { font: inherit; color: inherit; }
   padding: 0 12px 0 10px;
   border: 1px solid var(--edge);
   border-radius: 14px;
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
   color: var(--muted);
 }
 
@@ -909,7 +936,7 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 /* The app header's state opens Dev: link-like, a subtle hover only. */
-.run-box .state-link { margin: 0; padding: 0 8px; border: 0; border-radius: var(--radius-s); background: none; }
+.run-box .state-link { margin: 0; padding: 0 8px; border: 0; border-radius: var(--radius-s); background: none; box-shadow: none; }
 .run-box .state-link:hover { background: var(--steel-hover); color: var(--text); }
 
 /* Tabs: text with an underline on the selected one. */
@@ -1040,6 +1067,7 @@ button, select, input { font: inherit; color: inherit; }
   width: 24px;
   height: 24px;
   background: none;
+  box-shadow: none;
 }
 
 .path-open:hover { background: var(--steel-hover); }
@@ -1062,7 +1090,8 @@ button, select, input { font: inherit; color: inherit; }
   padding: 0 10px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
   font-size: 12px;
 }
 
@@ -1333,7 +1362,7 @@ button.proc-name:hover { text-decoration: underline; }
 /* Add and × side by side in the new row. */
 .dev-conf-table td:nth-child(5) .dev-conf-remove { display: inline-grid; margin-left: 4px; vertical-align: middle; }
 .dev-conf-name { font-weight: 500; }
-.dev-conf-input { width: 100%; height: 26px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
+.dev-conf-input { width: 100%; height: 26px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--field-edge); border-radius: var(--radius-s); background: var(--field); box-shadow: var(--field-shadow); font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
 .dev-conf-input::placeholder { color: var(--muted); }
 .dev-conf-table td:nth-child(1) .dev-conf-input { font-family: inherit; }
 .dev-conf-remove { width: 22px; height: 22px; color: var(--muted); }
@@ -1345,7 +1374,7 @@ button.proc-name:hover { text-decoration: underline; }
 /* Table | JSON, over what it switches. */
 .dev-conf-mode { width: max-content; }
 /* JSON: one fixed-height editor (CodeMirror, jsoneditor.ts), its first problem in one line under it. */
-.dev-json-editor { height: max(240px, calc(100vh - 420px)); overflow: hidden; border: 1px solid var(--edge); border-radius: var(--radius-m); background: var(--steel-raised); }
+.dev-json-editor { height: max(240px, calc(100vh - 420px)); overflow: hidden; border: 1px solid var(--field-edge); border-radius: var(--radius-m); background: var(--steel-raised); }
 .dev-json-loading { display: block; padding: 10px 12px; color: var(--muted); font-size: 12px; }
 .dev-json-msg { min-height: 1.5em; margin: 8px 0 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .dev-json-msg.error-text { color: var(--danger); }
@@ -1379,8 +1408,8 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 .proc-end { display: flex; align-items: center; gap: 10px; justify-self: end; }
 .proc-end .up { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .proc-end .up.bad { color: var(--danger); }
-.proc-end button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); font-size: 12px; }
-.proc-end button:hover { background: var(--steel-hover); }
+.proc-end button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--btn); box-shadow: var(--btn-shadow); font-size: 12px; }
+.proc-end button:hover { background: var(--btn-hover); }
 
 /* The Overview's Requests preview: the newest few, method, status, path and duration. A
  * new one opens a slot at the top and glows warm for a moment; the rows aren't buttons. */
@@ -1422,7 +1451,8 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
   padding: 0 8px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
 }
 
 .row input,
@@ -1430,9 +1460,10 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
   width: 100%;
   max-width: 320px;
   padding: 4px 8px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--field-edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--field);
+  box-shadow: var(--field-shadow);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1490,7 +1521,7 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 .page .row.preset-field { align-items: start; }
 .page .row.preset-field > span:first-child { flex: none; width: 110px; padding-top: 4px; }
 .page .row.preset-field .hk { max-width: none; }
-.page .hk button.hk-x { padding: 0; border: 0; }
+.page .hk button.hk-x { padding: 0; border: 0; box-shadow: none; }
 
 .row-top dt { padding-top: 4px; }
 
@@ -1514,9 +1545,9 @@ input[type="checkbox"]:not([role="switch"]) {
   width: 14px;
   height: 14px;
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--text) 38%, transparent);
+  border: 1px solid var(--field-edge);
   border-radius: 4px;
-  background: var(--steel-raised);
+  background: var(--field);
 }
 input[type="checkbox"]:not([role="switch"]):checked { border-color: var(--text); background: var(--text); }
 input[type="checkbox"]:not([role="switch"]):checked::after {
@@ -1539,9 +1570,10 @@ input[type="checkbox"][role="switch"] {
   width: 34px;
   height: 20px;
   margin: 0;
+  border: 0;
   border-radius: 10px;
-  background: var(--selected);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--switch-off);
+  box-shadow: inset 0 0 0 1px var(--edge);
   transition: background 0.2s ease;
 }
 
@@ -1698,7 +1730,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 /* A version's More (Make default, Uninstall): quiet until hovered; its empty place on the
  * default keeps the controls before it lined up. */
 .page .ver > .actions-inline { margin-left: auto; }
-.page .ver-more { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -8px; padding: 0; border: 0; border-radius: var(--radius-s); background: none; color: var(--muted); }
+.page .ver-more { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -8px; padding: 0; border: 0; border-radius: var(--radius-s); background: none; box-shadow: none; color: var(--muted); }
 .page button.ver-more:hover { background: var(--steel-hover); color: var(--text); }
 .page .ver-more svg { width: 15px; height: 15px; }
 
@@ -1961,7 +1993,8 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   margin: 8px 0 16px;
   padding: 2px;
   border-radius: var(--radius-m);
-  background: var(--steel-hover);
+  background: var(--track);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .page .storage-tabs button {
@@ -1970,10 +2003,11 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   border: 0;
   border-radius: var(--radius-s);
   background: none;
+  box-shadow: none;
   color: var(--muted);
 }
 
-.page .storage-tabs button[aria-selected="true"] { background: var(--selected); color: var(--text); }
+.page .storage-tabs button[aria-selected="true"] { background: var(--knob); box-shadow: var(--knob-shadow); color: var(--text); }
 .storage-tabs span { margin-left: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .page h2.storage-group {
@@ -2023,7 +2057,14 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   padding: 0 10px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
+}
+
+.page input:not([type]) {
+  border-color: var(--field-edge);
+  background: var(--field);
+  box-shadow: var(--field-shadow);
 }
 
 .page input:not([type]) {
@@ -2086,6 +2127,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   padding: 0;
   border: 0;
   background: none;
+  box-shadow: none;
   color: var(--text);
   text-decoration: underline;
   text-decoration-color: var(--line);
@@ -2107,6 +2149,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   padding: 0 5px;
   border: 0;
   background: none;
+  box-shadow: none;
   color: var(--muted);
 }
 
@@ -2153,7 +2196,8 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   padding: 0 10px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
 }
 
 .run-error { margin: 0 0 10px; }
@@ -2320,7 +2364,8 @@ kbd {
   padding: 0 10px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-pane);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
   color: var(--text);
   font-size: 12px;
   white-space: nowrap;
@@ -2421,7 +2466,7 @@ kbd {
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text) 45%, transparent);
 }
 
-.kind-card:has(input:focus-visible) { outline: 2px solid var(--heat); outline-offset: 2px; }
+.kind-card:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .field {
   display: grid;
@@ -2439,7 +2484,14 @@ kbd {
   padding: 0 8px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
+}
+
+.field input {
+  border-color: var(--field-edge);
+  background: var(--field);
+  box-shadow: var(--field-shadow);
 }
 
 .field small { grid-column: 2; min-height: 16px; color: var(--muted); font-size: 12px; }
@@ -2468,7 +2520,8 @@ kbd {
   padding: 0 14px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
 }
 
 /* The main action: a little stronger than the others, never colored. */
@@ -2486,7 +2539,7 @@ kbd {
 .sheet-actions .primary:disabled,
 .dev-conf-foot button:disabled { opacity: 0.5; }
 .sheet-actions .link,
-.wt-actions .link { padding: 0; border: 0; background: none; color: var(--muted); }
+.wt-actions .link { padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); }
 .sheet-actions .link:hover,
 .wt-actions .link:hover { color: var(--text); }
 
@@ -2513,9 +2566,10 @@ kbd {
   width: 100%;
   height: 26px;
   padding: 0 8px 0 26px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--field-edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--field);
+  box-shadow: var(--field-shadow);
   font-size: 12px;
 }
 .new-search input::placeholder { color: var(--muted); }
@@ -2583,7 +2637,8 @@ kbd {
   padding: 0 6px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
 }
 .opt-fields:empty { display: none; }
 .opt-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
@@ -2634,7 +2689,8 @@ kbd {
   margin: 0 16px 8px;
   padding: 2px;
   border-radius: var(--radius-m);
-  background: var(--steel-hover);
+  background: var(--track);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .modes button {
@@ -2664,8 +2720,8 @@ kbd {
   left: 2px;
   width: calc(50% - 3px);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  background: var(--knob);
+  box-shadow: var(--knob-shadow);
   transition: transform 0.45s cubic-bezier(0.3, 1.4, 0.5, 1);
 }
 .modes:has(> :nth-child(2)[aria-selected="true"])::before { transform: translateX(calc(100% + 2px)); }
@@ -2763,6 +2819,7 @@ kbd {
   border: 0;
   border-radius: var(--radius-s);
   background: none;
+  box-shadow: none;
   color: var(--muted);
   font-size: 11px;
 }
@@ -2783,10 +2840,10 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
 .svc-clients { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; }
 .svc-clients[hidden] { display: none; }
 .svc-clients .muted { margin-right: 4px; }
-.svc-clients button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); font-size: 12px; }
+.svc-clients button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--btn); box-shadow: var(--btn-shadow); font-size: 12px; }
 .proc.svc-row.muted .proc-name { font-weight: 400; color: var(--muted); }
 .proc.svc-new { grid-template-columns: minmax(0, 260px) auto; justify-content: space-between; }
-.svc-new input { height: 24px; padding: 0 8px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); }
+.svc-new input { height: 24px; padding: 0 8px; border: 1px solid var(--field-edge); border-radius: var(--radius-s); background: var(--field); box-shadow: var(--field-shadow); }
 .svc-row .proc-actions .danger { color: var(--danger); }
 /* Destructive row actions show on the row you point at or tab into. */
 .svc-row .hover-only { visibility: hidden; }
@@ -2846,7 +2903,8 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
   padding: 0 10px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
   font-size: 12px;
 }
 
@@ -2860,9 +2918,10 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
   min-width: 120px;
   height: 26px;
   padding: 0 10px;
-  border: 0;
+  border: 1px solid var(--field-edge);
   border-radius: var(--radius-s);
-  background: var(--steel-hover);
+  background: var(--field);
+  box-shadow: var(--field-shadow);
   outline-offset: 0;
 }
 
@@ -2876,7 +2935,8 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
   gap: 2px;
   padding: 2px;
   border-radius: var(--radius-m);
-  background: var(--steel-hover);
+  background: var(--track);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .seg button {
@@ -2902,19 +2962,16 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
   bottom: 2px;
   left: 0;
   border-radius: var(--radius-s);
-  background: rgba(255, 240, 230, 0.2); /* --steel-raised barely parts from the track in dark */
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  background: var(--knob);
+  box-shadow: var(--knob-shadow);
   pointer-events: none;
   transition: transform 0.45s cubic-bezier(0.3, 1.4, 0.5, 1), width 0.45s cubic-bezier(0.3, 1.4, 0.5, 1);
 }
 .seg > .knob[hidden] { display: none; }
 
-@media (prefers-color-scheme: light) {
-  .seg > .knob { background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
-}
 
 /* Icon toggles (Follow): pressed reads as a sunken, brighter icon, never a fill color. */
-.icon-btn[aria-pressed] { background: none; }
+.icon-btn[aria-pressed] { background: none; box-shadow: none; }
 .icon-btn[aria-pressed]:hover { background: var(--steel-hover); }
 .icon-btn[aria-pressed="true"] { background: var(--selected); color: var(--text); }
 
@@ -3287,8 +3344,8 @@ button.pkg-tile:hover { background: color-mix(in srgb, var(--text) 6%, transpare
 .pkg-checkbar { display: flex; justify-content: flex-end; gap: 8px; max-width: 640px; margin-top: 10px; }
 .pkg-body > .pkg-error { max-width: 640px; margin: 8px 0 0; }
 /* Plain rectangular buttons: clearly clickable. */
-.pkg-btn { height: 24px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--steel-raised); color: var(--text); font-size: 12px; }
-.pkg-btn:hover:not(:disabled) { background: var(--steel-hover); }
+.pkg-btn { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--btn); box-shadow: var(--btn-shadow); color: var(--text); font-size: 12px; }
+.pkg-btn:hover:not(:disabled) { background: var(--btn-hover); }
 .pkg-btn:disabled { color: var(--muted); }
 .pkg-error { margin: 0 0 6px; color: var(--danger); font-size: 12px; user-select: text; -webkit-user-select: text; }
 
@@ -3354,7 +3411,8 @@ a.pkg-adv-title:hover { text-decoration: underline; }
   padding: 0 8px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
   font-size: 12px;
 }
 
@@ -3472,7 +3530,8 @@ a.pkg-adv-title:hover { text-decoration: underline; }
   padding: 0 10px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-pane);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
   color: var(--text);
   white-space: nowrap;
   font-size: 12px;
@@ -3501,7 +3560,8 @@ a.pkg-adv-title:hover { text-decoration: underline; }
   padding: 0 9px;
   border: 1px solid var(--edge);
   border-radius: 11px;
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
   color: var(--text);
   font-size: 12px;
 }
@@ -3545,7 +3605,8 @@ a.pkg-adv-title:hover { text-decoration: underline; }
   padding: 0 6px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
   color: var(--text);
   font-size: 12px;
   font-weight: 400;
@@ -3575,7 +3636,8 @@ a.pkg-adv-title:hover { text-decoration: underline; }
   padding: 0 12px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--btn);
+  box-shadow: var(--btn-shadow);
   font-size: 13px;
 }
 
@@ -3838,9 +3900,10 @@ body.activity {
 .svc-settings .row[hidden], .connect-head[hidden], .env[hidden], .open-with button[hidden] { display: none; }
 .field textarea {
   padding: 5px 8px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--field-edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--field);
+  box-shadow: var(--field-shadow);
   font: 12px ui-monospace, "SF Mono", Menlo, monospace;
   resize: vertical;
 }
@@ -3851,9 +3914,10 @@ body.activity {
   height: 27px;
   margin: 0 0 3px;
   padding: 0 5px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--field-edge);
   border-radius: var(--radius-s);
-  background: var(--steel-raised);
+  background: var(--field);
+  box-shadow: var(--field-shadow);
   font: 700 20px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
   letter-spacing: -0.02em;
 }
@@ -3920,7 +3984,7 @@ html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui
 /* A row's quiet actions (Make default, Uninstall): text, no frame; a question asked in the
  * row ends in the action in red text. */
 .page button.text-act,
-.text-act { height: 22px; padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 12px; }
+.text-act { height: 22px; padding: 0 2px; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 12px; }
 .page button.text-act:hover,
 .text-act:hover { background: none; color: var(--text); }
 .page button.text-act.danger,
