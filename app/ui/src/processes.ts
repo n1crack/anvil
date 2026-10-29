@@ -260,10 +260,15 @@ function summaryLine(title: string, dots: [string, string][], tab: string, keys:
   return b;
 }
 
+/** Something of the app is live: a process runs or has crashed (the site's own row counts
+ * once Caddy serves it). Containers and the address don't: a folder stays cold. */
+const isAlive = (o?: Overview | null) => !!o?.rows.some((r) => r.running || r.crashed);
+
 export function drawProcs(name) {
   const box = $("#site .procs");
   if (!box) return;
   const o = procCache.get(name);
+  $("#site").classList.toggle("alive", isAlive(o));
   const rows = o?.rows ?? [];
   const dev = devRows(o);
   const containers = o?.containers ?? [];

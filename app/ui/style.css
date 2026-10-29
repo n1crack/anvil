@@ -691,6 +691,8 @@ button, select, input { font: inherit; color: inherit; }
   margin: -8px calc(-1 * var(--pad)) 0;
   padding: 8px var(--pad) 0;
   background: var(--steel-pane);
+  /* The glow reaches past the header; clip it here so the pane never scrolls sideways. */
+  overflow: clip;
 }
 
 /* Header: name and address on the left, run state on the right. */
@@ -702,6 +704,23 @@ button, select, input { font: inherit; color: inherit; }
   gap: 10px 16px;
   margin-bottom: 12px;
 }
+
+/* An ember behind the header's right side while the app is alive; it fades in and out and drifts slowly. */
+.glow {
+  position: absolute;
+  inset: -80px -60px auto auto;
+  z-index: -1;
+  width: 560px;
+  height: 360px;
+  pointer-events: none;
+  background: var(--glow);
+  opacity: 0;
+  transition: opacity 0.8s;
+}
+
+#site.alive .glow { opacity: 1; animation: heat 7s ease-in-out infinite; }
+
+@keyframes heat { 50% { transform: translate(-30px, 14px) scale(1.08); } }
 
 /* The name keeps its line; Start/Stop move under it when the pane is narrow. */
 .site-title {

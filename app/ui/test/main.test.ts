@@ -4138,6 +4138,40 @@ describe("motion", () => {
     box.remove();
   });
 
+  test("the header glows only while an app has a live process", async () => {
+    const alive = () => $("#site").classList.contains("alive");
+    await select("shop"); // queue runs
+    expect(alive()).toBe(true);
+    await select("notes"); // a folder: nothing runs
+    expect(alive()).toBe(false);
+    await select("shop");
+    expect(alive()).toBe(true);
+    // Served by Caddy with no dev process: still alive.
+    const shop = w.mockOv.shop;
+    w.mockOv.shop = { ...shop, rows: shop.rows.filter((r) => r.kind === "site") };
+    try {
+      await select("notes");
+      await select("shop");
+      expect(alive()).toBe(true);
+      // Nothing running or crashed: cold.
+      w.mockOv.shop = { ...shop, rows: shop.rows.map((r) => ({ ...r, running: false, crashed: null })) };
+      await select("notes");
+      await select("shop");
+      expect(alive()).toBe(false);
+    } finally {
+      w.mockOv.shop = shop;
+      await select("notes");
+      await select("shop");
+    }
+  });
+
+  test("the glow is behind the header, inert, and stops for reduced motion", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
+    expect($("#site .site-head .glow")).toBeTruthy();
+    expect(css).toMatch(/\.glow\s*{[^}]*pointer-events: none/);
+    expect(css).toContain("#site.alive .glow");
+  });
+
   test("reduced motion stops animations but not spinners", () => {
     const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
     const reduce = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
