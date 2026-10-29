@@ -740,7 +740,7 @@ async function drawJson(name: string) {
 /* ---------- Configure: the processes as a table ---------- */
 
 function drawConf(name: string, force = false) {
-  for (const b of modeSeg.children) b.setAttribute("aria-pressed", String((b as HTMLElement).dataset.id === confMode));
+  for (const b of modeSeg.querySelectorAll("button")) b.setAttribute("aria-pressed", String((b as HTMLElement).dataset.id === confMode));
   if (confMode === "json") return void drawJson(name);
   // Someone is typing: a poll doesn't wipe it.
   const active = document.activeElement as HTMLInputElement | null;

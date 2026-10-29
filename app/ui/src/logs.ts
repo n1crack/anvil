@@ -179,7 +179,7 @@ function drawFiles(v) {
     v.source?.id,
     pick,
   );
-  for (const b of box.children) {
+  for (const b of box.querySelectorAll("button")) {
     const src = v.sources.find((x) => x.id === b.dataset.id);
     b.title = tip(src);
     // A very large file is worth a glance before it's opened.

@@ -4072,3 +4072,53 @@ describe("errors where they happen", () => {
     expect($("#error").hidden).toBe(true);
   });
 });
+
+describe("motion", () => {
+  test("selection highlight follows the selected app", async () => {
+    await select("shop");
+    expect($("#list .sel-hl").dataset.row).toBe("shop");
+    await select("vuefinder");
+    expect($("#list .sel-hl").dataset.row).toBe("vuefinder");
+    expect($$("#list .sel-hl")).toHaveLength(1);
+  });
+
+  test("tab ink follows the tab", async () => {
+    $('#site .tabs [data-tab="git"]').click();
+    expect($("#site .tabs .tab-ink").dataset.tab).toBe("git");
+    $('#site .tabs [data-tab="overview"]').click();
+    expect($("#site .tabs .tab-ink").dataset.tab).toBe("overview");
+    expect($$("#site .tabs .tab-ink")).toHaveLength(1);
+    // One sliding ink, no underline drawn under each selected tab.
+    const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
+    expect(css).not.toContain('.tabs [role="tab"][aria-selected="true"]::after');
+  });
+
+  test("a segmented control's knob follows the pressed item", async () => {
+    const app = await import("../src/app");
+    const box = app.seg(
+      "Show",
+      [
+        ["a", "A"],
+        ["b", "B"],
+      ],
+      "a",
+      () => {},
+    );
+    document.body.append(box);
+    await wait();
+    expect($$(".knob").filter((k) => box.contains(k))).toHaveLength(1);
+    expect((box.querySelector(".knob") as HTMLElement).dataset.on).toBe("a");
+    (box.querySelector('[data-id="b"]') as HTMLElement).click();
+    await wait();
+    expect((box.querySelector(".knob") as HTMLElement).dataset.on).toBe("b");
+    box.remove();
+  });
+
+  test("reduced motion stops animations but not spinners", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
+    const reduce = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    const block = reduce.slice(0, reduce.indexOf("\n}") + 2);
+    expect(block).toContain("animation: none !important");
+    expect(block).toContain(".spin-dot");
+  });
+});

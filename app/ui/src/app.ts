@@ -5,6 +5,7 @@ import { ownError, shown } from "./live";
 import { NAMES, editor, summary } from "./hooksform";
 import { bubbleKeys, confirmInRow } from "./confirm";
 import { icon } from "./icons";
+import { knob } from "./knob";
 import { fileManager, keys, mac, mod } from "./platform";
 
 export const { invoke } = window.__TAURI__.core;
@@ -662,10 +663,10 @@ function parkedNoteEl() {
 }
 
 function renderList() {
-  const list = $("#list");
+  const list: HTMLElement = $("#list");
   // WebKit drops the scroll to the top the moment the list empties: it goes back once redrawn.
   const top = list.scrollTop;
-  list.replaceChildren();
+  clearList(list);
   const note = filterNote("apps", kindLabel);
   const hiddenApps = hiddenSites();
   if (note && (snap.sites.length || hiddenApps.length)) list.append(note);
@@ -674,6 +675,7 @@ function renderList() {
 
   if (!snap.sites.length && !hiddenApps.length) {
     list.append(el("p", "empty", "No applications yet."));
+    placeSel(list);
     return;
   }
 
@@ -787,8 +789,47 @@ function renderList() {
     p.textContent = filter ? `No ${what} match “${filter}”.` : `No ${f.running ? "running " : ""}${what}.`;
     list.append(p);
   }
+  // The first draw rises in, row by row.
+  if (!listDrawn && count) {
+    listDrawn = true;
+    [...list.querySelectorAll<HTMLElement>(".item")].slice(0, 8).forEach((r, i) => {
+      r.classList.add("enter");
+      r.style.animationDelay = `${i * 60}ms`;
+    });
+  }
   list.scrollTop = top;
+  placeSel(list);
 }
+let listDrawn = false;
+
+/** Empty the sidebar list but for the selection's highlight, so it slides to the next row
+ * instead of appearing. */
+export function clearList(list: HTMLElement) {
+  for (const c of [...list.childNodes]) if (!(c as Element).classList?.contains("sel-hl")) c.remove();
+}
+
+/** Move the one selection highlight onto the selected row; none while that row is out of
+ * the list or folded away. It sits in the list, so it scrolls with the rows. */
+export function placeSel(list: HTMLElement) {
+  let hl = $(":scope > .sel-hl", list);
+  if (!hl) list.prepend((hl = el("div", "sel-hl")));
+  const row = $('.item[aria-current="true"]', list);
+  hl.hidden = !row || !!row.closest(".closed");
+  if (hl.hidden) return;
+  hl.dataset.row = row.dataset.name; // not `data-name`: `#list [data-name=…]` finds rows
+  // Offsets, not boxes: a row rising in (`.enter`) is still moved by its animation.
+  let x = 0;
+  let y = 0;
+  for (let e = row; e && e !== list; e = e.offsetParent) {
+    x += e.offsetLeft;
+    y += e.offsetTop;
+  }
+  hl.style.width = `${row.offsetWidth}px`;
+  hl.style.height = `${row.offsetHeight}px`;
+  hl.style.transform = `translate(${x}px, ${y}px)`;
+}
+// Folding a group or worktrees moves the rows under it: the highlight follows once it ends.
+$("#list").addEventListener("transitionend", () => placeSel($("#list")));
 
 /* ---------- Context menu ---------- */
 
@@ -1182,6 +1223,8 @@ function keepTabSelected(root) {
     if (has(wanted)) {
       if (tab !== wanted) showTab(root, wanted, true);
     } else if (!has(tab)) showTab(root, shown[0].dataset.tab, true);
+    // A tab shown or hidden moves the ones after it.
+    else placeInk(root);
   };
   if (!watchedTabs.has(bar)) {
     watchedTabs.add(bar);
@@ -1225,7 +1268,28 @@ export function showTab(root, name, fallback = false) {
   if (name === "containers") late.containersTab?.();
   // Measuring (du, lsof, docker) only happens when someone looks at it.
   if (name === "resources" && selected) loadResources(selected);
+  placeInk(root);
 }
+
+/** Slide the one underline under the selected tab. */
+function placeInk(root) {
+  const bar = $(".tabs", root);
+  if (!bar) return;
+  let ink = $(":scope > .tab-ink", bar);
+  if (!ink) bar.append((ink = el("span", "tab-ink")));
+  const t = $(`[role=tab][aria-selected="true"]:not([hidden])`, bar);
+  // Only when it changes: setting `hidden` again would wake the bar's watcher, which calls here.
+  if (ink.hidden !== !t) ink.hidden = !t;
+  if (!t) return;
+  ink.dataset.tab = t.dataset.tab;
+  // Inside the tab's padding, as wide as its word.
+  ink.style.left = `${t.offsetLeft + 6}px`;
+  ink.style.width = `${t.offsetWidth - 12}px`;
+}
+window.addEventListener("resize", () => {
+  placeSel($("#list"));
+  placeInk($("#site"));
+});
 
 /** "just now", "5 min ago", "2 h ago", "3 d ago", then the date (header and logs). */
 export function ago(d) {
@@ -2444,11 +2508,12 @@ export function seg(label: string, items: [string, string][], current: string, p
     b.dataset.id = id;
     b.setAttribute("aria-pressed", String(id === current));
     b.onclick = () => {
-      for (const o of box.children) o.setAttribute("aria-pressed", String(o === b));
+      for (const o of box.querySelectorAll("button")) o.setAttribute("aria-pressed", String(o === b));
       pick(id);
     };
     box.append(b);
   }
+  knob(box);
   return box;
 }
 
@@ -2719,11 +2784,19 @@ export function focusRow(row: HTMLElement | null) {
 }
 
 export function select(name) {
-  if (name !== selected) actionErrors.clear();
+  const changed = name !== selected;
+  if (changed) actionErrors.clear();
   selected = name;
   localStorage.setItem("selected", name);
   renderList();
   renderSite();
+  // Another app eases in: its header and the shown tab.
+  if (changed)
+    for (const x of document.querySelectorAll<HTMLElement>("#site .site-head, #site [role=tabpanel]:not([hidden])")) {
+      x.classList.remove("swap");
+      void x.offsetWidth;
+      x.classList.add("swap");
+    }
   // Scrolled only as far as needed (keys moving past the edge): focus alone centres it.
   focusRow($(`.item[data-name="${CSS.escape(name)}"]`));
 }

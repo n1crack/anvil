@@ -1,5 +1,6 @@
 import { M } from "./menu";
 import "./platform";
+import { knob } from "./knob";
 import type { Activity, AgentAction } from "./types";
 import { follower } from "./console";
 import { splitter } from "./split";
@@ -321,6 +322,7 @@ export function showTab(name) {
 }
 
 for (const b of document.querySelectorAll("#tabs [role=tab]") as NodeListOf<HTMLElement>) b.onclick = () => showTab(b.dataset.tab);
+knob(document.getElementById("tabs")!);
 
 export function select(key) {
   selected = key;

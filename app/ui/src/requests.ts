@@ -72,7 +72,7 @@ function build(s) {
     Object.assign(v, { status: "all", method: "", query: "", assets: false });
     search.value = method.value = "";
     assets.checked = false;
-    for (const b of statuses.children) b.setAttribute("aria-pressed", String(b.dataset.id === "all"));
+    for (const b of statuses.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.id === "all"));
     load(v);
   };
   $(".req-more", node).onclick = () => more(v);

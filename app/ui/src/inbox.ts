@@ -4,6 +4,7 @@
  * `invoke` comes in, so both windows use it. */
 
 import { confirmInRow } from "./confirm";
+import { knob } from "./knob";
 
 type Invoke = <T = any>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -177,11 +178,12 @@ export function inboxView(inbox: string, invoke: Invoke, emptyText: string): Inb
       b.dataset.id = id;
       b.setAttribute("aria-pressed", String(id === views[0][0]));
       b.onclick = () => {
-        for (const o of segs.children) o.setAttribute("aria-pressed", String(o === b));
+        for (const o of segs.querySelectorAll("button")) o.setAttribute("aria-pressed", String(o === b));
         show(id);
       };
       segs.append(b);
     }
+    knob(segs);
     const del = el("button", "mail-delete", "Delete");
     // Asks where the buttons were, as Clear does in the bar.
     del.onclick = () => {

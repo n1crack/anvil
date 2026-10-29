@@ -226,6 +226,7 @@ button, select, input { font: inherit; color: inherit; }
 .search input::placeholder { color: var(--muted); }
 
 .list {
+  position: relative;
   flex: 1;
   overflow-y: auto;
   padding: 0 16px 16px;
@@ -546,11 +547,24 @@ button, select, input { font: inherit; color: inherit; }
 
 .item[aria-expanded="true"] .chevron { transform: rotate(90deg); }
 
-/* Selection: a warm fill and a faint ring, no line. */
-.item[aria-current="true"] {
+/* Selection: a warm fill and a faint ring, no line, on one highlight that slides from row
+   to row (placeSel). It sits under the rows and scrolls with them; outside their card's
+   clip, it takes the card's corners. */
+.sel-hl {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: var(--radius-m);
   background: var(--sel-fill);
   box-shadow: var(--sel-ring);
+  pointer-events: none;
+  transition: transform 0.4s cubic-bezier(0.3, 1.25, 0.5, 1);
 }
+.sel-hl[hidden] { display: none; }
+
+/* The first draw: rows rise in one after another (their delays are set in renderList). */
+.item.enter { animation: rise 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
 /* Quiet text on a selection's fill: a step brighter, so it keeps 4.5:1 there too. */
 .item[aria-current="true"] :is(.kind, .sub),
 .storage-tabs [aria-selected="true"] span { color: color-mix(in srgb, var(--muted) 50%, var(--text)); }
@@ -885,16 +899,21 @@ button, select, input { font: inherit; color: inherit; }
 
 .tabs [role="tab"][aria-selected="true"] { color: var(--text); font-weight: 600; }
 
-.tabs [role="tab"][aria-selected="true"]::after {
-  content: "";
+/* One underline that slides to the selected tab (placeInk). */
+.tabs .tab-ink {
   position: absolute;
-  right: 6px;
   bottom: 0;
-  left: 6px;
   height: 2px;
   border-radius: 1px;
   background: var(--ink);
+  pointer-events: none;
+  transition: left 0.45s, width 0.45s cubic-bezier(0.3, 1.3, 0.5, 1);
 }
+.tabs .tab-ink[hidden] { display: none; }
+
+/* Another app eases in. */
+.swap { animation: swap 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes swap { from { opacity: 0; transform: translateY(6px); filter: blur(2px); } }
 
 /* Out of the flow, so the tab bar keeps its height on Resources. */
 .tabs .res-reload {
@@ -2511,6 +2530,7 @@ kbd {
 /* ---------- Applications | Services switch and service details ---------- */
 
 .modes {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2px;
@@ -2521,6 +2541,7 @@ kbd {
 }
 
 .modes button {
+  position: relative; /* over the knob */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2535,11 +2556,22 @@ kbd {
 
 .modes button:hover { color: var(--text); }
 
-.modes button[aria-selected="true"] {
+.modes button[aria-selected="true"] { color: var(--text); }
+
+/* The raised knob under the selected half, sliding between the two. */
+.modes::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 3px);
+  border-radius: var(--radius-s);
   background: var(--steel-raised);
-  color: var(--text);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.45s cubic-bezier(0.3, 1.4, 0.5, 1);
 }
+.modes:has(> :nth-child(2)[aria-selected="true"])::before { transform: translateX(calc(100% + 2px)); }
 
 /* Running services: a small heat-coloured count, quiet when zero. */
 .modes .count:not(:empty) {
@@ -2738,6 +2770,7 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
 
 /* A segmented control: a few choices on one line, the pressed one raised. */
 .seg {
+  position: relative;
   display: inline-flex;
   flex: none;
   gap: 2px;
@@ -2747,6 +2780,7 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
 }
 
 .seg button {
+  position: relative; /* over the knob */
   height: 22px;
   padding: 0 10px;
   border: 0;
@@ -2759,15 +2793,24 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
 
 .seg button:hover { color: var(--text); }
 
-.seg button[aria-pressed="true"],
-.seg button[aria-selected="true"] {
+.seg button:is([aria-pressed="true"], [aria-selected="true"]) { color: var(--text); }
+
+/* The raised knob under the pressed item, sliding to the next (knob.ts). */
+.seg > .knob {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: var(--radius-s);
   background: rgba(255, 240, 230, 0.12); /* --steel-raised barely parts from the track in dark */
-  color: var(--text);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  transition: transform 0.45s cubic-bezier(0.3, 1.4, 0.5, 1), width 0.45s cubic-bezier(0.3, 1.4, 0.5, 1);
 }
+.seg > .knob[hidden] { display: none; }
 
 @media (prefers-color-scheme: light) {
-  .seg button:is([aria-pressed="true"], [aria-selected="true"]) { background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
+  .seg > .knob { background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
 }
 
 /* Icon toggles (Follow): pressed reads as a sunken, brighter icon, never a fill color. */

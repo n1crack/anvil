@@ -1,6 +1,8 @@
 import type { ServiceRow } from "./types";
 import {
   $,
+  clearList,
+  placeSel,
   M,
   listSection,
   resCache,
@@ -261,10 +263,11 @@ function renameService(svc) {
 export function renderServiceList() {
   const list = $("#list");
   const top = list.scrollTop; // WebKit loses it as the list empties, as in renderList
-  list.replaceChildren();
+  clearList(list);
   if (keptNote) list.append(el("p", "muted svc-kept", keptNote));
   if (!services.length) {
     list.append(el("p", "empty", "No services yet."));
+    placeSel(list);
     return;
   }
   const note = filterNote("services", (k) => services.find((x) => x.kind === k)?.name ?? k);
@@ -284,6 +287,7 @@ export function renderServiceList() {
   }
   if (!count) list.append(el("p", "empty", filter ? `No services match “${filter}”.` : "No services match the filter."));
   list.scrollTop = top;
+  placeSel(list);
 }
 
 export function selectService(id) {
