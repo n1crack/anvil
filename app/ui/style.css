@@ -59,6 +59,10 @@
   --ink: #f1ece8; /* the selected tab's underline */
   /* Ember behind the header of an app that is alive. */
   --glow: radial-gradient(closest-side, rgba(255, 120, 30, 0.2), rgba(232, 65, 12, 0.07) 55%, transparent);
+  /* A sidebar tile: lit from the top, with an inner hairline (an outer one would be cut by the badge's mask). */
+  --tile: linear-gradient(160deg, #2c2724, #1d1a18);
+  --tile-fg: #d9cfc8;
+  --tile-shadow: inset 0 1px 0 rgba(255, 230, 210, 0.08), inset 0 0 0 1px rgba(255, 235, 220, 0.07);
   /* On: a muted green, the one "on" means everywhere, light enough under the white knob. */
   --switch-on: #4c9a62;
 
@@ -122,6 +126,9 @@
     --flash: rgba(232, 101, 12, 0.08);
     --ink: #1f1a17;
     --glow: radial-gradient(closest-side, rgba(255, 150, 60, 0.22), rgba(255, 120, 30, 0.06) 55%, transparent);
+    --tile: linear-gradient(160deg, #ffffff, #f3eee9);
+    --tile-fg: #4a3f38;
+    --tile-shadow: inset 0 1px 0 #ffffff, inset 0 0 0 1px rgba(60, 30, 10, 0.1);
 
     --pc0: #1d4ed8; --pc1: #6d28d9; --pc2: #a21caf; --pc3: #0e7490; --pc4: #4338ca; --pc5: #475569;
   }
@@ -376,17 +383,18 @@ button, select, input { font: inherit; color: inherit; }
 .item .mark {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-m);
-  background: var(--steel-raised);
+  background: var(--tile);
   /* A hairline so the tile stays apart from a hovered or selected row of the same tone. */
-  box-shadow: inset 0 0 0 1px var(--line);
-  color: var(--muted);
+  box-shadow: var(--tile-shadow);
+  color: var(--tile-fg);
   font-weight: 600;
   font-size: 13px;
   overflow: hidden;
 }
+.item .mark > svg { width: 16px; height: 16px; }
 
 .item.child .mark {
   width: 24px;
@@ -505,7 +513,7 @@ button, select, input { font: inherit; color: inherit; }
 /* Running: a badge on the mark's corner, with a ring cut out of the mark so it
  * reads on any row background (the native vibrancy, hover, selection). An SVG, not a
  * radial-gradient: WebKitGTK masked the whole mark away with one. */
-.item .mark-box { position: relative; width: 32px; height: 32px; }
+.item .mark-box { position: relative; justify-self: center; width: 30px; height: 30px; }
 .item .mark-box.running .mark {
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill-rule='evenodd' d='M0 0H32V32H0Z M22.75 29a6.25 6.25 0 1 0 12.5 0a6.25 6.25 0 1 0 -12.5 0Z'/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill-rule='evenodd' d='M0 0H32V32H0Z M22.75 29a6.25 6.25 0 1 0 12.5 0a6.25 6.25 0 1 0 -12.5 0Z'/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
@@ -523,6 +531,16 @@ button, select, input { font: inherit; color: inherit; }
   border-radius: 50%;
   background: var(--ok);
 }
+/* Running: a ring breathes out of the badge now and then. */
+.run-badge.on::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--ok);
+  animation: ping 2.4s ease-out infinite;
+}
+@keyframes ping { 0% { transform: scale(1); opacity: 0.6; } 80%, 100% { transform: scale(2.4); opacity: 0; } }
 .run-badge.warm { background: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
 .run-badge.bad { background: var(--danger); }
 
@@ -751,6 +769,7 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 .mark.big img { width: 64%; height: 64%; object-fit: contain; }
+.mark.big > svg { width: 24px; height: 24px; }
 
 .site-name {
   margin: 0 0 3px;
@@ -2595,6 +2614,7 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+  .run-badge::after { display: none; } /* `*` doesn't reach pseudo-elements */
   /* A spinner says something is still working: it keeps turning, slower. Windows turns
    * this on with Settings › Accessibility › Animation effects off, common in VMs. */
   .spin-dot { animation: spin 1.4s linear infinite !important; }

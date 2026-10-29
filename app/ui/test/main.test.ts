@@ -344,6 +344,36 @@ describe("sidebar", () => {
     expect(badge("shop")).toBeNull();
   });
 
+  test("a tile shows its kind's glyph, no letter, until the app's own icon replaces it", async () => {
+    const tile = (name: string) => $(`#list [data-name="${name}"] .mark`);
+    // The mock's `icon` answers null: the glyph stays.
+    for (const name of ["shop", "notes", "vuefinder", "stack"]) {
+      expect(tile(name).querySelector("svg")).toBeTruthy();
+      expect(tile(name).textContent).toBe("");
+    }
+    // Each kind its own glyph: Laravel, a folder, Vite and Compose all differ.
+    const drawn = ["shop", "notes", "vuefinder", "stack"].map((n) => tile(n).querySelector("svg")!.innerHTML);
+    expect(new Set(drawn).size).toBe(4);
+    // The header's big tile too.
+    await select("vuefinder");
+    expect($("#site .site-title .mark svg")).toBeTruthy();
+    expect($("#site .site-title .mark").textContent).toBe("");
+    // A kind without a glyph of its own gets the generic box; PHP frameworks share PHP's.
+    const { kindGlyph } = await import("../src/icons");
+    expect(kindGlyph("go").innerHTML).toBe(kindGlyph("something-new").innerHTML);
+    expect(kindGlyph("symfony").innerHTML).toBe(kindGlyph("php").innerHTML);
+    expect(kindGlyph("php").getAttribute("stroke")).toBe("currentColor");
+    // An icon found replaces the glyph.
+    const { icons } = await import("../src/app");
+    icons.set("shop", "data:image/png;base64,iVBORw0KGgo=");
+    await wait(550); // refresh reads the state again only half a second after the last read
+    w.refresh();
+    await wait(80);
+    expect(tile("shop").querySelector("img")).toBeTruthy();
+    expect(tile("shop").querySelector("svg")).toBeNull();
+    icons.set("shop", null);
+  });
+
   test("while an app starts only the dots are asked for and redrawn, until it answers", async () => {
     w.mockSnap.app_states = { vuefinder: "starting" };
     await wait(550);

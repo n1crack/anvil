@@ -4,7 +4,7 @@ import { late } from "./late";
 import { ownError, shown } from "./live";
 import { NAMES, editor, summary } from "./hooksform";
 import { bubbleKeys, confirmInRow } from "./confirm";
-import { icon } from "./icons";
+import { icon, kindGlyph } from "./icons";
 import { knob } from "./knob";
 import { fileManager, keys, mac, mod } from "./platform";
 
@@ -240,15 +240,16 @@ export function mark(s) {
   const m = document.createElement("span");
   m.className = "mark";
   m.setAttribute("aria-hidden", "true");
-  m.textContent = (s.name.match(/[a-z0-9]/) ?? ["?"])[0].toUpperCase();
+  m.append(kindGlyph(s.kind));
   const img = (src) => {
     const i = new Image();
     i.src = src;
     i.alt = "";
     return i;
   };
-  // The first time, the letter until the icon has loaded; after that the icon at once:
-  // every redraw (a right-click, a refresh) showing the letter first made it flash.
+  // The first time, the kind's glyph until the icon has loaded; after that the icon at once:
+  // every redraw (a right-click, a refresh) showing the glyph first made it flash.
+  // No icon, or one that fails: the glyph stays.
   const show = (src) => {
     if (!src) return;
     const i = img(src);
