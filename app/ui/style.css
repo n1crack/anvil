@@ -727,17 +727,19 @@ button, select, input { font: inherit; color: inherit; }
   margin-bottom: 12px;
 }
 
-/* Silk threads behind every app's header and tabs (drawn by silk.ts). */
+/* Silk threads behind every app's header and tabs (drawn by silk.ts). The canvas keeps one height
+ * and is cut by the box, so a header that grows or shrinks between tabs doesn't stretch it. */
 .silk {
   position: absolute;
   inset: 0;
   z-index: -1;
-  width: 100%;
-  height: 100%;
+  overflow: hidden;
   pointer-events: none;
   -webkit-mask: linear-gradient(#000 60%, transparent);
   mask: linear-gradient(#000 60%, transparent);
 }
+
+.silk canvas { display: block; width: 100%; height: 200px; }
 
 @keyframes breathe { 50% { opacity: 0.6; } }
 

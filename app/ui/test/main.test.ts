@@ -4487,7 +4487,7 @@ describe("motion", () => {
 
   test("the silk sits behind every header, inert", () => {
     const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
-    expect($("#site .site-top > canvas.silk")).toBeTruthy();
+    expect($("#site .site-top > .silk > canvas")).toBeTruthy();
     expect(css).toMatch(/\.silk\s*{[^}]*pointer-events: none/);
     expect(css).not.toContain(".glow");
     expect(css).toMatch(/\.power\[data-on="true"\] \.ingot\s*{[^}]*breathe 2\.4s/);

@@ -8,10 +8,14 @@ const SHEETS = [
   { y: 0.7, amp: 0.16, f1: 2.1, f2: 4.1, s1: 0.15, s2: 0.37, tw: 2.6, ts: 0.33, w: 0.36, ph: 4.4 },
 ];
 const THREADS = 56;
+const BAND = 150; // css px the waves are laid out in, whatever the header's height
 const STEP = 8; // css px between points along a thread
 const FRAME = 1000 / 30; // ponytail: fixed 30 fps cap; tune if Activity Monitor shows a cost
 
 const still = matchMedia("(prefers-reduced-motion: reduce)");
+// One canvas for the app's life: every render clones a fresh header, and a fresh canvas would
+// start blank; this one moves into it with its last frame still drawn.
+let mine: HTMLCanvasElement | null = null;
 let raf = 0;
 let last = 0;
 let look: { colors: string[]; k: number; blend: GlobalCompositeOperation } | null = null;
@@ -57,7 +61,7 @@ function draw(cv: HTMLCanvasElement, now: number) {
           S.amp * Math.sin(x * S.f1 * Math.PI + t * S.s1 + S.ph) * 0.8 +
           S.amp * 0.35 * Math.sin(x * S.f2 * Math.PI + t * S.s2 + S.ph * 1.7);
         const width = S.w * Math.sin(x * S.tw * Math.PI + t * S.ts + S.ph);
-        const y = (c + v * width + 0.012 * Math.sin(x * 9 + t * 0.8 + i * 0.3)) * h;
+        const y = (c + v * width + 0.012 * Math.sin(x * 9 + t * 0.8 + i * 0.3)) * BAND;
         if (px === -STEP) ctx.moveTo(px, y);
         else ctx.lineTo(px, y);
       }
@@ -71,8 +75,11 @@ function draw(cv: HTMLCanvasElement, now: number) {
 
 function tick(now: number) {
   raf = 0;
-  const cv = document.querySelector<HTMLCanvasElement>("#site .silk");
-  if (!cv || document.hidden) return;
+  const slot = document.querySelector<HTMLCanvasElement>("#site .silk canvas");
+  if (!slot || document.hidden) return;
+  if (mine && slot !== mine) slot.replaceWith(mine);
+  else mine = slot;
+  const cv = mine;
   if (now - last >= FRAME) {
     last = now;
     draw(cv, now);
