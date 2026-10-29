@@ -3,15 +3,15 @@
 :root {
   color-scheme: light dark;
 
-  --steel-pane: #1d2126;
-  --steel-raised: #272c32;
+  --steel-pane: #131110;
+  --steel-raised: #1b1816;
   --ext-well: rgba(0, 0, 0, 0.18);
-  --steel-hover: rgba(255, 255, 255, 0.06);
-  --selected: rgba(255, 255, 255, 0.11);
-  --line: rgba(255, 255, 255, 0.08);
-  --text: #e8ebee;
-  --muted: #9aa2ac;
-  --cold: #5b636d;
+  --steel-hover: rgba(255, 240, 230, 0.045);
+  --selected: rgba(255, 240, 230, 0.09);
+  --line: rgba(255, 235, 220, 0.06);
+  --text: #f1ece8;
+  --muted: #a39a93;
+  --cold: #776e68;
   /* Disk space that can be deleted and made again: a calm blue, apart from state colors. */
   --rebuild: #5b8fd4;
   --safe-del: color-mix(in srgb, var(--text) 80%, transparent);
@@ -22,11 +22,13 @@
   --heat-text: #ffad5c;
 
   /* Errors and destructive actions: red, so orange stays the brand. */
-  --danger: #ff6961;
+  --danger: #ff5c50;
+  --danger-soft: rgba(255, 92, 80, 0.12);
 
   /* Running: green, so it never reads as a warning. */
-  --ok: #34c759;
-  --ok-text: #5fd47e;
+  --ok: #3ddc84;
+  --ok-text: #5fe39a;
+  --ok-soft: rgba(61, 220, 132, 0.1);
 
   /* An address's lock: muted green for HTTPS, muted red for HTTP; quiet beside the name. */
   --lock-on: #6aa97a;
@@ -37,14 +39,24 @@
   --amber-text: var(--heat-white);
 
   /* Split from --line/--heat so the light theme can differ; same look in dark. */
-  --edge: var(--line); /* the border of buttons, fields and chips */
-  --select-mark: var(--heat-text); /* the thin line on a selected sidebar row */
+  --edge: rgba(255, 240, 230, 0.1); /* the border of buttons, fields and chips */
   --group-bg: color-mix(in srgb, var(--heat) 6%, transparent);
-  --group-text: color-mix(in srgb, var(--heat-text) 70%, var(--text));
-  --sidebar-bg: transparent; /* the native vibrancy shows through */
-  --card: var(--steel-hover); /* the sidebar's grouped rows */
+  --group-text: #c98a5a;
+  --sidebar-bg: rgba(14, 12, 11, 0.55); /* a warm tint; the native vibrancy shows through */
+  --card: color-mix(in srgb, var(--steel-raised) 72%, transparent); /* the sidebar's grouped rows */
   --kids-bg: color-mix(in srgb, var(--card) 80%, #000); /* an app's worktrees under it */
   --pop-deep: color-mix(in srgb, var(--steel-raised) 78%, #000); /* a list in a bubble */
+  /* Cards (grouped lists, bubbles): a top highlight, a hairline ring and a soft drop;
+   * hovered, the ring warms. */
+  --card-shadow: inset 0 1px 0 rgba(255, 230, 210, 0.05), 0 0 0 1px rgba(255, 230, 210, 0.06), 0 10px 30px -14px rgba(0, 0, 0, 0.9);
+  --card-shadow-hi: inset 0 1px 0 rgba(255, 200, 150, 0.09), 0 0 0 1px rgba(255, 138, 31, 0.18), 0 16px 34px -14px rgba(255, 90, 20, 0.18);
+  /* The selected sidebar row: a warm fill fading right, a faint ring of the same hue. */
+  --sel-fill: linear-gradient(90deg, rgba(255, 138, 31, 0.12), rgba(255, 138, 31, 0.02) 70%);
+  --sel-ring: inset 0 0 0 1px rgba(255, 138, 31, 0.12);
+  --flash: rgba(255, 138, 31, 0.1); /* a new row, for a moment */
+  --ink: #f1ece8; /* the selected tab's underline */
+  /* Ember behind the header of an app that is alive. */
+  --glow: radial-gradient(closest-side, rgba(255, 120, 30, 0.2), rgba(232, 65, 12, 0.07) 55%, transparent);
   /* On: a muted green, the one "on" means everywhere, light enough under the white knob. */
   --switch-on: #4c9a62;
 
@@ -53,7 +65,8 @@
   --pc0: #93c5fd; --pc1: #c4b5fd; --pc2: #f0abfc; --pc3: #67e8f9; --pc4: #a5b4fc; --pc5: #cbd5e1;
 
   --radius-s: 6px;
-  --radius-m: 10px;
+  --radius-m: 9px;
+  --radius-l: 12px;
   /* Narrower windows give the detail pane the room; 760px is the window minimum. */
   --sidebar: clamp(280px, 36vw, 420px);
   --titlebar: 52px;
@@ -62,41 +75,50 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* Light: a clean native macOS light window. White content, a sidebar that lightens
- * the vibrancy (and is a very light neutral without it), hairlines, neutral grey
- * selection, and status colors that hold their contrast on white. */
+/* Light: a warm off-white window. White cards, a sidebar that lightens the vibrancy
+ * (and is a very light warm neutral without it), hairlines, and status colors that
+ * hold their contrast on white. */
 @media (prefers-color-scheme: light) {
   :root {
-    --steel-pane: #ffffff;
-    --steel-raised: #f5f5f7;
-    --ext-well: rgba(0, 0, 0, 0.035);
-    --steel-hover: rgba(0, 0, 0, 0.04);
-    --selected: rgba(0, 0, 0, 0.075);
-    --line: rgba(0, 0, 0, 0.1);
-    --text: #1d1d1f;
-    --muted: #5f636b;
-    --cold: #a1a6ad;
+    --steel-pane: #fdfbf9;
+    --steel-raised: #ffffff;
+    --ext-well: rgba(60, 30, 10, 0.035);
+    --steel-hover: rgba(60, 30, 10, 0.04);
+    --selected: rgba(60, 30, 10, 0.07);
+    --line: rgba(60, 30, 10, 0.08);
+    --text: #1f1a17;
+    --muted: #6a605a;
+    --cold: #978c85;
     --rebuild: #3f74c4;
-    /* A soft slate, not the near black 80% of the text would be. */
-    --safe-del: #6b7480;
+    /* A soft warm grey, not the near black 80% of the text would be. */
+    --safe-del: #776c65;
     --heat-text: #c2410c;
-    --danger: #c42127;
-    --ok: #1f9d3e;
-    --ok-text: #126429;
+    --danger: #d92d2d;
+    --danger-soft: rgba(217, 45, 45, 0.1);
+    --ok: #1fa84a;
+    --ok-text: #137a33;
+    --ok-soft: rgba(31, 168, 74, 0.1);
     --lock-on: #4e8a5d;
     --lock-off: #b0675e;
     --amber: #b87400;
     --amber-text: #8f5600;
 
-    --edge: rgba(0, 0, 0, 0.16);
-    --select-mark: transparent;
-    --group-bg: #f5f5f7;
-    --group-text: #a8410f;
-    --sidebar-bg: rgba(246, 246, 248, 0.72);
+    --edge: rgba(60, 30, 10, 0.14);
+    --group-bg: #f6f2ee;
+    --group-text: #b2541a;
+    --sidebar-bg: rgba(246, 242, 238, 0.72);
     --card: rgba(255, 255, 255, 0.78);
-    --kids-bg: rgba(0, 0, 0, 0.035);
-    --pop-deep: #ebebee;
+    --kids-bg: rgba(60, 30, 10, 0.035);
+    --pop-deep: #f3eee9;
     --switch-on: #3f8f56;
+
+    --card-shadow: 0 0 0 1px rgba(60, 30, 10, 0.07), 0 1px 2px rgba(60, 30, 10, 0.04), 0 8px 22px -12px rgba(60, 30, 10, 0.14);
+    --card-shadow-hi: 0 0 0 1px rgba(232, 101, 12, 0.25), 0 2px 4px rgba(60, 30, 10, 0.05), 0 14px 30px -14px rgba(232, 101, 12, 0.25);
+    --sel-fill: linear-gradient(90deg, rgba(232, 101, 12, 0.1), rgba(232, 101, 12, 0.02) 70%);
+    --sel-ring: inset 0 0 0 1px rgba(232, 101, 12, 0.12);
+    --flash: rgba(232, 101, 12, 0.08);
+    --ink: #1f1a17;
+    --glow: radial-gradient(closest-side, rgba(255, 150, 60, 0.22), rgba(255, 120, 30, 0.06) 55%, transparent);
 
     --pc0: #1d4ed8; --pc1: #6d28d9; --pc2: #a21caf; --pc3: #0e7490; --pc4: #4338ca; --pc5: #475569;
   }
@@ -259,6 +281,7 @@ button, select, input { font: inherit; color: inherit; }
 .rows {
   border-radius: var(--radius-m);
   background: var(--card);
+  box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 
@@ -351,7 +374,7 @@ button, select, input { font: inherit; color: inherit; }
   place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   background: var(--steel-raised);
   /* A hairline so the tile stays apart from a hovered or selected row of the same tone. */
   box-shadow: inset 0 0 0 1px var(--line);
@@ -364,7 +387,7 @@ button, select, input { font: inherit; color: inherit; }
 .item.child .mark {
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--radius-s);
 }
 
 .item .mark img {
@@ -507,10 +530,9 @@ button, select, input { font: inherit; color: inherit; }
   gap: 2px;
   max-width: 280px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--card-shadow);
   font-size: 12px;
   pointer-events: none;
 }
@@ -521,11 +543,10 @@ button, select, input { font: inherit; color: inherit; }
 
 .item[aria-expanded="true"] .chevron { transform: rotate(90deg); }
 
-/* Selection: a neutral background and one thin line of colour, nothing louder.
- * --heat-text keeps the line visible in the light theme too. */
+/* Selection: a warm fill and a faint ring, no line. */
 .item[aria-current="true"] {
-  background: var(--selected);
-  box-shadow: inset 2px 0 0 var(--select-mark);
+  background: var(--sel-fill);
+  box-shadow: var(--sel-ring);
 }
 /* Quiet text on a selection's grey: a step brighter, so it keeps 4.5:1 there too. */
 .item[aria-current="true"] :is(.kind, .sub),
@@ -609,6 +630,19 @@ button, select, input { font: inherit; color: inherit; }
 /* The banner for an error with no place of its own: over the top of the pane, so
  * nothing moves. */
 .detail { position: relative; }
+/* Dark: a faint grain over the pane, so it reads as a material, not a flat fill. */
+@media (prefers-color-scheme: dark) {
+  .detail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
 #error {
   position: absolute;
   top: var(--titlebar);
@@ -667,7 +701,7 @@ button, select, input { font: inherit; color: inherit; }
   flex: none;
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--radius-l);
   background: var(--steel-raised);
   color: var(--muted);
   font-size: 20px;
@@ -743,7 +777,7 @@ button, select, input { font: inherit; color: inherit; }
   height: 28px;
   padding: 0 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-s);
   background: none;
   color: var(--text);
   text-align: left;
@@ -772,7 +806,7 @@ button, select, input { font: inherit; color: inherit; }
   height: 30px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-s);
   background: none;
   color: var(--muted);
 }
@@ -856,7 +890,7 @@ button, select, input { font: inherit; color: inherit; }
   left: 6px;
   height: 2px;
   border-radius: 1px;
-  background: var(--heat);
+  background: var(--ink);
 }
 
 /* Out of the flow, so the tab bar keeps its height on Resources. */
@@ -890,8 +924,9 @@ button, select, input { font: inherit; color: inherit; }
 /* Settings read like a macOS grouped list, not a stack of cards. */
 .group {
   margin: 0;
-  border: 1px solid var(--line);
   border-radius: var(--radius-m);
+  background: var(--steel-raised);
+  box-shadow: var(--card-shadow);
   max-width: 640px;
 }
 
@@ -998,8 +1033,8 @@ button.proc-name:hover { text-decoration: underline; }
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  background: #121518;
-  color: #d7dce1;
+  background: #100e0d;
+  color: #e3ddd8;
 }
 .console[hidden] { display: none; }
 .console-head {
@@ -1012,7 +1047,7 @@ button.proc-name:hover { text-decoration: underline; }
 }
 .console-title { flex: 1; overflow: hidden; font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .console .proc-actions button,
-.console .icon-btn { border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.08); color: #e8ebee; }
+.console .icon-btn { border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.08); color: #f1ece8; }
 .console-out {
   height: 260px;
   margin: 0;
@@ -1024,7 +1059,7 @@ button.proc-name:hover { text-decoration: underline; }
   user-select: text;
   -webkit-user-select: text;
 }
-.console-out:empty::before { content: "No output yet"; color: #8d959f; }
+.console-out:empty::before { content: "No output yet"; color: #958c86; }
 /* A log paused away from its newest edge: this pill, pinned at that edge, jumps back
  * (console.ts follower). Its text is CSS so the log's own text stays the log's. */
 .follow-pill {
@@ -1040,7 +1075,7 @@ button.proc-name:hover { text-decoration: underline; }
   border-radius: 11px;
   background: rgba(48, 54, 61, 0.94);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  color: #e8ebee;
+  color: #f1ece8;
   font: 600 11px/20px -apple-system, system-ui, sans-serif;
   white-space: nowrap;
 }
@@ -1057,15 +1092,15 @@ button.proc-name:hover { text-decoration: underline; }
 /* Backgrounds deeper than the text colors, so white on blue (Laravel's INFO) reads;
  * black on any of them is the surface's near-black, not ansi0's grey. */
 .ansi-bg0 { background: #30363d; } .ansi-bg1 { background: #da3633; } .ansi-bg2 { background: #2ea043; } .ansi-bg3 { background: #d29922; }
-.ansi-bg4 { background: #1f5fcf; } .ansi-bg5 { background: #8957e5; } .ansi-bg6 { background: #39c5cf; } .ansi-bg7 { background: #d7dce1; color: #121518; }
+.ansi-bg4 { background: #1f5fcf; } .ansi-bg5 { background: #8957e5; } .ansi-bg6 { background: #39c5cf; } .ansi-bg7 { background: #d7dce1; color: #100e0d; }
 .ansi-bg8 { background: #484f58; } .ansi-bg9 { background: #f85149; } .ansi-bg10 { background: #3fb950; } .ansi-bg11 { background: #e3b341; }
-.ansi-bg12 { background: #388bfd; } .ansi-bg13 { background: #a371f7; } .ansi-bg14 { background: #56d4dd; } .ansi-bg15 { background: #ffffff; color: #121518; }
+.ansi-bg12 { background: #388bfd; } .ansi-bg13 { background: #a371f7; } .ansi-bg14 { background: #56d4dd; } .ansi-bg15 { background: #ffffff; color: #100e0d; }
 /* Badges: black and bright black (Pint's PASS is 90;42) are real black on a colored ground,
  * white is white; on the two grey grounds they stay as they are. */
 [class*="ansi-bg"]:is(.ansi0, .ansi8):not(.ansi-bg0, .ansi-bg8) { color: #000; }
 [class*="ansi-bg"]:is(.ansi7, .ansi15):not(.ansi-bg7, .ansi-bg15) { color: #fff; }
 .ansi-dim { opacity: 0.6; } .ansi-i { font-style: italic; } .ansi-u { text-decoration: underline; }
-.term-time { color: #8b949e; }
+.term-time { color: #958c86; }
 /* Process names: on the terminal surface always the dark theme's, in lists the theme's. */
 .pc0, .pc1, .pc2, .pc3, .pc4, .pc5 { color: var(--pc); }
 .pc0 { --pc: var(--pc0); } .pc1 { --pc: var(--pc1); } .pc2 { --pc: var(--pc2); }
@@ -1158,31 +1193,31 @@ button.proc-name:hover { text-decoration: underline; }
 .dev-pane { position: relative; margin: 0; container-type: inline-size; }
 .dev-out:focus-visible { outline-offset: -2px; }
 /* The keys, one muted line under the output; gone when the pane is too narrow for it. */
-.dev-keys { flex: none; margin: 0; padding: 3px 14px 4px; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #8d959f; font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; }
+.dev-keys { flex: none; margin: 0; padding: 3px 14px 4px; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #958c86; font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; }
 .dev-keys { position: relative; }
-.dev-keys-short { display: none; height: auto; padding: 0 4px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; }
-.dev-keys-short:hover, .dev-keys-short[aria-expanded="true"] { background: rgba(255, 255, 255, 0.08); color: #c9d1d9; }
+.dev-keys-short { display: none; height: auto; padding: 0 4px; border: 0; border-radius: var(--radius-s); background: none; color: inherit; font: inherit; }
+.dev-keys-short:hover, .dev-keys-short[aria-expanded="true"] { background: rgba(255, 255, 255, 0.08); color: #d9d1cb; }
 @container (max-width: 460px) {
   .dev-keys { text-align: right; }
   .dev-keys-full { display: none; }
   .dev-keys-short { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
 }
 /* ⌨ Keys' card: above the line, at the pane's right, in the console's colors. */
-.dev-keys-card { position: absolute; right: 10px; bottom: calc(100% + 6px); z-index: 5; display: grid; grid-template-columns: auto auto; gap: 4px 12px; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: #1b1f24; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); text-align: left; }
+.dev-keys-card { position: absolute; right: 10px; bottom: calc(100% + 6px); z-index: 5; display: grid; grid-template-columns: auto auto; gap: 4px 12px; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: #1b1816; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); text-align: left; }
 .dev-keys-card[hidden] { display: none; }
 /* Key caps in the console's colors: the app's kbd is drawn for the light pages. */
-.dev-keys-card kbd { min-width: 22px; padding: 0 6px; border: 1px solid rgba(255, 255, 255, 0.18); border-bottom-width: 2px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); color: #e6edf3; font: 600 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-align: center; }
+.dev-keys-card kbd { min-width: 22px; padding: 0 6px; border: 1px solid rgba(255, 255, 255, 0.18); border-bottom-width: 2px; border-radius: var(--radius-s); background: rgba(255, 255, 255, 0.08); color: #f1ece8; font: 600 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-align: center; }
 .dev-keys-card span { align-self: center; }
 .dev-head .console-title { flex: none; }
-.dev-cmd { flex: 1; overflow: hidden; color: #8d959f; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.dev-cmd { flex: 1; overflow: hidden; color: #958c86; font: 12px ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .dev-pane.is-empty .dev-head-start { display: none; }
 .dev-out { height: max(260px, calc(100vh - 360px)); }
 .dev-out:empty::before { content: none; }
-.dev-empty { position: absolute; top: 44px; left: 14px; display: flex; align-items: center; gap: 8px; min-height: 20px; /* a ▶ or not, the text stays put */ color: #8d959f; font: 11px ui-monospace, "SF Mono", Menlo, monospace; }
+.dev-empty { position: absolute; top: 44px; left: 14px; display: flex; align-items: center; gap: 8px; min-height: 20px; /* a ▶ or not, the text stays put */ color: #958c86; font: 11px ui-monospace, "SF Mono", Menlo, monospace; }
 .dev-empty[hidden] { display: none; }
 /* The compose file can't be read: its error and hint, wrapped in the pane. */
 .dev-empty.is-error { right: 14px; display: block; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
-.dev-empty button { display: inline-grid; place-items: center; height: 20px; padding: 0 7px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: rgba(255, 255, 255, 0.08); color: #e8ebee; font-size: 10px; }
+.dev-empty button { display: inline-grid; place-items: center; height: 20px; padding: 0 7px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-s); background: rgba(255, 255, 255, 0.08); color: #f1ece8; font-size: 10px; }
 .dev-line { display: flex; }
 .dev-tag { flex: none; white-space: pre; }
 .dev-text { min-width: 0; }
@@ -1809,7 +1844,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   gap: 2px;
   margin: 8px 0 16px;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   background: var(--steel-hover);
 }
 
@@ -1817,7 +1852,7 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
   height: 26px;
   padding: 0 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-s);
   background: none;
   color: var(--muted);
 }
@@ -2141,7 +2176,7 @@ kbd {
   padding: 2px 8px;
   border: 1px solid var(--line);
   border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: var(--radius-s);
   background: var(--steel-raised);
   font: 12px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   white-space: nowrap;
@@ -2231,7 +2266,7 @@ kbd {
   width: min(560px, 90vw);
   padding: 22px 24px 18px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius-l);
   background: var(--steel-pane);
   color: var(--text);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
@@ -2478,7 +2513,7 @@ kbd {
   gap: 2px;
   margin: 0 16px 8px;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-m);
   background: var(--steel-hover);
 }
 
@@ -2489,7 +2524,7 @@ kbd {
   gap: 6px;
   height: 24px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-s);
   background: none;
   color: var(--muted);
   font-weight: 500;
@@ -2704,7 +2739,7 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
   flex: none;
   gap: 2px;
   padding: 2px;
-  border-radius: 7px;
+  border-radius: var(--radius-m);
   background: var(--steel-hover);
 }
 
@@ -2712,7 +2747,7 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
   height: 22px;
   padding: 0 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-s);
   background: none;
   color: var(--muted);
   font-size: 12px;
@@ -2723,7 +2758,7 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
 
 .seg button[aria-pressed="true"],
 .seg button[aria-selected="true"] {
-  background: rgba(255, 255, 255, 0.14); /* --steel-raised barely parts from the track in dark */
+  background: rgba(255, 240, 230, 0.12); /* --steel-raised barely parts from the track in dark */
   color: var(--text);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
@@ -3012,8 +3047,8 @@ button.log-file:hover { text-decoration-color: currentColor; }
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  background: #121518;
-  color: #d7dce1;
+  background: #100e0d;
+  color: #e3ddd8;
   font: 11px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -3022,7 +3057,7 @@ button.log-file:hover { text-decoration-color: currentColor; }
 }
 .logs-term[hidden] { display: none; }
 .logs-term > .term-block { display: block; }
-.logs-term:empty::before { content: attr(data-empty); color: #8d959f; }
+.logs-term:empty::before { content: attr(data-empty); color: #958c86; }
 .logs-term mark { border-radius: 2px; background: rgba(227, 179, 65, 0.35); color: inherit; }
 [data-panel="logs"] .logs > .logs-term { flex: 1; min-height: 0; }
 
@@ -3081,7 +3116,7 @@ button.pkg-tile:hover { background: color-mix(in srgb, var(--text) 6%, transpare
   height: 26px;
   padding: 0 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-s);
   background: var(--steel-hover);
   outline: none;
 }
@@ -3094,7 +3129,7 @@ button.pkg-tile:hover { background: color-mix(in srgb, var(--text) 6%, transpare
   gap: 8px;
   height: 26px;
   padding: 0 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-s);
 }
 .pkg-opt[aria-selected="true"] { background: color-mix(in srgb, var(--text) 9%, transparent); }
 .pkg-opt-name { overflow: hidden; font: 12px ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; text-overflow: ellipsis; }
@@ -3526,11 +3561,11 @@ body.activity {
   min-width: 260px;
   max-width: calc(100% - 366px); /* the list keeps 360px and the splitter */
   /* The console's and Watch's terminal surface, in both themes. */
-  background: #121518;
-  color: #d7dce1;
+  background: #100e0d;
+  color: #e3ddd8;
 }
 .act-pane[hidden] { display: none; }
-.act-pane .icon-btn { background: rgba(255, 255, 255, 0.08); color: #e8ebee; }
+.act-pane .icon-btn { background: rgba(255, 255, 255, 0.08); color: #f1ece8; }
 
 /* Between the list and the log: drag to resize. */
 .act-split {
@@ -3552,18 +3587,18 @@ body.activity {
 }
 .act-pane-head span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Clear's question in the title's place, on the terminal surface in both themes. */
-.act-ask { flex: 1; display: flex; align-items: center; gap: 12px; min-width: 0; color: #9aa3ab; font-weight: 400; white-space: nowrap; }
+.act-ask { flex: 1; display: flex; align-items: center; gap: 12px; min-width: 0; color: #a39a93; font-weight: 400; white-space: nowrap; }
 .act-ask[hidden] { display: none; }
-.act-ask .text-act { color: #b8c0c8; }
-.act-ask .text-act:hover { color: #e8ebee; }
-.act-ask .text-act.danger { color: #ff6961; }
+.act-ask .text-act { color: #c4bbb4; }
+.act-ask .text-act:hover { color: #f1ece8; }
+.act-ask .text-act.danger { color: #ff5c50; }
 
 .act-log {
   flex: 1;
   margin: 0;
   padding: 8px 14px;
   overflow: auto;
-  color: #d7dce1;
+  color: #e3ddd8;
   font: 11px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -3572,7 +3607,7 @@ body.activity {
 }
 
 /* A log with nothing in it says so, as the Logs tab does. */
-.act-log:empty::before { content: attr(data-empty); color: #8d959f; }
+.act-log:empty::before { content: attr(data-empty); color: #958c86; }
 
 /* A small confirm bubble next to the button that asked. */
 /* A bubble under its button (popAt in app.js). */
@@ -3580,10 +3615,9 @@ body.activity {
   position: absolute;
   z-index: 50;
   padding: 8px 10px;
-  border: 1px solid var(--line);
   border-radius: var(--radius-s);
   background: var(--steel-raised);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--card-shadow);
   font-size: 12px;
 }
 .pop-confirm { display: flex; align-items: center; gap: 8px; }
@@ -3702,7 +3736,7 @@ html.linux header.titlebar { height: 52px; }
  * behind the window shows through. */
 html.linux { --sidebar-bg: color-mix(in srgb, var(--steel-pane) 82%, #000); }
 @media (prefers-color-scheme: light) {
-  html.linux { --sidebar-bg: #f2f2f4; }
+  html.linux { --sidebar-bg: #f3efeb; }
 }
 html.windows body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
 
@@ -3792,7 +3826,7 @@ body.updates:has(.upd-notes[hidden]) .upd-head { margin: auto 0; padding-bottom:
 .pkg-log:focus { outline: none; }
 /* The ANSI colours are made for a dark surface: in light, the terminal's own, as .logs-term. */
 @media (prefers-color-scheme: light) {
-  .pkg-log { border-color: transparent; background: #121518; color: #d7dce1; }
+  .pkg-log { border-color: transparent; background: #100e0d; color: #e3ddd8; }
 }
 .pkg-log-status { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 12px; }
 .pkg-log-status .spin-dot { flex: none; }
