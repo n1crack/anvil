@@ -169,7 +169,10 @@ function drawFiles(v) {
     for (const src of v.sources) menu.add(new Option(src.label, src.id));
     menu.value = v.source?.id;
     if (v.source) menu.title = tip(v.source);
-    menu.onchange = () => pick(menu.value);
+    menu.onchange = () => {
+      pick(menu.value);
+      menu.title = tip(v.source);
+    };
     return strip.replaceChildren(menu);
   }
   const box = seg(

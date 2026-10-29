@@ -413,6 +413,8 @@ describe("overview", () => {
     const card = $(".run-card");
     expect(card.querySelector(".run-card-title")!.textContent).toBe("Dev · 3 processes");
     expect($$(".run-card .proc .dot").map((d) => d.className)).toEqual(["dot ", "dot on", "dot "]);
+    // docs:dev runs with no start time known: "running", not "stopped" beside a green dot.
+    expect($$(".run-card .proc-end").map((e) => e.textContent)).toEqual(["stopped", "running", "stopped"]);
     expect($$("#site .res-sub").map((h) => h.textContent)).not.toContain("Commands");
     expect($('#site .facts [data-field="path"]').textContent).toBe("~/Sites/vuefinder");
     (card.querySelector(".run-card-head") as HTMLElement).click();
@@ -1659,6 +1661,31 @@ describe("logs", () => {
     ($('.logs-files .seg [data-id="laravel.log"]') as HTMLElement).click();
     await wait(80);
   });
+
+  test("many files are a menu; its tooltip follows the picked file", async () => {
+    const saved = w.mockLogSources;
+    w.mockLogSources = [0, 1, 2, 3, 4, 5].map((i) => ({
+      id: `f${i}`,
+      label: `f${i}.log`,
+      path: `/tmp/f${i}.log`,
+      bytes: 10,
+      modified: null,
+    }));
+    try {
+      await select("notes");
+      await select("shop");
+      $('.tabs [data-tab="logs"]').click();
+      await wait(80);
+      const menu = $(".logs-source") as HTMLSelectElement;
+      menu.value = "f3";
+      menu.dispatchEvent(new Event("change"));
+      await wait(80);
+      expect(menu.title).toMatch(/^\/tmp\/f3\.log\n/);
+    } finally {
+      w.mockLogSources = saved;
+      await select("notes");
+    }
+  });
 });
 
 describe("requests", () => {
@@ -1838,6 +1865,13 @@ describe("overview requests preview", () => {
     await wait(30);
     expect($(".req-preview .req-new")).toBeNull();
     expect(rows()[0]).toBe(fresh[0]); // the same row, not drawn again
+  });
+
+  test("a flash cut short by leaving the Overview doesn't play again", async () => {
+    const r = rows()[0];
+    r.classList.add("req-new");
+    r.dispatchEvent(Object.assign(new Event("animationcancel"), { animationName: "req-flash" }));
+    expect(r.classList.contains("req-new")).toBe(false);
   });
 
   test("a first read that failed is tried again when the Overview is shown next", async () => {
@@ -4464,6 +4498,8 @@ describe("motion", () => {
     const reduce = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
     const block = reduce.slice(0, reduce.indexOf("\n}") + 2);
     expect(block).toContain("animation: none !important");
+    // `*` alone doesn't reach pseudo-elements (.modes::before, .run-badge::after).
+    expect(block).toMatch(/\*::before,\s*\*::after/);
     expect(block).toContain(".spin-dot");
   });
 });

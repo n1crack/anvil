@@ -287,7 +287,8 @@ function procEnd(name: string, r: ProcessRow): Node[] {
     up.dataset.started = String(r.started);
     return [up];
   }
-  if (!r.crashed || r.running) return [el("span", "up", r.starting ? "starting" : "stopped")];
+  // Running without a start time (no pid of ours, e.g. the site Caddy serves): no uptime.
+  if (!r.crashed || r.running) return [el("span", "up", r.starting ? "starting" : r.running ? "running" : "stopped")];
   const how = r.crashed.code == null ? "ended by a signal" : `exited ${r.crashed.code}`;
   return [
     el("span", "up bad", `${how} · ${ago(new Date(r.crashed.at * 1000))}`),

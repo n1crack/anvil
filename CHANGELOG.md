@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- A warmer, layered look with motion: selection and tabs slide, the header glows while an app runs, Overview shows what runs first.
+
 ### Fixed
 
 - On macOS, `node`, `php` and the other terminal commands keep working after Anvil.app is moved or deleted; with Anvil gone they run the system's own.

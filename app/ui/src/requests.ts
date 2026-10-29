@@ -328,8 +328,10 @@ async function previewTick() {
   const fresh = page.requests.slice(0, PREVIEW_ROWS).map((r) => row(p, r, "div"));
   for (const li of fresh) {
     li.classList.add("req-new");
-    // Once: shown again (another tab and back, a redraw) it would open and flash anew.
-    li.addEventListener("animationend", (e) => e.animationName === "req-flash" && li.classList.remove("req-new"));
+    // Once: shown again (another tab and back, a redraw) it would open and flash anew. Hidden
+    // mid-flash (another tab) cancels the animation rather than ending it.
+    for (const ev of ["animationend", "animationcancel"])
+      li.addEventListener(ev, (e) => (e as AnimationEvent).animationName === "req-flash" && li.classList.remove("req-new"));
   }
   p.list.prepend(...fresh);
   for (const old of [...p.list.children].slice(PREVIEW_ROWS)) old.remove();

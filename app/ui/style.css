@@ -761,8 +761,9 @@ button, select, input { font: inherit; color: inherit; }
   width: 48px;
   height: 48px;
   border-radius: var(--radius-l);
-  background: var(--steel-raised);
-  color: var(--muted);
+  background: var(--tile);
+  box-shadow: var(--tile-shadow);
+  color: var(--tile-fg);
   font-size: 20px;
   font-weight: 600;
   overflow: hidden;
@@ -2613,8 +2614,10 @@ kbd {
 .term-error [class^="ansi"] { color: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
-  .run-badge::after { display: none; } /* `*` doesn't reach pseudo-elements */
+  *,
+  *::before,
+  *::after { transition: none !important; animation: none !important; }
+  .run-badge::after { display: none; } /* a ring that stands still is only a bigger dot */
   /* A spinner says something is still working: it keeps turning, slower. Windows turns
    * this on with Settings › Accessibility › Animation effects off, common in VMs. */
   .spin-dot { animation: spin 1.4s linear infinite !important; }
@@ -2686,7 +2689,7 @@ kbd {
 .svc-versitygw { --hue: #a37ad6; }
 .svc-silo { --hue: #4a9fd6; }
 .svc-docker { --hue: #3a8ee6; }
-.svc-other { --hue: #8a8f98; }
+.svc-other { --hue: #958c86; }
 .mark.svc-mark {
   background: color-mix(in srgb, var(--hue) 20%, var(--steel-raised));
   color: color-mix(in srgb, var(--hue) 75%, var(--text));
