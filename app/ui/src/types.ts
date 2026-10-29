@@ -210,6 +210,8 @@ export interface ProcessRow extends Process {
   address: string | null;
   host_edited: boolean;
   pid: number | null;
+  /** Unix seconds. */
+  started: number | null;
   crashed: Exit | null;
 }
 

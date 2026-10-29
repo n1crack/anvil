@@ -700,6 +700,8 @@ struct ProcessRow {
     /// Its address's label was set in the app's settings.
     host_edited: bool,
     pid: Option<u32>,
+    /// Unix seconds.
+    started: Option<u64>,
     /// How it ended on its own, until started or stopped again.
     crashed: Option<anvil::apps::Exit>,
 }
@@ -776,6 +778,7 @@ fn main_row(cfg: &Config, site: &Site, serving: bool, running: bool) -> Option<P
         address: None,
         host_edited: false,
         pid: None,
+        started: None,
         crashed: None,
     })
 }
@@ -826,6 +829,7 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
             last: None,
             error: None,
             pid: None,
+            started: None,
             crashed: None,
             process: p,
         }
@@ -847,6 +851,7 @@ fn process_rows(app: &App, cfg: &Config, site: &Site) -> Vec<ProcessRow> {
             };
             r.last = last.remove(&key).flatten();
             r.pid = apps.pid(&key);
+            r.started = r.pid.and_then(|_| apps.started(&key));
             r.crashed = crashed
                 .iter()
                 .find(|(k, _)| *k == key)

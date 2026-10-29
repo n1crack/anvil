@@ -177,6 +177,7 @@ const mockRow = (o) => ({
   error: null,
   address: null,
   pid: null,
+  started: null,
   crashed: null,
   ...o,
 });
@@ -199,7 +200,7 @@ window.mockOv = {
   shop: {
     rows: [
       mockRow({ name: "shop.test", source: "anvil", server: true, kind: "site", main: true, web: "https://shop.test", running: true }),
-      mockRow({ id: "queue", name: "queue", command: "php artisan queue:listen --tries=1", source: "artisan dev", running: true, pid: 11 }),
+      mockRow({ id: "queue", name: "queue", command: "php artisan queue:listen --tries=1", source: "artisan dev", running: true, pid: 11, started: Math.floor(Date.now() / 1000) - 8123 }),
       mockRow({ id: "logs", name: "logs", command: "php artisan pail --timeout=0", source: "artisan dev", crashed: { code: 1, at: 1 } }),
       mockRow({ id: "vite", name: "vite", command: "npm run dev", source: "artisan dev", server: true, port: 5174, autostart: true }),
     ],

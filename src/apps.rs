@@ -602,6 +602,8 @@ pub struct Apps {
     /// Where pid and log files go (Anvil's home; a temp folder in tests).
     home: PathBuf,
     children: BTreeMap<String, Child>,
+    /// When each child was started, in Unix seconds.
+    started: BTreeMap<String, u64>,
     /// The folder each child was started in.
     dirs: BTreeMap<String, PathBuf>,
     /// Keys of `children` that are an app's other processes, not apps.
@@ -648,6 +650,7 @@ impl Apps {
         Apps {
             home,
             children: BTreeMap::new(),
+            started: BTreeMap::new(),
             dirs: BTreeMap::new(),
             processes: Default::default(),
             once: Default::default(),
@@ -676,6 +679,7 @@ impl Apps {
             });
         if let Some(code) = ended {
             self.children.remove(name);
+            self.started.remove(name);
             if let Some(dir) = self.dirs.get(name) {
                 clear_vite_hot(dir);
             }
@@ -875,7 +879,16 @@ impl Apps {
         self.exits.remove(key);
         self.dirs.insert(key.to_string(), dir.to_path_buf());
         self.children.insert(key.to_string(), child);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        self.started.insert(key.to_string(), now);
         Ok(())
+    }
+
+    /// When a running child was started, in Unix seconds.
+    pub fn started(&self, key: &str) -> Option<u64> {
+        self.started.get(key).copied()
     }
 
     /// Process-group leader of a running app.
@@ -896,6 +909,7 @@ impl Apps {
         self.once.remove(name);
         self.exits.remove(name);
         let dir = self.dirs.remove(name);
+        self.started.remove(name);
         let child = self.children.remove(name)?;
         Some(Stopping {
             child,
@@ -1527,6 +1541,24 @@ mod tests {
         assert!(apps.crashed().is_empty());
         assert_eq!(apps.process_keys("shopping"), ["shopping@w"]);
         apps.stop("shopping@w");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn started_is_set_on_spawn_and_cleared_on_stop() {
+        let dir = project(&[("keys/x", "")]);
+        let mut apps = Apps::in_home(dir.join("home"));
+        let site = site_at(&dir);
+        apps.start_process(&site, &proc("idle", "sleep 5"), &crate::Config::default())
+            .unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let t = apps.started("shop@idle").unwrap();
+        assert!(now - 2 <= t && t <= now);
+        apps.stop("shop@idle");
+        assert_eq!(apps.started("shop@idle"), None);
         fs::remove_dir_all(dir).unwrap();
     }
 
