@@ -7,9 +7,13 @@ contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-29
+
 ### Changed
 
-- A warmer, layered look with motion: selection and tabs slide, threads of fire drift behind the header while an app runs, the sidebar shows what kind each app is, and Overview shows what runs, with uptime and the latest requests.
+- A warmer, layered look with motion: selection and tabs slide, faint threads drift behind each app's header, the sidebar shows what kind each app is, and Overview shows what runs, with uptime and the latest requests.
+- Forms and buttons read more clearly in light and dark, with a quieter focus ring.
+- An app's worktree setup is edited in its own window.
 
 ### Fixed
 
@@ -225,7 +229,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/n1crack/anvil/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/n1crack/anvil/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/n1crack/anvil/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/n1crack/anvil/compare/v0.2.1...v0.3.0
