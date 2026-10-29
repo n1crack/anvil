@@ -70,7 +70,7 @@ describe("state in words", () => {
   test("the Dev card's dots and the sidebar's badges say their state, not only their colour", async () => {
     $('#list [data-name="vuefinder"]').click();
     await wait(80);
-    const dots = $$(".procs .dev-card .dot");
+    const dots = $$(".run-card .dot");
     expect(dots.length).toBeGreaterThan(0);
     for (const d of dots) {
       expect(d.getAttribute("role")).toBe("img");

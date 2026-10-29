@@ -253,9 +253,9 @@ type Entry = [string, string, string, Node[], boolean];
 
 /** A card: its header (title, counts or what went wrong) opens `tab`; one row per entry. */
 function devCard(title: string, state: Node, rows: Entry[], tab: string, keys: string) {
-  const card = el("div", "dev-card");
-  const head = el("button", "dev-card-head");
-  head.append(el("span", "dev-card-title", title), state);
+  const card = el("div", "run-card");
+  const head = el("button", "run-card-head");
+  head.append(el("span", "run-card-title", title), state);
   const label = tab === "dev" ? "Dev" : "Containers";
   head.title = keys ? `Show the ${label} tab (${keys})` : `Show the ${label} tab`;
   head.onclick = () => showTab($("#site"), tab);
@@ -319,7 +319,7 @@ export function drawProcs(name) {
   const counts = (running: number, crashed: number) =>
     el(
       "span",
-      "dev-card-count",
+      "run-card-count",
       [running && `${running} running`, crashed && `${crashed} crashed`].filter(Boolean).join(" · ") || "none running",
     );
   if (dev.length) {
@@ -336,7 +336,7 @@ export function drawProcs(name) {
   else if (compose) {
     const states = containers.map(containerState);
     const state = error
-      ? el("span", "dev-card-count error-text", composeBrief(error, o!.compose_file))
+      ? el("span", "run-card-count error-text", composeBrief(error, o!.compose_file))
       : counts(containers.filter((c) => c.state === "running").length, states.filter((s) => s === "crashed").length);
     const rows = containers.map((c, i): Entry => {
       const s = states[i];
@@ -360,19 +360,18 @@ export function drawProcs(name) {
  * Overview shows a card with a running process. Called on every draw and tab change. */
 let uptimeTimer = 0;
 export function syncUptime() {
-  const want = mode === "apps" && tab === "overview" && !!$("#site .dev-card [data-started]");
+  const want = mode === "apps" && tab === "overview" && !!$("#site .run-card [data-started]");
   if (want && !uptimeTimer) uptimeTimer = window.setInterval(tickUptime, 1000);
   else if (!want && uptimeTimer) {
-    clearInterval(uptimeTimer);
+    window.clearInterval(uptimeTimer);
     uptimeTimer = 0;
   }
-  window.__uptimeTimers = uptimeTimer ? 1 : 0; // for the tests
 }
 
 function tickUptime() {
   syncUptime();
   const now = Date.now() / 1000;
-  for (const u of document.querySelectorAll<HTMLElement>("#site .dev-card [data-started]")) {
+  for (const u of document.querySelectorAll<HTMLElement>("#site .run-card [data-started]")) {
     u.textContent = uptime(now - Number(u.dataset.started));
   }
 }

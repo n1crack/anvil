@@ -380,12 +380,12 @@ describe("overview", () => {
 
   test("a Dev card with a row per process, its header opens Dev; no command lists", async () => {
     await select("vuefinder");
-    const card = $(".procs .dev-card");
-    expect(card.querySelector(".dev-card-title")!.textContent).toBe("Dev · 3 processes");
-    expect($$(".dev-card .proc .dot").map((d) => d.className)).toEqual(["dot ", "dot on", "dot "]);
+    const card = $(".run-card");
+    expect(card.querySelector(".run-card-title")!.textContent).toBe("Dev · 3 processes");
+    expect($$(".run-card .proc .dot").map((d) => d.className)).toEqual(["dot ", "dot on", "dot "]);
     expect($$("#site .res-sub").map((h) => h.textContent)).not.toContain("Commands");
     expect($('#site .facts [data-field="path"]').textContent).toBe("~/Sites/vuefinder");
-    (card.querySelector(".dev-card-head") as HTMLElement).click();
+    (card.querySelector(".run-card-head") as HTMLElement).click();
     await wait(80);
     expect($('.tabs [data-tab="dev"]').getAttribute("aria-selected")).toBe("true");
     $('.tabs [data-tab="overview"]').click();
@@ -393,9 +393,9 @@ describe("overview", () => {
 
   test("dev card lists processes: uptime ticks, a crash says how it ended, with Restart", async () => {
     await select("shop");
-    const procs = $$(".dev-card .proc");
+    const procs = $$(".run-card .proc");
     expect(procs).toHaveLength(3);
-    expect($(".dev-card .dev-card-count").textContent).toBe("1 running · 1 crashed");
+    expect($(".run-card .run-card-count").textContent).toBe("1 running · 1 crashed");
     const [queue, logs, vite] = procs;
     expect(queue.querySelector(".cmd")!.textContent).toBe("php artisan queue:listen --tries=1");
     expect(queue.querySelector("[data-started]")!.textContent).toMatch(/^2:1\d:\d\d$/);
@@ -411,16 +411,51 @@ describe("overview", () => {
   });
 
   test("one ticker: only on the Overview, one across app switches", async () => {
-    for (const n of ["vuefinder", "shop", "notes", "stack", "shop"]) await select(n);
-    expect(w.__uptimeTimers).toBe(1);
-    $('.tabs [data-tab="dev"]').click();
-    await wait();
-    expect(w.__uptimeTimers).toBe(0);
-    $('.tabs [data-tab="overview"]').click();
-    await wait();
-    expect(w.__uptimeTimers).toBe(1);
     await select("notes");
-    expect(w.__uptimeTimers).toBe(0);
+    // The uptime intervals really alive, by handle: a stray second one would count.
+    const live = new Set<number>();
+    const [set, clear] = [window.setInterval, window.clearInterval];
+    w.setInterval = (fn: any, ms?: number, ...a: any[]) => {
+      const h = set(fn, ms, ...a);
+      if (fn?.name === "tickUptime") live.add(h);
+      return h;
+    };
+    w.clearInterval = (h?: number) => {
+      live.delete(h!);
+      clear(h);
+    };
+    try {
+      for (const n of ["vuefinder", "shop", "notes", "stack", "shop"]) await select(n);
+      // Drawn again and ticked while it runs: still the one.
+      await select("shop");
+      await wait(1100);
+      expect(live.size).toBe(1);
+      $('.tabs [data-tab="dev"]').click();
+      await wait();
+      expect(live.size).toBe(0);
+      $('.tabs [data-tab="overview"]').click();
+      await wait();
+      expect(live.size).toBe(1);
+      await select("notes");
+      expect(live.size).toBe(0);
+    } finally {
+      [w.setInterval, w.clearInterval] = [set, clear];
+    }
+  });
+
+  test("a hidden Database row draws no edge above the first shown row", async () => {
+    const style = document.createElement("style");
+    style.textContent = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
+    document.head.append(style);
+    try {
+      await select("shop");
+      const rows = $$('#site [data-panel="overview"] .group > .row:not([hidden])');
+      expect($('#site [data-panel="overview"] .db-row').hidden).toBe(true);
+      expect(rows[0].classList.contains("mail-row")).toBe(true);
+      expect(getComputedStyle(rows[0]).borderTopStyle).not.toBe("solid");
+    } finally {
+      style.remove();
+    }
   });
 
   test("long names truncate", async () => {
@@ -429,12 +464,12 @@ describe("overview", () => {
     try {
       await select("notes");
       await select("shop");
-      const cmd = $(".dev-card .proc .cmd");
+      const cmd = $(".run-card .proc .cmd");
       expect(cmd.textContent).toHaveLength(200);
       // The page has no stylesheet here: the rule is read from style.css.
       const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
-      expect(css).toMatch(/\.dev-card \.cmd,[^{]*\{[^}]*text-overflow: ellipsis/);
-      const card = $(".dev-card");
+      expect(css).toMatch(/\.run-card \.cmd,[^{]*\{[^}]*text-overflow: ellipsis/);
+      const card = $(".run-card");
       expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth);
     } finally {
       w.mockOv.shop = shop;
@@ -887,16 +922,16 @@ describe("containers", () => {
   test("the Overview has a Containers card with a row each, whose header opens the tab", async () => {
     saved = structuredClone(w.mockOv.stack);
     await select("stack");
-    const card = $(".procs .dev-card");
-    const line = card.querySelector(".dev-card-head") as HTMLElement;
-    expect(card.querySelector(".dev-card-title")!.textContent).toBe("Containers · 4");
-    expect(card.querySelector(".dev-card-count")!.textContent).toBe("3 running · 1 crashed");
+    const card = $(".run-card");
+    const line = card.querySelector(".run-card-head") as HTMLElement;
+    expect(card.querySelector(".run-card-title")!.textContent).toBe("Containers · 4");
+    expect(card.querySelector(".run-card-count")!.textContent).toBe("3 running · 1 crashed");
     // The header counts the exited worker as crashed: red, never green.
     expect($("#site .state-text").textContent).toBe("3 running, 1 crashed");
     expect($("#site .run-box .dot").className).toBe("dot bad");
-    expect($$(".dev-card .proc .dot").map((d) => d.className)).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
-    expect($$(".dev-card .proc.crashed").map((p) => p.querySelector(".proc-name")!.textContent)).toEqual(["worker"]);
-    expect($$(".dev-card [data-started], .dev-card .proc button")).toHaveLength(0);
+    expect($$(".run-card .proc .dot").map((d) => d.className)).toEqual(["dot on", "dot on", "dot amber", "dot bad"]);
+    expect($$(".run-card .proc.crashed").map((p) => p.querySelector(".proc-name")!.textContent)).toEqual(["worker"]);
+    expect($$(".run-card [data-started], .run-card .proc button")).toHaveLength(0);
     expect($('.tabs [data-tab="dev"]').hidden).toBe(true);
     expect(tabBtn().hidden).toBe(false);
     line.click();

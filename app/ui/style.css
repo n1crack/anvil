@@ -986,6 +986,9 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 .row + .row { border-top: 1px solid var(--line); }
+/* The Overview's rows: a hidden one (no database) draws no edge under the card's top. */
+[data-panel="overview"] .group > .row { border-top: 0; }
+[data-panel="overview"] .group > .row:not([hidden]) ~ .row { border-top: 1px solid var(--line); }
 
 .row dt { color: var(--muted); }
 
@@ -1338,26 +1341,25 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 .procs > * + * { margin-top: 8px; }
 
 /* The Overview's Dev and Containers cards: the header opens the tab, a row per entry
- * (dot, name, command, then uptime or how it ended). Names and commands cut short.
- * Dev's own list is a .dev-card too, hence .procs. */
+ * (dot, name, command, then uptime or how it ended). Names and commands cut short. */
 [data-panel="overview"] > .procs { margin-bottom: 12px; }
-.procs .dev-card { overflow: hidden; border-radius: var(--radius-m); background: var(--steel-raised); box-shadow: var(--card-shadow); }
-.procs .dev-card-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 8px 14px; border: 0; background: none; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-align: left; text-transform: uppercase; }
-.procs .dev-card-head:hover { color: var(--text); }
-.procs .dev-card-count { margin-left: auto; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.run-card { overflow: hidden; border-radius: var(--radius-m); background: var(--steel-raised); box-shadow: var(--card-shadow); }
+.run-card-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 8px 14px; border: 0; background: none; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-align: left; text-transform: uppercase; }
+.run-card-head:hover { color: var(--text); }
+.run-card-count { margin-left: auto; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
 /* A chevron says the header opens its tab. */
-.procs .dev-card-head::after { content: ""; flex: none; width: 6px; height: 6px; margin: 0 2px 0 4px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); }
-.procs .dev-card .proc { grid-template-columns: 8px minmax(0, 140px) minmax(0, 1fr) auto; min-height: 36px; border-top: 1px solid var(--line); }
-.procs .dev-card .proc:hover { background: none; }
-.procs .dev-card .proc.crashed { background: linear-gradient(90deg, var(--danger-soft), transparent 60%); box-shadow: none; }
-.procs .dev-card .cmd,
-.procs .dev-card .proc-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.procs .dev-card .cmd { color: var(--muted); font: 11.5px ui-monospace, "SF Mono", Menlo, monospace; }
-.procs .proc-end { display: flex; align-items: center; gap: 10px; justify-self: end; }
-.procs .proc-end .up { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.procs .proc-end .up.bad { color: var(--danger); }
-.procs .proc-end button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); font-size: 12px; }
-.procs .proc-end button:hover { background: var(--steel-hover); }
+.run-card-head::after { content: ""; flex: none; width: 6px; height: 6px; margin: 0 2px 0 4px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); }
+.run-card .proc { grid-template-columns: 8px minmax(0, 140px) minmax(0, 1fr) auto; min-height: 36px; border-top: 1px solid var(--line); }
+.run-card .proc:hover { background: none; }
+.run-card .proc.crashed { background: linear-gradient(90deg, var(--danger-soft), transparent 60%); box-shadow: none; }
+.run-card .cmd,
+.run-card .proc-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.run-card .cmd { color: var(--muted); font: 11.5px ui-monospace, "SF Mono", Menlo, monospace; }
+.proc-end { display: flex; align-items: center; gap: 10px; justify-self: end; }
+.proc-end .up { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.proc-end .up.bad { color: var(--danger); }
+.proc-end button { height: 24px; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius-s); background: var(--steel-raised); font-size: 12px; }
+.proc-end button:hover { background: var(--steel-hover); }
 
 /* Runs on, Folder and Web root side by side above the rows; a long path is cut short,
  * the whole one in its tooltip. */
