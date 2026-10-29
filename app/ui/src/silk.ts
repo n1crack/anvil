@@ -1,4 +1,4 @@
-// Silk: sheets of fine glowing threads behind the app's header while it is alive. Each sheet is a
+// Silk: sheets of fine glowing threads behind every app's header. Each sheet is a
 // bundle of threads around a slow wave; its width swings through zero, so the sheet twists and the
 // threads bunch up where it folds. Colours and strength come from CSS (--silk-*), per theme.
 
@@ -71,7 +71,7 @@ function draw(cv: HTMLCanvasElement, now: number) {
 
 function tick(now: number) {
   raf = 0;
-  const cv = document.querySelector<HTMLCanvasElement>("#site.alive .silk");
+  const cv = document.querySelector<HTMLCanvasElement>("#site .silk");
   if (!cv || document.hidden) return;
   if (now - last >= FRAME) {
     last = now;
@@ -80,8 +80,8 @@ function tick(now: number) {
   if (!still.matches) raf = requestAnimationFrame(tick);
 }
 
-/** Starts or stops the threads to match the header: they move only while the app is alive, the
- * window is visible and motion is allowed (otherwise one still frame). Leaving, the last frame fades. */
+/** Starts or stops the threads to match the header: they move while an app is shown, the window is
+ * visible and motion is allowed (otherwise one still frame). */
 export function silkSync() {
   if (raf) cancelAnimationFrame(raf);
   raf = 0;

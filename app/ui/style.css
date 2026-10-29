@@ -60,7 +60,7 @@
   --silk-1: rgb(255, 168, 70);
   --silk-2: rgb(255, 140, 50);
   --silk-3: rgb(255, 196, 110);
-  --silk-k: 0.45;
+  --silk-k: 0.14;
   --silk-blend: lighter;
   /* A sidebar tile: lit from the top, with an inner hairline (an outer one would be cut by the badge's mask). */
   --tile: linear-gradient(160deg, #2c2724, #1d1a18);
@@ -126,10 +126,10 @@
     --sel-ring: inset 0 0 0 1px rgba(232, 101, 12, 0.12);
     --flash: rgba(232, 101, 12, 0.08);
     --ink: #1f1a17;
-    --silk-1: rgb(194, 65, 12);
-    --silk-2: rgb(217, 119, 6);
-    --silk-3: rgb(180, 83, 9);
-    --silk-k: 1;
+    --silk-1: rgb(13, 148, 136); /* teal, cyan, emerald: cool threads on the light pane */
+    --silk-2: rgb(8, 145, 178);
+    --silk-3: rgb(5, 150, 105);
+    --silk-k: 0.2;
     --silk-blend: multiply;
     --tile: linear-gradient(160deg, #ffffff, #f3eee9);
     --tile-fg: #4a3f38;
@@ -727,7 +727,7 @@ button, select, input { font: inherit; color: inherit; }
   margin-bottom: 12px;
 }
 
-/* Silk threads behind the header and tabs while the app is alive (drawn by silk.ts); they fade in and out. */
+/* Silk threads behind every app's header and tabs (drawn by silk.ts). */
 .silk {
   position: absolute;
   inset: 0;
@@ -735,13 +735,9 @@ button, select, input { font: inherit; color: inherit; }
   width: 100%;
   height: 100%;
   pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.8s;
   -webkit-mask: linear-gradient(#000 60%, transparent);
   mask: linear-gradient(#000 60%, transparent);
 }
-
-#site.alive .silk { opacity: 1; }
 
 @keyframes breathe { 50% { opacity: 0.6; } }
 
@@ -2854,6 +2850,9 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
 
 .logs-bar > button:hover { border-color: var(--cold); }
 
+/* An icon button in the bar is square: the text buttons' side padding would push its glyph off centre. */
+.logs-bar > button.icon-btn { width: 26px; padding: 0; }
+
 .logs-search {
   flex: 1;
   min-width: 120px;
@@ -2901,7 +2900,7 @@ div.proc.svc-summary { grid-template-columns: 1fr; }
   bottom: 2px;
   left: 0;
   border-radius: var(--radius-s);
-  background: rgba(255, 240, 230, 0.12); /* --steel-raised barely parts from the track in dark */
+  background: rgba(255, 240, 230, 0.2); /* --steel-raised barely parts from the track in dark */
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   pointer-events: none;
   transition: transform 0.45s cubic-bezier(0.3, 1.4, 0.5, 1), width 0.45s cubic-bezier(0.3, 1.4, 0.5, 1);

@@ -3,7 +3,6 @@ import { $, ago, cardHead, el, invoke, mode, popAt, renderSite, selected, showEr
 import { late } from "./late";
 import { clock, shown } from "./live";
 import { keys } from "./platform";
-import { silkSync } from "./silk";
 
 /* An app's processes as the Overview and the header see them: the backend's overview
  * (rows, one-off scripts, Docker Compose containers), the header's Dev start/stop, a Dev
@@ -305,7 +304,6 @@ export function drawProcs(name) {
   if (!box) return;
   const o = procCache.get(name);
   $("#site").classList.toggle("alive", isAlive(o));
-  silkSync();
   const rows = o?.rows ?? [];
   const dev = devRows(o);
   const containers = o?.containers ?? [];

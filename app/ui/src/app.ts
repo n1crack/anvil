@@ -1,4 +1,5 @@
 import { M } from "./menu";
+import { silkSync } from "./silk";
 import type { Snapshot } from "./types";
 import { late } from "./late";
 import { ownError, shown } from "./live";
@@ -1700,6 +1701,7 @@ export function renderSite() {
   const process = PROCESS_KINDS.has(s.kind);
 
   root.replaceChildren($("#site-tpl").content.cloneNode(true));
+  silkSync();
   topSize.disconnect();
   topSize.observe($(".site-top", root));
   $(".site-name", root).textContent = s.name;
