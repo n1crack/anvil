@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// A folder's identity on its disk: (device, inode).
-type Id = (u64, u64);
+/// A folder's identity on its disk: (device, inode, when it was made in ns since 1970):
+/// a deleted folder's inode can go to a new one, made later.
+type Id = (u64, u64, u128);
 
 #[derive(Serialize, Deserialize, Default, PartialEq, Clone)]
 struct Known {
@@ -27,10 +28,18 @@ fn file() -> PathBuf {
 #[cfg(unix)]
 fn id(p: &Path) -> Option<Id> {
     use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(p)
+    // Only the user's own: never a folder someone else made, in /tmp for one.
+    let me = nix::unistd::geteuid().as_raw();
+    let m = std::fs::metadata(p)
         .ok()
-        .filter(|m| m.is_dir())
-        .map(|m| (m.dev(), m.ino()))
+        .filter(|m| m.is_dir() && m.uid() == me)?;
+    // 0 where the file system doesn't keep it.
+    let born = m
+        .created()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos());
+    Some((m.dev(), m.ino(), born))
 }
 
 #[cfg(not(unix))]
@@ -182,7 +191,7 @@ fn locate(i: Id, old: &Path, cfg: &Config) -> Option<PathBuf> {
 
 /// macOS finds any folder on its disk by identity: /.vol/<device>/<inode>.
 #[cfg(target_os = "macos")]
-fn by_id((dev, ino): Id) -> Option<PathBuf> {
+fn by_id((dev, ino, _): Id) -> Option<PathBuf> {
     let f = std::fs::File::open(format!("/.vol/{dev}/{ino}")).ok()?;
     let mut path = PathBuf::new();
     nix::fcntl::fcntl(&f, nix::fcntl::FcntlArg::F_GETPATH(&mut path)).ok()?;
@@ -303,6 +312,28 @@ mod tests {
             real(&got["shop--fx"]),
             real(&sites.join("shop-v2/.claude/worktrees/fx"))
         );
+    }
+
+    #[test]
+    fn a_new_folder_with_a_reused_inode_is_not_the_app() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let d = tempfile::tempdir().unwrap();
+        let d = d.path().to_path_buf();
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", d.join("home")) };
+        let sites = d.join("Sites");
+        fs::create_dir_all(sites.join("shop")).unwrap();
+        let mut cfg = Config::default();
+        cfg.paths.push(sites.clone());
+        crate::save(&cfg).unwrap();
+        let cfg = crate::load().unwrap();
+        remember(&cfg, &crate::sites(&cfg));
+        // As if `shop` had been deleted and its inode given to a folder made later.
+        let mut known: Known = serde_json::from_slice(&fs::read(file()).unwrap()).unwrap();
+        known.apps.get_mut("shop").unwrap().1.2 += 1;
+        fs::write(file(), serde_json::to_vec(&known).unwrap()).unwrap();
+        fs::rename(sites.join("shop"), sites.join("other")).unwrap();
+        assert!(names(&crate::load().unwrap()).contains_key("other"));
     }
 
     #[test]
