@@ -2109,18 +2109,12 @@ pub fn after_create(cfg: &Config, site: &Site) -> Vec<String> {
 }
 
 /// Run one of the worktree's `after_create` commands in it, with what its processes get
-/// (Anvil's PHP and Node.js, its own database) and Anvil's shims first on PATH, so
-/// `composer` is Anvil's. Only when the user said so; its database is prepared first by the
-/// caller. `quiet`: the output is kept, its last lines in the error; else it shows.
+/// (Anvil's PHP and Node.js and its shims, so `composer` is Anvil's; its own database).
+/// Only when the user said so; its database is prepared first by the caller. `quiet`:
+/// the output is kept, its last lines in the error; else it shows.
 pub fn run_after(cfg: &Config, site: &Site, command: &str, quiet: bool) -> anyhow::Result<()> {
     use std::process::Stdio;
-    let mut env = crate::processes::env(cfg, site, false)?;
-    let shims = crate::home().join("shims");
-    if shims.is_dir()
-        && let Some((_, path)) = env.iter_mut().find(|(k, _)| k == "PATH")
-    {
-        *path = crate::prepend_path(&shims, path);
-    }
+    let env = crate::processes::env(cfg, site, false)?;
     if command.contains("pnpm") {
         crate::runtimes::pnpm_ready(&env)?;
     }

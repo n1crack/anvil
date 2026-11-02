@@ -1313,7 +1313,7 @@ pub fn run_command(cfg: &crate::Config, site: &crate::Site, id: &str) -> anyhow:
         let (php, pre, _) = crate::shims::resolve_with("composer", dir, cfg, false)?;
         let q = crate::platform::shell_quote;
         return Ok(format!(
-            "{} {} {action} --no-interaction",
+            "{} {} {action} --no-interaction --ansi",
             q(&php.display().to_string()),
             q(&pre[0])
         ));

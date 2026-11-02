@@ -1093,6 +1093,29 @@ pub fn with_ansi(command: &str) -> String {
     }
 }
 
+/// `path` (Anvil's folders, then `base`) with the shims right after Anvil's folders, so
+/// `composer`, and `php` in a script a Node.js tool runs, are always Anvil's: also when
+/// the login shell's PATH (`base`) lacks them (no rc block yet, a shell slower than 3 s)
+/// or has Homebrew's before them.
+fn with_shims(path: String, base: &str, shims: &Path) -> String {
+    let sep = crate::platform::PATH_SEP;
+    if !shims.is_dir() {
+        return path;
+    }
+    let without = |p: &str| {
+        p.split(sep)
+            .filter(|d| Path::new(d) != shims)
+            .collect::<Vec<_>>()
+            .join(&sep.to_string())
+    };
+    let (path, base) = (without(&path), without(base));
+    // `base` is last but for Anvil's pnpm, which `with_pms` appends.
+    match path.rfind(&base).filter(|_| !base.is_empty()) {
+        Some(i) => format!("{}{}{sep}{}", &path[..i], shims.display(), &path[i..]),
+        None => format!("{path}{sep}{}", shims.display()),
+    }
+}
+
 /// Key for the process manager, pid and log files: `<site>@<process>`. Site
 /// names never contain `@`, so a key can't be another app's name.
 pub fn key(site: &str, process: &str) -> String {
@@ -1126,7 +1149,8 @@ pub fn address(cfg: &crate::Config, site: &Site, id: &str) -> Option<String> {
 /// `test`: a test run's database).
 pub fn env(cfg: &crate::Config, site: &Site, test: bool) -> anyhow::Result<Vec<(String, String)>> {
     let mut env = vec![];
-    let mut path = crate::env_path();
+    let base = crate::env_path();
+    let mut path = base.clone();
     // The project's .nvmrc / .node-version when installed, else the newest.
     if let Some(node) = apps::runtime_version("node", &site.path) {
         env = runtimes::env("node", &node);
@@ -1141,7 +1165,7 @@ pub fn env(cfg: &crate::Config, site: &Site, test: bool) -> anyhow::Result<Vec<(
         path = crate::prepend_path(&crate::php_dir(v), &path);
         env.extend(crate::phpext::scan_env(cfg, v, Some(site))?);
     }
-    env.push(("PATH".into(), path));
+    env.push(("PATH".into(), with_shims(path, &base, &crate::home().join("shims"))));
     env.extend(apps::shared_env(site));
     env.extend(crate::worktrees::checked_env(cfg, site, test)?);
     // Not a test run's: phpunit.xml's MAIL_MAILER=array doesn't replace a set variable.
@@ -2156,6 +2180,26 @@ echo '{DEV_JSON}'
             ini_of(&scan(e).unwrap()),
             "memory_limit=1G\nopcache.enable=0\n"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_shims_come_right_after_anvils_folders() {
+        let d = tempfile::tempdir().unwrap();
+        let shims = d.path().join("shims");
+        let s = shims.display().to_string();
+        let w = |path: &str, base: &str| with_shims(path.into(), base, &shims);
+        // No shims folder: nothing changes.
+        assert_eq!(w("/a:/usr/bin", "/usr/bin"), "/a:/usr/bin");
+        fs::create_dir(&shims).unwrap();
+        // Missing from the login PATH, or after Homebrew's there: before it.
+        assert_eq!(w("/a:/usr/bin", "/usr/bin"), format!("/a:{s}:/usr/bin"));
+        let base = format!("/opt/homebrew/bin:{s}:/usr/bin");
+        assert_eq!(
+            w(&format!("/a:{base}:/pnpm"), &base),
+            format!("/a:{s}:/opt/homebrew/bin:/usr/bin:/pnpm")
+        );
+        assert_eq!(w("/a", ""), format!("/a:{s}"));
     }
 
     #[test]

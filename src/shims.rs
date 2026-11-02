@@ -207,7 +207,18 @@ pub fn resolve_run(
     }
     let mut r = resolve_for(tool, cwd, cfg, fetch, site)?;
     r.2.extend(extra);
+    if tool == "composer" && ansi_forced(args) {
+        r.1.push("--ansi".into());
+    }
     Ok(r)
+}
+
+/// Composer's own Symfony Console ignores FORCE_COLOR (https://force-color.org), which
+/// Anvil gives what it runs (`processes::COLOR_ENV`): without `--ansi` its progress bar,
+/// written to a log, is a line per step instead of one line redrawn.
+fn ansi_forced(args: &[String]) -> bool {
+    std::env::var("FORCE_COLOR").is_ok_and(|v| !v.is_empty() && v != "0")
+        && !args.iter().any(|a| a == "--ansi" || a == "--no-ansi")
 }
 
 /// `php artisan test`, `php vendor/bin/phpunit` (or pest, paratest, Symfony's `bin/phpunit`; `./vendor/bin/pest`
@@ -374,21 +385,17 @@ fn resolve_for(
         // The user's pnpm, else Anvil's (`runtimes::with_pms`), with the site's Node.js when
         // there is one; its env carries the app's "Shared dependencies" (`extra_env`).
         "pnpm" => {
-            let mut env = match resolve_for("node", cwd, cfg, fetch, site) {
+            let env = match resolve_for("node", cwd, cfg, fetch, site) {
                 Ok((_, _, env)) => env,
                 Err(_) => vec![("PATH".into(), runtimes::with_pms(&crate::env_path()))],
             };
-            // Never this shim again.
-            let shims = h.join("shims");
-            let (_, path) = env.iter_mut().find(|(k, _)| k == "PATH").unwrap();
-            *path = std::env::join_paths(std::env::split_paths(&path).filter(|d| *d != shims))?
-                .to_string_lossy()
-                .into_owned();
-            let path = path.clone();
+            // The real pnpm, never this shim; its env keeps the shims, so the scripts it
+            // runs (a Vite plugin's `php artisan …`) still find php and composer.
             if fetch {
                 runtimes::pnpm_ready(&env)?;
             }
-            let program = runtimes::which("pnpm", &path)
+            let (_, path) = env.iter().find(|(k, _)| k == "PATH").unwrap();
+            let program = runtimes::which("pnpm", &runtimes::without_shims(path))
                 .context("No pnpm found: install it in Settings › Node.js")?;
             Ok((program, vec![], env))
         }
@@ -705,6 +712,49 @@ mod tests {
         crate::platform::set_mode(&bin.join("node"), 0o755).unwrap();
         let out = run();
         assert_eq!(String::from_utf8_lossy(&out.stdout), "real a b\n");
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn composer_redraws_its_progress_when_colors_are_forced() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let args = |a: &[&str]| a.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        let forced = |v: &str, a: &[&str]| {
+            // SAFETY: every test that sets FORCE_COLOR holds ENV_LOCK.
+            unsafe { std::env::set_var("FORCE_COLOR", v) };
+            let r = ansi_forced(&args(a));
+            unsafe { std::env::remove_var("FORCE_COLOR") };
+            r
+        };
+        assert!(forced("1", &["install"]));
+        assert!(!forced("0", &["install"]));
+        assert!(!forced("1", &["install", "--no-ansi"]));
+        assert!(!ansi_forced(&args(&["install"])));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn pnpm_runs_the_real_one_and_its_scripts_keep_the_shims() {
+        let _env = crate::lock(&crate::ENV_LOCK);
+        let d = tmp("pnpm");
+        let (shims, bin) = (d.join("shims"), d.join("bin"));
+        for dir in [&shims, &bin] {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(dir.join("pnpm"), "#!/bin/sh\n").unwrap();
+            crate::platform::set_mode(&dir.join("pnpm"), 0o755).unwrap();
+        }
+        let old = crate::env_path();
+        // SAFETY: every test that sets ANVIL_HOME or PATH holds ENV_LOCK.
+        unsafe {
+            std::env::set_var("ANVIL_HOME", &d);
+            std::env::set_var("PATH", format!("{}:{}", shims.display(), bin.display()));
+        }
+        let r = resolve_with("pnpm", &d, &Config::default(), false);
+        unsafe { std::env::set_var("PATH", old) };
+        let (program, _, env) = r.unwrap();
+        assert_eq!(program, bin.join("pnpm"));
+        let path = &env.iter().find(|(k, _)| k == "PATH").unwrap().1;
+        assert!(std::env::split_paths(path).any(|p| p == shims), "{path}");
         fs::remove_dir_all(d).unwrap();
     }
 

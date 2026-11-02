@@ -624,7 +624,8 @@ pub fn pnpm_ready(env: &[(String, String)]) -> Result<()> {
         .rev()
         .find(|(k, _)| k == "PATH")
         .map_or_else(crate::env_path, |(_, v)| v.clone());
-    if which("pnpm", &path).is_none() {
+    // The shim isn't a pnpm: it runs the one this finds.
+    if which("pnpm", &without_shims(&path)).is_none() {
         ensure_pnpm()?;
     }
     Ok(())
@@ -755,7 +756,7 @@ pub(crate) fn which(name: &str, path: &str) -> Option<PathBuf> {
 
 /// `path` without Anvil's shims: they run the tools by the folder they're in, so a
 /// package manager's own file and version are found past them.
-fn without_shims(path: &str) -> String {
+pub(crate) fn without_shims(path: &str) -> String {
     let shims = home().join("shims");
     path.split(crate::platform::PATH_SEP)
         .filter(|d| Path::new(d) != shims)
