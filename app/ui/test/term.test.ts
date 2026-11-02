@@ -46,6 +46,20 @@ describe("clean follows cursor moves on a line", () => {
     // On one line (the Dev tab draws line by line) up stays on it.
     expect(clean("abc\x1b[1A\x1b[2K\x1b[Gxy")).toBe("xy");
   });
+  // pnpm in a terminal (a one-off run's pty): ESC[K ESC[0J, then up as many rows as it
+  // drew; the rows below are dropped, not left half-written.
+  test("pnpm's terminal redraw erases below; down adds rows", () => {
+    const raw =
+      "Progress: resolved 484, reused 0, downloaded 1\nDownloading x: 0 B/18 MB\n" +
+      "\x1b[K\x1b[0J\r\x1b[2AProgress: resolved 484, reused 0, downloaded 484, done\n" +
+      "\x1b[K\x1b[0J\rdependencies:\n+ react 19";
+    expect(clean(raw)).toBe("Progress: resolved 484, reused 0, downloaded 484, done\ndependencies:\n+ react 19");
+    expect(clean("ab\x1b[1Bc")).toBe("ab\n  c");
+    expect(clean("a\nb\nc\x1b[2A\x1b[1B\x1b[Gx")).toBe("a\nx\nc");
+    expect(clean("abcd\x1b[3G\x1b[J")).toBe("ab");
+    expect(clean("abcd\x1b[3G\x1b[1J")).toBe("   d");
+    expect(clean("a\nb\nc\x1b[1A\x1b[2Jz")).toBe("a\n z");
+  });
   test("columns, forward and back, partial erases", () => {
     expect(clean("abcdef\x1b[3Gx")).toBe("abxdef");
     expect(clean("abcdef\x1b[3G\x1b[K")).toBe("ab");

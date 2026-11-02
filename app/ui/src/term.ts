@@ -19,9 +19,9 @@ export function clean(text, colors = false) {
 }
 
 // Escape codes dropped: all but the cursor moves `draw` follows (and SGR, with colors).
-const STRIP = /\x1b\[(?![0-9]*[GKCDA])[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g;
-const STRIP_KEEP_SGR = /\x1b\[(?![0-9;]*m|[0-9]*[GKCDA])[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g;
-const CURSOR = /[\r\b]|\x1b\[[0-9]*[GKCDA]/;
+const STRIP = /\x1b\[(?![0-9]*[GKCDABJ])[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g;
+const STRIP_KEEP_SGR = /\x1b\[(?![0-9;]*m|[0-9]*[GKCDABJ])[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g;
+const CURSOR = /[\r\b]|\x1b\[[0-9]*[GKCDABJ]/;
 
 /** A drawn row: each column's color codes and character, and the codes after the last. */
 type Row = { cells: [string, string][]; tail: string };
@@ -45,8 +45,10 @@ const sinceReset = (codes: string) => codes.slice([...codes.matchAll(/\x1b\[0?m/
 /** One line written onto `rows` from row `r` as a terminal would: \r starts the line
  * over (once something is written), \b and CSI n D move back, CSI n C forward, CSI n G
  * to a column, CSI K / 1K / 2K erase, CSI n A goes up (not above the first row there
- * is). Color codes take no column; an erased cell's codes go to the next character, so
- * no reset is lost: `0%\e[0m\b\b1%` is `1%`. Returns the row it ends on.
+ * is), CSI n B down (rows are added), CSI J erases to the end and drops the rows below
+ * (1J: the row up to the cursor; 2J: the row and those below, kept simple). Color
+ * codes take no column; an erased cell's codes go to the next character, so no reset is
+ * lost: `0%\e[0m\b\b1%` is `1%`. Returns the row it ends on.
  * ponytail: one column per code point; wide characters and wrapping aren't measured. */
 function draw(rows: (string | Row)[], r: number, l: string) {
   let row = (rows[r] = toRow(rows[r]));
@@ -60,7 +62,7 @@ function draw(rows: (string | Row)[], r: number, l: string) {
     if (blank) for (let i = from; i < Math.min(to, row.cells.length); i++) row.cells[i] = ["", " "];
     else row.cells.splice(from, to - from);
   };
-  for (const [t, arg, op] of l.matchAll(/\x1b\[([0-9;]*)([mGKCDA])|[\s\S]/gu)) {
+  for (const [t, arg, op] of l.matchAll(/\x1b\[([0-9;]*)([mGKCDABJ])|[\s\S]/gu)) {
     const n = Number(arg) || 1;
     if (op === "m") {
       codes += t;
@@ -76,8 +78,12 @@ function draw(rows: (string | Row)[], r: number, l: string) {
     else if (op === "C") at += n;
     else if (op === "G") at = n - 1;
     else if (op === "K") lose(arg === "1" || arg === "2" ? 0 : at, arg === "1" ? at + 1 : row.cells.length, arg === "1");
-    else if (op === "A") {
-      r = Math.max(0, r - n);
+    else if (op === "J") {
+      lose(arg === "1" || arg === "2" ? 0 : at, arg === "1" ? at + 1 : row.cells.length, arg === "1");
+      if (arg !== "1") rows.length = r + 1;
+    } else if (op === "A" || op === "B") {
+      r = op === "A" ? Math.max(0, r - n) : r + n;
+      while (rows.length < r) rows.push("");
       row = rows[r] = toRow(rows[r]);
       codes = row.tail + codes;
       row.tail = "";

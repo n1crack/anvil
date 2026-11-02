@@ -758,6 +758,7 @@ impl Apps {
             &site.path,
             &script.run,
             crate::processes::env(cfg, site, crate::processes::is_test_script(&script.name))?,
+            true,
         )?;
         self.processes.insert(key.clone());
         self.once.insert(key, script.name.clone());
@@ -805,7 +806,7 @@ impl Apps {
         if site.kind == "nuxt" {
             env.push(("PORTLESS_URL".into(), crate::site_url(cfg, site)));
         }
-        self.spawn(&site.name, &site.path, &command, env)
+        self.spawn(&site.name, &site.path, &command, env, false)
     }
 
     /// One of an app's other processes (queue, Vite…), see `processes`; `cfg` as in `start`.
@@ -822,19 +823,28 @@ impl Apps {
         // Done by the caller beforehand, so this is quick; without its binary Octane would
         // offer to download one into the project.
         crate::octane::prepare(site, p)?;
-        self.spawn(&key, &site.path, &p.command, process_env(site, p, cfg)?)?;
+        self.spawn(
+            &key,
+            &site.path,
+            &p.command,
+            process_env(site, p, cfg)?,
+            false,
+        )?;
         self.processes.insert(key);
         Ok(())
     }
 
     /// Run `command` in `dir` as its own process group, output to `log_file(key)`, with
-    /// colors as in a terminal. The log starts empty, as a new terminal does.
+    /// colors as in a terminal. The log starts empty, as a new terminal does. With `tty`
+    /// (one-off runs) its output is a terminal on Unix (`platform::Pty`), so progress
+    /// redraws; long-running processes keep pipes.
     fn spawn(
         &mut self,
         key: &str,
         dir: &Path,
         command: &str,
         env: Vec<(String, String)>,
+        tty: bool,
     ) -> Result<()> {
         // Its old shell, if a killed Anvil left one, ends first (by its pid file, else by
         // its tag): nothing writes the log meanwhile, and its port is free again.
@@ -859,18 +869,26 @@ impl Apps {
         // `<site>`, `<site>@<process>` or `<site>#<script>`.
         let site = key.split(['@', '#']).next().unwrap_or(key);
         let (columns, lines) = self.sizes.get(site).copied().unwrap_or(TERM_SIZE);
-        let child = crate::platform::shell(&command, Some(&tag))
-            .current_dir(dir)
+        let mut cmd = crate::platform::shell(&command, Some(&tag));
+        cmd.current_dir(dir)
             .envs(crate::processes::COLOR_ENV)
             .env("COLUMNS", columns.to_string())
             .env("LINES", lines.to_string())
             .envs(env)
-            .stdin(Stdio::null())
-            .stdout(log.try_clone()?)
-            .stderr(log)
-            .own_group()
+            .stdin(Stdio::null());
+        let pty = crate::platform::Pty::attach(&mut cmd, tty, columns, lines)?;
+        if pty.is_none() {
+            cmd.stdout(log.try_clone()?)
+                .stderr(log.try_clone()?)
+                .own_group();
+        }
+        let child = cmd
             .spawn()
             .with_context(|| format!("failed to start {key}"))?;
+        drop(cmd); // its copies of the terminal: the reader sees it close
+        if let Some(pty) = pty {
+            pty.copy_to(log, child.id());
+        }
         let at = crate::started(child.id()).unwrap_or_default();
         fs::write(
             pid_in(&self.home, key),
@@ -1783,7 +1801,8 @@ mod tests {
             .unwrap();
 
         let mut apps = Apps::in_home(home.clone());
-        apps.spawn("shop@vite", &dir, "true", vec![]).unwrap();
+        apps.spawn("shop@vite", &dir, "true", vec![], false)
+            .unwrap();
         let after_start = (up(vite), up(queue));
         orphans_in(&home);
         let after_sweep = up(queue);
@@ -1830,6 +1849,95 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         assert!(apps.crashed().is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn once(id: &str, run: &str) -> crate::processes::Script {
+        crate::processes::Script {
+            name: id.into(),
+            id: id.into(),
+            text: String::new(),
+            source: "package.json",
+            run: run.into(),
+        }
+    }
+
+    /// A one-off run writes to a terminal of the pane's size (pnpm redraws), with no stdin
+    /// and no controlling terminal (what asks fails instead of hanging), \n as \n.
+    #[cfg(unix)]
+    #[test]
+    fn a_one_off_run_writes_to_a_terminal_without_stdin() {
+        let dir = project(&[("tty/x", "")]);
+        let mut apps = Apps::in_home(dir.join("home"));
+        let site = site_at(&dir);
+        apps.set_size(&site.name, 132, 40);
+        let run = "test -t 1 && echo tty; test -t 2 && echo tty2 >&2; test -t 0 || echo nostdin; \
+                   stty size <&1; (exec 3</dev/tty) 2>/dev/null || echo nocontrol; exit 3";
+        apps.run_once(&site, &once("tty", run), &crate::Config::default())
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let exit = loop {
+            if let Some(e) = apps.finished("shop#tty") {
+                break e;
+            }
+            assert!(std::time::Instant::now() < deadline, "never ended");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(exit.code, Some(3));
+        let want = "tty\ntty2\nnostdin\n40 132\nnocontrol\n";
+        let log = || fs::read_to_string(log_in(&apps.home, "shop#tty")).unwrap();
+        while log() != want && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(log(), want);
+        // A long-running process keeps its pipes.
+        apps.start_process(
+            &site,
+            &proc("p", "test -t 1 || echo pipe"),
+            &crate::Config::default(),
+        )
+        .unwrap();
+        while apps.running("shop@p") {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            fs::read_to_string(log_in(&apps.home, "shop@p")).unwrap(),
+            "pipe\n"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Its own session is its own group too: stopping it ends what it started.
+    #[cfg(unix)]
+    #[test]
+    fn stopping_a_one_off_run_ends_its_whole_group() {
+        let dir = project(&[("ttystop/x", "")]);
+        let mut apps = Apps::in_home(dir.join("home"));
+        let site = site_at(&dir);
+        apps.run_once(
+            &site,
+            &once("slow", "sleep 60 & sleep 60 & wait"),
+            &crate::Config::default(),
+        )
+        .unwrap();
+        let pid = apps.pid("shop#slow").unwrap();
+        let p = nix::unistd::Pid::from_raw(pid as i32);
+        assert_eq!(nix::unistd::getsid(Some(p)).unwrap(), p);
+        assert_eq!(nix::unistd::getpgid(Some(p)).unwrap(), p);
+        // Its tag ($0) is there for a crashed Anvil's sweep.
+        assert!(
+            crate::platform::command_line(pid)
+                .is_some_and(|c| c.trim_end().ends_with(":shop#slow")),
+            "{:?}",
+            crate::platform::command_line(pid)
+        );
+        std::thread::sleep(Duration::from_millis(100)); // the sleeps have started
+        apps.stop("shop#slow");
+        let up = crate::platform::group_alive(pid);
+        if up {
+            crate::platform::kill(pid, true);
+        }
+        assert!(!up, "the group outlived stop");
         fs::remove_dir_all(dir).unwrap();
     }
 

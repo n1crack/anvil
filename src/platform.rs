@@ -32,6 +32,105 @@ impl OwnGroup for Command {
     }
 }
 
+/// A pseudo-terminal for a one-off run's output (Unix), so pnpm and the like redraw their
+/// progress as in a terminal instead of appending a line per update. Only stdout and
+/// stderr are the terminal: stdin stays null and the child gets a session of its own
+/// without a controlling terminal, so what asks a question gets no answer and goes on or
+/// fails (npx proceeds, `pnpm approve` ends with "Device not configured") instead of hanging.
+#[cfg(unix)]
+pub struct Pty {
+    master: std::os::fd::OwnedFd,
+    slave: std::os::fd::OwnedFd,
+}
+
+#[cfg(windows)]
+pub enum Pty {}
+
+impl Pty {
+    /// With `tty` (Unix only): a terminal `columns` × `lines` as `c`'s stdout and stderr,
+    /// in a new session, which also makes it a group leader as `own_group` would. `None`
+    /// leaves `c` as it is.
+    #[cfg(unix)]
+    pub fn attach(c: &mut Command, tty: bool, columns: u16, lines: u16) -> io::Result<Option<Pty>> {
+        use nix::fcntl::{FcntlArg, FdFlag, fcntl};
+        use nix::sys::termios::{OutputFlags, SetArg, tcgetattr, tcsetattr};
+        use std::os::unix::process::CommandExt;
+        if !tty {
+            return Ok(None);
+        }
+        let size = nix::pty::Winsize {
+            ws_row: lines,
+            ws_col: columns,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        let nix::pty::OpenptyResult { master, slave } = nix::pty::openpty(&size, None)?;
+        // Neither end leaks into other children (openpty sets no close-on-exec); the
+        // child's stdout and stderr are copies, made by dup2, which keep it open.
+        for fd in [&master, &slave] {
+            fcntl(fd, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
+        }
+        // \n stays \n in the log, not \r\n.
+        let mut t = tcgetattr(&slave)?;
+        t.output_flags.remove(OutputFlags::ONLCR);
+        tcsetattr(&slave, SetArg::TCSANOW, &t)?;
+        c.stdout(slave.try_clone()?).stderr(slave.try_clone()?);
+        // SAFETY: setsid is async-signal-safe. A new session has pgid == pid, as
+        // process_group(0) would give; no TIOCSCTTY, so the terminal never controls it.
+        unsafe { c.pre_exec(|| nix::unistd::setsid().map(drop).map_err(io::Error::from)) };
+        Ok(Some(Pty { master, slave }))
+    }
+
+    #[cfg(windows)]
+    pub fn attach(_: &mut Command, _: bool, _: u16, _: u16) -> io::Result<Option<Pty>> {
+        Ok(None)
+    }
+
+    /// Once `pid` has been spawned (and the `Command` dropped): copy what it writes into
+    /// `log` on a thread of its own, until the terminal closes or shortly after `pid` is
+    /// gone (reaped), as background processes it left can keep the terminal open.
+    #[cfg(unix)]
+    pub fn copy_to(self, mut log: fs::File, pid: u32) {
+        use io::{Read, Write};
+        use nix::poll::{PollFd, PollFlags, poll};
+        use std::os::fd::AsFd;
+        use std::time::{Duration, Instant};
+        drop(self.slave); // only the child's copies are left
+        let master = fs::File::from(self.master);
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 16384];
+            let mut gone: Option<Instant> = None;
+            // ponytail: `alive` asks by pid; a pid reused right after the reap keeps this
+            // reading until EOF or that process ends, which is harmless.
+            while gone.is_none_or(|t| t.elapsed() < Duration::from_millis(300)) {
+                let mut fds = [PollFd::new(master.as_fd(), PollFlags::POLLIN)];
+                match poll(&mut fds, 100u16) {
+                    Ok(0) | Err(nix::errno::Errno::EINTR) => {}
+                    Err(_) => break,
+                    Ok(_) => match (&master).read(&mut buf) {
+                        Ok(n @ 1..) => {
+                            if log.write_all(&buf[..n]).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                        // EOF; on Linux EIO once the last copy of the slave is closed.
+                        _ => break,
+                    },
+                }
+                if gone.is_none() && !alive(pid) {
+                    gone = Some(Instant::now());
+                }
+            }
+        });
+    }
+
+    #[cfg(windows)]
+    pub fn copy_to(self, _: fs::File, _: u32) {
+        match self {}
+    }
+}
+
 /// `Command::new` for every program Anvil runs. On Windows a program started from the
 /// app, which has no console, would open a console window of its own; from a terminal
 /// it shares the terminal's.
