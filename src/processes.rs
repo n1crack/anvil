@@ -1165,7 +1165,10 @@ pub fn env(cfg: &crate::Config, site: &Site, test: bool) -> anyhow::Result<Vec<(
         path = crate::prepend_path(&crate::php_dir(v), &path);
         env.extend(crate::phpext::scan_env(cfg, v, Some(site))?);
     }
-    env.push(("PATH".into(), with_shims(path, &base, &crate::home().join("shims"))));
+    env.push((
+        "PATH".into(),
+        with_shims(path, &base, &crate::home().join("shims")),
+    ));
     env.extend(apps::shared_env(site));
     env.extend(crate::worktrees::checked_env(cfg, site, test)?);
     // Not a test run's: phpunit.xml's MAIL_MAILER=array doesn't replace a set variable.

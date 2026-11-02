@@ -86,7 +86,7 @@ pub fn follow(cfg: &mut Config) -> Vec<Move> {
         .map(|(p, i)| (p.clone(), *i))
         .collect();
     for (old, i) in roots {
-        if let Some(new) = locate(i, cfg) {
+        if let Some(new) = locate(i, &old, cfg) {
             apply(cfg, &old, &new, None);
             known.roots.remove(&old);
             known.roots.insert(new.clone(), i);
@@ -100,7 +100,7 @@ pub fn follow(cfg: &mut Config) -> Vec<Move> {
         .map(|(n, (p, i))| (n.clone(), p.clone(), *i))
         .collect();
     for (name, old, i) in apps {
-        if let Some(new) = locate(i, cfg) {
+        if let Some(new) = locate(i, &old, cfg) {
             apply(cfg, &old, &new, Some(&name));
             known.apps.insert(name.clone(), (new.clone(), i));
             repair_worktrees(&old, &new);
@@ -163,12 +163,13 @@ pub fn apply_all(cfg: &mut Config, moves: &[Move]) {
     }
 }
 
-/// Where the folder with identity `i` is now: never in a Trash.
-fn locate(i: Id, cfg: &Config) -> Option<PathBuf> {
+/// Where the folder with identity `i`, last at `old`, is now: never in a Trash. Without
+/// macOS's lookup by identity, only beside `old` (renamed) or in a parked folder.
+fn locate(i: Id, old: &Path, cfg: &Config) -> Option<PathBuf> {
     let found = by_id(i).or_else(|| {
-        // Elsewhere: in a parked folder.
-        cfg.paths
-            .iter()
+        old.parent()
+            .into_iter()
+            .chain(cfg.paths.iter().map(PathBuf::as_path))
             .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
             .map(|e| e.path())
             .find(|p| id(p) == Some(i))
@@ -344,12 +345,17 @@ mod tests {
                 .any(|(n, p)| n.starts_with("shop-") && *p == sites.join("shop"))
         );
         fs::remove_dir(sites.join("shop")).unwrap();
-        // Out of the parked folder: a link by the same name.
-        fs::rename(sites.join("shop-v2"), other.join("store")).unwrap();
-        check(&[("blog", sites.join("blog")), ("shop", other.join("store"))]);
-        assert_eq!(crate::load().unwrap().links["shop"], other.join("store"));
-        // Back in under its own name: parked again, nothing kept.
-        fs::rename(other.join("store"), sites.join("shop")).unwrap();
+        if cfg!(target_os = "macos") {
+            // Out of the parked folder: a link by the same name (found anywhere on the
+            // disk by its identity: macOS only).
+            fs::rename(sites.join("shop-v2"), other.join("store")).unwrap();
+            check(&[("blog", sites.join("blog")), ("shop", other.join("store"))]);
+            assert_eq!(crate::load().unwrap().links["shop"], other.join("store"));
+            fs::rename(other.join("store"), sites.join("shop")).unwrap();
+        } else {
+            fs::rename(sites.join("shop-v2"), sites.join("shop")).unwrap();
+        }
+        // Back under its own name: parked again, nothing kept.
         check(&[("blog", sites.join("blog")), ("shop", sites.join("shop"))]);
         let cfg = crate::load().unwrap();
         assert!(cfg.links.is_empty() && cfg.folder_names.is_empty());
