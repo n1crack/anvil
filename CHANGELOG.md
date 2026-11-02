@@ -9,6 +9,7 @@ contain breaking changes.
 
 ### Fixed
 
+- An app whose folder is renamed or moved, or whose parked folder is, keeps its address, settings, database, mail and worktrees.
 - Scripts that `pnpm` runs, such as Vite plugins, find `php` and `composer` again.
 - Composer's progress bar redraws in place instead of adding a line per step, wherever Anvil runs it.
 - An app's processes and scripts always get Anvil's `composer`, also when the terminal's PATH puts another first.

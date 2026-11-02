@@ -1009,6 +1009,8 @@ fn last_sites(cfg: &Config) -> std::sync::Arc<Vec<Site>> {
 fn scan_sites(cfg: &Config) -> std::sync::Arc<Vec<Site>> {
     let key = serde_json::to_string(cfg).unwrap_or_default();
     let all = std::sync::Arc::new(anvil::sites(cfg));
+    // So a folder renamed or moved later keeps its app (`moves::follow`, in `load`).
+    anvil::moves::remember(cfg, &all);
     *anvil::lock(&SITES) = Some((std::time::Instant::now(), key, all.clone()));
     all
 }

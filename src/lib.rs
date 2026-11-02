@@ -14,6 +14,7 @@ pub mod git;
 pub mod logs;
 pub mod mail;
 pub mod mcp;
+pub mod moves;
 pub mod octane;
 pub mod opcache;
 pub mod packages;
@@ -80,6 +81,10 @@ pub struct Config {
     pub php: Option<String>,
     pub paths: Vec<PathBuf>,
     pub links: BTreeMap<String, PathBuf>,
+    /// Parked app folders renamed or moved by hand, with the name (so the address) they
+    /// kept: folder -> name (`moves`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub folder_names: BTreeMap<PathBuf, String>,
     pub sites: BTreeMap<String, SiteConfig>,
     /// macOS app name used for "Open in editor", e.g. "PhpStorm".
     pub editor: Option<String>,
@@ -260,6 +265,7 @@ impl Default for Config {
             php: None,
             paths: vec![],
             links: BTreeMap::new(),
+            folder_names: BTreeMap::new(),
             sites: BTreeMap::new(),
             editor: None,
             hidden: vec![],
@@ -388,7 +394,23 @@ pub fn user_home() -> PathBuf {
 
 /// The config, or the defaults when there is none yet. Any other read error is
 /// reported: treating it as "no config" would let the next save wipe it.
+/// The config, after following app folders renamed or moved by hand (`moves::follow`).
 pub fn load() -> Result<Config> {
+    let mut cfg = read_config()?;
+    let moves = moves::follow(&mut cfg);
+    if moves.is_empty() {
+        return Ok(cfg);
+    }
+    let (cfg, ()) = update(|c| {
+        moves::apply_all(c, &moves);
+        Ok(())
+    })?;
+    control::notify_changed();
+    Ok(cfg)
+}
+
+/// config.toml as it is.
+fn read_config() -> Result<Config> {
     match fs::read_to_string(home().join("config.toml")) {
         Ok(s) => toml::from_str(&s).context("config.toml is invalid"),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(first_config()),
@@ -418,7 +440,8 @@ pub fn update<T>(f: impl FnOnce(&mut Config) -> Result<T>) -> Result<(Config, T)
     fs::create_dir_all(home())?;
     let file = fs::File::create(home().join("config.lock")).context("couldn't open config.lock")?;
     file.lock().context("couldn't lock config.lock")?;
-    let mut cfg = load()?;
+    let mut cfg = read_config()?;
+    moves::follow(&mut cfg);
     let out = f(&mut cfg)?;
     // ponytail: most core setters save themselves too, so this can write twice; harmless.
     save(&cfg)?;
@@ -506,7 +529,7 @@ pub fn hidden_sites(cfg: &Config) -> Vec<HiddenSite> {
 /// whose name is the site name as it is keeps it, else the one with the first path;
 /// the others get `-<hash of their path>`, so a name doesn't depend on `read_dir` order.
 fn parked(cfg: &Config) -> (BTreeMap<String, (PathBuf, PathBuf)>, Vec<String>) {
-    let mut all: Vec<(String, bool, PathBuf, PathBuf)> = vec![];
+    let mut all: Vec<(String, u8, PathBuf, PathBuf)> = vec![];
     for dir in &cfg.paths {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
@@ -514,12 +537,19 @@ fn parked(cfg: &Config) -> (BTreeMap<String, (PathBuf, PathBuf)>, Vec<String>) {
         for e in entries.flatten() {
             let folder = e.file_name().to_string_lossy().into_owned();
             if e.path().is_dir() && !folder.starts_with('.') {
-                let name = site_name(&folder);
-                all.push((name.clone(), folder != name, e.path(), dir.clone()));
+                // A folder renamed by hand keeps its app's name, ahead of a clash.
+                let kept = cfg.folder_names.get(&e.path()).cloned();
+                let name = kept.clone().unwrap_or_else(|| site_name(&folder));
+                let rank = if kept.is_some() {
+                    0
+                } else {
+                    u8::from(folder != name) + 1
+                };
+                all.push((name.clone(), rank, e.path(), dir.clone()));
             }
         }
     }
-    // Keepers first: the exact name, then by path.
+    // Keepers first: a name kept through a rename, the exact name, then by path.
     all.sort();
     let (mut found, mut clashes) = (BTreeMap::new(), vec![]);
     for (name, _, path, dir) in all {

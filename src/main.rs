@@ -1572,6 +1572,7 @@ fn run() -> Result<()> {
         }
         Cmd::Apps => {
             let all = sites(&cfg);
+            anvil::moves::remember(&cfg, &all);
             // Columns as wide as their longest value, so a long kind ("Docker
             // Compose") or address doesn't push the rest out of line.
             let host = all
