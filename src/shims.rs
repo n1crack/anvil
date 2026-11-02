@@ -747,7 +747,8 @@ mod tests {
         // SAFETY: every test that sets ANVIL_HOME or PATH holds ENV_LOCK.
         unsafe {
             std::env::set_var("ANVIL_HOME", &d);
-            std::env::set_var("PATH", format!("{}:{}", shims.display(), bin.display()));
+            // The real PATH stays after them: tests without ENV_LOCK run git meanwhile.
+            std::env::set_var("PATH", format!("{}:{}:{old}", shims.display(), bin.display()));
         }
         let r = resolve_with("pnpm", &d, &Config::default(), false);
         unsafe { std::env::set_var("PATH", old) };
