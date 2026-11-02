@@ -1384,8 +1384,9 @@ fn php_index() -> Result<serde_json::Value> {
         .with_context(|| format!("{url} sent something unreadable"))
 }
 
-/// What the source has of each PHP version: minor -> (newest patch, preview).
-pub type PhpReleases = BTreeMap<String, (String, bool)>;
+/// What the source has of each PHP version: minor -> (newest patch, preview, build).
+/// The build counts Anvil's rebuilds of one patch (1 when the index doesn't say).
+pub type PhpReleases = BTreeMap<String, (String, bool, u32)>;
 
 /// The source's PHP versions Anvil offers, each with its newest patch.
 pub fn php_releases() -> Result<PhpReleases> {
@@ -1404,7 +1405,8 @@ fn releases_from(index: &serde_json::Value, plat: &str) -> PhpReleases {
                 return None;
             }
             let version = rel["version"].as_str()?.to_string();
-            Some((m.to_string(), (version, rel["preview"] == true)))
+            let build = rel["build"].as_u64().map_or(1, |b| b as u32);
+            Some((m.to_string(), (version, rel["preview"] == true, build)))
         })
         .collect()
 }
@@ -1428,14 +1430,35 @@ fn newer_patch(have: &str, new: &str) -> bool {
     matches!((key(have), key(new)), (Some(a), Some(b)) if b > a)
 }
 
-/// The installed PHP versions `releases` has a newer patch of: (minor, installed, newest).
+/// The file in a PHP folder that records the index's build it was installed from.
+const PHP_BUILD_FILE: &str = ".anvil-build";
+
+/// What to offer over PHP `have` (Anvil's build `have_build`) when the index has `new`
+/// (build `new_build`): a newer patch, or the same one built again (`8.5.12 build 2`).
+fn php_update(have: &str, have_build: u32, new: &str, new_build: u32) -> Option<String> {
+    if newer_patch(have, new) {
+        Some(new.to_string())
+    } else if have == new && new_build > have_build {
+        Some(format!("{new} build {new_build}"))
+    } else {
+        None
+    }
+}
+
+/// The installed PHP versions `releases` has a newer patch or build of: (minor,
+/// installed, newest). A folder with no build recorded is build 1.
 pub fn php_updates(releases: &PhpReleases) -> Vec<(String, String, String)> {
     installed_php()
         .into_iter()
         .filter_map(|minor| {
             let have = opcache::installed_full(&minor).ok()?;
-            let new = releases.get(&minor)?.0.clone();
-            newer_patch(&have, &new).then_some((minor, have, new))
+            let have_build = fs::read_to_string(php_dir(&minor).join(PHP_BUILD_FILE))
+                .ok()
+                .and_then(|b| b.trim().parse().ok())
+                .unwrap_or(1);
+            let (new, _, build) = releases.get(&minor)?;
+            let new = php_update(&have, have_build, new, *build)?;
+            Some((minor, have, new))
         })
         .collect()
 }
@@ -1504,6 +1527,8 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
             fetch_tgz(url, new, false, Some(sum))?;
         }
         php_runs(new)?;
+        let build = rel["build"].as_u64().unwrap_or(1);
+        fs::write(new.join(PHP_BUILD_FILE), format!("{build}\n"))?;
         let ini = dir.join("php.ini");
         if ini.exists() {
             fs::copy(ini, new.join("php.ini"))?;
@@ -4751,7 +4776,7 @@ mod tests {
         let index = serde_json::json!({
             "8.6": {"version": "8.6.0RC4", "preview": true, "files": {
                 "fpm-macos-aarch64": {"url": "u", "sha256": "s"}}},
-            "8.4": {"version": "8.4.27", "preview": false, "files": {
+            "8.4": {"version": "8.4.27", "preview": false, "build": 2, "files": {
                 "fpm-macos-aarch64": {"url": "u", "sha256": "s"}}},
             "8.3": {"version": "8.3.30", "files": {
                 "fpm-linux-x86_64": {"url": "u", "sha256": "s"}}},
@@ -4760,11 +4785,11 @@ mod tests {
         });
         let got = releases_from(&index, "macos-aarch64");
         assert_eq!(got.len(), 2, "{got:?}");
-        assert_eq!(got["8.6"], ("8.6.0RC4".into(), true));
-        assert_eq!(got["8.4"], ("8.4.27".into(), false));
+        assert_eq!(got["8.6"], ("8.6.0RC4".into(), true, 1));
+        assert_eq!(got["8.4"], ("8.4.27".into(), false, 2));
         // windows.php.net's releases.json: one build per version, no previews.
         let win = serde_json::json!({"8.4": {"version": "8.4.27"}});
-        assert_eq!(releases_from(&win, "")["8.4"], ("8.4.27".into(), false));
+        assert_eq!(releases_from(&win, "")["8.4"], ("8.4.27".into(), false, 1));
         assert!(newer_patch("8.4.9", "8.4.27"));
         assert!(!newer_patch("8.4.27", "8.4.27"));
         assert!(!newer_patch("8.4.27", "8.4.9"));
@@ -4772,6 +4797,24 @@ mod tests {
         assert!(newer_patch("8.6.0RC4", "8.6.0RC5"));
         assert!(newer_patch("8.6.0RC5", "8.6.0"));
         assert!(!newer_patch("8.6.0", "8.6.0RC5"));
+    }
+
+    #[test]
+    fn php_rebuild_of_the_same_patch_is_an_update() {
+        assert_eq!(
+            php_update("8.5.12", 1, "8.5.12", 2).as_deref(),
+            Some("8.5.12 build 2")
+        );
+        assert_eq!(php_update("8.5.12", 2, "8.5.12", 2), None);
+        assert_eq!(php_update("8.5.12", 3, "8.5.12", 2), None);
+        // A folder with no build recorded (1) against an index without builds (1).
+        assert_eq!(php_update("8.5.12", 1, "8.5.12", 1), None);
+        // A newer patch is offered as such, whatever the builds.
+        assert_eq!(
+            php_update("8.5.11", 2, "8.5.12", 1).as_deref(),
+            Some("8.5.12")
+        );
+        assert_eq!(php_update("8.5.12", 1, "8.5.11", 2), None);
     }
 
     #[test]

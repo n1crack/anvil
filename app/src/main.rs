@@ -3868,7 +3868,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                 preview: releases
                     .as_ref()
                     .and_then(|r| r.get(*v))
-                    .is_some_and(|(_, p)| *p),
+                    .is_some_and(|(_, p, _)| *p),
                 pinned_by: anvil::pinned_to(&cfg, "php", v),
                 opcache: anvil::opcache::state(v),
                 opcache_on: !cfg.php_opcache_off.contains(*v),

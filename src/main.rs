@@ -1918,7 +1918,7 @@ fn run() -> Result<()> {
                     None => String::new(),
                 };
                 let preview = match releases.get(&v) {
-                    Some((_, true)) => dim(" (preview)"),
+                    Some((_, true, _)) => dim(" (preview)"),
                     _ => String::new(),
                 };
                 let full = opcache::installed_full(&v).unwrap_or_else(|_| v.clone());
