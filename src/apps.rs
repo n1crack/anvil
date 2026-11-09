@@ -753,6 +753,14 @@ impl Apps {
         if self.running(&key) {
             return Ok(());
         }
+        if let Some(other) = other_composer(&script.id)
+            && self.running(&crate::processes::once_key(&site.name, other))
+        {
+            bail!(
+                "Composer is already running for {}. Wait for it to finish.",
+                site.name
+            );
+        }
         self.spawn(
             &key,
             &site.path,
@@ -1040,8 +1048,32 @@ pub fn check_command(command: &str) -> Result<()> {
     Ok(())
 }
 
+/// The other Composer command in an app's Packages list: run together, the two write
+/// over each other in `vendor`.
+fn other_composer(id: &str) -> Option<&'static str> {
+    match id {
+        "pkg-composer-install" => Some("pkg-composer-update"),
+        "pkg-composer-update" => Some("pkg-composer-install"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_composer_commands_exclude_each_other_only() {
+        use super::other_composer;
+        assert_eq!(
+            other_composer("pkg-composer-install"),
+            Some("pkg-composer-update")
+        );
+        assert_eq!(
+            other_composer("pkg-composer-update"),
+            Some("pkg-composer-install")
+        );
+        assert_eq!(other_composer("pkg-js-install"), None);
+    }
+
     #[test]
     fn running_anywhere_counts_the_apps_processes() {
         let _env = crate::lock(&crate::ENV_LOCK);
