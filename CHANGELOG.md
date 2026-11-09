@@ -11,7 +11,8 @@ contain breaking changes.
 
 - Windows' PHP loads the sockets extension, which Pest's browser plugin needs; installed versions gain it with their next PHP update.
 - When the HTTPS port is taken, Windows names the program holding it instead of asking whether Anvil is already running.
-- Windows' PHP also loads exif, ftp and soap, as a Mac's does; installed versions gain them with their next PHP update.
+- Windows' PHP also loads exif, ftp and soap; installed versions gain them with their next PHP update.
+- Settings on Windows finds installed editors, terminals and git apps, and opens them.
 
 ## [0.3.4] - 2026-11-03
 

@@ -246,6 +246,15 @@ pub fn open_with(app: &str, target: impl AsRef<std::ffi::OsStr>) -> Command {
     {
         let mut c = command("cmd.exe");
         // `start` finds programs the way the Run dialog does (App Paths), and returns.
+        if let Some(program) = desktop_program(app) {
+            let mut args: Vec<String> = match app {
+                "Sourcetree" => vec!["-f".into()],
+                "GitKraken" => vec!["--path".into()],
+                _ => vec![],
+            };
+            args.push(target.as_ref().to_string_lossy().into_owned());
+            return start_program(&program, &args, None);
+        }
         c.args(["/D", "/C", "start", "\"\"", app]).arg(target);
         c
     }
@@ -281,6 +290,14 @@ pub fn terminal(app: Option<&str>, dir: &Path) -> Command {
     #[cfg(windows)]
     {
         if let Some(app) = app {
+            if let Some(program) = desktop_program(app) {
+                let args = if app == "Windows Terminal" {
+                    vec!["-d".to_string(), dir.display().to_string()]
+                } else {
+                    vec![]
+                };
+                return start_program(&program, &args, Some(dir));
+            }
             let mut c = command(app);
             c.current_dir(dir);
             return c;
@@ -453,6 +470,173 @@ pub fn desktop_program(app: &str) -> Option<PathBuf> {
         .copied()
         .chain(programs.is_empty().then_some(app))
         .find_map(|p| dirs.iter().map(|d| d.join(p)).find(|f| f.is_file()))
+}
+
+/// Windows: the apps Settings offers, and where each installs, relative to
+/// `%LOCALAPPDATA%`, `%ProgramFiles%` or `%ProgramFiles(x86)%`. `*` is a version in a
+/// folder's name, the newest first.
+pub const WINDOWS_APPS: [(&str, &str, &[&str]); 21] = [
+    (
+        "terminal",
+        "Windows Terminal",
+        &[r"Microsoft\WindowsApps\wt.exe"],
+    ),
+    ("terminal", "PowerShell 7", &[r"PowerShell\7\pwsh.exe"]),
+    ("terminal", "Git Bash", &[r"Git\git-bash.exe"]),
+    ("terminal", "WezTerm", &[r"WezTerm\wezterm-gui.exe"]),
+    ("terminal", "Alacritty", &[r"Alacritty\alacritty.exe"]),
+    (
+        "editor",
+        "Visual Studio Code",
+        &[
+            r"Programs\Microsoft VS Code\Code.exe",
+            r"Microsoft VS Code\Code.exe",
+        ],
+    ),
+    ("editor", "Cursor", &[r"Programs\cursor\Cursor.exe"]),
+    ("editor", "Zed", &[r"Programs\Zed\Zed.exe", r"Zed\Zed.exe"]),
+    ("editor", "Windsurf", &[r"Programs\Windsurf\Windsurf.exe"]),
+    (
+        "editor",
+        "Sublime Text",
+        &[r"Sublime Text\sublime_text.exe"],
+    ),
+    ("editor", "Notepad++", &[r"Notepad++\notepad++.exe"]),
+    (
+        "editor",
+        "PhpStorm",
+        &[
+            r"Programs\PhpStorm\bin\phpstorm64.exe",
+            r"JetBrains\PhpStorm*\bin\phpstorm64.exe",
+        ],
+    ),
+    (
+        "editor",
+        "WebStorm",
+        &[
+            r"Programs\WebStorm\bin\webstorm64.exe",
+            r"JetBrains\WebStorm*\bin\webstorm64.exe",
+        ],
+    ),
+    (
+        "editor",
+        "IntelliJ IDEA",
+        &[
+            r"Programs\IntelliJ IDEA*\bin\idea64.exe",
+            r"JetBrains\IntelliJ IDEA*\bin\idea64.exe",
+        ],
+    ),
+    (
+        "editor",
+        "Rider",
+        &[
+            r"Programs\Rider\bin\rider64.exe",
+            r"JetBrains\Rider*\bin\rider64.exe",
+            r"JetBrains\JetBrains Rider*\bin\rider64.exe",
+        ],
+    ),
+    (
+        "git",
+        "GitHub Desktop",
+        &[r"GitHubDesktop\GitHubDesktop.exe"],
+    ),
+    ("git", "Fork", &[r"Fork\Fork.exe"]),
+    (
+        "git",
+        "Sourcetree",
+        &[
+            r"Atlassian\SourceTree\SourceTree.exe",
+            r"SourceTree\SourceTree.exe",
+        ],
+    ),
+    ("git", "GitKraken", &[r"gitkraken\gitkraken.exe"]),
+    (
+        "git",
+        "Sublime Merge",
+        &[r"Sublime Merge\sublime_merge.exe"],
+    ),
+    ("git", "SmartGit", &[r"SmartGit\bin\smartgit.exe"]),
+];
+
+/// The file `pattern` (see `WINDOWS_APPS`) finds under `root`. By the link itself, as
+/// the programs in WindowsApps are links that can't be followed.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn program_under(root: &Path, pattern: &str) -> Option<PathBuf> {
+    let mut found = vec![root.to_path_buf()];
+    for part in pattern.split('\\') {
+        found = found
+            .iter()
+            .flat_map(|dir| match part.split_once('*') {
+                None => vec![dir.join(part)],
+                Some((start, end)) => {
+                    let (start, end) = (start.to_lowercase(), end.to_lowercase());
+                    let mut versions: Vec<PathBuf> = fs::read_dir(dir)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .filter(|e| {
+                            let name = e.file_name().to_string_lossy().to_lowercase();
+                            name.starts_with(&start) && name.ends_with(&end)
+                        })
+                        .map(|e| e.path())
+                        .collect();
+                    versions.sort();
+                    versions.reverse();
+                    versions
+                }
+            })
+            .collect();
+    }
+    found
+        .into_iter()
+        .find(|p| fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir()))
+}
+
+/// Windows: the `kind` apps of `WINDOWS_APPS` (terminal, editor, git) installed here.
+#[cfg(windows)]
+pub fn desktop_apps(kind: &str) -> Vec<String> {
+    WINDOWS_APPS
+        .iter()
+        .filter(|(k, name, _)| *k == kind && desktop_program(name).is_some())
+        .map(|(_, name, _)| name.to_string())
+        .collect()
+}
+
+/// Windows: the program an app from Settings runs: one of `WINDOWS_APPS`' by its name,
+/// else a program picked by path.
+#[cfg(windows)]
+pub fn desktop_program(app: &str) -> Option<PathBuf> {
+    let path = Path::new(app);
+    if path.is_absolute() {
+        return path.is_file().then(|| path.to_path_buf());
+    }
+    let (_, _, patterns) = WINDOWS_APPS.iter().find(|(_, name, _)| *name == app)?;
+    ["LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .find_map(|root| {
+            patterns
+                .iter()
+                .find_map(|pattern| program_under(Path::new(&root), pattern))
+        })
+}
+
+/// `start`, which returns at once and gives a console program a window of its own.
+/// Written out, as `start` takes its first quoted word for a title.
+#[cfg(windows)]
+fn start_program(program: &Path, args: &[String], dir: Option<&Path>) -> Command {
+    use std::os::windows::process::CommandExt;
+    let mut line = String::from("/D /C start \"\"");
+    if let Some(dir) = dir {
+        line.push_str(&format!(" /D \"{}\"", dir.display()));
+    }
+    line.push_str(&format!(" \"{}\"", program.display()));
+    for arg in args {
+        line.push_str(&format!(" \"{arg}\""));
+    }
+    let mut c = command("cmd.exe");
+    c.raw_arg(line);
+    c
 }
 
 /// The process listening on `port` in `netstat -ano` output: by its addresses, as
@@ -1254,7 +1438,21 @@ pub fn needs_newer_macos(name: &str, kind: &str, version: &str) -> Option<String
 
 #[cfg(test)]
 mod tests {
-    use super::{netstat_listener, tasklist_program};
+    use super::{netstat_listener, program_under, tasklist_program};
+
+    #[test]
+    fn an_app_is_found_by_its_folder_and_the_newest_version_wins() {
+        let root = tempfile::tempdir().unwrap();
+        for v in ["PhpStorm 2024.1", "PhpStorm 2025.2"] {
+            let bin = root.path().join("JetBrains").join(v).join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(bin.join("phpstorm64.exe"), "").unwrap();
+        }
+        let pattern = "JetBrains\\PhpStorm*\\bin\\phpstorm64.exe";
+        let found = program_under(root.path(), pattern).unwrap();
+        assert!(found.to_string_lossy().contains("2025.2"), "{found:?}");
+        assert_eq!(program_under(root.path(), "Fork\\Fork.exe"), None);
+    }
 
     #[test]
     fn netstat_finds_the_listener_whatever_the_language() {

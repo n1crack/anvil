@@ -613,7 +613,7 @@ pub fn editor_command(editor: &str, file: &Path, line: u32) -> (String, Vec<Stri
         "Zed" => ("zed", vec![at]),
         "Visual Studio Code" => ("code", vec!["-g".into(), at]),
         "PhpStorm" => ("phpstorm", vec!["--line".into(), line.to_string(), f]),
-        _ if !cfg!(target_os = "linux") => {
+        _ if cfg!(target_os = "macos") => {
             return ("open".into(), vec!["-a".into(), editor.into(), f]);
         }
         "VSCodium" | "Cursor" | "Windsurf" => ("", vec!["-g".into(), at]),
@@ -623,7 +623,7 @@ pub fn editor_command(editor: &str, file: &Path, line: u32) -> (String, Vec<Stri
         "Text Editor" => ("", vec![format!("+{line}"), f]),
         _ => ("", vec![f]),
     };
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(not(target_os = "macos"))]
     if let Some(p) = crate::platform::desktop_program(editor) {
         return (p.display().to_string(), args);
     }

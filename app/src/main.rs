@@ -3772,15 +3772,15 @@ fn git_client(cfg: &Config) -> Option<String> {
         .or_else(|| installed_apps("git", &GIT_CLIENTS).into_iter().next())
 }
 
-/// Which of `apps` are installed in the usual macOS app folders. Linux has its own
-/// list of each `kind` (terminal, editor, git), found by program.
+/// Which of `apps` are installed in the usual macOS app folders. Linux and Windows
+/// have their own list of each `kind` (terminal, editor, git), found by program.
 fn installed_apps(kind: &str, apps: &[&str]) -> Vec<String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = apps;
         anvil::platform::desktop_apps(kind)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
         let _ = kind;
         let user = anvil::user_home().join("Applications");
