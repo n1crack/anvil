@@ -1565,10 +1565,12 @@ const PHP_WINDOWS: &str = "https://windows.php.net/downloads/releases/";
 
 /// The extensions a Windows PHP loads: what static-php-cli builds into the Mac's, as far
 /// as windows.php.net ships them.
-const PHP_WINDOWS_EXT: [&str; 16] = [
+const PHP_WINDOWS_EXT: [&str; 19] = [
     "bz2",
     "curl",
+    "exif",
     "fileinfo",
+    "ftp",
     "gd",
     "gmp",
     "intl",
@@ -1578,6 +1580,7 @@ const PHP_WINDOWS_EXT: [&str; 16] = [
     "pdo_mysql",
     "pdo_pgsql",
     "pdo_sqlite",
+    "soap",
     "sockets",
     "sodium",
     "sqlite3",
@@ -1587,13 +1590,19 @@ const PHP_WINDOWS_EXT: [&str; 16] = [
 /// A php.ini from an older Anvil with the extensions `PHP_WINDOWS_EXT` has gained since.
 /// One the file names at all, even commented out, stays as the user left it.
 fn php_ini_with_added_ext(ini: &str) -> String {
-    const ADDED: [&str; 1] = ["sockets"];
+    const ADDED: [&str; 4] = ["exif", "ftp", "soap", "sockets"];
+    let names = |line: &str, ext: &str| {
+        line.trim_start_matches([';', ' ', '\t'])
+            .strip_prefix("extension")
+            .and_then(|rest| rest.trim_start().strip_prefix('='))
+            .is_some_and(|value| {
+                let value = value.trim().trim_matches('"');
+                value.trim_start_matches("php_").trim_end_matches(".dll") == ext
+            })
+    };
     let mut out = ini.to_string();
     for e in ADDED {
-        if !ini
-            .lines()
-            .any(|l| l.contains("extension") && l.contains(e))
-        {
+        if !ini.lines().any(|l| names(l, e)) {
             if !out.is_empty() && !out.ends_with('\n') {
                 out.push('\n');
             }
@@ -3788,12 +3797,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_older_windows_php_ini_gains_sockets_once() {
+    fn an_older_windows_php_ini_gains_new_extensions_once() {
         let added = php_ini_with_added_ext("extension=curl");
-        assert_eq!(added, "extension=curl\nextension=sockets\n");
+        assert_eq!(
+            added,
+            "extension=curl\nextension=exif\nextension=ftp\nextension=soap\nextension=sockets\n"
+        );
         assert_eq!(php_ini_with_added_ext(&added), added);
-        let off = ";extension=sockets\n";
-        assert_eq!(php_ini_with_added_ext(off), off);
+        // Turned off by the user, or written the long way: left as it is.
+        let kept =
+            ";extension=exif\n; extension = ftp\nextension=php_soap.dll\nextension=\"sockets\"\n";
+        assert_eq!(php_ini_with_added_ext(kept), kept);
+    }
+
+    #[test]
+    fn a_folder_named_like_an_extension_does_not_count_as_it() {
+        let ini = "extension_dir = \"C:\\ftp\\soap\\exif\\sockets\\ext\"\n";
+        assert!(php_ini_with_added_ext(ini).ends_with("extension=sockets\n"));
+        assert!(php_ini_with_added_ext(ini).contains("\nextension=ftp\n"));
     }
 
     /// The Caddyfile without its access logs (one test covers those), so the others read
