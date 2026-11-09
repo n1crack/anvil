@@ -276,7 +276,13 @@ pub fn prune_sources() {
 
 /// The exact version (`8.4.23`) of the installed PHP `minor`.
 pub fn installed_full(minor: &str) -> Result<String> {
-    let out = crate::platform::command(crate::php_bin(minor))
+    // Settings asks for every version it lists; starting a program that isn't there
+    // can take seconds on Windows, for each extension of each missing version.
+    let php = crate::php_bin(minor);
+    if !php.is_file() {
+        bail!("PHP {minor} is not installed");
+    }
+    let out = crate::platform::command(php)
         .args(["-n", "-r", "echo PHP_VERSION;"])
         .output()
         .with_context(|| format!("PHP {minor} is not installed"))?;
@@ -432,6 +438,19 @@ mod tests {
     use super::*;
     use crate::{Config, ENV_LOCK, home};
     use std::fs;
+
+    #[test]
+    fn a_version_that_is_not_installed_is_reported_and_has_no_builds() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let err = installed_full("8.1").unwrap_err().to_string();
+        assert_eq!(err, "PHP 8.1 is not installed");
+        assert!(!crate::phpext::built("8.1", "xdebug"));
+        // SAFETY: as above.
+        unsafe { std::env::remove_var("ANVIL_HOME") };
+    }
 
     #[test]
     fn fpm_args_for_each_state() {

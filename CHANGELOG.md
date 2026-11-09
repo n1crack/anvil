@@ -12,6 +12,7 @@ contain breaking changes.
 - Windows' PHP loads the sockets extension, which Pest's browser plugin needs; installed versions gain it with their next PHP update.
 - When the HTTPS port is taken, Windows names the program holding it instead of asking whether Anvil is already running.
 - Windows' PHP also loads exif, ftp and soap; installed versions gain them with their next PHP update.
+- Settings › PHP and the rest of Settings no longer wait minutes on Windows while it tries the PHP versions that aren't installed.
 - Settings on Windows finds installed editors, terminals and git apps, and opens them.
 - An app's Packages list won't start composer install while composer update runs, or the other way round.
 
