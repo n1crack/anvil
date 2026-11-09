@@ -19,6 +19,7 @@ contain breaking changes.
 - Settings › PHP and the rest of Settings no longer wait minutes on Windows while it tries the PHP versions that aren't installed.
 - Settings on Windows finds installed editors, terminals and git apps, and opens them.
 - An app's Packages list won't start composer install while composer update runs, or the other way round.
+- PostgreSQL services start on Windows when Anvil runs as administrator.
 - Windows' PHP also loads ffi, pgsql and shmop; installed versions gain them with their next PHP update.
 
 ## [0.3.4] - 2026-11-03

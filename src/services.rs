@@ -1899,7 +1899,12 @@ fn command(cfg: &Config, id: &str) -> Command {
     let v = version(cfg, id);
     let (d, data, run_dir) = (dir(kind, &v), data(id), home().join("run"));
     let port = port(cfg, id).to_string();
-    let mut c = crate::platform::command(binary(kind, &v));
+    // PostgreSQL refuses to start with an administrator's rights (an elevated Anvil).
+    let mut c = if kind == "postgres" {
+        crate::platform::command_without_admin(binary(kind, &v))
+    } else {
+        crate::platform::command(binary(kind, &v))
+    };
     match kind {
         "mysql" => {
             c.arg("--no-defaults")
@@ -2236,21 +2241,21 @@ pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
     if !installed(kind, &v) {
         bail!("{} {v} is not installed", name(kind));
     }
+    let leftover = pid_file(id).exists();
     kill_orphans(&pid_file(id), false);
     if !id.starts_with("app-") {
         // Left by an Anvil from before `svc-` (an `app-` one is the app's to clean up).
         kill_orphans(&legacy_pid_file(id), false);
     }
-    // PostgreSQL refuses an administrator's token (an elevated terminal or "Run as
-    // administrator"); its log would only say so in the system's language.
-    #[cfg(windows)]
-    if kind == "postgres" && crate::platform::elevated() {
-        bail!(
-            "PostgreSQL doesn't run with administrator rights: start Anvil (or the terminal running `anvil start`) without \"Run as administrator\""
-        );
-    }
     let port = port(cfg, id);
     for p in [Some(port), web_port(cfg, id)].into_iter().flatten() {
+        // What was just ended above lets go of its port a moment later.
+        for _ in 0..if leftover { 30 } else { 0 } {
+            if !in_use(p) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
         if in_use(p) {
             bail!("{id}: port {p} is already in use by another program — pick another port");
         }

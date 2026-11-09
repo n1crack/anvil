@@ -5377,6 +5377,7 @@ fn on_menu(handle: &AppHandle, id: &str) {
 }
 
 fn main() {
+    anvil::platform::restricted_entry();
     // Opened from Finder, Anvil gets launchd's short PATH; what it starts (pnpm,
     // Homebrew tools, nvm's node…) needs the one a terminal has.
     if let Some(login) = anvil::login_path() {

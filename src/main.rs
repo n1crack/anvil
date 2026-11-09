@@ -1289,6 +1289,7 @@ fn project_cmd(
 }
 
 fn main() -> ExitCode {
+    anvil::platform::restricted_entry();
     // Same output as returning the Result, with `Error:` in red on a terminal.
     if let Err(e) = run() {
         eprintln!("{} {e:?}", style::error("Error:"));

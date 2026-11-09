@@ -1049,6 +1049,228 @@ pub fn link_program(target: &str, link: &Path) -> io::Result<()> {
     }
 }
 
+/// The first argument that makes an Anvil binary run a program without administrator
+/// rights instead of doing its usual work (`restricted_entry`).
+#[cfg(windows)]
+const RESTRICTED_ARG: &str = "--anvil-without-admin";
+
+/// `command`, except that a program started by an elevated Anvil on Windows loses its
+/// administrator rights (through `restricted_entry` in this same binary).
+pub fn command_without_admin(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[cfg(windows)]
+    if elevated()
+        && let Ok(me) = std::env::current_exe()
+    {
+        let mut c = command(me);
+        c.arg(RESTRICTED_ARG).arg(program.as_ref());
+        return c;
+    }
+    command(program)
+}
+
+/// First thing in `main`: when this process was started by `command_without_admin`, run
+/// the program it names and end with its exit code. Elsewhere nothing happens.
+pub fn restricted_entry() {
+    #[cfg(windows)]
+    {
+        let mut args = std::env::args_os().skip(1);
+        if args.next().is_some_and(|a| a == RESTRICTED_ARG) {
+            let argv: Vec<String> = args.map(|a| a.to_string_lossy().into_owned()).collect();
+            let code = run_without_admin(&argv).unwrap_or_else(|e| {
+                eprintln!(
+                    "Couldn't start {} without administrator rights: {e}",
+                    argv[0]
+                );
+                1
+            });
+            std::process::exit(code as i32);
+        }
+    }
+}
+
+/// `arg` as a Windows command line needs it, read back by the program as one argument.
+#[cfg(any(windows, test))]
+fn quote_arg(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '"']) {
+        return arg.to_string();
+    }
+    let mut out = String::from("\"");
+    let mut slashes = 0;
+    for c in arg.chars() {
+        match c {
+            '\\' => {
+                slashes += 1;
+                continue;
+            }
+            // Backslashes before a quote are doubled, and the quote escaped.
+            '"' => out.push_str(&"\\".repeat(slashes * 2 + 1)),
+            _ => out.push_str(&"\\".repeat(slashes)),
+        }
+        slashes = 0;
+        out.push(c);
+    }
+    // Before the closing quote they would escape it.
+    out.push_str(&"\\".repeat(slashes * 2));
+    out.push('"');
+    out
+}
+
+/// Run `argv` with the Administrators and Power Users groups turned off in its token, as
+/// PostgreSQL's own `pg_ctl` starts the server, with this process's output; its exit code.
+/// It's in a job with this process, so it can't outlive it (an Anvil that crashed
+/// and whose leftovers the next one ends by this process's pid).
+#[cfg(windows)]
+fn run_without_admin(argv: &[String]) -> std::io::Result<u32> {
+    use std::io::Error;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_ALL};
+    use windows_sys::Win32::Security::{
+        ACL, ACL_REVISION, AddAccessAllowedAce, CreateRestrictedToken, CreateWellKnownSid,
+        GetTokenInformation, InitializeAcl, SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES,
+        SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_USER, TokenDefaultDacl,
+        TokenUser, WinBuiltinAdministratorsSid, WinBuiltinPowerUsersSid,
+    };
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
+    };
+    use windows_sys::Win32::System::Threading::{
+        CREATE_NO_WINDOW, CREATE_SUSPENDED, CreateProcessAsUserW, GetCurrentProcess,
+        GetExitCodeProcess, INFINITE, OpenProcessToken, PROCESS_INFORMATION, ResumeThread,
+        STARTF_USESTDHANDLES, STARTUPINFOW, WaitForSingleObject,
+    };
+    let check = |ok: i32| {
+        if ok != 0 {
+            Ok(())
+        } else {
+            Err(Error::last_os_error())
+        }
+    };
+    let line = argv
+        .iter()
+        .map(|a| quote_arg(a))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut line: Vec<u16> = std::ffi::OsStr::new(&line)
+        .encode_wide()
+        .chain([0])
+        .collect();
+    // SAFETY: Win32 calls on buffers that outlive them; the process exits right after,
+    // which closes the handles left open.
+    unsafe {
+        let mut own = null_mut();
+        check(OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ALL_ACCESS,
+            &mut own,
+        ))?;
+        let mut sids = [[0u8; SECURITY_MAX_SID_SIZE as usize]; 2];
+        let mut off: [SID_AND_ATTRIBUTES; 2] = std::mem::zeroed();
+        for (i, kind) in [WinBuiltinAdministratorsSid, WinBuiltinPowerUsersSid]
+            .into_iter()
+            .enumerate()
+        {
+            let mut size = SECURITY_MAX_SID_SIZE;
+            check(CreateWellKnownSid(
+                kind,
+                null_mut(),
+                sids[i].as_mut_ptr().cast(),
+                &mut size,
+            ))?;
+            off[i].Sid = sids[i].as_mut_ptr().cast();
+        }
+        let mut token = null_mut();
+        check(CreateRestrictedToken(
+            own,
+            0,
+            2,
+            off.as_ptr(),
+            0,
+            null(),
+            0,
+            null(),
+            &mut token,
+        ))?;
+        // An elevated token's default permissions name only Administrators, just turned
+        // off: what the program creates would be closed to itself. usize: TOKEN_USER's
+        // and ACL's alignment.
+        let mut user = [0usize; 64];
+        let mut size = 0;
+        check(GetTokenInformation(
+            token,
+            TokenUser,
+            user.as_mut_ptr().cast(),
+            size_of_val(&user) as u32,
+            &mut size,
+        ))?;
+        let sid = (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid;
+        let mut acl = [0usize; 32];
+        let acl_ptr = acl.as_mut_ptr().cast::<ACL>();
+        check(InitializeAcl(
+            acl_ptr,
+            size_of_val(&acl) as u32,
+            ACL_REVISION,
+        ))?;
+        check(AddAccessAllowedAce(acl_ptr, ACL_REVISION, GENERIC_ALL, sid))?;
+        let dacl = TOKEN_DEFAULT_DACL {
+            DefaultDacl: acl_ptr,
+        };
+        check(SetTokenInformation(
+            token,
+            TokenDefaultDacl,
+            (&raw const dacl).cast(),
+            size_of::<TOKEN_DEFAULT_DACL>() as u32,
+        ))?;
+
+        let job = CreateJobObjectW(null(), null());
+        if job.is_null() {
+            return Err(Error::last_os_error());
+        }
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        check(SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            (&raw const limits).cast(),
+            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ))?;
+
+        let mut si: STARTUPINFOW = std::mem::zeroed();
+        si.cb = size_of::<STARTUPINFOW>() as u32;
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+        si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+        si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+        check(CreateProcessAsUserW(
+            token,
+            null(),
+            line.as_mut_ptr(),
+            null(),
+            null(),
+            1,
+            // The app has no console to share: without this PostgreSQL would open a window.
+            CREATE_SUSPENDED | CREATE_NO_WINDOW,
+            null(),
+            null(),
+            &si,
+            &mut pi,
+        ))?;
+        check(AssignProcessToJobObject(job, pi.hProcess))?;
+        ResumeThread(pi.hThread);
+        CloseHandle(pi.hThread);
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        let mut code = 1;
+        check(GetExitCodeProcess(pi.hProcess, &mut code))?;
+        Ok(code)
+    }
+}
+
 /// Whether this process already has administrator rights (Windows: an elevated token),
 /// so a step that needs them can run without asking.
 #[cfg(windows)]
@@ -1438,7 +1660,22 @@ pub fn needs_newer_macos(name: &str, kind: &str, version: &str) -> Option<String
 
 #[cfg(test)]
 mod tests {
-    use super::{netstat_listener, program_under, tasklist_program};
+    use super::{netstat_listener, program_under, quote_arg, tasklist_program};
+
+    #[test]
+    fn windows_arguments_stay_one_argument() {
+        assert_eq!(quote_arg("-D"), "-D");
+        assert_eq!(quote_arg(r"C:\dir\file"), r"C:\dir\file");
+        assert_eq!(quote_arg(""), r#""""#);
+        assert_eq!(
+            quote_arg(r"C:\Program Files\pg"),
+            r#""C:\Program Files\pg""#
+        );
+        // A trailing backslash must not escape the closing quote.
+        assert_eq!(quote_arg(r"C:\My Dir\"), r#""C:\My Dir\\""#);
+        assert_eq!(quote_arg(r#"a "b" c"#), r#""a \"b\" c""#);
+        assert_eq!(quote_arg(r#"a\" b"#), r#""a\\\" b""#);
+    }
 
     #[test]
     fn an_app_is_found_by_its_folder_and_the_newest_version_wins() {
