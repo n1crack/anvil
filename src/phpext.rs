@@ -1,4 +1,4 @@
-//! PHP extensions from PECL (xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached,
+//! PHP extensions from PECL (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached,
 //! imagick), built on this Mac with phpize against the source tree OPcache configured for
 //! the same exact version.
 
@@ -89,6 +89,16 @@ pub const CATALOG: &[Ext] = &[
         zend: false,
         hidden: false,
         recipe: Some(mongodb_recipe),
+    },
+    // Pinned 2026-11-09.
+    Ext {
+        name: "redis",
+        pecl: "redis",
+        version: "6.3.0",
+        sha256: "0d5141f634bd1db6c1ddcda053d25ecf2c4fc1c395430d534fd3f8d51dd7f0b5",
+        zend: false,
+        hidden: false,
+        recipe: None,
     },
     Ext {
         name: "memcached",
@@ -1044,6 +1054,7 @@ pub(crate) mod tests {
                 "igbinary",
                 "msgpack",
                 "mongodb",
+                "redis",
                 "memcached",
                 "imagick",
                 "swoole"
@@ -1319,8 +1330,8 @@ pub(crate) mod tests {
 
     #[test]
     fn build_errors_are_clear() {
-        let e = build("8.4", "redis").unwrap_err();
-        assert_eq!(e.to_string(), "redis is not in Anvil's catalog");
+        let e = build("8.4", "nope").unwrap_err();
+        assert_eq!(e.to_string(), "nope is not in Anvil's catalog");
         let e = tools_error(
             "xdebug",
             anyhow::anyhow!("\"make\" exited with exit status: 2"),
@@ -1348,6 +1359,7 @@ pub(crate) mod tests {
                 "igbinary",
                 "msgpack",
                 "mongodb",
+                "redis",
                 "memcached",
                 "imagick"
             ]

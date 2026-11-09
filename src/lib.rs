@@ -1565,10 +1565,11 @@ const PHP_WINDOWS: &str = "https://windows.php.net/downloads/releases/";
 
 /// The extensions a Windows PHP loads: what static-php-cli builds into the Mac's, as far
 /// as windows.php.net ships them.
-const PHP_WINDOWS_EXT: [&str; 19] = [
+const PHP_WINDOWS_EXT: [&str; 22] = [
     "bz2",
     "curl",
     "exif",
+    "ffi",
     "fileinfo",
     "ftp",
     "gd",
@@ -1580,6 +1581,8 @@ const PHP_WINDOWS_EXT: [&str; 19] = [
     "pdo_mysql",
     "pdo_pgsql",
     "pdo_sqlite",
+    "pgsql",
+    "shmop",
     "soap",
     "sockets",
     "sodium",
@@ -1590,7 +1593,7 @@ const PHP_WINDOWS_EXT: [&str; 19] = [
 /// A php.ini from an older Anvil with the extensions `PHP_WINDOWS_EXT` has gained since.
 /// One the file names at all, even commented out, stays as the user left it.
 fn php_ini_with_added_ext(ini: &str) -> String {
-    const ADDED: [&str; 4] = ["exif", "ftp", "soap", "sockets"];
+    const ADDED: [&str; 7] = ["exif", "ffi", "ftp", "pgsql", "shmop", "soap", "sockets"];
     let names = |line: &str, ext: &str| {
         line.trim_start_matches([';', ' ', '\t'])
             .strip_prefix("extension")
@@ -3801,13 +3804,19 @@ mod tests {
         let added = php_ini_with_added_ext("extension=curl");
         assert_eq!(
             added,
-            "extension=curl\nextension=exif\nextension=ftp\nextension=soap\nextension=sockets\n"
+            "extension=curl\nextension=exif\nextension=ffi\nextension=ftp\nextension=pgsql\n\
+             extension=shmop\nextension=soap\nextension=sockets\n"
         );
         assert_eq!(php_ini_with_added_ext(&added), added);
         // Turned off by the user, or written the long way: left as it is.
-        let kept =
-            ";extension=exif\n; extension = ftp\nextension=php_soap.dll\nextension=\"sockets\"\n";
+        let kept = ";extension=exif\n; extension = ftp\nextension=php_soap.dll\n\
+                    extension=\"sockets\"\n;extension=ffi\n;extension=pgsql\n;extension=shmop\n";
         assert_eq!(php_ini_with_added_ext(kept), kept);
+    }
+
+    #[test]
+    fn pdo_pgsql_does_not_count_as_pgsql() {
+        assert!(php_ini_with_added_ext("extension=pdo_pgsql\n").contains("\nextension=pgsql\n"));
     }
 
     #[test]

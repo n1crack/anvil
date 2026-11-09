@@ -565,14 +565,14 @@ enum AppCmd {
         reset: bool,
     },
     /// Turn an extension on or off for this app only, which then gets a PHP-FPM of its own
-    /// (xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached, imagick)
+    /// (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick)
     Ext {
         /// The application, by its name in `anvil apps` (e.g. blog)
         #[arg(value_name = "APP")]
         site: String,
         #[arg(value_enum)]
         action: ExtAction,
-        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached or imagick
+        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached or imagick
         name: String,
     },
     /// Set a php.ini value for the app, or clear it by leaving out the value
@@ -756,7 +756,7 @@ enum PhpCmd {
         /// An installed version, e.g. 8.4
         version: String,
     },
-    /// Extensions for every app on a PHP version (xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached, imagick)
+    /// Extensions for every app on a PHP version (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick)
     Ext {
         #[command(subcommand)]
         cmd: ExtCmd,
@@ -773,7 +773,7 @@ enum ExtAction {
 enum ExtCmd {
     /// Turn an extension on, building it first if needed
     Add {
-        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached or imagick
+        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached or imagick
         name: String,
         /// The PHP version, e.g. 8.4; the default version if left out
         #[arg(long, value_name = "VERSION")]
@@ -781,7 +781,7 @@ enum ExtCmd {
     },
     /// Turn an extension off (its build is kept)
     Remove {
-        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, memcached or imagick
+        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached or imagick
         name: String,
         /// The PHP version, e.g. 8.4; the default version if left out
         #[arg(long, value_name = "VERSION")]
