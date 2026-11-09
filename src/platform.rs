@@ -455,6 +455,56 @@ pub fn desktop_program(app: &str) -> Option<PathBuf> {
         .find_map(|p| dirs.iter().map(|d| d.join(p)).find(|f| f.is_file()))
 }
 
+/// The process listening on `port` in `netstat -ano` output: by its addresses, as
+/// Windows translates the state column.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn netstat_listener(out: &str, port: u16) -> Option<u32> {
+    let local_port = format!(":{port}");
+    out.lines().find_map(|line| {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let [proto, local, remote, _state, pid] = fields[..] else {
+            return None;
+        };
+        (proto.eq_ignore_ascii_case("TCP")
+            && local.ends_with(&local_port)
+            && remote.ends_with(":0"))
+        .then(|| pid.parse().ok())
+        .flatten()
+    })
+}
+
+/// The program in a line of `tasklist /FO CSV /NH`, said so that it means something
+/// when it is only WSL's relay for a program inside WSL.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn tasklist_program(out: &str) -> Option<String> {
+    let name = out.trim_start().strip_prefix('"')?.split('"').next()?;
+    Some(if name.eq_ignore_ascii_case("wslrelay.exe") {
+        "a program inside WSL (wslrelay.exe)".to_string()
+    } else {
+        name.to_string()
+    })
+}
+
+/// What listens on `port`, when the system can say (Windows).
+pub fn port_owner(port: u16) -> Option<String> {
+    #[cfg(windows)]
+    {
+        let text = |c: &mut Command| {
+            let out = no_window(c).output().ok()?;
+            Some(String::from_utf8_lossy(&out.stdout).into_owned())
+        };
+        let pid = netstat_listener(&text(command("netstat").arg("-ano"))?, port)?;
+        let list =
+            text(command("tasklist").args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]))?;
+        tasklist_program(&list)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = port;
+        None
+    }
+}
+
 /// No console window for a background child (Windows); nothing elsewhere.
 pub fn no_window(cmd: &mut Command) -> &mut Command {
     #[cfg(windows)]
@@ -1204,6 +1254,32 @@ pub fn needs_newer_macos(name: &str, kind: &str, version: &str) -> Option<String
 
 #[cfg(test)]
 mod tests {
+    use super::{netstat_listener, tasklist_program};
+
+    #[test]
+    fn netstat_finds_the_listener_whatever_the_language() {
+        let out = "  Proto  Local  Foreign  State  PID\n  \
+                   TCP    127.0.0.1:50443  10.0.0.1:443   ESTABLISHED  7\n  \
+                   TCP    10.0.0.2:51000   10.0.0.1:443   ESTABLISHED  8\n  \
+                   TCP    0.0.0.0:443      0.0.0.0:0      DİNLİYOR     24460\n";
+        assert_eq!(netstat_listener(out, 443), Some(24460));
+        assert_eq!(netstat_listener(out, 80), None);
+    }
+
+    #[test]
+    fn tasklist_names_the_program_and_explains_wsl() {
+        assert_eq!(
+            tasklist_program("\"caddy.exe\",\"12\",\"Console\",\"1\",\"9 K\""),
+            Some("caddy.exe".into())
+        );
+        assert!(
+            tasklist_program("\"wslrelay.exe\",\"3\"")
+                .unwrap()
+                .contains("WSL")
+        );
+        assert_eq!(tasklist_program("INFO: No tasks are running."), None);
+    }
+
     #[test]
     fn downloads_too_new_for_this_macos_are_refused_with_the_reason() {
         use super::too_old;

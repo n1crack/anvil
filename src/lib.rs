@@ -3410,8 +3410,10 @@ impl Server {
         kill_orphans(&pid_file(), false);
         if port_held(cfg.https_port) {
             bail!(
-                "Port {} is already in use — is Anvil already running?",
-                cfg.https_port
+                "Port {0} is in use by {1}. Stop it, or change https_port in {2}.",
+                cfg.https_port,
+                platform::port_owner(cfg.https_port).unwrap_or_else(|| "another program".into()),
+                home().join("config.toml").display()
             );
         }
         ensure_caddy()?;
