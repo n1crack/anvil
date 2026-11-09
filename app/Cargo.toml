@@ -27,3 +27,7 @@ tauri-plugin-updater = "2"
 # Linux: where the page sits in its GTK window, for placing menus (menu_origin).
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+
+# Windows: the taskbar's light or dark setting, for the tray icon's colour.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"

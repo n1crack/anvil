@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <path id="anvil" d="M 350 262 L 916 262 Q 952 262 952 298 L 952 420 Q 952 452 920 454 L 800 462 Q 716 470 698 540 L 684 600 Q 694 640 770 660 Q 826 676 826 724 L 826 760 Q 826 790 796 790 L 228 790 Q 198 790 198 760 L 198 724 Q 198 676 254 660 Q 330 640 340 600 L 326 540 Q 306 476 240 458 C 170 438 100 410 72 366 Q 62 346 86 336 C 150 300 250 262 350 262 Z"/>
+    <clipPath id="body"><use href="#anvil"/></clipPath>
+  </defs>
+  <rect width="1024" height="1024" rx="210" fill="#191b21"/>
+  <rect x="16" y="16" width="992" height="992" rx="194" fill="none" stroke="#fff" stroke-opacity="0.16" stroke-width="32"/>
+  <use href="#anvil" fill="#f0f3f7"/>
+  <rect x="576" y="256" width="256" height="32" fill="#ff7d14" clip-path="url(#body)"/>
+</svg>

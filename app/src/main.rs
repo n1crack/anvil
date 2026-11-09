@@ -5193,6 +5193,52 @@ fn on_app_menu(handle: &AppHandle, id: &str) {
     }
 }
 
+/// macOS recolours its template image for light and dark menu bars. Windows and
+/// Linux don't: Windows gets the colour its taskbar needs, and Linux, whose
+/// panel colour can't be read, a light grey icon with a dark edge.
+fn tray_png() -> &'static [u8] {
+    #[cfg(windows)]
+    if light_taskbar() {
+        return include_bytes!("../icons/tray-dark.png");
+    }
+    if cfg!(target_os = "macos") {
+        include_bytes!("../icons/tray.png")
+    } else {
+        include_bytes!("../icons/tray-light.png")
+    }
+}
+
+/// The taskbar has its own light or dark setting, apart from the apps' one.
+#[cfg(windows)]
+fn light_taskbar() -> bool {
+    winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|k| k.get_value::<u32, _>("SystemUsesLightTheme"))
+        .is_ok_and(|v| v == 1)
+}
+
+/// Swaps the tray icon when the taskbar changes colour. The main window can be
+/// closed for hours, so its theme events can't be relied on for this.
+#[cfg(windows)]
+fn watch_taskbar_theme(handle: AppHandle) {
+    std::thread::spawn(move || {
+        let mut light = light_taskbar();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            if light_taskbar() == light {
+                continue;
+            }
+            light = !light;
+            if let (Some(tray), Ok(icon)) = (
+                handle.tray_by_id("anvil"),
+                tauri::image::Image::from_bytes(tray_png()),
+            ) {
+                let _ = tray.set_icon(Some(icon));
+            }
+        }
+    });
+}
+
 /// The tray's Start, Stop or Restart while it runs: "Starting…" and the like.
 static TRAY_BUSY: Mutex<Option<&'static str>> = Mutex::new(None);
 
@@ -5693,16 +5739,15 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_secs(24 * 3600));
                 }
             });
-            // Template image: macOS recolours it for light and dark menu bars.
             TrayIconBuilder::with_id("anvil")
-                .icon(tauri::image::Image::from_bytes(include_bytes!(
-                    "../icons/tray.png"
-                ))?)
-                .icon_as_template(true)
+                .icon(tauri::image::Image::from_bytes(tray_png())?)
+                .icon_as_template(cfg!(target_os = "macos"))
                 .tooltip("Anvil")
                 .menu(&menu(app.handle())?)
                 .on_menu_event(|handle, e| on_menu(handle, e.id.as_ref()))
                 .build(app)?;
+            #[cfg(windows)]
+            watch_taskbar_theme(app.handle().clone());
             Ok(())
         })
         // macOS's menu bar; on Windows it would be a menu row inside the window.
