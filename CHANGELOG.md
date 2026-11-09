@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows' PHP loads the sockets extension, which Pest's browser plugin needs; installed versions gain it with their next PHP update.
+
 ## [0.3.4] - 2026-11-03
 
 ### Fixed

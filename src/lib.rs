@@ -1565,7 +1565,7 @@ const PHP_WINDOWS: &str = "https://windows.php.net/downloads/releases/";
 
 /// The extensions a Windows PHP loads: what static-php-cli builds into the Mac's, as far
 /// as windows.php.net ships them.
-const PHP_WINDOWS_EXT: [&str; 15] = [
+const PHP_WINDOWS_EXT: [&str; 16] = [
     "bz2",
     "curl",
     "fileinfo",
@@ -1578,10 +1578,30 @@ const PHP_WINDOWS_EXT: [&str; 15] = [
     "pdo_mysql",
     "pdo_pgsql",
     "pdo_sqlite",
+    "sockets",
     "sodium",
     "sqlite3",
     "zip",
 ];
+
+/// A php.ini from an older Anvil with the extensions `PHP_WINDOWS_EXT` has gained since.
+/// One the file names at all, even commented out, stays as the user left it.
+fn php_ini_with_added_ext(ini: &str) -> String {
+    const ADDED: [&str; 1] = ["sockets"];
+    let mut out = ini.to_string();
+    for e in ADDED {
+        if !ini
+            .lines()
+            .any(|l| l.contains("extension") && l.contains(e))
+        {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(&format!("extension={e}\n"));
+        }
+    }
+    out
+}
 
 /// PHP from windows.php.net: the thread-safe-less x64 build (php-cgi), checked against
 /// its published SHA-256, with a php.ini that loads the usual extensions and OPcache.
@@ -1605,7 +1625,10 @@ fn php_install_windows(cfg: &mut Config, minor: &str, list: &serde_json::Value) 
         php_runs(new)?;
         let ini = dir.join("php.ini");
         if ini.exists() {
-            fs::copy(ini, new.join("php.ini"))?;
+            fs::write(
+                new.join("php.ini"),
+                php_ini_with_added_ext(&fs::read_to_string(ini)?),
+            )?;
         } else {
             let ext: String = PHP_WINDOWS_EXT
                 .iter()
@@ -3761,6 +3784,15 @@ impl Drop for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_older_windows_php_ini_gains_sockets_once() {
+        let added = php_ini_with_added_ext("extension=curl");
+        assert_eq!(added, "extension=curl\nextension=sockets\n");
+        assert_eq!(php_ini_with_added_ext(&added), added);
+        let off = ";extension=sockets\n";
+        assert_eq!(php_ini_with_added_ext(off), off);
+    }
 
     /// The Caddyfile without its access logs (one test covers those), so the others read
     /// each block's directives as they follow its address.
