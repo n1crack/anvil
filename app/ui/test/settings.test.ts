@@ -414,7 +414,11 @@ describe("versions", () => {
         const options = [...addPick("8.4").options].map((o) => [o.value, o.textContent, o.disabled]);
         expect(options[0]).toEqual(["", "Add an extension…", false]);
         expect(options.map((o) => o[0])).not.toContain("xdebug");
-        expect(options.find((o) => o[0] === "imagick")).toEqual(["imagick", "imagick — Needs ImageMagick from Homebrew: brew install imagemagick", true]);
+        expect(options.find((o) => o[0] === "imagick")).toEqual([
+          "imagick",
+          "imagick — Needs ImageMagick from Homebrew: brew install imagemagick",
+          true,
+        ]);
         // Picked: one call, and its row with a switch.
         await add("8.4", "pcov");
         expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "pcov", on: true }]);

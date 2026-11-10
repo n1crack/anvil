@@ -1046,7 +1046,9 @@ function extensionsList(v: Settings["php"][number]) {
   list.append(op);
   // Only the ones on (and any switched here, so a row doesn't vanish under the pointer);
   // the rest are a pick in Add.
-  const shown = v.extensions.filter((e) => e.on || e.building || installing.has(`ext@${v.version}@${e.name}`) || touched.has(`${v.version}@${e.name}`));
+  const shown = v.extensions.filter(
+    (e) => e.on || e.building || installing.has(`ext@${v.version}@${e.name}`) || touched.has(`${v.version}@${e.name}`),
+  );
   for (const e of shown) {
     const building = e.building || installing.has(`ext@${v.version}@${e.name}`);
     const unbuilt = e.on && !e.built && !building;
@@ -1074,7 +1076,13 @@ function extensionsList(v: Settings["php"][number]) {
     pick.setAttribute("aria-label", `Add an extension to PHP ${v.version}`);
     pick.append(Object.assign(document.createElement("option"), { value: "", textContent: "Add an extension…" }));
     for (const e of rest)
-      pick.append(Object.assign(document.createElement("option"), { value: e.name, textContent: e.needs ? `${e.name} — ${e.needs}` : e.name, disabled: !!e.needs }));
+      pick.append(
+        Object.assign(document.createElement("option"), {
+          value: e.name,
+          textContent: e.needs ? `${e.name} — ${e.needs}` : e.name,
+          disabled: !!e.needs,
+        }),
+      );
     pick.onchange = () => {
       if (!pick.value) return;
       setExtension(v.version, pick.value, true);
