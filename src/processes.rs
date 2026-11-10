@@ -252,7 +252,36 @@ pub fn detect_with(site: &Site, cfg: Option<&crate::Config>) -> Vec<Process> {
 fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>) -> Vec<Process> {
     let mut procs = detect_base(site, php, cache, cfg);
     procs.extend(cfg.and_then(|c| octane_row(c, site)));
+    procs.extend(reverb_row(site, cfg, &procs));
     apply_settings(site, cfg, procs)
+}
+
+/// A Laravel app with laravel/reverb: its WebSocket server, started with Dev start, on
+/// the host and port in its own .env (`reverb:install` writes localhost:8080), which the
+/// browser connects to directly. None when a row already runs it (a dev script's, one
+/// added in Anvil), or .anvil.toml lists the app's processes.
+// ponytail: two apps on Reverb's default 8080 at once clash; the second's .env picks another port.
+fn reverb_row(site: &Site, cfg: Option<&crate::Config>, procs: &[Process]) -> Option<Process> {
+    let runs = |c: &str| c.contains("reverb:start");
+    let added = cfg
+        .and_then(|c| c.sites.get(settings_of(site)))
+        .is_some_and(|s| {
+            s.processes
+                .iter()
+                .any(|(id, p)| id != "reverb" && p.command.as_deref().is_some_and(runs))
+        });
+    (apps::is_php(&site.kind)
+        && !added
+        && !procs.iter().any(|p| runs(&p.command))
+        && crate::project::load(&site.path).is_none_or(|f| f.processes.is_empty())
+        && apps::requires(&site.path, "laravel/reverb"))
+    .then(|| Process {
+        id: "reverb".into(),
+        name: "reverb".into(),
+        command: "php artisan reverb:start".into(),
+        source: "laravel/reverb",
+        ..Default::default()
+    })
 }
 
 /// The Octane row of a Laravel app with laravel/octane (`octane::server`), left out of
@@ -2391,6 +2420,45 @@ echo '{DEV_JSON}'
         // Composer's scripts are a PHP app's only.
         assert_eq!(one_off_scripts(&site(&dir, "vite")).len(), 2);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reverb_row_unless_something_runs_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (php, cache) = (dir.path().join("no-php"), dir.path().join("cache"));
+        let write = |dev: &str| {
+            let json = format!(
+                r#"{{"require": {{"laravel/framework": "^12.0", "laravel/reverb": "^1.0"}}, "scripts": {{"dev": "{dev}"}}}}"#
+            );
+            fs::write(dir.path().join("composer.json"), json).unwrap();
+        };
+        let s = site(dir.path(), "laravel");
+        let mut cfg = crate::Config::default();
+        let reverb = |cfg: &crate::Config| {
+            detect_in(&s, &php, &cache, Some(cfg))
+                .into_iter()
+                .filter(|p| p.command.contains("reverb:start"))
+                .map(|p| (p.id, p.source, p.manual))
+                .collect::<Vec<_>>()
+        };
+        write("npm run dev");
+        assert_eq!(reverb(&cfg), [("reverb".into(), "laravel/reverb", false)]);
+        // A dev script that runs it already: that row only.
+        write(r#"npx concurrently \"php artisan reverb:start\" \"npm run dev\" --names=ws,vite"#);
+        assert_eq!(reverb(&cfg), [("ws".into(), "composer.json", false)]);
+        // One added in Anvil under another name: that one only.
+        write("npm run dev");
+        let site_cfg = cfg.sites.entry("shop".into()).or_default();
+        add_entry(site_cfg, &[], "sockets", "php artisan reverb:start --debug").unwrap();
+        assert_eq!(reverb(&cfg), [("sockets".into(), "Anvil", false)]);
+        // Without laravel/reverb: none.
+        cfg.sites.clear();
+        fs::write(
+            dir.path().join("composer.json"),
+            r#"{"require": {"laravel/framework": "^12.0"}}"#,
+        )
+        .unwrap();
+        assert!(reverb(&cfg).is_empty());
     }
 
     /// A Laravel app in a temp folder whose composer.json requires laravel/octane.

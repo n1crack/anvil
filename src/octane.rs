@@ -52,16 +52,7 @@ const FP_PHP: &str = "8.5";
 /// The server of an app with `laravel/octane`: `OCTANE_SERVER` in its `.env`, else
 /// `config/octane.php`'s default, else RoadRunner. `None` without laravel/octane.
 pub fn server(dir: &Path) -> Option<Server> {
-    let text = std::fs::read_to_string(dir.join("composer.json")).ok()?;
-    // Most apps have no Octane: no need to parse their composer.json.
-    if !text.contains("octane") {
-        return None;
-    }
-    let composer: serde_json::Value = serde_json::from_str(&text).ok()?;
-    ["require", "require-dev"]
-        .iter()
-        .any(|k| composer[k].get("laravel/octane").is_some())
-        .then_some(())?;
+    crate::apps::requires(dir, "laravel/octane").then_some(())?;
     let name = crate::resources::dotenv(dir)
         .remove("OCTANE_SERVER")
         .or_else(|| config_default(&std::fs::read_to_string(dir.join("config/octane.php")).ok()?));

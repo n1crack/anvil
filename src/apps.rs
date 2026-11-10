@@ -61,6 +61,21 @@ fn read(path: &Path) -> String {
 }
 
 /// Recognise a project from the files in its folder.
+/// Whether the app's composer.json requires `package` (or for development).
+pub fn requires(dir: &Path, package: &str) -> bool {
+    let Ok(text) = fs::read_to_string(dir.join("composer.json")) else {
+        return false;
+    };
+    // Most apps don't have it: no need to parse their composer.json. The name's last part,
+    // as JSON may escape the slash (`laravel\/octane`).
+    text.contains(package.rsplit('/').next().unwrap_or(package))
+        && serde_json::from_str::<serde_json::Value>(&text).is_ok_and(|c| {
+            ["require", "require-dev"]
+                .iter()
+                .any(|k| c[k].get(package).is_some())
+        })
+}
+
 pub fn detect(dir: &Path) -> &'static str {
     let has = |f: &str| dir.join(f).exists();
     if has("artisan") {
