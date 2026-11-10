@@ -4414,7 +4414,11 @@ describe("motion", () => {
     $('#site .tabs [data-tab="overview"]').click();
     expect($("#site .tabs .tab-ink").dataset.tab).toBe("overview");
     expect($$("#site .tabs .tab-ink")).toHaveLength(1);
-    // Another tab: it slides; the same app drawn again: it doesn't.
+    // Another tab: it slides, and a second call meanwhile (the bar's watcher) doesn't stop it;
+    // the same app drawn again: no slide.
+    expect($("#site .tabs .tab-ink").style.transition).toBe("");
+    window.dispatchEvent(new Event("resize"));
+    await wait();
     expect($("#site .tabs .tab-ink").style.transition).toBe("");
     const name = $("#site .site-name").textContent;
     ($(`#list .item[data-name="${name}"]`) as HTMLElement).click();
