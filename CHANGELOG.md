@@ -25,6 +25,8 @@ contain breaking changes.
 - macOS: turning on redis no longer prints "Module redis is already loaded" on every PHP start (it's built in).
 - The selected app's highlight follows the sidebar's width; the list no longer scrolls sideways.
 - The tab underline doesn't slide when the same app is clicked again.
+- Windows: the Add service sheet opens at once instead of after 1–2 seconds.
+- The silk threads run behind a service's header too.
 
 ## [0.3.5] - 2026-11-10
 

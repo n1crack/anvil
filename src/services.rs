@@ -549,36 +549,51 @@ pub struct Kind {
 
 /// What can be added, with a free name and port for each.
 pub fn kinds(cfg: &Config) -> Vec<Kind> {
+    let taken = ports_taken(cfg, "");
+    // At once: each free port is a connection that Windows takes `port_answers`' 250 ms
+    // to give up on, one after another 1.5 s before the Add service sheet opened.
+    let ports: Vec<u16> = std::thread::scope(|s| {
+        let probes: Vec<_> = SERVICES
+            .into_iter()
+            .map(|kind| {
+                let taken = &taken;
+                s.spawn(move || free_port(taken, default_port(kind)))
+            })
+            .collect();
+        probes
+            .into_iter()
+            .zip(SERVICES)
+            .map(|(p, kind)| p.join().unwrap_or(default_port(kind)))
+            .collect()
+    });
     SERVICES
         .into_iter()
-        .map(|kind| {
-            let taken = ports_taken(cfg, "");
-            Kind {
-                kind,
-                name: name(kind),
-                category: category(kind),
-                installed: installed(kind, default_version(kind)),
-                versions: versions(kind),
-                default_version: default_version(kind),
-                installed_versions: installed_versions(kind),
-                suggested_name: free_name(cfg, kind),
-                suggested_port: free_port(&taken, default_port(kind)),
-                default_port: default_port(kind),
-                licenses: versions(kind)
-                    .iter()
-                    .map(|v| {
-                        let accepted = license_accepted(cfg, kind, v).map(String::from);
-                        (v.to_string(), license(kind, v), accepted)
-                    })
-                    .collect(),
-                unsupported: versions(kind)
-                    .iter()
-                    .filter_map(|v| {
-                        let why = crate::platform::needs_newer_macos(name(kind), kind, v)?;
-                        Some((v.to_string(), why))
-                    })
-                    .collect(),
-            }
+        .zip(ports)
+        .map(|(kind, suggested_port)| Kind {
+            kind,
+            name: name(kind),
+            category: category(kind),
+            installed: installed(kind, default_version(kind)),
+            versions: versions(kind),
+            default_version: default_version(kind),
+            installed_versions: installed_versions(kind),
+            suggested_name: free_name(cfg, kind),
+            suggested_port,
+            default_port: default_port(kind),
+            licenses: versions(kind)
+                .iter()
+                .map(|v| {
+                    let accepted = license_accepted(cfg, kind, v).map(String::from);
+                    (v.to_string(), license(kind, v), accepted)
+                })
+                .collect(),
+            unsupported: versions(kind)
+                .iter()
+                .filter_map(|v| {
+                    let why = crate::platform::needs_newer_macos(name(kind), kind, v)?;
+                    Some((v.to_string(), why))
+                })
+                .collect(),
         })
         .collect()
 }
