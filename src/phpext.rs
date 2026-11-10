@@ -1,6 +1,6 @@
 //! PHP extensions from PECL (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached,
-//! imagick), built on this Mac with phpize against the source tree OPcache configured for
-//! the same exact version.
+//! imagick, sqlsrv, pdo_sqlsrv), built on this Mac with phpize against the source tree
+//! OPcache configured for the same exact version; and one of the user's own (`build_own`).
 
 use crate::opcache::{install_so, installed_full, tools_error};
 use crate::{Config, fetch_tgz, home, php_dir, run};
@@ -118,6 +118,25 @@ pub const CATALOG: &[Ext] = &[
         hidden: false,
         recipe: Some(imagick_recipe),
     },
+    // Microsoft's SQL Server drivers, pinned 2026-11-10; 5.13 supports PHP 8.3 and later.
+    Ext {
+        name: "sqlsrv",
+        pecl: "sqlsrv",
+        version: "5.13.3",
+        sha256: "1c3092ca793bb67002ca022c412aacabb79a3297ee7005e3b7cc91b1e7166d22",
+        zend: false,
+        hidden: false,
+        recipe: Some(odbc_recipe),
+    },
+    Ext {
+        name: "pdo_sqlsrv",
+        pecl: "pdo_sqlsrv",
+        version: "5.13.3",
+        sha256: "198a7b37da0658d36a93d158a0ec179b137b3a4d241c90a6650ae9ee8f91ec4a",
+        zend: false,
+        hidden: false,
+        recipe: Some(odbc_recipe),
+    },
     // Octane's server; loaded only into the Octane process (`octane::swoole_env`).
     Ext {
         name: "swoole",
@@ -158,6 +177,29 @@ const IMAGEMAGICK: [&str; 2] = [
     "/usr/local/opt/imagemagick",
 ];
 
+/// Where Homebrew keeps unixODBC, the driver manager Microsoft's ODBC Driver 18 plugs into.
+const UNIXODBC: [&str; 2] = ["/opt/homebrew/opt/unixodbc", "/usr/local/opt/unixodbc"];
+
+/// Said once sqlsrv or pdo_sqlsrv is on: they load without it, but connect through it.
+pub const SQLSRV_DRIVER: &str = if cfg!(windows) {
+    "Connecting to SQL Server needs Microsoft's ODBC Driver 18 for SQL Server: https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server"
+} else {
+    "Connecting to SQL Server needs Microsoft's ODBC Driver 18, under Microsoft's license: brew tap microsoft/mssql-release && brew install msodbcsql18"
+};
+
+/// `SQLSRV_DRIVER` after turning sqlsrv or pdo_sqlsrv on, when the driver isn't installed.
+pub fn driver_note(name: &str) -> Option<&'static str> {
+    let at: &[&str] = if cfg!(windows) {
+        &[r"C:\Windows\System32\msodbcsql18.dll"]
+    } else {
+        &[
+            "/opt/homebrew/opt/msodbcsql18",
+            "/usr/local/opt/msodbcsql18",
+        ]
+    };
+    (name.ends_with("sqlsrv") && !at.iter().any(|p| Path::new(p).exists())).then_some(SQLSRV_DRIVER)
+}
+
 /// The catalog the extensions UI, `anvil php ext` and `.anvil.toml` offer.
 pub fn offered() -> impl Iterator<Item = &'static Ext> {
     CATALOG.iter().filter(|e| !e.hidden)
@@ -170,9 +212,14 @@ pub fn needs(name: &str) -> Option<&'static str> {
     match name {
         "memcached" | "imagick" if cfg!(windows) => Some("Not on Windows yet"),
         // No Homebrew to point to; Linux's PHP loads no extension yet anyway (`build`).
-        "imagick" if cfg!(target_os = "linux") => Some("Not on Linux yet"),
+        "imagick" | "sqlsrv" | "pdo_sqlsrv" if cfg!(target_os = "linux") => {
+            Some("Not on Linux yet")
+        }
         "imagick" if imagemagick().is_none() => {
             Some("Needs ImageMagick from Homebrew: brew install imagemagick")
+        }
+        "sqlsrv" | "pdo_sqlsrv" if !cfg!(windows) && unixodbc().is_none() => {
+            Some("Needs unixODBC from Homebrew: brew install unixodbc")
         }
         _ => None,
     }
@@ -254,6 +301,9 @@ pub fn build(minor: &str, name: &str) -> Result<()> {
     if let Some(why) = needs(name) {
         bail!("{name}: {why}");
     }
+    if name.ends_with("sqlsrv") && matches!(minor, "8.0" | "8.1" | "8.2") {
+        bail!("{name} {} needs PHP 8.3 or later", ext.version);
+    }
     let _held = build_lock(minor, name, name)?;
     if cfg!(windows) {
         return fetch_dll(minor, ext);
@@ -283,6 +333,86 @@ pub fn build(minor: &str, name: &str) -> Result<()> {
     ok?;
     println!("{name} built for PHP {full}");
     Ok(())
+}
+
+/// An extension that isn't in the catalog, from its source folder `dir` (a PECL tarball
+/// unpacked, a git checkout): phpize, `./configure` with `flags`, and make against the
+/// installed PHP `minor`, checked to load, into `php_dir(minor)/ext`, the folder
+/// `extension_dir` names (`php_args_with`). The module's name and its file there.
+pub fn build_own(minor: &str, dir: &Path, flags: &[String]) -> Result<(String, PathBuf)> {
+    if !cfg!(target_os = "macos") {
+        bail!("Building an extension of your own works on macOS only for now");
+    }
+    if !dir.join("config.m4").is_file() {
+        bail!(
+            "{} has no config.m4: give the folder of an extension's source",
+            dir.display()
+        );
+    }
+    let _held = build_lock(minor, "own", "An extension")?;
+    let (full, stage) = crate::opcache::stage(minor)?;
+    let bin = tools()?;
+    println!("Building {} for PHP {full}…", dir.display());
+    let recipe = Recipe {
+        env: vec![],
+        flags: flags.to_vec(),
+    };
+    let modules = dir.join("modules");
+    let _ = fs::remove_dir_all(&modules);
+    compile(dir, &stage, &bin, "the extension", &recipe)?;
+    let so = fs::read_dir(&modules)?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "so"))
+        .context("make built no .so in modules/")?;
+    let file = so.file_name().context("no file name")?.to_owned();
+    let stem = so
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    if ["opcache", "mysqli"].contains(&stem.as_str()) {
+        bail!("{stem} is Anvil's own: anvil php opcache {minor} or anvil php mysqli {minor}");
+    }
+    if CATALOG.iter().any(|e| e.name == stem) {
+        bail!("{stem} is in Anvil's list: anvil php ext add {stem} --php {minor}");
+    }
+    let name = own_loads(minor, &so)?;
+    let to = php_dir(minor).join("ext").join(file);
+    install_so(&so, &to)?;
+    Ok((name, to))
+}
+
+/// The module `so` adds to PHP `minor`, as `php -m` lists it: Err with PHP's warning when
+/// it adds none (built for another PHP, or a Zend extension).
+fn own_loads(minor: &str, so: &Path) -> Result<String> {
+    let modules = |load: Option<&Path>| -> Result<(Vec<String>, String)> {
+        let mut cmd = crate::platform::command(crate::php_bin(minor));
+        cmd.arg("-n");
+        if let Some(so) = load {
+            cmd.arg("-d").arg(format!("extension={}", so.display()));
+        }
+        let out = cmd.arg("-m").output()?;
+        let list = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .collect();
+        Ok((
+            list,
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ))
+    };
+    let (before, _) = modules(None)?;
+    let (after, stderr) = modules(Some(so))?;
+    // A warning comes on stdout too ("Warning: … in Unknown on line 0").
+    let (new, warnings): (Vec<String>, Vec<String>) = after
+        .into_iter()
+        .filter(|m| !m.is_empty() && !m.starts_with('[') && !before.contains(m))
+        .partition(|m| !m.contains(':'));
+    new.into_iter().next().with_context(|| {
+        let why = warnings.into_iter().chain([stderr]).collect::<Vec<_>>();
+        format!("PHP {minor} doesn't load it: {}", why.join(" ").trim())
+    })
 }
 
 /// Windows: PHP's own builds of the extension (windows.php.net's PECL folder) for the
@@ -454,6 +584,20 @@ pub fn php_args_with(cfg: &Config, minor: &str, site: Option<&crate::Site>) -> V
     let names = names_for(cfg, minor, site);
     if !names.is_empty() {
         args.extend(ini_args(&ini, minor, &names));
+    }
+    // The binary's own names a folder that doesn't exist (`/lib/php/extensions/…`): this
+    // one does, so an `extension=` line in php.ini finds a `build_own` build (the catalog's
+    // are in subfolders). A PHP update replaces the folder, so nothing in it outlives the
+    // version it was built for.
+    let dir = php_dir(minor).join("ext");
+    let own = || {
+        fs::read_dir(&dir).is_ok_and(|d| {
+            d.flatten()
+                .any(|e| e.path().extension().is_some_and(|x| x == "so"))
+        })
+    };
+    if cfg!(target_os = "macos") && !ini.contains_key("extension_dir") && own() {
+        args.extend(["-d".into(), format!("extension_dir={}", dir.display())]);
     }
     args
 }
@@ -818,6 +962,33 @@ fn libmemcached() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Homebrew's unixODBC, when it has its headers.
+fn unixodbc() -> Option<PathBuf> {
+    UNIXODBC
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.join("include/sql.h").is_file())
+}
+
+/// sqlsrv and pdo_sqlsrv against Homebrew's unixODBC.
+fn odbc_recipe(_: &str) -> Result<Recipe> {
+    let odbc = unixodbc().context(needs("sqlsrv").unwrap_or_default())?;
+    Ok(Recipe {
+        env: vec![
+            ("PATH".into(), clean_path(None)),
+            (
+                "CPPFLAGS".into(),
+                format!("-I{}", odbc.join("include").display()),
+            ),
+            (
+                "LDFLAGS".into(),
+                format!("-L{}", odbc.join("lib").display()),
+            ),
+        ],
+        flags: vec![],
+    })
+}
+
 /// Homebrew's ImageMagick, when it has MagickWand's pkg-config file.
 fn imagemagick() -> Option<PathBuf> {
     IMAGEMAGICK
@@ -1057,6 +1228,8 @@ pub(crate) mod tests {
                 "redis",
                 "memcached",
                 "imagick",
+                "sqlsrv",
+                "pdo_sqlsrv",
                 "swoole"
             ]
         );
@@ -1343,6 +1516,32 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn extension_dir_only_for_an_own_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let cfg = Config::default();
+        fake_so("8.4", "8.4.23", "apcu");
+        assert!(
+            php_args(&cfg, "8.4").is_empty(),
+            "a catalog build isn't one"
+        );
+        let ext = php_dir("8.4").join("ext");
+        fs::write(ext.join("mine.so"), "").unwrap();
+        let want = format!("extension_dir={}", ext.display());
+        assert_eq!(php_args(&cfg, "8.4"), ["-d", want.as_str()]);
+        let mut cfg = cfg;
+        cfg.ini.insert("extension_dir".into(), "/x".into());
+        assert!(
+            !php_args(&cfg, "8.4")
+                .iter()
+                .any(|a| a.starts_with("extension_dir="))
+        );
+    }
+
     #[test]
     fn swoole_is_hidden() {
         let dir = tempfile::tempdir().unwrap();
@@ -1361,7 +1560,9 @@ pub(crate) mod tests {
                 "mongodb",
                 "redis",
                 "memcached",
-                "imagick"
+                "imagick",
+                "sqlsrv",
+                "pdo_sqlsrv"
             ]
         );
         fake_php("8.4", "8.4.23");

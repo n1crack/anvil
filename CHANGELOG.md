@@ -7,6 +7,11 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- PHP extensions: sqlsrv and pdo_sqlsrv for SQL Server (PHP 8.3 and later).
+- `anvil php ext build <folder>` builds an extension of your own on macOS; php.ini's `extension=` lines find it.
+
 ## [0.3.5] - 2026-11-10
 
 ### Added

@@ -222,7 +222,11 @@ pub fn stage(minor: &str) -> Result<(String, PathBuf)> {
         .join(&full)
         .join("stage");
     if stage.join(".anvil-staged").exists() {
-        return Ok((full, stage));
+        // One staged before PDO's headers were (pdo_sqlsrv needs them) is staged again.
+        if stage.join("include/php/ext/pdo/php_pdo_driver.h").is_file() {
+            return Ok((full, stage));
+        }
+        fs::remove_dir_all(&stage)?;
     }
     let (full, src) = source_tree(minor)?;
     stage_in(&src)?;
@@ -336,6 +340,8 @@ pub fn source_tree(minor: &str) -> Result<(String, PathBuf)> {
             // The default builds have sessions: igbinary and msgpack add their
             // session serializers only when the headers say so.
             "--enable-session",
+            // PDO's headers, for a PDO driver (pdo_sqlsrv); the binary has PDO built in.
+            "--enable-pdo",
         ])
         .current_dir(&src))
     .map_err(|e| tools_error("PHP's source", e))?;

@@ -321,7 +321,11 @@ pub(crate) fn frankenphp_env(
     env.retain(|(k, _)| k != "PHP_INI_SCAN_DIR");
     let args: Vec<String> = crate::phpext::cli_args(cfg, FP_PHP, Some(site))
         .chunks(2)
-        .filter(|d| !d[1].starts_with("extension=") && !d[1].starts_with("zend_extension="))
+        .filter(|d| {
+            !["extension=", "zend_extension=", "extension_dir="]
+                .iter()
+                .any(|p| d[1].starts_with(p))
+        })
         .flatten()
         .cloned()
         .collect();

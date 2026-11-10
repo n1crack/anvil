@@ -565,14 +565,14 @@ enum AppCmd {
         reset: bool,
     },
     /// Turn an extension on or off for this app only, which then gets a PHP-FPM of its own
-    /// (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick)
+    /// (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick, sqlsrv, pdo_sqlsrv)
     Ext {
         /// The application, by its name in `anvil apps` (e.g. blog)
         #[arg(value_name = "APP")]
         site: String,
         #[arg(value_enum)]
         action: ExtAction,
-        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached or imagick
+        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick, sqlsrv or pdo_sqlsrv
         name: String,
     },
     /// Set a php.ini value for the app, or clear it by leaving out the value
@@ -756,7 +756,7 @@ enum PhpCmd {
         /// An installed version, e.g. 8.4
         version: String,
     },
-    /// Extensions for every app on a PHP version (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick)
+    /// Extensions for every app on a PHP version (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick, sqlsrv, pdo_sqlsrv)
     Ext {
         #[command(subcommand)]
         cmd: ExtCmd,
@@ -773,7 +773,7 @@ enum ExtAction {
 enum ExtCmd {
     /// Turn an extension on, building it first if needed
     Add {
-        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached or imagick
+        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick, sqlsrv or pdo_sqlsrv
         name: String,
         /// The PHP version, e.g. 8.4; the default version if left out
         #[arg(long, value_name = "VERSION")]
@@ -781,11 +781,23 @@ enum ExtCmd {
     },
     /// Turn an extension off (its build is kept)
     Remove {
-        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached or imagick
+        /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick, sqlsrv or pdo_sqlsrv
         name: String,
         /// The PHP version, e.g. 8.4; the default version if left out
         #[arg(long, value_name = "VERSION")]
         php: Option<String>,
+    },
+    /// Build an extension that isn't in the list from its source folder, into PHP's
+    /// extension_dir; then turn it on with an `extension=` line in php.ini
+    Build {
+        /// The extension's source folder (with its config.m4)
+        path: std::path::PathBuf,
+        /// The PHP version, e.g. 8.4; the default version if left out
+        #[arg(long, value_name = "VERSION")]
+        php: Option<String>,
+        /// Arguments for its ./configure, after `--`
+        #[arg(last = true)]
+        configure: Vec<String>,
     },
     /// The extensions Anvil can add, and which are on
     List {
@@ -1790,15 +1802,36 @@ fn run() -> Result<()> {
         Cmd::Php {
             cmd: PhpCmd::Ext { cmd },
         } => {
-            let (ExtCmd::Add { php, .. } | ExtCmd::Remove { php, .. } | ExtCmd::List { php }) =
-                &cmd;
+            let (ExtCmd::Add { php, .. }
+            | ExtCmd::Remove { php, .. }
+            | ExtCmd::Build { php, .. }
+            | ExtCmd::List { php }) = &cmd;
             let v = php
                 .clone()
                 .or_else(|| cfg.php.clone())
                 .context("No PHP version yet — run `anvil php install 8.4`")?;
             match &cmd {
-                ExtCmd::Add { name, .. } => drop(phpext::add(&v, name)?),
+                ExtCmd::Add { name, .. } => {
+                    drop(phpext::add(&v, name)?);
+                    if let Some(note) = phpext::driver_note(name) {
+                        println!("{}", yellow(note));
+                    }
+                }
                 ExtCmd::Remove { name, .. } => drop(phpext::remove(&v, name)?),
+                ExtCmd::Build {
+                    path, configure, ..
+                } => {
+                    let (name, so) = phpext::build_own(&v, path, configure)?;
+                    println!(
+                        "{} {name} is in {}",
+                        green("Built."),
+                        so.parent().unwrap_or(&so).display()
+                    );
+                    println!(
+                        "Turn it on with `extension={name}` in {}",
+                        php_dir(&v).join("php.ini").display()
+                    );
+                }
                 ExtCmd::List { .. } => {}
             }
             if let ExtCmd::List { .. } = cmd {
@@ -1810,7 +1843,7 @@ fn run() -> Result<()> {
                         }
                         (false, _) => dim(phpext::needs(e.name).unwrap_or("off")),
                     };
-                    println!("{:<9} {:<10} {state}", e.name, e.version);
+                    println!("{:<10} {:<10} {state}", e.name, e.version);
                 }
                 // Apps on this version with extensions of their own.
                 let built = phpext::built_names(&v);
@@ -2214,7 +2247,12 @@ fn run() -> Result<()> {
             }
             AppCmd::Ext { site, action, name } => {
                 match action {
-                    ExtAction::Add => drop(phpext::add_site(&site, &name)?),
+                    ExtAction::Add => {
+                        drop(phpext::add_site(&site, &name)?);
+                        if let Some(note) = phpext::driver_note(&name) {
+                            println!("{}", yellow(note));
+                        }
+                    }
                     ExtAction::Remove => drop(phpext::remove_site(&site, &name)?),
                 }
                 control::notify_changed();
