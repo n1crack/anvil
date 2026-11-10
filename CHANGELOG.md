@@ -7,6 +7,8 @@ contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-11-11
+
 ### Added
 
 - PHP extensions: sqlsrv and pdo_sqlsrv for SQL Server (PHP 8.3 and later).
@@ -25,7 +27,7 @@ contain breaking changes.
 - macOS: turning on redis no longer prints "Module redis is already loaded" on every PHP start (it's built in).
 - The selected app's highlight follows the sidebar's width; the list no longer scrolls sideways.
 - The tab underline doesn't slide when the same app is clicked again.
-- Windows: the Add service sheet opens at once instead of after 1–2 seconds.
+- Windows: the Add service sheet opens faster.
 - The silk threads run behind a service's header too.
 
 ## [0.3.5] - 2026-11-10
@@ -283,7 +285,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/n1crack/anvil/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/n1crack/anvil/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/n1crack/anvil/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/n1crack/anvil/compare/v0.3.2...v0.3.3
