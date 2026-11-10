@@ -32,7 +32,10 @@ pub enum State {
 }
 
 pub fn so_path(minor: &str) -> PathBuf {
-    php_dir(minor).join("ext").join("opcache.so")
+    crate::phpext::moved(
+        php_dir(minor).join("ext/opcache.so"),
+        crate::phpext::anvil_dir(minor).join("opcache.so"),
+    )
 }
 
 /// Whether the installed PHP `minor` has `module` compiled in, as `php -n -m` lists it.
@@ -114,7 +117,10 @@ pub fn fpm_args(ini: &std::collections::BTreeMap<String, String>, minor: &str) -
 
 /// Anvil's build of mysqli for PHP `minor`, loaded with OPcache's `-d`s when there.
 pub fn mysqli_path(minor: &str) -> PathBuf {
-    php_dir(minor).join("ext").join("mysqli.so")
+    crate::phpext::moved(
+        php_dir(minor).join("ext/mysqli.so"),
+        crate::phpext::anvil_dir(minor).join("mysqli.so"),
+    )
 }
 
 /// Whether PHP `minor` has mysqli: Windows' PHP loads its own (`PHP_WINDOWS_EXT`),
@@ -465,13 +471,13 @@ mod tests {
         // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
         unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
         let cfg = Config::default();
-        fs::create_dir_all(php_dir("8.4").join("ext")).unwrap();
+        fs::create_dir_all(crate::phpext::anvil_dir("8.4")).unwrap();
         fs::write(so_path("8.4"), "").unwrap();
 
         let args = fpm_args(&cfg.ini, "8.4");
         let so = format!(
             "zend_extension={}",
-            home().join("php/8.4/ext/opcache.so").display()
+            home().join("php/8.4/anvil-ext/opcache.so").display()
         );
         assert_eq!(args[..2], ["-d".to_string(), so]);
         assert!(args.contains(&"opcache.enable=1".into()));

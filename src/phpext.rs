@@ -259,16 +259,36 @@ fn find(name: &str) -> Result<&'static Ext> {
         .with_context(|| format!("{name} is not in Anvil's catalog"))
 }
 
+/// Where Anvil keeps its own builds for PHP `minor` (OPcache, mysqli, the catalog's),
+/// apart from the user's `own_dir`.
+pub fn anvil_dir(minor: &str) -> PathBuf {
+    php_dir(minor).join("anvil-ext")
+}
+
+/// `new`, moved there from `old`, where Anvil 0.3.5 and earlier kept its builds (in the
+/// user's folder now), the first time it's asked for: no build again.
+// ponytail: drop once no install has 0.3.5's layout.
+pub(crate) fn moved(old: PathBuf, new: PathBuf) -> PathBuf {
+    if !new.exists()
+        && old.exists()
+        && let Some(parent) = new.parent()
+    {
+        let _ = fs::create_dir_all(parent).and_then(|()| fs::rename(&old, &new));
+    }
+    new
+}
+
 /// Keyed by the exact version: a build is never loaded into another patch release.
 pub fn so_path(minor: &str, full: &str, name: &str) -> PathBuf {
-    php_dir(minor)
-        .join("ext")
-        .join(full)
-        .join(if cfg!(windows) {
-            format!("php_{name}.dll")
-        } else {
-            format!("{name}.so")
-        })
+    moved(
+        php_dir(minor).join("ext").join(full),
+        anvil_dir(minor).join(full),
+    )
+    .join(if cfg!(windows) {
+        format!("php_{name}.dll")
+    } else {
+        format!("{name}.so")
+    })
 }
 
 /// Whether `name` is built for the PHP `minor` installed now.
@@ -1289,7 +1309,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             so_path("8.4", "8.4.23", "apcu"),
-            php_dir("8.4").join("ext/8.4.23/apcu.so")
+            anvil_dir("8.4").join("8.4.23/apcu.so")
         );
         assert!(!built("8.4", "apcu"), "PHP isn't installed");
         fake_php("8.4", "8.4.23");
@@ -1559,7 +1579,8 @@ pub(crate) mod tests {
             php_args(&cfg, "8.4").is_empty(),
             "a catalog build isn't one"
         );
-        let ext = php_dir("8.4").join("ext");
+        let ext = own_dir("8.4");
+        fs::create_dir_all(&ext).unwrap();
         fs::write(ext.join("mine.so"), "").unwrap();
         let want = format!("extension_dir={}", ext.display());
         assert_eq!(php_args(&cfg, "8.4"), ["-d", want.as_str()]);
@@ -1570,6 +1591,31 @@ pub(crate) mod tests {
                 .iter()
                 .any(|a| a.starts_with("extension_dir="))
         );
+    }
+
+    #[test]
+    fn builds_move_out_of_the_users_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let ext = php_dir("8.4").join("ext");
+        fs::create_dir_all(ext.join("8.4.23")).unwrap();
+        fs::write(ext.join("8.4.23/apcu.so"), "a").unwrap();
+        fs::write(ext.join("opcache.so"), "o").unwrap();
+        fs::write(ext.join("mine.so"), "m").unwrap();
+        assert_eq!(
+            fs::read_to_string(so_path("8.4", "8.4.23", "apcu")).unwrap(),
+            "a"
+        );
+        assert_eq!(
+            fs::read_to_string(crate::opcache::so_path("8.4")).unwrap(),
+            "o"
+        );
+        assert!(so_path("8.4", "8.4.23", "apcu").starts_with(anvil_dir("8.4")));
+        // Only the user's own is left there.
+        assert_eq!(own("8.4"), ["mine"]);
+        assert!(!ext.join("8.4.23").exists());
     }
 
     #[test]

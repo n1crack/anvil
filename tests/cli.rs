@@ -957,9 +957,9 @@ fn cli_php_ext_add_lists_it() {
         "#!/bin/sh\nif [ \"$1\" = -n ]; then printf 8.4.23; exit; fi\nprintf '%s\\n' \"$@\"\nd=${PHP_INI_SCAN_DIR%%:*}\n[ -z \"$d\" ] || cat \"$d/anvil.ini\"\n",
     );
     fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
-    // Built before: turning it on needs no build.
-    let so = env.home.join("php/8.4/ext/8.4.23/apcu.so");
-    write(&so, "");
+    // Built before (where 0.3.5 kept it): turning it on needs no build, and it moves.
+    write(&env.home.join("php/8.4/ext/8.4.23/apcu.so"), "");
+    let so = env.home.join("php/8.4/anvil-ext/8.4.23/apcu.so");
     env.ok(&["use", "8.4"]);
 
     env.ok(&["php", "ext", "add", "apcu"]);
