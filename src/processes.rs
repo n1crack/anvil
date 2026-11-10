@@ -257,8 +257,9 @@ fn detect_in(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config>)
 }
 
 /// A Laravel app with laravel/reverb: its WebSocket server, started with Dev start, on
-/// the host and port in its own .env (`reverb:install` writes localhost:8080), which the
-/// browser connects to directly. None when a row already runs it (a dev script's, one
+/// the port in its own .env (`reverb:install` writes localhost:8080), which the browser
+/// connects to directly; on this Mac only (Reverb's default is 0.0.0.0) unless the .env
+/// sets REVERB_SERVER_HOST. None when a row already runs it (a dev script's, one
 /// added in Anvil), or .anvil.toml lists the app's processes.
 // ponytail: two apps on Reverb's default 8080 at once clash; the second's .env picks another port.
 fn reverb_row(site: &Site, cfg: Option<&crate::Config>, procs: &[Process]) -> Option<Process> {
@@ -278,7 +279,11 @@ fn reverb_row(site: &Site, cfg: Option<&crate::Config>, procs: &[Process]) -> Op
     .then(|| Process {
         id: "reverb".into(),
         name: "reverb".into(),
-        command: "php artisan reverb:start".into(),
+        command: if crate::resources::dotenv(&site.path).contains_key("REVERB_SERVER_HOST") {
+            "php artisan reverb:start".into()
+        } else {
+            "php artisan reverb:start --host=127.0.0.1".into()
+        },
         source: "laravel/reverb",
         ..Default::default()
     })
@@ -2443,6 +2448,18 @@ echo '{DEV_JSON}'
         };
         write("npm run dev");
         assert_eq!(reverb(&cfg), [("reverb".into(), "laravel/reverb", false)]);
+        let command = |cfg: &crate::Config| {
+            detect_in(&s, &php, &cache, Some(cfg))
+                .into_iter()
+                .find(|p| p.id == "reverb")
+                .unwrap()
+                .command
+        };
+        // Not on the network unless the .env says where.
+        assert_eq!(command(&cfg), "php artisan reverb:start --host=127.0.0.1");
+        fs::write(dir.path().join(".env"), "REVERB_SERVER_HOST=0.0.0.0\n").unwrap();
+        assert_eq!(command(&cfg), "php artisan reverb:start");
+        fs::remove_file(dir.path().join(".env")).unwrap();
         // A dev script that runs it already: that row only.
         write(r#"npx concurrently \"php artisan reverb:start\" \"npm run dev\" --names=ws,vite"#);
         assert_eq!(reverb(&cfg), [("ws".into(), "composer.json", false)]);
