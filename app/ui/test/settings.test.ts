@@ -162,7 +162,7 @@ describe("versions", () => {
       await open("php");
       const row = phpRow("8.4");
       expect(buttons(row)[0]).toBe("Update to 8.4.27");
-      expect(row.querySelector(".ver-patch + .ext-toggle")!.textContent).toBe("Extensions 1/9›");
+      expect(row.querySelector(".ver-patch + .ext-toggle")!.textContent).toBe("Extensions 1›");
       (row.querySelector(".ver-patch button") as HTMLElement).click();
       await wait(10);
       expect(w.mockCalls).toContainEqual(["php_update", { version: "8.4" }]);
@@ -271,7 +271,7 @@ describe("versions", () => {
   test("own_extensions_last: the version's folder for the user's own, by name, with Show folder", () =>
     withOpcache83(async () => {
       await openExts("8.4");
-      const own = lines("8.4").at(-1)!;
+      const own = line("8.4", "Your own");
       expect(own.textContent).toBe("Your ownextension=name in php.iniShow folder");
       (own.querySelector(".text-act") as HTMLElement).click();
       await wait(10);
@@ -281,32 +281,22 @@ describe("versions", () => {
         w.refresh();
         await open("php");
         await openExts("8.4");
-        expect(lines("8.4").at(-1)!.textContent).toBe("Your ownanvilhello, fooShow folder");
+        expect(line("8.4", "Your own").textContent).toBe("Your ownanvilhello, fooShow folder");
       } finally {
         delete w.mockOwnExt;
       }
     }));
 
-  test("row_shows_opcache_state: Extensions n/9 after an installed version opens its list, OPcache first", () =>
+  test("row_shows_opcache_state: Extensions n after an installed version opens its list, OPcache first", () =>
     withOpcache83(async () => {
-      expect(toggle("8.5")!.textContent).toBe("Extensions 1/9›");
-      expect(toggle("8.3")!.textContent).toBe("Extensions 0/9›");
+      expect(toggle("8.5")!.textContent).toBe("Extensions 1›");
+      expect(toggle("8.3")!.textContent).toBe("Extensions 0›");
       // Not installed: nothing about extensions.
       expect(toggle("8.2")).toBeNull();
       expect(lines("8.5").length).toBe(0);
       await openExts("8.5");
-      expect(lines("8.5").map((l) => l.querySelector(".ext-name")!.textContent)).toEqual([
-        "OPcache",
-        "xdebug",
-        "pcov",
-        "apcu",
-        "igbinary",
-        "msgpack",
-        "mongodb",
-        "memcached",
-        "imagick",
-        "Your own",
-      ]);
+      // Only what's on, then Add (Anvil's list), the user's own, and what PHP has in it.
+      expect(lines("8.5").map((l) => l.querySelector(".ext-name")!.textContent)).toEqual(["OPcache", "Add", "Your own", "Built in"]);
       expect(line("8.5", "OPcache").textContent).toBe("OPcacheBuilt in");
       // The list slides open in place: no redraw.
       expect(phpRow("8.5").querySelector(".ext-fold")!.classList.contains("open")).toBe(true);
@@ -339,7 +329,7 @@ describe("versions", () => {
       await wait(30);
       expect(w.mockCalls.filter(([c]: [string]) => c === "php_opcache_on").at(-1)[1]).toEqual({ version: "8.5", on: false });
       expect(sw().checked).toBe(false);
-      expect(toggle("8.5")!.textContent).toMatch(/^Extensions 0\/9/);
+      expect(toggle("8.5")!.textContent).toMatch(/^Extensions 0›/);
       sw().checked = true;
       sw().dispatchEvent(new Event("change"));
       await wait(30);
@@ -373,7 +363,7 @@ describe("versions", () => {
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheBuilding… a few minutes");
       await wait(150);
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheRemove");
-      expect(toggle("8.3")!.textContent).toBe("Extensions 1/9›");
+      expect(toggle("8.3")!.textContent).toBe("Extensions 1›");
       // Remove asks in the row too, then it's Not built again.
       (line("8.3", "OPcache").querySelector(".text-act") as HTMLElement).click();
       expect(line("8.3", "OPcache").textContent).toBe("OPcacheRemove OPcache from PHP 8.3? Building it again takes minutes.CancelRemove");
@@ -401,49 +391,67 @@ describe("versions", () => {
       expect(w.mockCalls.at(-1)).toEqual(["xcode_tools_install", undefined]);
     }));
 
-  test("extensions_switches_per_version: the catalog as switches in each installed version's list", () =>
+  const addPick = (v: string) => line(v, "Add").querySelector("select") as HTMLSelectElement;
+  async function add(v: string, name: string) {
+    const pick = addPick(v);
+    pick.value = name;
+    pick.dispatchEvent(new Event("change"));
+    await wait(30);
+  }
+
+  test("extensions_on_and_add: only the ones on have a switch; the rest are picked in Add", () =>
     withOpcache83(async () => {
       w.mockExt = { "8.4": ["xdebug"] };
       w.refresh();
       await open("php");
       try {
-        expect(toggle("8.4")!.textContent).toBe("Extensions 2/9›");
+        expect(toggle("8.4")!.textContent).toBe("Extensions 2›");
         await openExts("8.4");
         await openExts("8.3");
-        expect(exts("8.4")).toEqual(
-          ["xdebug", "pcov", "apcu", "igbinary", "msgpack", "mongodb", "memcached", "imagick"].map((name) => ({
-            name,
-            on: name === "xdebug",
-            text: name === "imagick" ? "imagickNeeds ImageMagick from Homebrew: brew install imagemagick" : name,
-          })),
-        );
-        // Needs Homebrew's ImageMagick: held off; with it, a switch like the others.
-        expect(extSwitch("8.4", "imagick").disabled).toBe(true);
-        w.mockExtNeeds = {};
-        w.refresh();
-        await open("php");
-        expect(extSwitch("8.4", "imagick").disabled).toBe(false);
-        delete w.mockExtNeeds;
-        expect(exts("8.3").every((e) => !e.on)).toBe(true);
-        // Off: one call, for that version and extension.
+        expect(exts("8.4")).toEqual([{ name: "xdebug", on: true, text: "xdebug" }]);
+        expect(exts("8.3")).toEqual([]);
+        // Add lists the rest; one that needs something first says what and can't be picked.
+        const options = [...addPick("8.4").options].map((o) => [o.value, o.textContent, o.disabled]);
+        expect(options[0]).toEqual(["", "Add an extension…", false]);
+        expect(options.map((o) => o[0])).not.toContain("xdebug");
+        expect(options.find((o) => o[0] === "imagick")).toEqual(["imagick", "imagick — Needs ImageMagick from Homebrew: brew install imagemagick", true]);
+        // Picked: one call, and its row with a switch.
+        await add("8.4", "pcov");
+        expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "pcov", on: true }]);
+        expect(exts("8.4").map((e) => e.name)).toEqual(["xdebug", "pcov"]);
+        // Off: one call; the row stays while this window is open, switched off.
         extSwitch("8.4", "xdebug").click();
         await wait(30);
         expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "xdebug", on: false }]);
-        expect(exts("8.4").every((e) => !e.on)).toBe(true);
+        expect(exts("8.4").find((e) => e.name === "xdebug")?.on).toBe(false);
 
         // On, but no build for the installed PHP: off, Not built; on builds it.
-        w.mockExt = { "8.4": ["pcov"] };
-        w.mockExtUnbuilt = ["8.4 pcov"];
+        w.mockExt = { "8.4": ["apcu"] };
+        w.mockExtUnbuilt = ["8.4 apcu"];
         w.refresh();
         await open("php");
-        expect(exts("8.4").find((e) => e.name === "pcov")).toEqual({ name: "pcov", on: false, text: "pcovNot built" });
-        extSwitch("8.4", "pcov").click();
+        expect(exts("8.4").find((e) => e.name === "apcu")).toEqual({ name: "apcu", on: false, text: "apcuNot built" });
+        extSwitch("8.4", "apcu").click();
         await wait(30);
-        expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "pcov", on: true }]);
+        expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "apcu", on: true }]);
       } finally {
         delete w.mockExt;
         delete w.mockExtUnbuilt;
       }
+    }));
+
+  test("builtin_is_information: what PHP has in it, by name on Show, no switches", () =>
+    withOpcache83(async () => {
+      await openExts("8.4");
+      const row = line("8.4", "Built in");
+      expect(row.textContent).toBe("Built in4 extensionsShow");
+      expect(row.querySelector("input")).toBeNull();
+      const names = row.nextElementSibling as HTMLElement;
+      expect(names.hidden).toBe(true);
+      (row.querySelector(".text-act") as HTMLElement).click();
+      expect(names.hidden).toBe(false);
+      expect(names.textContent).toBe("Core, ctype, mbstring, redis");
+      expect(row.textContent).toBe("Built in4 extensionsHide");
     }));
 
   test("building_is_inline: Building… on the extension's line until it resolves; an error under the row", () =>
@@ -451,14 +459,13 @@ describe("versions", () => {
       w.mockDelay.php_ext = 100;
       try {
         await openExts("8.4");
-        extSwitch("8.4", "apcu").click();
-        await wait(10);
-        expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "apcu", on: true }]);
-        const apcu = () => exts("8.4").find((e) => e.name === "apcu")!;
-        expect(apcu().text).toBe("apcuBuilding…");
-        expect(extSwitch("8.4", "apcu").disabled).toBe(true);
+        await add("8.4", "igbinary");
+        expect(w.mockCalls.at(-1)).toEqual(["php_ext", { version: "8.4", name: "igbinary", on: true }]);
+        const igb = () => exts("8.4").find((e) => e.name === "igbinary")!;
+        expect(igb().text).toBe("igbinaryBuilding…");
+        expect(extSwitch("8.4", "igbinary").disabled).toBe(true);
         await wait(150);
-        expect(apcu()).toEqual({ name: "apcu", on: true, text: "apcu" });
+        expect(igb()).toEqual({ name: "igbinary", on: true, text: "igbinary" });
         expect($$('[role="alert"]:not([hidden]), .toast').length).toBe(0);
 
         // A window opened while another build runs says so too.
@@ -471,14 +478,13 @@ describe("versions", () => {
         w.refresh();
         await open("php");
 
-        w.mockExtError = "Building pcov failed — it needs the Xcode Command Line Tools: xcode-select --install";
+        w.mockExtError = "Building msgpack failed — it needs the Xcode Command Line Tools: xcode-select --install";
         delete w.mockDelay.php_ext;
-        extSwitch("8.4", "pcov").click();
-        await wait(30);
+        await add("8.4", "msgpack");
         const r = phpRow("8.4");
         expect(r.querySelector(".ver-error")?.textContent).toContain("xcode-select --install");
         expect(buttons(r)).toContain("Install command line tools");
-        expect(extSwitch("8.4", "pcov").checked).toBe(false);
+        expect(extSwitch("8.4", "msgpack").checked).toBe(false);
         expect($$('[role="alert"]:not([hidden])').length).toBe(0);
       } finally {
         delete w.mockExt;

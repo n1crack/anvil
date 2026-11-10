@@ -84,6 +84,7 @@ export interface Snapshot {
   php_ext_catalog: string[];
   /** What a catalog extension needs first that isn't here (Homebrew's ImageMagick), by name. */
   php_ext_needs?: Record<string, string>;
+  php_ext_builtin?: Record<string, string[]>;
   /** Extensions on for every app on a version, by version. */
   php_ext: Record<string, string[]>;
   /** The extensions built for each version that has some on; one on without a build loads nothing. */
@@ -333,6 +334,7 @@ export interface Settings {
     /** `needs`: what it needs first that isn't here; it can't be turned on. */
     extensions: { name: string; on: boolean; built: boolean; building: boolean; needs?: string | null }[];
     own_ext?: string[] | null;
+    builtin?: string[];
     /** A newer patch, [installed, newest], as the last check found. */
     available: [string, string] | null;
     /** The patch it was updated to since Anvil started. */

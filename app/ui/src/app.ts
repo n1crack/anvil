@@ -1941,7 +1941,9 @@ function appExtensions(s, root) {
   const line = el("div", "ver-exts app-ext-list");
   const shared = snap.php_ext?.[s.php] ?? [];
   const built = snap.php_ext_built?.[s.php];
-  for (const name of snap.php_ext_catalog ?? []) {
+  // One PHP has in it (Anvil's macOS builds have redis) has no switch.
+  const inPhp = (snap.php_ext_builtin?.[s.php] ?? []).map((m) => m.toLowerCase());
+  for (const name of (snap.php_ext_catalog ?? []).filter((n) => !inPhp.includes(n))) {
     const forAll = shared.includes(name);
     const building = appExtBuilding.has(`${s.name}@${name}`);
     const on = forAll || s.ext.includes(name);

@@ -109,6 +109,8 @@ struct Snapshot {
     php_ext_needs: std::collections::BTreeMap<&'static str, &'static str>,
     /// Extensions on for every app on a version (Settings › PHP), by version.
     php_ext: std::collections::BTreeMap<String, Vec<String>>,
+    /// What each installed version has in it (`phpext::builtin`): no switch for those.
+    php_ext_builtin: std::collections::BTreeMap<String, Vec<String>>,
     /// The catalog extensions built for each version that has some turned on: one on
     /// without a build loads nothing and shows as not built.
     php_ext_built: std::collections::BTreeMap<String, Vec<&'static str>>,
@@ -523,6 +525,13 @@ fn snapshot(app: &App) -> Res<Snapshot> {
             .filter_map(|e| Some((e.name, anvil::phpext::needs(e.name)?)))
             .collect(),
         php_ext: cfg.php_ext.clone(),
+        php_ext_builtin: anvil::installed_php()
+            .into_iter()
+            .map(|v| {
+                let list = anvil::phpext::builtin(&v);
+                (v, list)
+            })
+            .collect(),
         editor: cfg.editor.clone(),
         terminal: cfg.terminal.clone(),
         git_client: git_client(&cfg).map(|c| app_label(&c)),
@@ -3645,6 +3654,9 @@ struct PhpVersion {
     /// An OPcache build for it is running, so a window opened meanwhile says so too.
     opcache_building: bool,
     /// The catalog (`phpext::CATALOG`), each on or off for every app on this version.
+    /// What the binary has in it (`php -n -m`): shown as information, not switches.
+    builtin: Vec<String>,
+    /// The catalog's it doesn't have in it, on or off.
     extensions: Vec<PhpExt>,
     /// The user's own in `phpext::own_dir`, by name; None where PHP loads none (Linux).
     own_ext: Option<Vec<String>>,
@@ -3875,7 +3887,8 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                 opcache: anvil::opcache::state(v),
                 opcache_on: !cfg.php_opcache_off.contains(*v),
                 opcache_building: anvil::lock(&OPCACHE_BUILDS).iter().any(|b| b == v),
-                extensions: anvil::phpext::offered()
+                builtin: anvil::phpext::builtin(v),
+                extensions: anvil::phpext::addable(v)
                     .map(|e| PhpExt {
                         name: e.name,
                         on: anvil::phpext::on(&cfg, v, e.name),

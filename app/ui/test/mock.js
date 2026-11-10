@@ -1293,6 +1293,7 @@ const mockHandle = (cmd, a) => {
           updated: window.mockPhpUpdated?.[version] ?? null,
           updating: window.mockPhpUpdating?.includes(version) ?? false,
           own_ext: window.mockOwnExt?.[version] ?? [],
+          builtin: window.mockBuiltin ?? ["Core", "ctype", "mbstring", "redis"],
           extensions: ["xdebug", "pcov", "apcu", "igbinary", "msgpack", "mongodb", "memcached", "imagick"].map((name) => ({
             name,
             on: window.mockExt?.[version]?.includes(name) ?? false,

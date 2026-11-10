@@ -136,6 +136,8 @@ fn hints(name: &str) -> Option<(&'static str, bool, bool, bool)> {
         "set" => ("Change an app setting", false, false, true),
         "mail" => ("Caught mail", true, false, true),
         "browser" => ("Browser errors", true, false, true),
+        "php_extensions" => ("PHP extensions", true, false, true),
+        "php_extension" => ("Turn a PHP extension on or off", false, false, true),
         _ => return None,
     })
 }
@@ -281,6 +283,22 @@ fn tools() -> Vec<Value> {
             &["field", "value"],
         ),
         tool(
+            "php_extensions",
+            "A PHP version's extensions: `built_in` (in the binary, always on), `anvil` (Anvil's list: on, built for this patch, what one needs first) and `own` (the person's, in `own_dir`, turned on with extension=name in `php_ini`). Default: the default PHP version",
+            json!({"version": {"type": "string", "description": "e.g. 8.4; leave out for the default"}}),
+            &[],
+        ),
+        tool(
+            "php_extension",
+            "Turn one of Anvil's list on or off for every app on a PHP version; on builds it first when needed (seconds to minutes), and the running Anvil restarts PHP-FPM. Not for built-in ones, nor the person's own",
+            json!({
+                "version": {"type": "string", "description": "e.g. 8.4; leave out for the default"},
+                "name": {"type": "string", "description": "As php_extensions lists it under `anvil`"},
+                "on": {"type": "boolean"},
+            }),
+            &["name", "on"],
+        ),
+        tool(
             "mail",
             "Mail the app sent, as the mail catcher (Settings › Features) caught it. Without an id: the latest, newest first. With an id: that message's text, HTML and links, e.g. to follow a sign-up mail's link",
             json!({
@@ -312,6 +330,43 @@ fn tools() -> Vec<Value> {
         }
     }
     list
+}
+
+/// `version`, or the default PHP version.
+fn php_version(cfg: &Config, args: &Value) -> Result<String> {
+    args["version"]
+        .as_str()
+        .map(String::from)
+        .or_else(|| cfg.php.clone())
+        .context("No PHP version yet: the person installs one (anvil php install 8.4)")
+}
+
+/// The `php_extensions` tool: what a PHP version has in it, Anvil's list with what's on,
+/// and the folder for the person's own.
+fn php_extensions(cfg: &Config, args: &Value) -> Result<Value> {
+    let v = php_version(cfg, args)?;
+    if !crate::installed_php().contains(&v) {
+        bail!("PHP {v} is not installed");
+    }
+    let list: Vec<Value> = crate::phpext::addable(&v)
+        .map(|e| {
+            json!({
+                "name": e.name,
+                "version": e.version,
+                "on": crate::phpext::on(cfg, &v, e.name),
+                "built": crate::phpext::built(&v, e.name),
+                "needs": crate::phpext::needs(e.name),
+            })
+        })
+        .collect();
+    Ok(json!({
+        "version": v,
+        "built_in": crate::phpext::builtin(&v),
+        "anvil": list,
+        "own": crate::phpext::own(&v),
+        "own_dir": crate::phpext::own_dir(&v),
+        "php_ini": crate::php_dir(&v).join("php.ini"),
+    }))
 }
 
 /// The `mail` tool: an app's caught mail, or one message with its text, HTML and links.
@@ -773,6 +828,22 @@ fn call(name: &str, args: &Value, client: &str) -> Result<Value> {
                 .collect();
             Ok(v)
         }
+        "php_extensions" => php_extensions(&cfg, args),
+        "php_extension" => {
+            let name = arg(args, "name")?;
+            let on = args["on"].as_bool().context("on: true or false")?;
+            let v = php_version(&cfg, args)?;
+            // Anvil's list only (pinned, checked PECL sources): one of the user's own is a
+            // build of code from anywhere, theirs to do (`anvil php ext build`).
+            if on {
+                crate::phpext::add(&v, name)?;
+            } else {
+                crate::phpext::remove(&v, name)?;
+            }
+            // The running Anvil restarts PHP-FPM when what it starts with changed.
+            let _ = control::request("config_changed", json!({}), client);
+            php_extensions(&crate::load()?, &json!({"version": v}))
+        }
         "worktrees" => {
             let app = site(&cfg, args)?;
             let list: Vec<Value> = crate::sites(&cfg)
@@ -1117,6 +1188,60 @@ mod tests {
     }
 
     #[test]
+    fn php_extensions_lists_and_switches_only_anvils() {
+        let h = home();
+        let php = crate::php_dir("8.4").join("php");
+        std::fs::create_dir_all(php.parent().unwrap()).unwrap();
+        std::fs::write(
+            &php,
+            "#!/bin/sh\nif [ \"$2\" = -m ]; then printf 'Core\\nredis\\n'; else printf 8.4.23; fi\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&php, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(php.with_file_name("php-fpm"), "").unwrap();
+        crate::update(|c| {
+            c.php = Some("8.4".into());
+            Ok(())
+        })
+        .unwrap();
+        let v = ok("php_extensions", json!({}));
+        assert_eq!(v["version"], "8.4");
+        assert_eq!(v["built_in"], json!(["Core", "redis"]));
+        let names: Vec<&str> = v["anvil"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            names.contains(&"apcu") && !names.contains(&"redis"),
+            "{names:?}"
+        );
+        // Built in, or not Anvil's: refused, nothing changed.
+        let (text, err) = call_tool("php_extension", json!({"name": "redis", "on": true}));
+        assert!(err && text.contains("built into PHP 8.4"), "{text}");
+        let (text, err) = call_tool("php_extension", json!({"name": "../x.so", "on": true}));
+        assert!(err && text.contains("not in Anvil's catalog"), "{text}");
+        // Built before: on at once, and off again.
+        let so = crate::phpext::so_path("8.4", "8.4.23", "apcu");
+        std::fs::create_dir_all(so.parent().unwrap()).unwrap();
+        std::fs::write(&so, "").unwrap();
+        let v = ok("php_extension", json!({"name": "apcu", "on": true}));
+        assert!(
+            v["anvil"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["name"] == "apcu" && e["on"] == true)
+        );
+        assert_eq!(crate::load().unwrap().php_ext["8.4"], ["apcu"]);
+        ok("php_extension", json!({"name": "apcu", "on": false}));
+        assert!(!crate::load().unwrap().php_ext.contains_key("8.4"));
+        drop(h);
+    }
+
+    #[test]
     fn tools_list_has_exactly_these_tools_each_with_its_hints() {
         let tools = tools_listed();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
@@ -1136,6 +1261,8 @@ mod tests {
                 "worktree_remove",
                 "settings",
                 "set",
+                "php_extensions",
+                "php_extension",
                 "mail",
                 "browser"
             ]
@@ -1149,6 +1276,7 @@ mod tests {
             "check",
             "worktrees",
             "settings",
+            "php_extensions",
             "mail",
             "browser",
         ];

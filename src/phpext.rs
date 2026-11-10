@@ -253,6 +253,47 @@ pub fn tools_dir() -> PathBuf {
     home().join("tools")
 }
 
+/// The modules PHP `minor`'s binary has in it, as `php -n -m` lists them (Core, ctype,
+/// …, Zend OPcache), sorted; none when it isn't installed. Asked once per binary.
+pub fn builtin(minor: &str) -> Vec<String> {
+    type Seen = BTreeMap<(PathBuf, std::time::SystemTime), Vec<String>>;
+    static SEEN: std::sync::Mutex<Seen> = std::sync::Mutex::new(BTreeMap::new());
+    let php = crate::php_bin(minor);
+    let Ok(at) = fs::metadata(&php).and_then(|m| m.modified()) else {
+        return vec![];
+    };
+    let key = (php.clone(), at);
+    if let Some(list) = crate::lock(&SEEN).get(&key) {
+        return list.clone();
+    }
+    let Ok(out) = crate::platform::command(php).args(["-n", "-m"]).output() else {
+        return vec![];
+    };
+    let mut list: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty() && !l.starts_with('['))
+        .collect();
+    list.sort_by_key(|m| m.to_lowercase());
+    list.dedup();
+    if out.status.success() {
+        crate::lock(&SEEN).insert(key, list.clone());
+    }
+    list
+}
+
+/// Whether PHP `minor` has `name` in it already (Anvil's macOS builds have redis): the
+/// catalog's would load it twice ("Module "redis" is already loaded" on every start).
+pub fn is_builtin(minor: &str, name: &str) -> bool {
+    builtin(minor).iter().any(|m| m.eq_ignore_ascii_case(name))
+}
+
+/// The catalog's extensions PHP `minor` doesn't have in it: the ones it can add.
+pub fn addable(minor: &str) -> impl Iterator<Item = &'static Ext> {
+    let have = builtin(minor);
+    offered().filter(move |e| !have.iter().any(|m| m.eq_ignore_ascii_case(e.name)))
+}
+
 fn find(name: &str) -> Result<&'static Ext> {
     offered()
         .find(|e| e.name == name)
@@ -537,6 +578,9 @@ pub fn add(minor: &str, name: &str) -> Result<Config> {
     if !crate::installed_php().iter().any(|v| v == minor) {
         bail!("PHP {minor} is not installed — run `anvil php install {minor}`");
     }
+    if is_builtin(minor, name) {
+        bail!("{name} is built into PHP {minor} already");
+    }
     if !built(minor, name) {
         build(minor, name)?;
     }
@@ -577,6 +621,9 @@ pub fn add_site(site: &str, name: &str) -> Result<Config> {
     let minor = s
         .php
         .with_context(|| format!("{site} runs on no PHP of Anvil's"))?;
+    if is_builtin(&minor, name) {
+        bail!("{name} is built into PHP {minor} already");
+    }
     if !built(&minor, name) {
         build(&minor, name)?;
     }
@@ -660,6 +707,8 @@ fn names_for(cfg: &Config, minor: &str, site: Option<&crate::Site>) -> Vec<Strin
             names.push(n.clone());
         }
     }
+    // Turned on before Anvil knew PHP has it in it (redis, 0.3.5): not loaded twice.
+    names.retain(|n| !is_builtin(minor, n));
     names
 }
 
@@ -1591,6 +1640,31 @@ pub(crate) mod tests {
                 .iter()
                 .any(|a| a.starts_with("extension_dir="))
         );
+    }
+
+    #[test]
+    fn built_in_ones_are_not_offered_nor_loaded_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = crate::lock(&ENV_LOCK);
+        // SAFETY: every test that sets ANVIL_HOME holds ENV_LOCK.
+        unsafe { std::env::set_var("ANVIL_HOME", dir.path()) };
+        let php = php_dir("8.4").join("php");
+        fs::create_dir_all(php.parent().unwrap()).unwrap();
+        fs::write(
+            &php,
+            "#!/bin/sh\nif [ \"$2\" = -m ]; then printf '[PHP Modules]\\nCore\\nredis\\n\\n[Zend Modules]\\n'; else printf 8.4.23; fi\n",
+        )
+        .unwrap();
+        fs::set_permissions(&php, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(builtin("8.4"), ["Core", "redis"]);
+        assert!(is_builtin("8.4", "REDIS"));
+        assert!(!addable("8.4").any(|e| e.name == "redis"));
+        assert!(addable("8.4").any(|e| e.name == "apcu"));
+        // On from before (0.3.5 offered it): left out of what PHP loads.
+        let mut cfg = Config::default();
+        cfg.php_ext
+            .insert("8.4".into(), vec!["redis".into(), "apcu".into()]);
+        assert_eq!(names_for(&cfg, "8.4", None), ["apcu"]);
     }
 
     #[test]

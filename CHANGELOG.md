@@ -13,6 +13,18 @@ contain breaking changes.
 - Each PHP version has a folder for your own extensions (Settings › PHP › Extensions › Show folder): turn one on with `extension=name` in php.ini; PHP updates keep them.
 - `anvil php ext build <folder>` builds an extension of your own into it on macOS.
 - Laravel apps with Reverb get a reverb process, started with Dev start; it uses the app's own .env.
+- MCP tools `php_extensions` and `php_extension`: agents can list a PHP version's extensions and turn Anvil's on or off.
+
+### Changed
+
+- Settings › PHP › Extensions lists only what's on; add one from Anvil's list with Add. What PHP has built in is shown under Built in.
+- Shorter `anvil --help`.
+
+### Fixed
+
+- macOS: turning on redis no longer prints "Module redis is already loaded" on every PHP start (it's built in).
+- The selected app's highlight follows the sidebar's width; the list no longer scrolls sideways.
+- The tab underline doesn't slide when the same app is clicked again.
 
 ## [0.3.5] - 2026-11-10
 

@@ -1918,7 +1918,7 @@ fn run() -> Result<()> {
                 ExtCmd::List { .. } => {}
             }
             if let ExtCmd::List { .. } = cmd {
-                for e in phpext::offered() {
+                for e in phpext::addable(&v) {
                     let state = match (phpext::on(&cfg, &v, e.name), phpext::built(&v, e.name)) {
                         (true, true) => green("on"),
                         (true, false) => {
@@ -1946,6 +1946,10 @@ fn run() -> Result<()> {
                         })
                         .collect();
                     println!("{} {}", dim(format!("{}:", s.name)), list.join(", "));
+                }
+                let builtin = phpext::builtin(&v);
+                if !builtin.is_empty() {
+                    println!("{}", dim(format!("Built in: {}", builtin.join(", "))));
                 }
                 if !cfg!(target_os = "linux") {
                     let own = phpext::own(&v);

@@ -1767,6 +1767,8 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 .ext-fold.open > .ext-list { margin-top: 6px; margin-bottom: 10px; }
 .ext-line { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 32px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .ext-line:last-child { border-bottom: 0; }
+.ext-builtin { margin: 0; padding: 8px 0 10px; font-size: 12px; line-height: 1.5; }
+.ext-add { max-width: 240px; font-size: 12px; }
 .ext-end { display: inline-flex; align-items: center; gap: 10px; min-width: 0; font-size: 12px; text-align: right; }
 .ext-line input[type="checkbox"][role="switch"] { transform: scale(0.8); transform-origin: right center; }
 .ext-line input:disabled { opacity: 0.45; }

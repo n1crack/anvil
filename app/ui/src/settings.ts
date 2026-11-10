@@ -958,6 +958,8 @@ const opcacheErrors = new Map<string, string>();
 const extErrors = new Map<string, string>(); // version -> why its last extension change failed
 
 const extsOpen = new Set<string>(); // PHP versions whose extension list is open
+const builtinOpen = new Set<string>(); // PHP versions whose built-in names are shown
+const touched = new Set<string>(); // "version@name" switched in this window: its row stays
 
 /** An installed version's "Extensions 2/6 ›" at the row's far end; a click on the row slides the version's
  * list open under it (OPcache first, then the catalog's). After a failed build, the
@@ -975,7 +977,7 @@ function phpParts(v: Settings["php"][number]) {
     const t = Object.assign(document.createElement("span"), { className: "ext-toggle" });
     // "Extensions" goes in a narrow row (style.css); the count and the tooltip stay.
     t.innerHTML = `<span><span class="ext-word">Extensions </span></span><span class="chevron" aria-hidden="true">›</span>`;
-    t.firstElementChild!.append(`${on}/${v.extensions.length + 1}`);
+    t.firstElementChild!.append(`${on}`);
     t.title = "Extensions";
     if (busy) t.prepend(Object.assign(document.createElement("span"), { className: "spin-dot" }));
     below = Object.assign(document.createElement("div"), { className: "ext-fold" });
@@ -1042,25 +1044,44 @@ function extensionsList(v: Settings["php"][number]) {
   } else opEnd.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Built in" }), opcacheSwitch(v));
   op.append(opName, opEnd);
   list.append(op);
-  for (const e of v.extensions) {
+  // Only the ones on (and any switched here, so a row doesn't vanish under the pointer);
+  // the rest are a pick in Add.
+  const shown = v.extensions.filter((e) => e.on || e.building || installing.has(`ext@${v.version}@${e.name}`) || touched.has(`${v.version}@${e.name}`));
+  for (const e of shown) {
     const building = e.building || installing.has(`ext@${v.version}@${e.name}`);
     const unbuilt = e.on && !e.built && !building;
     const line = Object.assign(document.createElement("label"), { className: "ext-line" });
     const end = Object.assign(document.createElement("span"), { className: "ext-end" });
     if (building) end.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Building…" }));
     if (unbuilt) end.append(Object.assign(document.createElement("span"), { className: "muted", textContent: "Not built" }));
-    // One that needs something first (Homebrew's ImageMagick) says what, and can only go off.
-    const blocked = !!e.needs && !e.on;
-    if (blocked) end.append(Object.assign(document.createElement("span"), { className: "muted", textContent: e.needs }));
     const input = Object.assign(document.createElement("input"), {
       type: "checkbox",
       checked: e.on && !unbuilt,
-      disabled: building || blocked,
+      disabled: building || (!!e.needs && !e.on),
     });
     input.setAttribute("role", "switch");
     input.onchange = () => setExtension(v.version, e.name, input.checked);
     end.append(input);
     line.append(Object.assign(document.createElement("span"), { className: "ext-name", textContent: e.name }), end);
+    list.append(line);
+  }
+  // Add: Anvil's list, built on this Mac the first time (seconds to minutes); one that
+  // needs something first (Homebrew's ImageMagick) says what and can't be picked.
+  const rest = v.extensions.filter((e) => !shown.includes(e));
+  if (rest.length) {
+    const line = Object.assign(document.createElement("div"), { className: "ext-line" });
+    const pick = Object.assign(document.createElement("select"), { className: "ext-add" });
+    pick.setAttribute("aria-label", `Add an extension to PHP ${v.version}`);
+    pick.append(Object.assign(document.createElement("option"), { value: "", textContent: "Add an extension…" }));
+    for (const e of rest)
+      pick.append(Object.assign(document.createElement("option"), { value: e.name, textContent: e.needs ? `${e.name} — ${e.needs}` : e.name, disabled: !!e.needs }));
+    pick.onchange = () => {
+      if (!pick.value) return;
+      setExtension(v.version, pick.value, true);
+    };
+    const end = Object.assign(document.createElement("span"), { className: "ext-end" });
+    end.append(pick);
+    line.append(Object.assign(document.createElement("span"), { className: "ext-name", textContent: "Add" }), end);
     list.append(line);
   }
   // The user's own: files in PHP's extension folder, turned on with extension=name in php.ini.
@@ -1075,6 +1096,22 @@ function extensionsList(v: Settings["php"][number]) {
     line.append(Object.assign(document.createElement("span"), { className: "ext-name", textContent: "Your own" }), end);
     list.append(line);
   }
+  // What PHP has in it: information, no switches; the names on Show.
+  if (v.builtin?.length) {
+    const line = Object.assign(document.createElement("div"), { className: "ext-line" });
+    const end = Object.assign(document.createElement("span"), { className: "ext-end" });
+    const names = Object.assign(document.createElement("p"), { className: "ext-builtin muted", textContent: v.builtin.join(", ") });
+    names.hidden = !builtinOpen.has(v.version);
+    const act = textAct(names.hidden ? "Show" : "Hide", () => {
+      names.hidden = !names.hidden;
+      if (names.hidden) builtinOpen.delete(v.version);
+      else builtinOpen.add(v.version);
+      act.textContent = names.hidden ? "Show" : "Hide";
+    });
+    end.append(Object.assign(document.createElement("span"), { className: "muted", textContent: `${v.builtin.length} extensions` }), act);
+    line.append(Object.assign(document.createElement("span"), { className: "ext-name", textContent: "Built in" }), end);
+    list.append(line, names);
+  }
   return list;
 }
 
@@ -1083,6 +1120,7 @@ function extensionsList(v: Settings["php"][number]) {
 async function setExtension(version: string, name: string, on: boolean) {
   const key = `ext@${version}@${name}`;
   if (installing.has(key)) return;
+  touched.add(`${version}@${name}`);
   if (on) installing.add(key);
   extErrors.delete(version);
   render();
