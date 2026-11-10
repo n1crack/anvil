@@ -7,6 +7,8 @@ contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-11-10
+
 ### Added
 
 - PHP extensions: phpredis.
@@ -260,7 +262,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/n1crack/anvil/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/n1crack/anvil/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/n1crack/anvil/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/n1crack/anvil/compare/v0.3.1...v0.3.2
