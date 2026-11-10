@@ -43,30 +43,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Serve every sub-folder of a directory as an application
+    /// Serve every folder in a directory
     Park {
         /// The folder (default: the current one)
         path: Option<PathBuf>,
     },
-    /// Stop serving a parked directory (its folders are left alone)
+    /// Stop serving a parked directory
     Forget {
         /// The parked folder (default: the current one)
         path: Option<PathBuf>,
     },
-    /// Serve the current directory as <name>.<tld>
+    /// Serve the current folder
     Link {
         /// The application's name (default: the folder's name)
         name: Option<String>,
     },
-    /// Stop serving a linked application (its folder is left alone)
+    /// Stop serving a linked app
     Unlink {
         /// The name `anvil link` gave it
         name: String,
     },
-    /// List the applications: address, type, PHP version and web root
+    /// List the apps
     #[command(alias = "sites")]
     Apps,
-    /// Parallel workspaces: git worktrees of an app, each served on its own
+    /// Git worktrees of an app, each served
     Worktree {
         #[command(subcommand)]
         cmd: WorktreeCmd,
@@ -81,11 +81,15 @@ enum Cmd {
         /// An installed version, e.g. 8.4
         version: String,
     },
-    /// Databases, cache, mail and S3 storage: mysql, postgres, redis, mailpit, versitygw, silo
+    /// Databases, cache, mail and storage
+    ///
+    /// mysql, postgres, redis, mailpit, versitygw, silo
     Service {
         #[command(subcommand)]
         cmd: ServiceCmd,
     },
+    /// Node.js, Go, Rust, .NET and Python
+    ///
     /// Language toolchains for apps that run their own server: node, go, rust, dotnet, python
     Runtime {
         #[command(subcommand)]
@@ -96,7 +100,10 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AppCmd,
     },
-    /// Create a new application: laravel, statamic, symfony, wordpress, php, static, next, nuxt, vite, node, rust, go, dotnet, django, fastapi, flask
+    /// Create a new app
+    ///
+    /// laravel, statamic, symfony, wordpress, php, static, next, nuxt, vite, node, rust, go,
+    /// dotnet, django, fastapi, flask
     New {
         /// The template, e.g. laravel
         kind: String,
@@ -108,6 +115,8 @@ enum Cmd {
         #[command(flatten)]
         opts: NewOpts,
     },
+    /// Disk usage
+    ///
     /// Disk usage of an app, what is safe to delete, and the services it uses.
     /// Without an app: Anvil's own footprint and every app's size.
     Usage {
@@ -115,6 +124,8 @@ enum Cmd {
         #[arg(value_name = "APP")]
         site: Option<String>,
     },
+    /// Free disk space
+    ///
     /// Delete items `anvil usage` lists for an app (by path), or with --safe every
     /// item that is safe to delete; --safe without an app cleans every app
     Clean {
@@ -127,13 +138,15 @@ enum Cmd {
         #[arg(long)]
         safe: bool,
     },
+    /// Git status of an app
+    ///
     /// Branch, changes, last commit and remote of an app (default: current folder)
     Git {
         /// The application, by its name in `anvil apps` (default: the current folder's)
         #[arg(value_name = "APP")]
         site: Option<String>,
     },
-    /// Recent log entries of an app, oldest first
+    /// Recent logs of an app
     Logs {
         /// The application, by its name in `anvil apps` (e.g. blog)
         #[arg(value_name = "APP")]
@@ -148,6 +161,8 @@ enum Cmd {
         #[arg(long)]
         level: Option<String>,
     },
+    /// Dependencies of an app
+    ///
     /// Dependencies of an app (or a folder, default: current) from its manifests and lock files
     Packages {
         /// The application, by its name in `anvil apps` (default: the current folder's)
@@ -160,14 +175,20 @@ enum Cmd {
         #[arg(long)]
         audit: bool,
     },
+    /// First-time setup
+    ///
     /// Download the web server, put the terminal shims on PATH and print the
     /// one-time system setup command
     Setup,
+    /// Which php, composer, node… runs here
+    ///
     /// The program `php`, `composer`, `laravel`, `forge`, `node`, `npm`, `npx` or `pnpm` runs in this folder
     Which {
         /// php, composer, laravel, forge, node, npm, npx or pnpm
         tool: String,
     },
+    /// Check an app's .anvil.toml
+    ///
     /// What an app's .anvil.toml asks for (PHP, Node.js, services) and what's missing
     /// (default: the app of the current folder); --apply installs and adds it
     Project {
@@ -181,17 +202,25 @@ enum Cmd {
         #[arg(long)]
         accept_license: bool,
     },
+    /// Trust Anvil's HTTPS certificates
+    ///
     /// Trust Anvil's local HTTPS certificate authority (asks for permission)
     Trust,
+    /// Run Anvil in the foreground
+    ///
     /// Run DNS, PHP-FPM and the web server in the foreground
     Start,
-    /// Serve Anvil to AI agents (MCP, stdio)
+    /// MCP server for AI agents
     Mcp,
+    /// The database viewer
+    ///
     /// The Database viewer (Adminer at db.<tld>, Settings › Features)
     Db {
         #[command(subcommand)]
         cmd: DbCmd,
     },
+    /// HTTPS on or off for an app
+    ///
     /// Serve an application over HTTPS, its http:// address redirecting there; with --off,
     /// HTTP only. New applications get HTTP unless `https_default = true` in config.toml
     Https {
@@ -202,12 +231,16 @@ enum Cmd {
         #[arg(long)]
         off: bool,
     },
+    /// The domain suffix (.test)
+    ///
     /// Show the domain suffix applications answer at, or set it: `anvil tld localhost`
     /// needs no password or resolver file; `anvil tld test` needs one setup step
     Tld {
         /// The new suffix, e.g. test or localhost
         tld: Option<String>,
     },
+    /// Remove Anvil from this computer
+    ///
     /// List what Anvil changed on this computer (resolver files, trusted certificate,
     /// login item, ~/.anvil); with --yes, remove it all
     Uninstall {
@@ -354,6 +387,8 @@ enum WorktreeCmd {
         /// The application (default: the current folder's)
         app: Option<String>,
     },
+    /// Use an existing database for a worktree
+    ///
     /// Use the database a worktree would get that is there already and Anvil didn't make
     UseDb {
         /// The worktree, by its name (shop--feat) or its branch (feat)
@@ -362,6 +397,8 @@ enum WorktreeCmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Remove a worktree
+    ///
     /// Remove a worktree: its folder, and with --drop-db its database copies
     Remove {
         /// The worktree, by its name (shop--feat) or its branch (feat)
@@ -380,6 +417,8 @@ enum WorktreeCmd {
 
 #[derive(Subcommand)]
 enum DbCmd {
+    /// Open a database in the viewer
+    ///
     /// Print the address that opens a MySQL or PostgreSQL service (at one of its
     /// databases), or an app's database, logged in
     Open {
@@ -395,6 +434,8 @@ enum DbCmd {
 enum ServiceCmd {
     /// List added services and their state
     List,
+    /// Add a service, e.g. `add redis`
+    ///
     /// Add a service: `add redis`, `add redis cache --port 6380`. Downloads the
     /// program the first time (Redis is built from source). Also a Docker image
     /// (`add --docker mongo:7 --port 27017:27017`), a container that is there
@@ -483,6 +524,8 @@ enum ServiceCmd {
         /// The applications, by their names in `anvil apps`
         apps: Vec<String>,
     },
+    /// Remove an unused program version
+    ///
     /// Remove a program version no service uses anymore, e.g. `uninstall redis 7.2.16`
     Uninstall {
         /// mysql, postgres, redis, mailpit, versitygw or silo
@@ -500,11 +543,15 @@ enum ServiceCmd {
         /// The service, by its name in `anvil service list`
         id: String,
     },
+    /// Start a service
+    ///
     /// Start the service in the running Anvil (and with Anvil from now on)
     Start {
         /// The service, by its name in `anvil service list`
         id: String,
     },
+    /// Stop a service
+    ///
     /// Stop the service in the running Anvil (and don't start it with Anvil)
     Stop {
         /// The service, by its name in `anvil service list`
@@ -526,6 +573,8 @@ enum ServiceCmd {
 enum RuntimeCmd {
     /// Installed and available versions
     List,
+    /// Install a version, e.g. `node 22`
+    ///
     /// Install a version, e.g. `node 22`, `go 1.27.2`, `rust stable`, `dotnet 10.0`
     Install {
         /// node, go, rust, dotnet or python
@@ -544,6 +593,8 @@ enum RuntimeCmd {
 
 #[derive(Subcommand)]
 enum AppCmd {
+    /// Pin the app's PHP version
+    ///
     /// Pin the app's PHP version (e.g. `8.3`), or leave it out for the default
     Php {
         /// The application, by its name in `anvil apps` (e.g. blog)
@@ -552,6 +603,8 @@ enum AppCmd {
         /// e.g. 8.3 (leave it out for the default)
         version: Option<String>,
     },
+    /// The app's web root
+    ///
     /// Show the app's web root, set it to a folder inside the project (`web`, `dist`,
     /// `.`), or go back to the detected one (`public/` when present) with --reset
     Root {
@@ -564,6 +617,8 @@ enum AppCmd {
         #[arg(long, conflicts_with = "dir")]
         reset: bool,
     },
+    /// An extension for this app only
+    ///
     /// Turn an extension on or off for this app only, which then gets a PHP-FPM of its own
     /// (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick, sqlsrv, pdo_sqlsrv)
     Ext {
@@ -575,6 +630,8 @@ enum AppCmd {
         /// xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick, sqlsrv or pdo_sqlsrv
         name: String,
     },
+    /// Set a php.ini value for the app
+    ///
     /// Set a php.ini value for the app, or clear it by leaving out the value
     Ini {
         /// The application, by its name in `anvil apps` (e.g. blog)
@@ -593,6 +650,8 @@ enum AppCmd {
         /// e.g. "pnpm dev" (leave it out for the default)
         command: Option<String>,
     },
+    /// Pin the language version
+    ///
     /// Pin the language version (e.g. `24` for Node), or leave it out for automatic
     Runtime {
         /// The application, by its name in `anvil apps` (e.g. blog)
@@ -610,6 +669,8 @@ enum AppCmd {
         #[arg(action = clap::ArgAction::Set)]
         on: bool,
     },
+    /// Set the app type
+    ///
     /// Set the app type (e.g. `vite`), or leave it out to use the detected one
     Type {
         /// The application, by its name in `anvil apps` (e.g. blog)
@@ -618,6 +679,8 @@ enum AppCmd {
         /// e.g. vite, next or laravel
         kind: Option<String>,
     },
+    /// Pin the app's private port
+    ///
     /// Pin the app's private port, or leave it out for an automatic one
     Port {
         /// The application, by its name in `anvil apps` (e.g. blog)
@@ -626,6 +689,8 @@ enum AppCmd {
         /// A free port, e.g. 3001
         port: Option<u16>,
     },
+    /// Start the app's processes
+    ///
     /// Start the app's processes, or one of them, in the running Anvil
     Start {
         /// The application, by its name in `anvil apps` (e.g. blog)
@@ -650,12 +715,16 @@ enum AppCmd {
         /// One process, by its name in the app's Processes (default: all)
         process: Option<String>,
     },
+    /// Share the app at a public address
+    ///
     /// Share the app at a temporary public address (a Cloudflare quick tunnel) until Ctrl-C
     Share {
         /// The application, by its name in `anvil apps` (e.g. blog)
         #[arg(value_name = "APP")]
         site: String,
     },
+    /// Switch the app to pnpm
+    ///
     /// Switch an npm or yarn app to pnpm: pnpm-lock.yaml from its lock file, node_modules
     /// installed again; the old lock file goes only after that works. Test the app after
     Pnpm {
@@ -663,6 +732,8 @@ enum AppCmd {
         #[arg(value_name = "APP")]
         site: String,
     },
+    /// The app's latest mails
+    ///
     /// The app's latest mails, oldest first, while the mail catcher (Settings › Features)
     /// catches them; else the inbox address of the Anvil Mailpit its .env sends to
     Mail {
@@ -676,6 +747,8 @@ enum AppCmd {
         #[arg(short, default_value_t = 20)]
         n: usize,
     },
+    /// The app's latest requests
+    ///
     /// The latest requests Caddy served for the app, oldest first: time, method, status,
     /// duration, size and path. Static assets (Vite's, Next's, maps) only with --assets
     Requests {
@@ -698,6 +771,8 @@ enum AppCmd {
         #[arg(long, short)]
         follow: bool,
     },
+    /// Browser errors on the app's pages
+    ///
     /// Errors on the app's pages from your browser (JS errors, rejections, console errors,
     /// failed requests, CSP), grouped, oldest first, while its Browser errors switch is on;
     /// --on and --off turn it on (PHP apps and dev servers) and off
@@ -722,6 +797,8 @@ enum AppCmd {
 
 #[derive(Subcommand)]
 enum PhpCmd {
+    /// Install a PHP version, e.g. 8.4
+    ///
     /// Install the latest patch release of a PHP minor version, e.g. 8.4
     Install {
         /// The minor version, e.g. 8.4
@@ -739,6 +816,8 @@ enum PhpCmd {
         /// An installed version, e.g. 8.4
         version: String,
     },
+    /// Set a php.ini value for every app
+    ///
     /// Set a php.ini value for every application, or clear it by leaving out the value
     Ini {
         /// A php.ini setting, e.g. memory_limit
@@ -751,11 +830,15 @@ enum PhpCmd {
         /// An installed version, e.g. 8.3
         version: String,
     },
+    /// Build mysqli (WordPress needs it)
+    ///
     /// Build mysqli for an installed PHP that lacks it: WordPress needs it
     Mysqli {
         /// An installed version, e.g. 8.4
         version: String,
     },
+    /// Extensions for every app on a PHP version
+    ///
     /// Extensions for every app on a PHP version (xdebug, pcov, apcu, igbinary, msgpack, mongodb, redis, memcached, imagick, sqlsrv, pdo_sqlsrv)
     Ext {
         #[command(subcommand)]
