@@ -2496,7 +2496,12 @@ mod tests {
     #[test]
     fn write_env_sets_the_connect_keys_and_keeps_the_rest() {
         let mut cfg = Config::default();
-        let id = insert(&mut cfg, "postgres", Some("pg"), Some(5433), None).unwrap();
+        // A port the system just found free: 5433 is often a real PostgreSQL's (or Docker's).
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .unwrap()
+            .port();
+        let id = insert(&mut cfg, "postgres", Some("pg"), Some(port), None).unwrap();
         let dir = tempfile::tempdir().unwrap();
         assert!(write_env(&cfg, &id, dir.path(), None).is_err());
         let env = dir.path().join(".env");
@@ -2505,12 +2510,12 @@ mod tests {
         assert!(keys.contains(&"DB_DATABASE".to_string()));
         let text = fs::read_to_string(&env).unwrap();
         for line in [
-            "APP_KEY=x",
-            "DB_CONNECTION=pgsql",
-            "DB_HOST=127.0.0.1",
-            "DB_PORT=5433",
-            "DATABASE_URL=postgres://postgres@127.0.0.1:5433/shop",
-            "DB_DATABASE=shop",
+            "APP_KEY=x".to_string(),
+            "DB_CONNECTION=pgsql".into(),
+            "DB_HOST=127.0.0.1".into(),
+            format!("DB_PORT={port}"),
+            format!("DATABASE_URL=postgres://postgres@127.0.0.1:{port}/shop"),
+            "DB_DATABASE=shop".into(),
         ] {
             assert!(text.lines().any(|l| l == line), "{line} in {text}");
         }
