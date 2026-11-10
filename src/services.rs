@@ -2241,7 +2241,6 @@ pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
     if !installed(kind, &v) {
         bail!("{} {v} is not installed", name(kind));
     }
-    let leftover = pid_file(id).exists();
     kill_orphans(&pid_file(id), false);
     if !id.starts_with("app-") {
         // Left by an Anvil from before `svc-` (an `app-` one is the app's to clean up).
@@ -2249,15 +2248,15 @@ pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
     }
     let port = port(cfg, id);
     for p in [Some(port), web_port(cfg, id)].into_iter().flatten() {
-        // What was just ended above lets go of its port a moment later.
-        for _ in 0..if leftover { 30 } else { 0 } {
-            if !in_use(p) {
-                break;
+        // What was just stopped lets go of its port a moment later, even with its pid file
+        // gone: on Windows, as administrator, Stop waits for a wrapper, not the server.
+        let mut waits = 0;
+        while in_use(p) {
+            if waits == 30 {
+                bail!("{id}: port {p} is already in use by another program — pick another port");
             }
+            waits += 1;
             std::thread::sleep(Duration::from_millis(100));
-        }
-        if in_use(p) {
-            bail!("{id}: port {p} is already in use by another program — pick another port");
         }
     }
     crate::state_dirs()?;

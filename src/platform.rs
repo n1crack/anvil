@@ -646,7 +646,8 @@ fn netstat_listener(out: &str, port: u16) -> Option<u32> {
     let local_port = format!(":{port}");
     out.lines().find_map(|line| {
         let fields: Vec<&str> = line.split_whitespace().collect();
-        let [proto, local, remote, _state, pid] = fields[..] else {
+        // The state can be more than one word once translated.
+        let [proto, local, remote, .., pid] = fields[..] else {
             return None;
         };
         (proto.eq_ignore_ascii_case("TCP")
@@ -1142,7 +1143,7 @@ fn run_without_admin(argv: &[String]) -> std::io::Result<u32> {
     use windows_sys::Win32::System::Threading::{
         CREATE_NO_WINDOW, CREATE_SUSPENDED, CreateProcessAsUserW, GetCurrentProcess,
         GetExitCodeProcess, INFINITE, OpenProcessToken, PROCESS_INFORMATION, ResumeThread,
-        STARTF_USESTDHANDLES, STARTUPINFOW, WaitForSingleObject,
+        STARTF_USESTDHANDLES, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
     };
     let check = |ok: i32| {
         if ok != 0 {
@@ -1261,7 +1262,11 @@ fn run_without_admin(argv: &[String]) -> std::io::Result<u32> {
             &si,
             &mut pi,
         ))?;
-        check(AssignProcessToJobObject(job, pi.hProcess))?;
+        if let Err(e) = check(AssignProcessToJobObject(job, pi.hProcess)) {
+            // Suspended and outside the job: nothing else would ever end it.
+            TerminateProcess(pi.hProcess, 1);
+            return Err(e);
+        }
         ResumeThread(pi.hThread);
         CloseHandle(pi.hThread);
         WaitForSingleObject(pi.hProcess, INFINITE);
@@ -1699,6 +1704,8 @@ mod tests {
                    TCP    0.0.0.0:443      0.0.0.0:0      DİNLİYOR     24460\n";
         assert_eq!(netstat_listener(out, 443), Some(24460));
         assert_eq!(netstat_listener(out, 80), None);
+        let two_words = "  TCP    0.0.0.0:443      0.0.0.0:0      EN ECOUTE    24460\n";
+        assert_eq!(netstat_listener(two_words, 443), Some(24460));
     }
 
     #[test]

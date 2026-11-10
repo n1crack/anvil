@@ -11,8 +11,13 @@ contain breaking changes.
 
 - PHP extensions: phpredis.
 
+### Changed
+
+- New app icons.
+
 ### Fixed
 
+- The tray icon no longer disappears on dark Windows and Linux panels; on Windows it follows the taskbar's light or dark setting.
 - Windows' PHP loads the sockets extension, which Pest's browser plugin needs; installed versions gain it with their next PHP update.
 - When the HTTPS port is taken, Windows names the program holding it instead of asking whether Anvil is already running.
 - Windows' PHP also loads exif, ftp and soap; installed versions gain them with their next PHP update.

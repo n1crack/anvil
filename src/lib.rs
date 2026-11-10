@@ -1591,25 +1591,28 @@ const PHP_WINDOWS_EXT: [&str; 22] = [
 ];
 
 /// A php.ini from an older Anvil with the extensions `PHP_WINDOWS_EXT` has gained since.
-/// One the file names at all, even commented out, stays as the user left it.
-fn php_ini_with_added_ext(ini: &str) -> String {
+/// One the file names at all, even commented out, stays as the user left it. Bytes, as
+/// Windows editors can save it in a code page: what is there is kept as it is.
+fn php_ini_with_added_ext(ini: &[u8]) -> Vec<u8> {
     const ADDED: [&str; 7] = ["exif", "ffi", "ftp", "pgsql", "shmop", "soap", "sockets"];
     let names = |line: &str, ext: &str| {
         line.trim_start_matches([';', ' ', '\t'])
             .strip_prefix("extension")
             .and_then(|rest| rest.trim_start().strip_prefix('='))
             .is_some_and(|value| {
-                let value = value.trim().trim_matches('"');
+                let value = value.split(';').next().unwrap_or_default();
+                let value = value.trim().trim_matches(['"', '\'']);
                 value.trim_start_matches("php_").trim_end_matches(".dll") == ext
             })
     };
-    let mut out = ini.to_string();
+    let text = String::from_utf8_lossy(ini);
+    let mut out = ini.to_vec();
     for e in ADDED {
-        if !ini.lines().any(|l| names(l, e)) {
-            if !out.is_empty() && !out.ends_with('\n') {
-                out.push('\n');
+        if !text.lines().any(|l| names(l, e)) {
+            if !out.is_empty() && !out.ends_with(b"\n") {
+                out.push(b'\n');
             }
-            out.push_str(&format!("extension={e}\n"));
+            out.extend_from_slice(format!("extension={e}\n").as_bytes());
         }
     }
     out
@@ -1637,10 +1640,7 @@ fn php_install_windows(cfg: &mut Config, minor: &str, list: &serde_json::Value) 
         php_runs(new)?;
         let ini = dir.join("php.ini");
         if ini.exists() {
-            fs::write(
-                new.join("php.ini"),
-                php_ini_with_added_ext(&fs::read_to_string(ini)?),
-            )?;
+            fs::write(new.join("php.ini"), php_ini_with_added_ext(&fs::read(ini)?))?;
         } else {
             let ext: String = PHP_WINDOWS_EXT
                 .iter()
@@ -3421,12 +3421,14 @@ impl Server {
     pub fn start(cfg: &Config) -> Result<Server> {
         kill_orphans(&pid_file(), false);
         if port_held(cfg.https_port) {
-            bail!(
-                "Port {0} is in use by {1}. Stop it, or change https_port in {2}.",
-                cfg.https_port,
-                platform::port_owner(cfg.https_port).unwrap_or_else(|| "another program".into()),
-                home().join("config.toml").display()
-            );
+            let port = cfg.https_port;
+            match platform::port_owner(port) {
+                Some(owner) => bail!(
+                    "Port {port} is in use by {owner}. Stop it, or change https_port in {}.",
+                    home().join("config.toml").display()
+                ),
+                None => bail!("Port {port} is already in use — is Anvil already running?"),
+            }
         }
         ensure_caddy()?;
         let sites = sites(cfg);
@@ -3799,31 +3801,51 @@ impl Drop for Server {
 mod tests {
     use super::*;
 
+    fn with_added_ext(ini: &str) -> String {
+        String::from_utf8(php_ini_with_added_ext(ini.as_bytes())).unwrap()
+    }
+
     #[test]
     fn an_older_windows_php_ini_gains_new_extensions_once() {
-        let added = php_ini_with_added_ext("extension=curl");
+        let added = with_added_ext("extension=curl");
         assert_eq!(
             added,
             "extension=curl\nextension=exif\nextension=ffi\nextension=ftp\nextension=pgsql\n\
              extension=shmop\nextension=soap\nextension=sockets\n"
         );
-        assert_eq!(php_ini_with_added_ext(&added), added);
+        assert_eq!(with_added_ext(&added), added);
         // Turned off by the user, or written the long way: left as it is.
         let kept = ";extension=exif\n; extension = ftp\nextension=php_soap.dll\n\
                     extension=\"sockets\"\n;extension=ffi\n;extension=pgsql\n;extension=shmop\n";
-        assert_eq!(php_ini_with_added_ext(kept), kept);
+        assert_eq!(with_added_ext(kept), kept);
+    }
+
+    #[test]
+    fn a_note_after_the_extension_or_single_quotes_still_name_it() {
+        let kept = "extension=exif      ; after mbstring\n;extension=ftp ; off\n\
+                    extension='soap'\nextension=ffi\nextension=pgsql\nextension=shmop\n\
+                    extension=sockets\n";
+        assert_eq!(with_added_ext(kept), kept);
+    }
+
+    #[test]
+    fn a_php_ini_in_a_code_page_is_kept_byte_for_byte() {
+        let ini = b"error_log = C:\\M\xfcller\\php.log\n";
+        let out = php_ini_with_added_ext(ini);
+        assert!(out.starts_with(ini));
+        assert!(out.ends_with(b"extension=sockets\n"));
     }
 
     #[test]
     fn pdo_pgsql_does_not_count_as_pgsql() {
-        assert!(php_ini_with_added_ext("extension=pdo_pgsql\n").contains("\nextension=pgsql\n"));
+        assert!(with_added_ext("extension=pdo_pgsql\n").contains("\nextension=pgsql\n"));
     }
 
     #[test]
     fn a_folder_named_like_an_extension_does_not_count_as_it() {
         let ini = "extension_dir = \"C:\\ftp\\soap\\exif\\sockets\\ext\"\n";
-        assert!(php_ini_with_added_ext(ini).ends_with("extension=sockets\n"));
-        assert!(php_ini_with_added_ext(ini).contains("\nextension=ftp\n"));
+        assert!(with_added_ext(ini).ends_with("extension=sockets\n"));
+        assert!(with_added_ext(ini).contains("\nextension=ftp\n"));
     }
 
     /// The Caddyfile without its access logs (one test covers those), so the others read
