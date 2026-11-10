@@ -842,6 +842,9 @@ export function placeSel(list: HTMLElement) {
 // Folding a group or worktrees moves the rows under it: placed at once by the fold (right
 // without motion), and again once the slide ends.
 $("#list").addEventListener("transitionend", (e) => (e.target as Element).matches(".fold, .kids") && placeSel($("#list")));
+// The sidebar dragged narrower or wider: the highlight takes the rows' new width (a stale
+// wider one overflowed the list, which then scrolled sideways).
+new ResizeObserver(() => placeSel($("#list"))).observe($("#list"));
 
 /* ---------- Context menu ---------- */
 

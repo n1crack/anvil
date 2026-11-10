@@ -266,6 +266,7 @@ button, select, input { font: inherit; color: inherit; }
 .list {
   position: relative;
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 0 16px 16px;
 }
