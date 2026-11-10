@@ -1,3 +1,4 @@
+import { silkSync } from "./silk";
 import type { ServiceRow } from "./types";
 import {
   $,
@@ -355,6 +356,7 @@ export function renderService() {
   if (root.dataset.service === svc.id && root.contains(document.activeElement) && document.activeElement?.matches("input")) return;
   root.dataset.service = svc.id;
   root.replaceChildren($("#service-tpl").content.cloneNode(true));
+  silkSync();
 
   $(".site-name", root).textContent = svc.id;
   $(".site-title .mark", root).replaceWith(serviceMark(svc, "mark big"));
