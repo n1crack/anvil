@@ -1303,10 +1303,15 @@ function placeInk(root) {
   // Only when it changes: setting `hidden` again would wake the bar's watcher, which calls here.
   if (ink.hidden !== !t) ink.hidden = !t;
   if (!t) return;
+  // It slides only to another tab; a redraw (the same app clicked again), a tab shown as
+  // its data arrives or a resize puts it in place without moving.
+  const slide = !!ink.dataset.tab && ink.dataset.tab !== t.dataset.tab;
   ink.dataset.tab = t.dataset.tab;
+  ink.style.transition = slide ? "" : "none";
   // Inside the tab's padding, as wide as its word.
   ink.style.left = `${t.offsetLeft + 6}px`;
   ink.style.width = `${t.offsetWidth - 12}px`;
+  if (!slide) void ink.offsetWidth;
 }
 window.addEventListener("resize", () => {
   placeSel($("#list"));

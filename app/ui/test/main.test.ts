@@ -4401,6 +4401,8 @@ describe("motion", () => {
     $('#site .tabs [data-tab="dev"]').hidden = true;
     await wait();
     expect($("#site .tabs .tab-ink").style.left).toBe("106px");
+    // Moved by a tab shown or hidden, not by a click: in place, no slide.
+    expect($("#site .tabs .tab-ink").style.transition).toBe("none");
     $('#site .tabs [data-tab="dev"]').hidden = false;
     await wait();
     $('#site .tabs [data-tab="overview"]').click();
@@ -4412,6 +4414,11 @@ describe("motion", () => {
     $('#site .tabs [data-tab="overview"]').click();
     expect($("#site .tabs .tab-ink").dataset.tab).toBe("overview");
     expect($$("#site .tabs .tab-ink")).toHaveLength(1);
+    // Another tab: it slides; the same app drawn again: it doesn't.
+    expect($("#site .tabs .tab-ink").style.transition).toBe("");
+    const name = $("#site .site-name").textContent;
+    ($(`#list .item[data-name="${name}"]`) as HTMLElement).click();
+    expect($("#site .tabs .tab-ink").style.transition).toBe("none");
     // One sliding ink, no underline drawn under each selected tab.
     const css = readFileSync(resolve(import.meta.dirname, "../style.css"), "utf8");
     expect(css).not.toContain('.tabs [role="tab"][aria-selected="true"]::after');
