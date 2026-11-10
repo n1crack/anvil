@@ -1063,6 +1063,18 @@ function extensionsList(v: Settings["php"][number]) {
     line.append(Object.assign(document.createElement("span"), { className: "ext-name", textContent: e.name }), end);
     list.append(line);
   }
+  // The user's own: files in PHP's extension folder, turned on with extension=name in php.ini.
+  if (v.own_ext) {
+    const line = Object.assign(document.createElement("div"), { className: "ext-line" });
+    const end = Object.assign(document.createElement("span"), { className: "ext-end" });
+    const said = v.own_ext.length ? v.own_ext.join(", ") : "extension=name in php.ini";
+    end.append(
+      Object.assign(document.createElement("span"), { className: "muted", textContent: said }),
+      textAct("Show folder", () => invoke("open_php_ext_dir", { version: v.version }).catch((e) => showError(String(e)))),
+    );
+    line.append(Object.assign(document.createElement("span"), { className: "ext-name", textContent: "Your own" }), end);
+    list.append(line);
+  }
   return list;
 }
 

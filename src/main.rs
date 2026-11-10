@@ -1821,11 +1821,11 @@ fn run() -> Result<()> {
                 ExtCmd::Build {
                     path, configure, ..
                 } => {
-                    let (name, so) = phpext::build_own(&v, path, configure)?;
+                    let (name, _) = phpext::build_own(&v, path, configure)?;
                     println!(
                         "{} {name} is in {}",
                         green("Built."),
-                        so.parent().unwrap_or(&so).display()
+                        phpext::own_dir(&v).display()
                     );
                     println!(
                         "Turn it on with `extension={name}` in {}",
@@ -1863,6 +1863,20 @@ fn run() -> Result<()> {
                         })
                         .collect();
                     println!("{} {}", dim(format!("{}:", s.name)), list.join(", "));
+                }
+                if !cfg!(target_os = "linux") {
+                    let own = phpext::own(&v);
+                    if !own.is_empty() {
+                        println!("{:<21} {}", "Your own", own.join(", "));
+                    }
+                    println!(
+                        "{}",
+                        dim(format!(
+                            "Your own extensions go in {}, turned on with extension=<name> in {}",
+                            phpext::own_dir(&v).display(),
+                            php_dir(&v).join("php.ini").display()
+                        ))
+                    );
                 }
             } else {
                 control::notify_changed();

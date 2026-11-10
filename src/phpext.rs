@@ -378,7 +378,7 @@ pub fn build_own(minor: &str, dir: &Path, flags: &[String]) -> Result<(String, P
         bail!("{stem} is in Anvil's list: anvil php ext add {stem} --php {minor}");
     }
     let name = own_loads(minor, &so)?;
-    let to = php_dir(minor).join("ext").join(file);
+    let to = own_dir(minor).join(file);
     install_so(&so, &to)?;
     Ok((name, to))
 }
@@ -413,6 +413,44 @@ fn own_loads(minor: &str, so: &Path) -> Result<String> {
         let why = warnings.into_iter().chain([stderr]).collect::<Vec<_>>();
         format!("PHP {minor} doesn't load it: {}", why.join(" ").trim())
     })
+}
+
+/// The folder for the user's own extensions (`build_own`'s, or ones put there by hand),
+/// which php.ini's `extension=name` lines then load: PHP's `extension_dir` (macOS gets it
+/// in `php_args_with`; Windows' php.ini names it). The catalog's are in subfolders.
+pub fn own_dir(minor: &str) -> PathBuf {
+    php_dir(minor).join("ext")
+}
+
+/// The extensions in `own_dir`, by file name; none listed on Windows, where the folder is
+/// PHP's own too.
+pub fn own(minor: &str) -> Vec<String> {
+    let Ok(dir) = fs::read_dir(own_dir(minor)) else {
+        return vec![];
+    };
+    let mut names: Vec<String> = dir
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| !cfg!(windows) && p.extension().is_some_and(|x| x == "so"))
+        .filter_map(|p| Some(p.file_stem()?.to_string_lossy().into_owned()))
+        .collect();
+    names.sort();
+    names
+}
+
+/// A PHP update (`old`, the version's folder, being replaced by `new`): the files of the
+/// user's own in its `own_dir` go with it, as one built for a minor loads in its every
+/// patch; the catalog's subfolders are built again (`build_missing`), PHP's own DLLs come new.
+pub(crate) fn carry_own(old: &Path, new: &Path) -> Result<()> {
+    let (from, to) = (old.join("ext"), new.join("ext"));
+    fs::create_dir_all(&to)?;
+    for e in fs::read_dir(&from).into_iter().flatten().flatten() {
+        let dest = to.join(e.file_name());
+        if e.file_type()?.is_file() && !dest.exists() {
+            fs::copy(e.path(), dest)?;
+        }
+    }
+    Ok(())
 }
 
 /// Windows: PHP's own builds of the extension (windows.php.net's PECL folder) for the
@@ -585,18 +623,10 @@ pub fn php_args_with(cfg: &Config, minor: &str, site: Option<&crate::Site>) -> V
     if !names.is_empty() {
         args.extend(ini_args(&ini, minor, &names));
     }
-    // The binary's own names a folder that doesn't exist (`/lib/php/extensions/…`): this
-    // one does, so an `extension=` line in php.ini finds a `build_own` build (the catalog's
-    // are in subfolders). A PHP update replaces the folder, so nothing in it outlives the
-    // version it was built for.
-    let dir = php_dir(minor).join("ext");
-    let own = || {
-        fs::read_dir(&dir).is_ok_and(|d| {
-            d.flatten()
-                .any(|e| e.path().extension().is_some_and(|x| x == "so"))
-        })
-    };
-    if cfg!(target_os = "macos") && !ini.contains_key("extension_dir") && own() {
+    // The binary's own names a folder that doesn't exist (`/lib/php/extensions/…`): with
+    // one of the user's own in `own_dir`, PHP looks there, so php.ini's `extension=` finds it.
+    let dir = own_dir(minor);
+    if cfg!(target_os = "macos") && !ini.contains_key("extension_dir") && !own(minor).is_empty() {
         args.extend(["-d".into(), format!("extension_dir={}", dir.display())]);
     }
     args
@@ -1540,6 +1570,31 @@ pub(crate) mod tests {
                 .iter()
                 .any(|a| a.starts_with("extension_dir="))
         );
+    }
+
+    #[test]
+    fn a_php_update_carries_the_users_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let (old, new) = (dir.path().join("8.5"), dir.path().join(".8.5.new"));
+        fs::create_dir_all(old.join("ext/8.5.12")).unwrap();
+        fs::write(old.join("ext/8.5.12/apcu.so"), "catalog").unwrap();
+        fs::write(old.join("ext/mine.so"), "mine").unwrap();
+        fs::write(old.join("ext/php_x.dll"), "old").unwrap();
+        fs::create_dir_all(new.join("ext")).unwrap();
+        fs::write(new.join("ext/php_x.dll"), "new").unwrap();
+        carry_own(&old, &new).unwrap();
+        assert_eq!(fs::read_to_string(new.join("ext/mine.so")).unwrap(), "mine");
+        assert_eq!(
+            fs::read_to_string(new.join("ext/php_x.dll")).unwrap(),
+            "new"
+        );
+        assert!(
+            !new.join("ext/8.5.12").exists(),
+            "the catalog's are built again"
+        );
+        // A first install: nothing to carry, the folder is there.
+        carry_own(&dir.path().join("none"), &dir.path().join("first")).unwrap();
+        assert!(dir.path().join("first/ext").is_dir());
     }
 
     #[test]

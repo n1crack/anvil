@@ -1529,6 +1529,7 @@ pub fn php_install(cfg: &mut Config, minor: &str) -> Result<()> {
         php_runs(new)?;
         let build = rel["build"].as_u64().unwrap_or(1);
         fs::write(new.join(PHP_BUILD_FILE), format!("{build}\n"))?;
+        phpext::carry_own(&dir, new)?;
         let ini = dir.join("php.ini");
         if ini.exists() {
             fs::copy(ini, new.join("php.ini"))?;
@@ -1638,6 +1639,7 @@ fn php_install_windows(cfg: &mut Config, minor: &str, list: &serde_json::Value) 
     replace_dir(&dir, |new| {
         fetch_tgz(&format!("{PHP_WINDOWS}{file}"), new, false, Some(sum))?;
         php_runs(new)?;
+        phpext::carry_own(&dir, new)?;
         let ini = dir.join("php.ini");
         if ini.exists() {
             fs::write(new.join("php.ini"), php_ini_with_added_ext(&fs::read(ini)?))?;

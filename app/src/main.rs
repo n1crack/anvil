@@ -3646,6 +3646,8 @@ struct PhpVersion {
     opcache_building: bool,
     /// The catalog (`phpext::CATALOG`), each on or off for every app on this version.
     extensions: Vec<PhpExt>,
+    /// The user's own in `phpext::own_dir`, by name; None where PHP loads none (Linux).
+    own_ext: Option<Vec<String>>,
     /// A newer patch than the installed one, (installed, newest), as the last check found.
     available: Option<(String, String)>,
     /// The patch it was updated to since Anvil started.
@@ -3882,6 +3884,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
                         needs: anvil::phpext::needs(e.name),
                     })
                     .collect(),
+                own_ext: (!cfg!(target_os = "linux")).then(|| anvil::phpext::own(v)),
                 available: anvil::lock(&PHP_AVAILABLE).get(*v).cloned(),
                 updated: anvil::lock(&PHP_UPDATED).get(*v).cloned(),
                 updating: anvil::lock(&PHP_UPDATING).iter().any(|u| u == v),
@@ -4513,6 +4516,14 @@ fn performance() -> Res<Performance> {
 #[tauri::command(async)]
 fn open_config_dir() -> Res<()> {
     anvil::run(&mut anvil::platform::open(anvil::home())).map_err(err)
+}
+
+/// Opens the folder for the user's own extensions of PHP `version`.
+#[tauri::command(async)]
+fn open_php_ext_dir(version: String) -> Res<()> {
+    let dir = anvil::phpext::own_dir(&version);
+    std::fs::create_dir_all(&dir).map_err(|e| err(e.into()))?;
+    anvil::run(&mut anvil::platform::open(dir)).map_err(err)
 }
 
 #[tauri::command(async)]
@@ -5562,6 +5573,7 @@ fn main() {
             set_worktree_preset,
             set_login,
             open_config_dir,
+            open_php_ext_dir,
             services,
             set_service_port,
             service_kinds,

@@ -26,6 +26,7 @@
     "allow-menu-origin",
     "allow-open",
     "allow-open-config-dir",
+    "allow-open-php-ext-dir",
     "allow-open-url",
     "allow-package-manager-install",
     "allow-package-manager-uninstall",

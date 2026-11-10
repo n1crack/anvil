@@ -260,12 +260,32 @@ describe("versions", () => {
   const exts = (v: string) =>
     lines(v)
       .slice(1)
+      .filter((l) => l.querySelector("input[role=switch]"))
       .map((l) => ({
         name: l.querySelector(".ext-name")?.textContent,
         on: (l.querySelector("input[role=switch]") as HTMLInputElement).checked,
         text: l.textContent,
       }));
   const extSwitch = (v: string, name: string) => line(v, name).querySelector("input") as HTMLInputElement;
+
+  test("own_extensions_last: the version's folder for the user's own, by name, with Show folder", () =>
+    withOpcache83(async () => {
+      await openExts("8.4");
+      const own = lines("8.4").at(-1)!;
+      expect(own.textContent).toBe("Your ownextension=name in php.iniShow folder");
+      (own.querySelector(".text-act") as HTMLElement).click();
+      await wait(10);
+      expect(w.mockCalls.at(-1)).toEqual(["open_php_ext_dir", { version: "8.4" }]);
+      w.mockOwnExt = { "8.4": ["anvilhello", "foo"] };
+      try {
+        w.refresh();
+        await open("php");
+        await openExts("8.4");
+        expect(lines("8.4").at(-1)!.textContent).toBe("Your ownanvilhello, fooShow folder");
+      } finally {
+        delete w.mockOwnExt;
+      }
+    }));
 
   test("row_shows_opcache_state: Extensions n/9 after an installed version opens its list, OPcache first", () =>
     withOpcache83(async () => {
@@ -285,6 +305,7 @@ describe("versions", () => {
         "mongodb",
         "memcached",
         "imagick",
+        "Your own",
       ]);
       expect(line("8.5", "OPcache").textContent).toBe("OPcacheBuilt in");
       // The list slides open in place: no redraw.

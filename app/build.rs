@@ -116,6 +116,7 @@ const COMMANDS: &[&str] = &[
     "set_worktree_preset",
     "set_login",
     "open_config_dir",
+    "open_php_ext_dir",
     "services",
     "set_service_port",
     "service_kinds",
