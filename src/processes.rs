@@ -1026,12 +1026,16 @@ pub(crate) fn task_file(dir: &Path) -> Option<(&'static str, Vec<Task>)> {
                 | (.., serde_json::Value::String(s)) => s.clone(),
                 _ => return None,
             };
-            let command = match t["cwd"].as_str().or(default_cwd) {
+            let cwd = t["cwd"]
+                .as_str()
+                .or(default_cwd)
+                .map(|c| c.trim_start_matches("./"));
+            let command = match cwd {
                 // cmd's cd takes `\` and needs /d for another drive.
-                Some(cwd) if !matches!(cwd, "" | "." | "./") && cfg!(windows) => {
+                Some(cwd) if !matches!(cwd, "" | ".") && cfg!(windows) => {
                     format!("cd /d \"{}\" && {command}", cwd.replace('/', "\\"))
                 }
-                Some(cwd) if !matches!(cwd, "" | "." | "./") => {
+                Some(cwd) if !matches!(cwd, "" | ".") => {
                     format!("cd {} && {command}", quote(cwd))
                 }
                 _ => command,
@@ -1627,13 +1631,13 @@ tasks:
             [
                 (
                     "frontend".into(),
-                    "cd ./frontend && pnpm run dev".into(),
+                    "cd frontend && pnpm run dev".into(),
                     false,
                     "dekit.yaml"
                 ),
                 (
                     "backend".into(),
-                    "cd \"./back end\" && dotnet watch run".into(),
+                    "cd \"back end\" && dotnet watch run".into(),
                     true,
                     "dekit.yaml"
                 ),
