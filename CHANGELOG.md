@@ -7,6 +7,8 @@ contain breaking changes.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-11
+
 ### Added
 
 - A project's `dekit.yaml` or `mprocs.yaml` gives its Dev rows, each in its own folder; its autostart tasks are in Dev start. A compose file beside it no longer makes it a Docker Compose app.
@@ -317,7 +319,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/n1crack/anvil/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/n1crack/anvil/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/n1crack/anvil/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/n1crack/anvil/compare/v0.3.4...v0.3.5
