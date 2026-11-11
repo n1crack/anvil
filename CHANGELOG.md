@@ -7,12 +7,7 @@ contain breaking changes.
 
 ## [Unreleased]
 
-### Fixed
-
-- Windows: the Add service sheet opens at once, and checks of whether a port is in use no longer wait a quarter second for each free port.
-- Windows: after Anvil crashed, MySQL starts again; the server it had running (a child of the one Anvil started) no longer keeps its port.
-
-## [0.3.7] - 2026-11-11
+## [0.4.0] - 2026-11-11
 
 ### Changed
 
@@ -20,6 +15,8 @@ contain breaking changes.
 
 ### Fixed
 
+- Windows: the Add service sheet opens at once, and checks of whether a port is in use no longer wait a quarter second for each free port.
+- Windows: after Anvil crashed, MySQL starts again; the server it had running (a child of the one Anvil started) no longer keeps its port.
 - Windows: updating no longer stops at "Error opening file for writing: anvil.exe" while a shim runs (an MCP server, a terminal's php); running shims also move to the new version at once.
 - Windows: an update installs into the folder Anvil runs from and starts it again as the same user, with the same rights (an Anvil run as administrator comes back as administrator).
 - Windows: PHP 8.5 no longer warns "Failed loading Zend extension 'opcache'" at every start (OPcache is built in); installed 8.5 drops the line with its next PHP update.
@@ -307,8 +304,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.7...HEAD
-[0.3.7]: https://github.com/n1crack/anvil/compare/v0.3.6...v0.3.7
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/n1crack/anvil/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/n1crack/anvil/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/n1crack/anvil/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/n1crack/anvil/compare/v0.3.3...v0.3.4
