@@ -1696,6 +1696,8 @@ input[type="checkbox"][role="switch"]:checked::after { transform: translateX(14p
 
 /* PHP: a newer patch at the row's end, before Extensions. */
 .ver-patch { display: inline-flex; flex: none; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+/* Its buttons look like every other button, not like its muted status text. */
+.ver-patch > button:not(.text-act) { color: var(--text); font-size: 13px; }
 .ver-patch + .ext-toggle { margin-left: 8px; }
 /* With a patch note, the hover actions take their room before it instead of drawing over the name. */
 .ver .actions-inline.on-hover + .ver-patch { margin-left: 8px; }
