@@ -832,11 +832,8 @@ button, select, input { font: inherit; color: inherit; }
 .site-meta .sep { flex: none; width: 17px; opacity: 0.5; text-align: center; }
 .site-meta .addr { display: inline-flex; align-items: center; gap: 5px; }
 .site-meta .securing { display: inline-flex; align-items: center; gap: 5px; margin-left: 3px; }
-.https-cell { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 10px; }
 .https-cell .securing { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .https-cell .securing[hidden] { display: none; }
-.https-cell small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
-.https-cell small.error { color: var(--danger); }
 .root-cell { display: grid; grid-template-columns: minmax(0, 320px) auto; justify-content: start; align-items: center; gap: 4px 2px; }
 .root-cell [hidden] { display: none; }
 .root-cell small { grid-column: 1 / -1; color: var(--danger); font-size: 12px; }
@@ -1502,7 +1499,28 @@ button.dev-summary { display: flex; align-items: center; gap: 8px; width: 100%; 
 .wt-actions .inline-action { margin-left: 0; }
 .wt-actions small.error-text { margin: 0; }
 /* The Settings tab's groups stand apart, like the cards elsewhere. */
+/* An app's Settings tab reads like Settings: titled groups, the name and its note at the
+ * left, the control at the right; wide fields (web root, start command) fill the rest,
+ * and the extensions and php.ini lines sit under their name. */
+#site > [data-panel="settings"] { max-width: 640px; }
+[data-panel="settings"] .group { max-width: none; }
 [data-panel="settings"] > .group + .group { margin-top: 14px; }
+[data-panel="settings"] .set-head { margin: 22px 0 8px; font-size: 13px; font-weight: 600; }
+[data-panel="settings"] .set-head:first-child { margin-top: 0; }
+[data-panel="settings"] .set-head + .group { margin-top: 0; }
+[data-panel="settings"] .row { grid-template-columns: minmax(0, 1fr) auto; }
+[data-panel="settings"] .row dt { display: flex; flex-direction: column; color: var(--text); }
+[data-panel="settings"] .row dt small { margin-top: 2px; color: var(--muted); font-size: 11px; }
+[data-panel="settings"] .row dt small.error { color: var(--danger); }
+[data-panel="settings"] .row dt small[hidden] { display: none; }
+[data-panel="settings"] .row dd { justify-self: end; }
+[data-panel="settings"] .row-wide { grid-template-columns: minmax(0, 1fr) minmax(0, 300px); }
+[data-panel="settings"] .row-wide dd { justify-self: stretch; }
+[data-panel="settings"] .row-wide dd input { width: 100%; box-sizing: border-box; }
+[data-panel="settings"] .row-stack { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+[data-panel="settings"] .row-stack dd { justify-self: stretch; }
+[data-panel="settings"] .row-stack textarea { width: 100%; max-width: none; box-sizing: border-box; }
+[data-panel="settings"] .https-cell { display: inline-flex; align-items: center; gap: 8px; }
 /* Customize…: the editors in a sheet, wide enough for a key, its value and a custom one. */
 .wt-sheet { width: min(760px, 92vw); }
 .wt-sheet .wt-title { margin-bottom: 12px; }

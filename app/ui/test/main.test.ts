@@ -138,7 +138,7 @@ describe("https", () => {
     await select("shop");
     const box = $("#app-https") as HTMLInputElement;
     expect(box.checked).toBe(true);
-    expect($(".https-cell small").textContent).toBe("Serve at https:// with a trusted local certificate; http:// redirects there");
+    expect(box.closest(".row")!.querySelector("dt small")!.textContent).toBe("A trusted local certificate; http:// redirects to https://");
     expect($("#site .site-meta .lock.on")).not.toBeNull();
     w.mockDelay = { set_secure: 200 };
     box.checked = false;
@@ -161,6 +161,8 @@ describe("https", () => {
     expect($("#site .site-meta .lock.on")).not.toBeNull();
     await select("stack");
     expect($("#app-https")).toBeNull();
+    // Nor PHP settings: a Compose app runs no PHP of Anvil's.
+    expect(($('[data-panel="settings"] .group.php-only') as HTMLElement).hidden).toBe(true);
   });
 
   test("Remove Link… asks in a bubble, naming the settings that go, before it removes", async () => {
@@ -276,7 +278,8 @@ describe("app extensions", () => {
       w.refresh();
       await wait(80);
       await select("shop");
-      expect($('[data-panel="settings"] .app-exts-row dt').textContent).toBe("PHP extensions");
+      expect($('[data-panel="settings"] .app-exts-row dt').firstChild!.textContent).toBe("Extensions");
+      expect($('[data-panel="settings"] .app-exts-row').closest(".group")!.previousElementSibling!.textContent).toBe("PHP");
       expect(exts().map((e) => [e.name, e.on, e.held])).toEqual([["apcu", true, true]]);
       // Without Homebrew's ImageMagick: in Add, saying what to install, not pickable.
       expect(options()).toEqual([

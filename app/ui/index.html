@@ -134,85 +134,86 @@
     <section role="tabpanel" data-panel="mail" hidden></section>
 
     <section role="tabpanel" data-panel="settings" hidden>
+      <h3 class="set-head">Application</h3>
       <dl class="group">
         <div class="row">
           <dt><label for="kind">Type</label></dt>
           <dd><select id="kind"></select></dd>
         </div>
-        <div class="row row-top serves-only">
-          <dt><label for="app-https">HTTPS</label></dt>
+        <div class="row serves-only">
+          <dt><label for="app-https">HTTPS</label><small>A trusted local certificate; http:// redirects to https://</small></dt>
           <dd class="https-cell">
-            <input id="app-https" type="checkbox" role="switch">
             <span class="securing" hidden><span class="spin-dot"></span><span class="securing-text"></span></span>
-            <small>Serve at https:// with a trusted local certificate; http:// redirects there</small>
+            <input id="app-https" type="checkbox" role="switch">
           </dd>
         </div>
-        <div class="row row-top shared-row">
-          <dt><label for="app-shared">Shared dependencies</label></dt>
+        <div class="row shared-row">
+          <dt><label for="app-shared">Shared dependencies</label><small>Packages stored once for every app (pnpm): quick installs, next to no space</small><small class="shared-note" hidden></small></dt>
           <dd class="https-cell">
-            <input id="app-shared" type="checkbox" role="switch">
             <span class="securing" hidden><span class="spin-dot"></span><span class="securing-text">Reinstalling…</span></span>
-            <small>Packages are stored once and shared between apps (pnpm): installs are quick and take next to no space</small>
-            <small class="shared-note" hidden></small>
+            <input id="app-shared" type="checkbox" role="switch">
           </dd>
         </div>
-        <div class="row row-top serves-only browser-row">
-          <dt><label for="app-browser">Browser errors</label></dt>
-          <dd class="https-cell">
-            <input id="app-browser" type="checkbox" role="switch">
-            <small>Shows this app's JavaScript errors and failed requests to AI agents (MCP); Anvil adds one small script to its pages</small>
-            <small class="error browser-blocked" hidden>This app's Content-Security-Policy keeps the script out of its pages, so nothing arrives</small>
-          </dd>
+        <div class="row serves-only browser-row">
+          <dt><label for="app-browser">Browser errors</label><small>This app's JavaScript errors and failed requests, for AI agents (MCP); Anvil adds one small script to its pages</small><small class="error browser-blocked" hidden>This app's Content-Security-Policy keeps the script out of its pages, so nothing arrives</small></dt>
+          <dd><input id="app-browser" type="checkbox" role="switch"></dd>
         </div>
-        <div class="row php-only serves-only">
-          <dt><label for="app-root" title="The folder Anvil serves, inside the project folder">Web root</label></dt>
+        <div class="row row-wide php-only serves-only">
+          <dt><label for="app-root">Web root</label><small>The folder Anvil serves, inside the project folder</small></dt>
           <dd class="root-cell">
             <input id="app-root" spellcheck="false" autocomplete="off">
             <button class="inline-action root-reset" hidden>Reset</button>
             <small class="root-error" hidden></small>
           </dd>
         </div>
-        <div class="row php-only">
-          <dt><label for="php">PHP version</label></dt>
+      </dl>
+      <h3 class="set-head php-only">PHP</h3>
+      <dl class="group php-only">
+        <div class="row">
+          <dt><label for="php">Version</label></dt>
           <dd><select id="php"></select></dd>
         </div>
-        <div class="row row-top php-only app-exts-row">
-          <dt title="For this app only; it then gets a PHP-FPM of its own">PHP extensions</dt>
+        <div class="row row-stack app-exts-row">
+          <dt>Extensions<small>For this app only; it then gets a PHP-FPM of its own</small></dt>
           <dd class="app-exts"></dd>
         </div>
-        <div class="row php-only">
-          <dt><label for="ini-memory">Memory limit</label></dt>
+        <div class="row">
+          <dt><label for="ini-memory">Memory limit</label><small>Most memory one request can use</small></dt>
           <dd><input id="ini-memory" data-ini="memory_limit" spellcheck="false"></dd>
         </div>
-        <div class="row php-only">
-          <dt><label for="ini-upload" title="Largest file a form can upload">Upload limit</label></dt>
+        <div class="row">
+          <dt><label for="ini-upload">Upload limit</label><small>Largest file a form can upload</small></dt>
           <dd><input id="ini-upload" data-ini="upload_max_filesize" spellcheck="false"></dd>
         </div>
-        <div class="row php-only">
-          <dt><label for="ini-time" title="Seconds before a request is stopped">Max execution time</label></dt>
+        <div class="row">
+          <dt><label for="ini-time">Max execution time</label><small>Seconds before a request is stopped</small></dt>
           <dd><input id="ini-time" data-ini="max_execution_time" spellcheck="false"></dd>
         </div>
-        <div class="row row-top php-only">
-          <dt><label for="ini-extra" title="Any php.ini setting, one per line">Other PHP settings</label></dt>
+        <div class="row row-stack">
+          <dt><label for="ini-extra">Other PHP settings</label><small>Any php.ini setting, one per line</small></dt>
           <dd><textarea id="ini-extra" rows="3" spellcheck="false" placeholder="display_errors = On"></textarea></dd>
         </div>
-        <div class="row process-only">
+      </dl>
+      <h3 class="set-head process-only">Server</h3>
+      <dl class="group process-only">
+        <div class="row">
           <dt><label for="app-runtime" id="app-runtime-label">Version</label></dt>
           <dd><select id="app-runtime"></select></dd>
         </div>
-        <div class="row process-only">
-          <dt><label for="app-command" title="Runs in the project folder with $PORT set">Start command</label></dt>
+        <div class="row row-wide">
+          <dt><label for="app-command">Start command</label><small>Runs in the project folder with $PORT set</small></dt>
           <dd><input id="app-command" spellcheck="false"></dd>
         </div>
-        <div class="row process-only">
+        <div class="row">
           <dt><label for="app-port">Port</label></dt>
           <dd><input id="app-port" inputmode="numeric" spellcheck="false"></dd>
         </div>
-        <div class="row process-only">
+        <div class="row">
           <dt><label for="app-autostart">Start with Anvil</label></dt>
           <dd><input id="app-autostart" type="checkbox" role="switch"></dd>
         </div>
       </dl>
+      <h3 class="set-head wt-hooks-head" hidden>Worktrees</h3>
       <dl class="group wt-hooks" hidden></dl>
     </section>
 

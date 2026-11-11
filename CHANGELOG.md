@@ -11,6 +11,10 @@ contain breaking changes.
 
 - A project's `dekit.yaml` or `mprocs.yaml` gives its Dev rows, each in its own folder; its autostart tasks are in Dev start. A compose file beside it no longer makes it a Docker Compose app.
 
+### Changed
+
+- An application's Settings tab reads like Settings: Application, PHP or Server, and Worktrees groups, each setting with its note beside it. Docker Compose apps and folders no longer show PHP settings.
+
 ### Fixed
 
 - Windows: Anvil installed in another account's profile and started as the signed-in account (the installer's Run Anvil, when it ran as administrator) asks Windows for administrator rights and runs as the account it was installed for, instead of setting itself up anew in the signed-in account.

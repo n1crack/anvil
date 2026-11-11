@@ -1430,7 +1430,7 @@ function drawHttps(s) {
   const busy = securing.has(s.name);
   box.checked = busy ? !s.secure : s.secure;
   box.disabled = busy;
-  const note = box.nextElementSibling;
+  const note = $(".securing", box.parentElement);
   note.hidden = !busy;
   $(".securing-text", note).textContent = s.secure ? "Turning off…" : "Turning on…";
   box.onchange = () => {
@@ -1737,7 +1737,7 @@ export function renderSite() {
   drawMeta();
   drawOpenWith(root);
   for (const b of root.querySelectorAll("[data-open]")) b.onclick = () => open(b.dataset.open);
-  for (const el of root.querySelectorAll(".php-only")) el.hidden = process;
+  for (const el of root.querySelectorAll(".php-only")) el.hidden = !PHP_KINDS.has(s.kind);
   for (const el of root.querySelectorAll(".process-only")) el.hidden = !process;
 
   // Caddy serves neither a compose project nor a plain folder; Request log off keeps none.
@@ -2145,10 +2145,11 @@ async function renderHooks(s, root) {
   if (offers) head.append(el("div", "wt-offers", offers));
   // A layer with a mistake (a typo in config.toml or .anvil.toml): one line each.
   for (const p of v.hooks.problems ?? []) head.append(el("small", "error-text", p));
-  const row = el("div", "row row-top");
-  row.append(el("dt", null, "Worktrees"), head);
+  const row = el("div", "row row-stack");
+  row.append(head);
   box.replaceChildren(row);
   box.hidden = false;
+  box.previousElementSibling?.removeAttribute("hidden"); // its title, Worktrees
   if (hooksOpen === s.name) hooksSheet(s, root, v);
 }
 
