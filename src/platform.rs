@@ -1578,6 +1578,60 @@ pub fn on_dev_drive(path: &Path) -> Option<bool> {
     }
 }
 
+/// Windows: when this program was installed in another account's profile (a per-user
+/// install, `C:\Users\Avva\AppData\Local\Anvil`) and runs without administrator rights
+/// as someone else (the installer's Run Anvil starts it as the signed-in account), start
+/// it again with administrator rights (Windows asks for that account's password) and
+/// say so: the caller quits before anything is set up in this account's home. Declined,
+/// it says so too. Elsewhere, or installed in this account's own profile, false.
+pub fn hand_to_install_owner() -> bool {
+    #[cfg(windows)]
+    {
+        let (Ok(exe), Some(home)) = (std::env::current_exe(), account_home()) else {
+            return false;
+        };
+        if elevated() || !in_other_profile(&exe.to_string_lossy(), &home.to_string_lossy()) {
+            return false;
+        }
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        let wide = |s: &std::ffi::OsStr| s.encode_wide().chain([0]).collect::<Vec<u16>>();
+        let args: Vec<String> = std::env::args().skip(1).map(|a| quote_arg(&a)).collect();
+        let (verb, file, params) = (
+            wide("runas".as_ref()),
+            wide(exe.as_os_str()),
+            wide(args.join(" ").as_ref()),
+        );
+        // SAFETY: NUL-terminated strings that outlive the call; no window handle.
+        let r = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                file.as_ptr(),
+                params.as_ptr(),
+                std::ptr::null(),
+                1, // SW_SHOWNORMAL
+            )
+        } as isize;
+        // Above 32: started. 5 (access denied): the prompt was declined.
+        r > 32 || r == 5
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+/// Whether `exe` lies in another account's profile: under the folder that holds
+/// `home` (`C:\Users`), but not under `home` itself. Windows paths: case doesn't count.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn in_other_profile(exe: &str, home: &str) -> bool {
+    let norm = |p: &str| p.replace('/', "\\").trim_end_matches('\\').to_lowercase();
+    let (exe, home) = (norm(exe), norm(home));
+    let Some((profiles, _)) = home.rsplit_once('\\') else {
+        return false;
+    };
+    exe.starts_with(&format!("{profiles}\\")) && !exe.starts_with(&format!("{home}\\"))
+}
+
 /// The account's home folder when the environment names none.
 pub fn account_home() -> Option<PathBuf> {
     #[cfg(unix)]
@@ -1718,6 +1772,29 @@ pub fn needs_newer_macos(name: &str, kind: &str, version: &str) -> Option<String
 #[cfg(test)]
 mod tests {
     use super::{netstat_listener, program_under, quote_arg, tasklist_program};
+
+    #[test]
+    fn another_accounts_install_is_told_apart_from_ones_own() {
+        use super::in_other_profile as other;
+        let exe = r"C:\Users\Avva\AppData\Local\Anvil\anvil-app.exe";
+        assert!(other(exe, r"C:\Users\yozdemir"));
+        assert!(!other(exe, r"C:\Users\Avva"));
+        assert!(!other(exe, r"c:\users\AVVA\"));
+        // A name that only starts like this account's.
+        assert!(other(
+            r"C:\Users\Avva2\AppData\Local\Anvil\anvil-app.exe",
+            r"C:\Users\Avva"
+        ));
+        // Outside the profiles: Program Files, a build folder.
+        assert!(!other(
+            r"C:\Program Files\Anvil\anvil-app.exe",
+            r"C:\Users\yozdemir"
+        ));
+        assert!(!other(
+            r"C:\Projects\anvil\target\release\anvil-app.exe",
+            r"C:\Users\yozdemir"
+        ));
+    }
 
     #[cfg(windows)]
     #[test]

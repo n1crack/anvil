@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows: Anvil installed in another account's profile and started as the signed-in account (the installer's Run Anvil, when it ran as administrator) asks Windows for administrator rights and runs as the account it was installed for, instead of setting itself up anew in the signed-in account.
+
 ## [0.4.0] - 2026-11-11
 
 ### Changed
