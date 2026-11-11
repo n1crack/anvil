@@ -7,6 +7,11 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows: updating no longer stops at "Error opening file for writing: anvil.exe" while a shim runs (an MCP server, a terminal's php); running shims also move to the new version at once.
+- Windows: an update installs into the folder Anvil runs from and starts it again as the same user, with the same rights (an Anvil run as administrator comes back as administrator).
+
 ## [0.3.6] - 2026-11-11
 
 ### Added

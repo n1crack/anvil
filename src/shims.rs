@@ -90,13 +90,16 @@ pub fn install(home: &Path) -> Result<()> {
     }
     let dir = home.join("shims");
     fs::create_dir_all(&dir)?;
+    // What earlier runs moved aside (below) and nothing runs any more.
+    clear_moved_aside(&dir);
     for tool in TOOLS.iter().copied().chain(["anvil"]) {
         let file = dir.join(format!("{tool}.exe"));
         if file == cli {
             continue;
         }
-        // A running shim can't be replaced; it is the same program, so keep it.
-        if fs::remove_file(&file).is_err() && file.exists() {
+        // A running shim can't be deleted, but it can be moved aside (it keeps running),
+        // so the name links to the updated CLI now. Only if that fails too is it kept.
+        if fs::remove_file(&file).is_err() && file.exists() && move_aside(&file).is_err() {
             continue;
         }
         if fs::hard_link(&cli, &file).is_err() {
@@ -104,6 +107,29 @@ pub fn install(home: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Rename `file` (`anvil.exe`) to `anvil.exe.<n>.old` in its folder. Windows can't
+/// delete or overwrite a program that runs, or a hard link to one, but it can rename it:
+/// the name is then free for a new file. `clear_moved_aside` deletes it later.
+#[cfg(windows)]
+pub fn move_aside(file: &Path) -> std::io::Result<()> {
+    let name = file.file_name().unwrap_or_default().to_string_lossy();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    fs::rename(file, file.with_file_name(format!("{name}.{stamp}.old")))
+}
+
+/// Delete the `*.old` files in `dir` that `move_aside` left; one still running stays.
+#[cfg(windows)]
+pub fn clear_moved_aside(dir: &Path) {
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "old") && path.is_file() {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 /// The tool a shim stands for when this program runs under its name (`php.exe`).

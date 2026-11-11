@@ -1732,26 +1732,121 @@ async fn update_install(handle: AppHandle) -> Res<()> {
         .map_err(|e| e.to_string())?
         .ok_or("Anvil is up to date")?;
     let (mut got, mut shown) = (0u64, None);
-    update
-        .download_and_install(
-            |chunk, total| {
-                got += chunk as u64;
-                let pct = total.map(|t| (got * 100 / t.max(1)).min(100));
-                if shown != Some(pct) {
-                    shown = Some(pct);
-                    let _ = handle.emit("update-progress", pct);
-                }
-            },
-            || {},
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    relaunch(handle)
+    let progress = |chunk: usize, total: Option<u64>| {
+        got += chunk as u64;
+        let pct = total.map(|t| (got * 100 / t.max(1)).min(100));
+        if shown != Some(pct) {
+            shown = Some(pct);
+            let _ = handle.emit("update-progress", pct);
+        }
+    };
+    // Windows: Anvil runs the installer itself (`install_windows`); the signature is
+    // checked by `download` all the same.
+    #[cfg(windows)]
+    {
+        let setup = update
+            .download(progress, || {})
+            .await
+            .map_err(|e| e.to_string())?;
+        install_windows(handle, &setup, &update.version)
+    }
+    #[cfg(not(windows))]
+    {
+        update
+            .download_and_install(progress, || {})
+            .await
+            .map_err(|e| e.to_string())?;
+        relaunch(handle)
+    }
+}
+
+/// Install a downloaded update on Windows, then start the new Anvil.
+///
+/// The updater plugin's way doesn't fit Anvil: its installer goes wherever the registry
+/// says Anvil lives (not necessarily this copy), fails on `anvil.exe` while a shim runs
+/// (a hard link to it: an MCP server, a terminal's `php`), and restarts Anvil without
+/// administrator rights. Here the running `anvil.exe` is moved aside first, the installer
+/// is told this folder (`/D`), and a helper started by this Anvil (so with the same
+/// rights) waits for it to quit, runs the installer, and starts the new one.
+#[cfg(windows)]
+fn install_windows(handle: AppHandle, setup: &[u8], version: &str) -> Res<()> {
+    if !setup.starts_with(b"MZ") {
+        return Err("the update isn't a Windows installer".into());
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or("couldn't find Anvil's folder")?;
+    let file = std::env::temp_dir().join(format!("Anvil_{version}_x64-setup.exe"));
+    std::fs::write(&file, setup).map_err(|e| format!("couldn't save the update: {e}"))?;
+    let cli = dir.join("anvil.exe");
+    if cli.exists() {
+        anvil::shims::move_aside(&cli)
+            .map_err(|e| format!("couldn't make room for the new anvil.exe: {e}"))?;
+    }
+    let q = |p: &std::path::Path| p.display().to_string().replace('\'', "''");
+    // `/D=` comes last and unquoted, even with spaces (NSIS). Should the installer fail
+    // before writing anvil.exe, the old one is put back.
+    let script = format!(
+        "Wait-Process -Id {pid} -ErrorAction SilentlyContinue\n\
+         $p = Start-Process -FilePath '{setup}' -ArgumentList '/P /UPDATE /D={dir}' -Wait -PassThru\n\
+         if (-not (Test-Path -LiteralPath '{cli}')) {{\n\
+           $old = Get-ChildItem -LiteralPath '{dir}' -Filter 'anvil.exe.*.old' | Sort-Object Name | Select-Object -Last 1\n\
+           if ($old) {{ Rename-Item -LiteralPath $old.FullName -NewName 'anvil.exe' }}\n\
+         }}\n\
+         Remove-Item -LiteralPath '{setup}' -ErrorAction SilentlyContinue\n\
+         Start-Process -FilePath '{exe}'\n",
+        pid = std::process::id(),
+        setup = q(&file),
+        dir = q(dir),
+        cli = q(&cli),
+        exe = q(&exe),
+    );
+    let started = anvil::platform::command("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+        ])
+        .args(["-WindowStyle", "Hidden", "-Command", &script])
+        .spawn();
+    if let Err(e) = started {
+        if let Some(old) = latest_moved_aside(dir) {
+            let _ = std::fs::rename(old, &cli);
+        }
+        return Err(format!("couldn't start the installer: {e}"));
+    }
+    prepare_restart(&handle)?;
+    handle.exit(0);
+    Ok(())
+}
+
+/// The newest `anvil.exe.<n>.old` in `dir` (`anvil::shims::move_aside`).
+#[cfg(windows)]
+fn latest_moved_aside(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut old: Vec<_> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("anvil.exe.") && n.ends_with(".old"))
+        })
+        .collect();
+    old.sort();
+    old.pop()
 }
 
 /// Restart Anvil; the dev processes running now start again in the new one.
 #[tauri::command(async)]
 fn relaunch(handle: AppHandle) -> Res<()> {
+    prepare_restart(&handle)?;
+    handle.restart()
+}
+
+/// Before Anvil quits to start again: note the dev processes to start in the new one,
+/// then stop everything.
+fn prepare_restart(handle: &AppHandle) -> Res<()> {
     let keys: Vec<String> = anvil::lock(&handle.state::<App>().apps)
         .list()
         .into_iter()
@@ -1764,7 +1859,7 @@ fn relaunch(handle: AppHandle) -> Res<()> {
     // `ExitRequested` can't be held back to wait for a stop.
     stop_everything(&handle.state::<App>());
     STOPPED.store(true, Ordering::SeqCst);
-    handle.restart()
+    Ok(())
 }
 
 /// The dev processes to start again after a restart, one key per line.
@@ -5685,6 +5780,15 @@ fn main() {
                     // Shims rewritten, so they follow the app when it's moved or updated.
                     if anvil::shims::ready() {
                         let _ = anvil::shims::install(&anvil::home());
+                    }
+                    // The anvil.exe an update moved aside (`install_windows`), once no
+                    // shim runs it any more.
+                    #[cfg(windows)]
+                    if let Some(dir) = std::env::current_exe()
+                        .ok()
+                        .and_then(|e| e.parent().map(std::path::Path::to_path_buf))
+                    {
+                        anvil::shims::clear_moved_aside(&dir);
                     }
                     // Log retention now and hourly, off the start's way.
                     std::thread::spawn(|| {
