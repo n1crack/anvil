@@ -3248,6 +3248,12 @@ fn owner_alive(line: &str) -> bool {
 
 /// Whether something listens on this Mac's `port`.
 pub fn port_answers(port: u16) -> bool {
+    // Windows: a port no program listens on (its own table says so at once) isn't tried,
+    // as the connection below would spend its whole 250 ms on it.
+    #[cfg(windows)]
+    if platform::tcp_listening(port) == Some(false) {
+        return false;
+    }
     // Bounded: on Windows a refused connection to loopback takes ~2 s (it retries the
     // SYN); one that is listening answers in well under this.
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));

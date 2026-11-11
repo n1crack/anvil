@@ -2256,10 +2256,14 @@ pub fn launch(cfg: &Config, id: &str) -> Result<Child> {
     if !installed(kind, &v) {
         bail!("{} {v} is not installed", name(kind));
     }
-    kill_orphans(&pid_file(id), false);
+    // Windows: with its process tree, as Stop does (`terminate_all`). MySQL runs its
+    // server as a child of the mysqld the pid file names (a monitor); the monitor alone
+    // ended, the server kept the port and the service couldn't start again.
+    let tree = cfg!(windows);
+    kill_orphans(&pid_file(id), tree);
     if !id.starts_with("app-") {
         // Left by an Anvil from before `svc-` (an `app-` one is the app's to clean up).
-        kill_orphans(&legacy_pid_file(id), false);
+        kill_orphans(&legacy_pid_file(id), tree);
     }
     let port = port(cfg, id);
     for p in [Some(port), web_port(cfg, id)].into_iter().flatten() {

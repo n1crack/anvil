@@ -1276,6 +1276,58 @@ fn run_without_admin(argv: &[String]) -> std::io::Result<u32> {
     }
 }
 
+/// Whether a program listens on TCP `port`, at any address, IPv4 or IPv6, from
+/// Windows' own table of listeners: no connection is made, so it takes no time. None
+/// when the table can't be read.
+#[cfg(windows)]
+pub fn tcp_listening(port: u16) -> Option<bool> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCPROW_OWNER_PID,
+        TCP_TABLE_OWNER_PID_LISTENER,
+    };
+    // The port sits in a row's low 16 bits, in network byte order.
+    let wanted = u32::from(port.to_be());
+    let ports = |family: u32| -> Option<Vec<u32>> {
+        // The table can grow between asking its size and reading it: a few tries.
+        let mut size = 0u32;
+        for _ in 0..4 {
+            let mut buf = vec![0u32; (size as usize).div_ceil(4).max(1)];
+            // SAFETY: `buf` holds `size` bytes, u32-aligned like the table.
+            let r = unsafe {
+                GetExtendedTcpTable(
+                    buf.as_mut_ptr().cast(),
+                    &mut size,
+                    0,
+                    family,
+                    TCP_TABLE_OWNER_PID_LISTENER,
+                    0,
+                )
+            };
+            if r == 122 {
+                // ERROR_INSUFFICIENT_BUFFER: `size` now says how much.
+                continue;
+            }
+            if r != 0 {
+                return None;
+            }
+            let n = buf[0] as usize;
+            // Rows follow the count; the port is a row's third u32 (IPv4) or sixth (IPv6).
+            let (row, at) = if family == 2 {
+                (size_of::<MIB_TCPROW_OWNER_PID>() / 4, 2)
+            } else {
+                (size_of::<MIB_TCP6ROW_OWNER_PID>() / 4, 5)
+            };
+            let rows = buf.get(1..1 + n * row)?;
+            return Some(rows.chunks_exact(row).map(|r| r[at] & 0xffff).collect());
+        }
+        None
+    };
+    // AF_INET, AF_INET6.
+    let v4 = ports(2)?;
+    let v6 = ports(23)?;
+    Some(v4.contains(&wanted) || v6.contains(&wanted))
+}
+
 /// Whether this process already has administrator rights (Windows: an elevated token),
 /// so a step that needs them can run without asking.
 #[cfg(windows)]
@@ -1666,6 +1718,21 @@ pub fn needs_newer_macos(name: &str, kind: &str, version: &str) -> Option<String
 #[cfg(test)]
 mod tests {
     use super::{netstat_listener, program_under, quote_arg, tasklist_program};
+
+    #[cfg(windows)]
+    #[test]
+    fn tcp_listening_reads_ipv4_and_ipv6_listeners() {
+        let v4 = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let v6 = std::net::TcpListener::bind("[::1]:0").unwrap();
+        let (p4, p6) = (
+            v4.local_addr().unwrap().port(),
+            v6.local_addr().unwrap().port(),
+        );
+        assert_eq!(super::tcp_listening(p4), Some(true));
+        assert_eq!(super::tcp_listening(p6), Some(true));
+        drop(v4);
+        assert_eq!(super::tcp_listening(p4), Some(false));
+    }
 
     #[test]
     fn windows_arguments_stay_one_argument() {

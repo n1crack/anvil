@@ -7,6 +7,11 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows: the Add service sheet opens at once, and checks of whether a port is in use no longer wait a quarter second for each free port.
+- Windows: after Anvil crashed, MySQL starts again; the server it had running (a child of the one Anvil started) no longer keeps its port.
+
 ## [0.3.7] - 2026-11-11
 
 ### Changed
