@@ -235,6 +235,20 @@ describe("web root", () => {
   });
 });
 
+describe("tab scroll", () => {
+  test("another tab starts at its top, not where the last one was scrolled to", async () => {
+    await select("shop");
+    $('.tabs [data-tab="settings"]').click();
+    const site = $("#site");
+    site.scrollTop = 300;
+    expect(site.scrollTop).toBe(300); // happy-dom keeps it, so the check below means something
+    $('.tabs [data-tab="settings"]').click(); // the same tab: stays
+    expect(site.scrollTop).toBe(300);
+    $('.tabs [data-tab="overview"]').click();
+    expect(site.scrollTop).toBe(0);
+  });
+});
+
 describe("app extensions", () => {
   const exts = () =>
     $$('[data-panel="settings"] .app-exts .ver-ext').map((l) => {

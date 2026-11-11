@@ -1278,6 +1278,8 @@ export function showTab(root, name, fallback = false) {
     wanted = name;
     localStorage.setItem("tab", name);
   }
+  // Another tab starts at its top, not where the last one was scrolled to.
+  if (name !== tab) document.getElementById("site")?.scrollTo(0, 0);
   tab = name;
   // One stop in the Tab order; the arrow keys move between tabs.
   for (const b of root.querySelectorAll(".tabs [role=tab]")) {
