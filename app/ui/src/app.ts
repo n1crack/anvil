@@ -809,6 +809,8 @@ let listDrawn = false;
 /** Empty the sidebar list but for the selection's highlight, so it slides to the next row
  * instead of appearing. */
 export function clearList(list: HTMLElement) {
+  // A copy: childNodes is live, and removing from it while iterating skips every other node.
+  // oxlint-disable-next-line unicorn/no-useless-spread
   for (const c of [...list.childNodes]) if (!(c as Element).classList?.contains("sel-hl")) c.remove();
 }
 
@@ -1931,10 +1933,11 @@ async function setRun(s, field: HTMLElement, name: string, cmd: string, args: Re
 const rootErrors = new Map<string, [string, string]>(); // app -> [what was typed, why refused]
 const appExtErrors = new Map<string, string>(); // app -> why its last extension change failed
 const appExtBuilding = new Set<string>(); // `<app>@<extension>` being turned on (maybe built)
+const appExtTouched = new Set<string>(); // `<app>@<extension>` switched in this window: its row stays
 
-/** The Settings tab's PHP extensions: the catalog as switches, as in Settings › PHP, for
- * this app only. One on for every app on its version shows on and held, saying where. One
- * on without a build for the app's PHP shows off, "Not built"; on builds it. */
+/** The Settings tab's PHP extensions, as in Settings › PHP, for this app only: the ones on
+ * as switches, the rest a pick in Add. One on for every app on its version shows on and
+ * held, saying where. One on without a build for the app's PHP shows off, "Not built". */
 function appExtensions(s, root) {
   const cell = $(".app-exts", root);
   cell.replaceChildren();
@@ -1943,7 +1946,11 @@ function appExtensions(s, root) {
   const built = snap.php_ext_built?.[s.php];
   // One PHP has in it (Anvil's macOS builds have redis) has no switch.
   const inPhp = (snap.php_ext_builtin?.[s.php] ?? []).map((m) => m.toLowerCase());
-  for (const name of (snap.php_ext_catalog ?? []).filter((n) => !inPhp.includes(n))) {
+  const names = (snap.php_ext_catalog ?? []).filter((n) => !inPhp.includes(n));
+  // A row switched here stays, so it doesn't vanish under the pointer.
+  const shown = (n: string) =>
+    shared.includes(n) || s.ext.includes(n) || appExtBuilding.has(`${s.name}@${n}`) || appExtTouched.has(`${s.name}@${n}`);
+  for (const name of names.filter(shown)) {
     const forAll = shared.includes(name);
     const building = appExtBuilding.has(`${s.name}@${name}`);
     const on = forAll || s.ext.includes(name);
@@ -1963,6 +1970,24 @@ function appExtensions(s, root) {
     if (unbuilt) label.append(el("span", "muted", "Not built"));
     if (needs) label.append(el("span", "muted", needs));
     line.append(label);
+  }
+  const rest = names.filter((n) => !shown(n));
+  if (rest.length) {
+    const pick = Object.assign(document.createElement("select"), { className: "ext-add" });
+    pick.setAttribute("aria-label", `Add an extension to ${s.name}`);
+    pick.append(Object.assign(document.createElement("option"), { value: "", textContent: "Add an extension…" }));
+    for (const name of rest) {
+      const needs = snap.php_ext_needs?.[name];
+      pick.append(
+        Object.assign(document.createElement("option"), {
+          value: name,
+          textContent: needs ? `${name} — ${needs}` : name,
+          disabled: !!needs,
+        }),
+      );
+    }
+    pick.onchange = () => pick.value && setAppExt(s.name, pick.value, true);
+    line.append(pick);
   }
   cell.append(line);
   const why = appExtErrors.get(s.name);
@@ -2022,6 +2047,7 @@ function phpState(s, php) {
 async function setAppExt(site: string, name: string, on: boolean) {
   const key = `${site}@${name}`;
   if (appExtBuilding.has(key)) return;
+  appExtTouched.add(key);
   if (on) appExtBuilding.add(key);
   appExtErrors.delete(site);
   render();

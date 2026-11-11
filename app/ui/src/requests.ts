@@ -1,4 +1,4 @@
-import { $, cardHead, el, inlineError, invoke, seg, selected, showTab, snap, tab } from "./app";
+import { $, cardHead, el, inlineError, invoke, seg, selected, snap, tab } from "./app";
 import { follower } from "./console";
 import { shown } from "./live";
 

@@ -241,6 +241,12 @@ describe("app extensions", () => {
       const input = l.querySelector("input") as HTMLInputElement;
       return { name: l.querySelector(".ver-ext-name")?.textContent, on: input.checked, held: input.disabled, text: l.textContent };
     });
+  const pick = () => $('[data-panel="settings"] .app-exts select.ext-add') as HTMLSelectElement;
+  const options = () => [...pick().options].map((o) => [o.value, o.textContent, o.disabled]);
+  const add = (name: string) => {
+    pick().value = name;
+    pick().dispatchEvent(new Event("change"));
+  };
   const flip = (name: string) =>
     (
       $$('[data-panel="settings"] .app-exts .ver-ext')
@@ -248,7 +254,7 @@ describe("app extensions", () => {
         .querySelector("input") as HTMLInputElement
     ).click();
 
-  test("app_tab_extensions: the catalog as switches for this app; the version's held on; Building… and errors inline", async () => {
+  test("app_tab_extensions: the ones on as switches, the rest in Add; the version's held on; Building… and errors inline", async () => {
     w.mockSnap.php_ext = { "8.4": ["apcu"] };
     w.mockDelay = { app_ext: 100 };
     try {
@@ -257,19 +263,19 @@ describe("app extensions", () => {
       await wait(80);
       await select("shop");
       expect($('[data-panel="settings"] .app-exts-row dt').textContent).toBe("PHP extensions");
-      expect(exts().map((e) => [e.name, e.on, e.held])).toEqual([
-        ["xdebug", false, false],
-        ["pcov", false, false],
-        ["apcu", true, true],
-        ["igbinary", false, false],
-        ["msgpack", false, false],
-        ["mongodb", false, false],
-        ["memcached", false, false],
-        ["imagick", false, true],
+      expect(exts().map((e) => [e.name, e.on, e.held])).toEqual([["apcu", true, true]]);
+      // Without Homebrew's ImageMagick: in Add, saying what to install, not pickable.
+      expect(options()).toEqual([
+        ["", "Add an extension…", false],
+        ["xdebug", "xdebug", false],
+        ["pcov", "pcov", false],
+        ["igbinary", "igbinary", false],
+        ["msgpack", "msgpack", false],
+        ["mongodb", "mongodb", false],
+        ["memcached", "memcached", false],
+        ["imagick", "imagick — Needs ImageMagick from Homebrew: brew install imagemagick", true],
       ]);
-      // Without Homebrew's ImageMagick: held off, saying what to install.
-      expect(exts().at(-1)!.text).toBe("imagickNeeds ImageMagick from Homebrew: brew install imagemagick");
-      flip("xdebug");
+      add("xdebug");
       await wait(10);
       expect(calls("app_ext").at(-1)![1]).toEqual({ site: "shop", name: "xdebug", on: true });
       expect(exts()[0]).toMatchObject({ text: "xdebugBuilding…", held: true });
@@ -279,12 +285,17 @@ describe("app extensions", () => {
 
       delete w.mockDelay.app_ext;
       w.mockExtError = "Building pcov failed — it needs the Xcode Command Line Tools: xcode-select --install";
-      flip("pcov");
+      add("pcov");
       await wait(80);
       const error = $('[data-panel="settings"] .app-ext-error');
       expect(error.textContent).toContain("xcode-select --install");
       expect([...error.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Install command line tools"]);
-      expect(exts()[1].on).toBe(false);
+      // The failed one stays where it was picked, off, to try again.
+      expect(exts().map((e) => [e.name, e.on])).toEqual([
+        ["xdebug", true],
+        ["pcov", false],
+        ["apcu", true],
+      ]);
       expect($$('[role="alert"]:not([hidden]), .toast:not([hidden])').length).toBe(0);
       delete w.mockExtError;
 
@@ -313,7 +324,8 @@ describe("app extensions", () => {
       w.refresh();
       await wait(80);
       await select("shop");
-      const [xdebug, , apcu] = exts();
+      const xdebug = exts().find((e) => e.name === "xdebug");
+      const apcu = exts().find((e) => e.name === "apcu");
       expect(xdebug).toMatchObject({ on: false, held: false, text: "xdebugNot built" });
       expect(apcu).toMatchObject({ on: false, held: true, text: "apcuNot built" });
       flip("xdebug");
