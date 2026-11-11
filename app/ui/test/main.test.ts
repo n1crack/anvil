@@ -1476,7 +1476,7 @@ describe("service page", () => {
     try {
       await call("state");
       await show("mysql");
-      expect($(".svc-apps-hint").textContent).toContain("Their .env isn’t changed");
+      expect($(".svc-apps-hint").textContent).toContain("Linking doesn’t change their .env");
       // A linked app can be picked; an alias (admin.shop: shop's folder) can't.
       const picks = $$("#site .svc-apps select option").map((o) => o.textContent);
       expect(picks).toContain("notes2.test");
