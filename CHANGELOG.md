@@ -14,6 +14,7 @@ contain breaking changes.
 ### Changed
 
 - An application's Settings tab reads like Settings: Application, PHP or Server, and Worktrees groups, each setting with its note beside it. Docker Compose apps and folders no longer show PHP settings.
+- A crash notification says the last line the process printed, rather than only its exit code.
 
 ### Fixed
 

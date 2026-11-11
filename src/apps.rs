@@ -531,6 +531,30 @@ fn log_in(home: &Path, name: &str) -> PathBuf {
     home.join("log").join(format!("app-{name}.log"))
 }
 
+/// The last line a process printed, plain and short: what a crash notification says.
+pub fn last_line(name: &str) -> Option<String> {
+    last_line_of(&log_file(name))
+}
+
+fn last_line_of(path: &Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(8192))).ok()?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    let line = text
+        .lines()
+        .rev()
+        .map(|l| crate::logs::strip_ansi(l).trim().to_string())
+        .find(|l| !l.is_empty())?;
+    Some(match line.char_indices().nth(160) {
+        Some((i, _)) => format!("{}…", &line[..i]),
+        None => line,
+    })
+}
+
 /// Empty the output of every app and process that no Anvil runs now: their screens
 /// show only the current run. Commands run once (`<site>#<id>`) keep their logs.
 pub fn clear_stale_logs() {
@@ -1076,6 +1100,28 @@ fn other_composer(id: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn last_line_is_the_last_printed_one_plain() {
+        let dir = std::env::temp_dir().join(format!("anvil-last-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.log");
+        fs::write(
+            &f,
+            "starting\n\x1b[31mError: connect ECONNREFUSED 127.0.0.1:5432\x1b[0m\n\n  \n",
+        )
+        .unwrap();
+        assert_eq!(
+            last_line_of(&f).as_deref(),
+            Some("Error: connect ECONNREFUSED 127.0.0.1:5432")
+        );
+        fs::write(&f, "x".repeat(300)).unwrap();
+        assert_eq!(last_line_of(&f).unwrap().chars().count(), 161);
+        fs::write(&f, "").unwrap();
+        assert_eq!(last_line_of(&f), None);
+        assert_eq!(last_line_of(&dir.join("none.log")), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn the_composer_commands_exclude_each_other_only() {
         use super::other_composer;

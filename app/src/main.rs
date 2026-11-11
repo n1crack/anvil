@@ -379,7 +379,12 @@ fn notify_crashes(handle: &AppHandle, new: &[(String, anvil::apps::Exit)]) {
         return;
     };
     match new {
-        [(key, exit)] => notify(handle, &crash_title(&cfg, key), &exit_detail(exit)),
+        // What it printed last says why; the exit code when it printed nothing.
+        [(key, exit)] => notify(
+            handle,
+            &crash_title(&cfg, key),
+            &anvil::apps::last_line(key).unwrap_or_else(|| exit_detail(exit)),
+        ),
         _ => {
             let names: Vec<String> = new
                 .iter()
