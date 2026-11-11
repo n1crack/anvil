@@ -7,10 +7,18 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- An application's Settings tab lists only the PHP extensions that are on; add one with Add, as in Settings › PHP.
+
 ### Fixed
 
 - Windows: updating no longer stops at "Error opening file for writing: anvil.exe" while a shim runs (an MCP server, a terminal's php); running shims also move to the new version at once.
 - Windows: an update installs into the folder Anvil runs from and starts it again as the same user, with the same rights (an Anvil run as administrator comes back as administrator).
+- Another tab starts at its top instead of where the last one was scrolled to.
+- Packages: the unchecked tiles say which check they are.
+- Settings: Update and Install buttons beside a version look like every other button.
+- Services: the link hint no longer says to copy lines that Write to .env writes.
 
 ## [0.3.6] - 2026-11-11
 
