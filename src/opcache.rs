@@ -38,36 +38,11 @@ pub fn so_path(minor: &str) -> PathBuf {
     )
 }
 
-/// Whether the installed PHP `minor` has `module` compiled in, as `php -n -m` lists it.
-/// Asked once per binary: an install replaces it, and with it its modification time.
-fn built_in(minor: &str, module: &str) -> bool {
-    type Seen = std::collections::BTreeMap<PathBuf, (std::time::SystemTime, Vec<String>)>;
-    static SEEN: std::sync::Mutex<Seen> = std::sync::Mutex::new(Seen::new());
-    let bin = crate::php_bin(minor);
-    let Ok(at) = fs::metadata(&bin).and_then(|m| m.modified()) else {
-        return false;
-    };
-    let mut seen = crate::lock(&SEEN);
-    if !seen.get(&bin).is_some_and(|(t, _)| *t == at) {
-        let list = crate::platform::command(&bin)
-            .args(["-n", "-m"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| {
-                let out = String::from_utf8_lossy(&o.stdout);
-                out.lines().map(|l| l.trim().to_string()).collect()
-            })
-            .unwrap_or_default();
-        seen.insert(bin.clone(), (at, list));
-    }
-    seen[&bin].1.iter().any(|m| m == module)
-}
-
 pub fn state(minor: &str) -> State {
     // Windows' PHP ships OPcache; its php.ini loads it. Built in wins over an
     // opcache.so left from before, which would load it twice.
-    if cfg!(windows) || !BUILDS.contains(&minor) || built_in(minor, "Zend OPcache") {
+    if cfg!(windows) || !BUILDS.contains(&minor) || crate::phpext::is_builtin(minor, "Zend OPcache")
+    {
         State::BuiltIn
     } else if so_path(minor).exists() {
         State::Ready
@@ -126,7 +101,7 @@ pub fn mysqli_path(minor: &str) -> PathBuf {
 /// Whether PHP `minor` has mysqli: Windows' PHP loads its own (`PHP_WINDOWS_EXT`),
 /// Anvil's builds have it built in.
 pub fn has_mysqli(minor: &str) -> bool {
-    cfg!(windows) || mysqli_path(minor).exists() || built_in(minor, "mysqli")
+    cfg!(windows) || mysqli_path(minor).exists() || crate::phpext::is_builtin(minor, "mysqli")
 }
 
 /// Build `mysqli.so` for the installed PHP `minor` from php.net's source of its exact

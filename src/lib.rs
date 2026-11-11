@@ -1593,8 +1593,10 @@ const PHP_WINDOWS_EXT: [&str; 22] = [
 
 /// A php.ini from an older Anvil with the extensions `PHP_WINDOWS_EXT` has gained since.
 /// One the file names at all, even commented out, stays as the user left it. Bytes, as
-/// Windows editors can save it in a code page: what is there is kept as it is.
-fn php_ini_with_added_ext(ini: &[u8]) -> Vec<u8> {
+/// Windows editors can save it in a code page: what is there is kept as it is. Without
+/// `opcache_dll` (PHP 8.5 has OPcache in it) its `zend_extension=opcache` goes: PHP
+/// warned at every start that it couldn't load it.
+fn php_ini_with_added_ext(ini: &[u8], opcache_dll: bool) -> Vec<u8> {
     const ADDED: [&str; 7] = ["exif", "ffi", "ftp", "pgsql", "shmop", "soap", "sockets"];
     let names = |line: &str, ext: &str| {
         line.trim_start_matches([';', ' ', '\t'])
@@ -1606,8 +1608,29 @@ fn php_ini_with_added_ext(ini: &[u8]) -> Vec<u8> {
                 value.trim_start_matches("php_").trim_end_matches(".dll") == ext
             })
     };
-    let text = String::from_utf8_lossy(ini);
-    let mut out = ini.to_vec();
+    let loads_opcache = |line: &[u8]| {
+        let line = String::from_utf8_lossy(line);
+        line.trim()
+            .strip_prefix("zend_extension")
+            .and_then(|rest| rest.trim_start().strip_prefix('='))
+            .is_some_and(|v| {
+                let v = v.split(';').next().unwrap_or_default();
+                matches!(
+                    v.trim().trim_matches(['"', '\'']),
+                    "opcache" | "php_opcache.dll"
+                )
+            })
+    };
+    let mut out: Vec<u8> = if opcache_dll {
+        ini.to_vec()
+    } else {
+        ini.split_inclusive(|b| *b == b'\n')
+            .filter(|l| !loads_opcache(l))
+            .flatten()
+            .copied()
+            .collect()
+    };
+    let text = String::from_utf8_lossy(&out).into_owned();
     for e in ADDED {
         if !text.lines().any(|l| names(l, e)) {
             if !out.is_empty() && !out.ends_with(b"\n") {
@@ -1641,8 +1664,12 @@ fn php_install_windows(cfg: &mut Config, minor: &str, list: &serde_json::Value) 
         php_runs(new)?;
         phpext::carry_own(&dir, new)?;
         let ini = dir.join("php.ini");
+        let opcache_dll = new.join("ext").join("php_opcache.dll").exists();
         if ini.exists() {
-            fs::write(new.join("php.ini"), php_ini_with_added_ext(&fs::read(ini)?))?;
+            fs::write(
+                new.join("php.ini"),
+                php_ini_with_added_ext(&fs::read(ini)?, opcache_dll),
+            )?;
         } else {
             let ext: String = PHP_WINDOWS_EXT
                 .iter()
@@ -1652,8 +1679,13 @@ fn php_install_windows(cfg: &mut Config, minor: &str, list: &serde_json::Value) 
                 new.join("php.ini"),
                 format!(
                     "memory_limit = 512M\nupload_max_filesize = 100M\npost_max_size = 100M\nmax_execution_time = 120\n\
-                     extension_dir = \"{}\"\n{ext}zend_extension=opcache\nopcache.enable = 1\n",
-                    dir.join("ext").display()
+                     extension_dir = \"{}\"\n{ext}{}opcache.enable = 1\n",
+                    dir.join("ext").display(),
+                    if opcache_dll {
+                        "zend_extension=opcache\n"
+                    } else {
+                        ""
+                    },
                 ),
             )?;
         }
@@ -3804,7 +3836,7 @@ mod tests {
     use super::*;
 
     fn with_added_ext(ini: &str) -> String {
-        String::from_utf8(php_ini_with_added_ext(ini.as_bytes())).unwrap()
+        String::from_utf8(php_ini_with_added_ext(ini.as_bytes(), true)).unwrap()
     }
 
     #[test]
@@ -3833,9 +3865,27 @@ mod tests {
     #[test]
     fn a_php_ini_in_a_code_page_is_kept_byte_for_byte() {
         let ini = b"error_log = C:\\M\xfcller\\php.log\n";
-        let out = php_ini_with_added_ext(ini);
+        let out = php_ini_with_added_ext(ini, true);
         assert!(out.starts_with(ini));
         assert!(out.ends_with(b"extension=sockets\n"));
+    }
+
+    #[test]
+    fn php_8_5_on_windows_loses_zend_extension_opcache_it_has_in_it() {
+        let ini = "extension=sockets\nzend_extension=opcache\nopcache.enable = 1\n; zend_extension=opcache\n";
+        let all = "extension=exif\nextension=ffi\nextension=ftp\nextension=pgsql\nextension=shmop\nextension=soap\n";
+        let out = String::from_utf8(php_ini_with_added_ext(
+            format!("{all}{ini}").as_bytes(),
+            false,
+        ))
+        .unwrap();
+        assert_eq!(
+            out,
+            format!("{all}extension=sockets\nopcache.enable = 1\n; zend_extension=opcache\n")
+        );
+        // With the DLL there (8.4 and older) it stays.
+        let kept = format!("{all}{ini}");
+        assert_eq!(with_added_ext(&kept), kept);
     }
 
     #[test]

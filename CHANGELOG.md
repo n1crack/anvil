@@ -15,6 +15,8 @@ contain breaking changes.
 
 - Windows: updating no longer stops at "Error opening file for writing: anvil.exe" while a shim runs (an MCP server, a terminal's php); running shims also move to the new version at once.
 - Windows: an update installs into the folder Anvil runs from and starts it again as the same user, with the same rights (an Anvil run as administrator comes back as administrator).
+- Windows: PHP 8.5 no longer warns "Failed loading Zend extension 'opcache'" at every start (OPcache is built in); installed 8.5 drops the line with its next PHP update.
+- Windows: Settings › PHP's Built in list includes what Anvil's php.ini loads (curl, mbstring, intl, gd, zip…).
 - Another tab starts at its top instead of where the last one was scrolled to.
 - Packages: the unchecked tiles say which check they are.
 - Settings: Update and Install buttons beside a version look like every other button.

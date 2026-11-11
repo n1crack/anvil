@@ -255,6 +255,10 @@ pub fn tools_dir() -> PathBuf {
 
 /// The modules PHP `minor`'s binary has in it, as `php -n -m` lists them (Core, ctype,
 /// …, Zend OPcache), sorted; none when it isn't installed. Asked once per binary.
+/// Windows' PHP has few in it and loads curl, mbstring, intl… as DLLs from the php.ini
+/// Anvil wrote beside it (`PHP_WINDOWS_EXT`), so there it reads that php.ini: Anvil's
+/// own list goes on the command line, not in it.
+// ponytail: cached per binary, so a hand edit of Windows' php.ini shows after the next PHP update or restart
 pub fn builtin(minor: &str) -> Vec<String> {
     type Seen = BTreeMap<(PathBuf, std::time::SystemTime), Vec<String>>;
     static SEEN: std::sync::Mutex<Seen> = std::sync::Mutex::new(BTreeMap::new());
@@ -266,13 +270,19 @@ pub fn builtin(minor: &str) -> Vec<String> {
     if let Some(list) = crate::lock(&SEEN).get(&key) {
         return list.clone();
     }
-    let Ok(out) = crate::platform::command(php).args(["-n", "-m"]).output() else {
+    let args: &[&str] = if cfg!(windows) {
+        &["-m"]
+    } else {
+        &["-n", "-m"]
+    };
+    let Ok(out) = crate::platform::command(php).args(args).output() else {
         return vec![];
     };
     let mut list: Vec<String> = String::from_utf8_lossy(&out.stdout)
         .lines()
         .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty() && !l.starts_with('['))
+        // A module's name has no colon; a startup warning PHP prints among them does.
+        .filter(|l| !l.is_empty() && !l.starts_with('[') && !l.contains(':'))
         .collect();
     list.sort_by_key(|m| m.to_lowercase());
     list.dedup();
