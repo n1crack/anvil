@@ -17,8 +17,8 @@ Each project runs at its own address, such as `shop.test`, with its own language
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: light)" srcset="https://anvil.tr/screenshots/overview-light.webp">
-    <img src="https://anvil.tr/screenshots/overview.webp" width="820" alt="The Anvil app: the applications list and a Laravel app's Overview">
+    <source media="(prefers-color-scheme: light)" srcset="https://anvil.tr/screenshots/overview-light.webp?v=0.4.0">
+    <img src="https://anvil.tr/screenshots/overview.webp?v=0.4.0" width="820" alt="The Anvil app: the applications list and a Laravel app's Overview">
   </picture>
 </p>
 
