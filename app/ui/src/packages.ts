@@ -310,7 +310,7 @@ function frameworkTile(name, p) {
 
 /** How many updates the last check found, how many major; a click goes to the first. */
 function updatesTile(up) {
-  if (!up?.at) return tile("pkg-tile-updates", el("div", "pkg-tile-big muted", "Not checked"), []);
+  if (!up?.at) return tile("pkg-tile-updates", el("div", "pkg-tile-big muted", "Updates not checked"), []);
   const list = up.list ?? [];
   const n = list.length;
   const major = list.filter((x) => x.level === "major").length;
@@ -328,7 +328,7 @@ const rank = (s) => (SEVERITY.indexOf(s) + SEVERITY.length + 1) % (SEVERITY.leng
 /** The advisories the last security check found, across the managers, and the worst of them. */
 function securityTile(checks) {
   const done = checks.filter((a) => a?.at);
-  if (!done.length) return tile("pkg-tile-security", el("div", "pkg-tile-big muted", "Not checked"), []);
+  if (!done.length) return tile("pkg-tile-security", el("div", "pkg-tile-big muted", "Security not checked"), []);
   const all = done.flatMap((a) => a.list ?? []);
   const when = `checked ${ago(new Date(Math.max(...done.map((a) => a.at))))}`;
   if (!all.length) return tile("pkg-tile-security", el("div", "pkg-tile-big", "No known advisories"), [when]);

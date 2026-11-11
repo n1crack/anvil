@@ -2131,8 +2131,8 @@ describe("packages", () => {
     $('.tabs [data-tab="packages"]').click();
     await wait(80);
     expect(tile("app")).toBe("Laravel 11.36.1 / PHP ^8.2 / Node >=20");
-    expect(tile("updates")).toBe("Not checked");
-    expect(tile("security")).toBe("Not checked");
+    expect(tile("updates")).toBe("Updates not checked");
+    expect(tile("security")).toBe("Security not checked");
     expect($(".pkg-pins-sec h3").textContent).toBe("Key packages");
     expect($(".pkg-pin-add").textContent).toBe("+ Add");
     expect(pins()).toEqual(["Laravel 11.36.1", "Livewire 3.5.18", "Tailwind 3.4.17", "Vite 6.0.6"]);
