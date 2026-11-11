@@ -157,7 +157,8 @@ pub fn detect(dir: &Path) -> &'static str {
         })
     };
     let pages = page(dir) || page(&dir.join("public"));
-    if crate::compose::file(dir).is_some() && !pages {
+    // A compose file beside dekit.yaml or mprocs.yaml is the deploy, not how it runs in dev.
+    if crate::compose::file(dir).is_some() && !pages && crate::processes::task_file(dir).is_none() {
         return "compose";
     }
     // Nothing to serve: a project folder, not a site.
@@ -1221,7 +1222,7 @@ mod tests {
 
     #[test]
     fn detects_kinds() {
-        let cases: [(&[(&str, &str)], &str); 28] = [
+        let cases: [(&[(&str, &str)], &str); 30] = [
             (
                 &[("artisan", ""), ("package.json", "{\"vite\":1}")],
                 "laravel",
@@ -1304,6 +1305,14 @@ mod tests {
             (&[("requirements.txt", "FastAPI==0.115\n")], "fastapi"),
             (&[("pyproject.toml", "dependencies = [\"flask\"]")], "flask"),
             (&[("manage.py", "print(1)")], "folder"),
+            (
+                &[("docker-compose.yml", ""), ("dekit.yaml", "tasks: {}")],
+                "folder",
+            ),
+            (
+                &[("compose.yaml", ""), ("mprocs.yaml", "procs: {}")],
+                "folder",
+            ),
             // Nothing to serve: a project folder, not a site.
             (&[("README.md", ""), ("Cargo.lock", "")], "folder"),
             (&[("about.htm", "")], "static"),

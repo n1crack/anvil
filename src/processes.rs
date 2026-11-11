@@ -451,6 +451,19 @@ fn detect_base(site: &Site, php: &Path, cache: &Path, cfg: Option<&crate::Config
             })
             .collect();
     }
+    if let Some((source, tasks)) = task_file(&site.path) {
+        return tasks
+            .into_iter()
+            .map(|(name, command, autostart)| Process {
+                id: name.clone(),
+                name,
+                command,
+                source,
+                manual: !autostart,
+                ..Default::default()
+            })
+            .collect();
+    }
     // Apps with their own server already run their dev command; the rest of their
     // dev servers (a docs site) are rows of their own.
     if !apps::is_php(&site.kind) {
@@ -971,6 +984,80 @@ pub fn one_off_scripts(site: &Site) -> Vec<Script> {
 }
 
 /// Names become file names and ids: letters, digits, `-` and `_`.
+/// A task of a runner file: name, shell command, in Dev start.
+type Task = (String, String, bool);
+
+/// The project's own process runner file: dekit.yaml's `tasks`, else mprocs.yaml's
+/// `procs`, as (name, shell command, in Dev start). A task with a `cwd` runs there;
+/// `cmd /c` (dekit can't start .cmd files on Windows) is dropped elsewhere.
+// ponytail: a task's `env` and mprocs' `$select` per-OS variants are ignored; add when a
+// project needs them.
+pub(crate) fn task_file(dir: &Path) -> Option<(&'static str, Vec<Task>)> {
+    let (source, key, autostart) = [
+        ("dekit.yaml", "tasks", false),
+        ("mprocs.yaml", "procs", true),
+    ]
+    .into_iter()
+    .find(|(f, ..)| dir.join(f).is_file())?;
+    let text = fs::read_to_string(dir.join(source)).ok()?;
+    let doc: serde_json::Value = serde_saphyr::from_str(&text).ok()?;
+    let default_cwd = doc["defaults"]["cwd"].as_str();
+    let tasks = doc[key].as_object()?;
+    let list = tasks
+        .iter()
+        .filter(|(name, _)| valid_name(name))
+        .filter_map(|(name, t)| {
+            let command = match (&t["cmd"], &t["shell"], &t["script"]) {
+                (serde_json::Value::Array(a), ..) => {
+                    let words: Vec<&str> = a.iter().filter_map(|w| w.as_str()).collect();
+                    match words.as_slice() {
+                        [c, s, rest @ ..]
+                            if !cfg!(windows)
+                                && c.eq_ignore_ascii_case("cmd")
+                                && s.eq_ignore_ascii_case("/c") =>
+                        {
+                            rest.join(" ")
+                        }
+                        _ => words.iter().map(|w| quote(w)).collect::<Vec<_>>().join(" "),
+                    }
+                }
+                (serde_json::Value::String(s), ..)
+                | (_, serde_json::Value::String(s), _)
+                | (.., serde_json::Value::String(s)) => s.clone(),
+                _ => return None,
+            };
+            let command = match t["cwd"].as_str().or(default_cwd) {
+                // cmd's cd takes `\` and needs /d for another drive.
+                Some(cwd) if !matches!(cwd, "" | "." | "./") && cfg!(windows) => {
+                    format!("cd /d \"{}\" && {command}", cwd.replace('/', "\\"))
+                }
+                Some(cwd) if !matches!(cwd, "" | "." | "./") => {
+                    format!("cd {} && {command}", quote(cwd))
+                }
+                _ => command,
+            };
+            Some((
+                name.clone(),
+                command,
+                t["autostart"].as_bool().unwrap_or(autostart),
+            ))
+        })
+        .collect();
+    Some((source, list))
+}
+
+/// A word as the shell reads it back: as it is when plain, else in double quotes.
+fn quote(w: &str) -> String {
+    if !w.is_empty()
+        && w.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./:=@%+,".contains(c))
+    {
+        w.to_string()
+    } else {
+        format!("\"{}\"", w.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+}
+
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 40
@@ -1490,6 +1577,74 @@ mod tests {
         .unwrap();
         let p = detect(&site(&dir, "next"));
         assert_eq!((p.len(), p[0].source), (1, ".anvil.toml"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn dekit_and_mprocs_tasks_are_rows() {
+        let dir = std::env::temp_dir().join(format!("anvil-dekit-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("mprocs.yaml"),
+            "procs:\n  web:\n    shell: npm run dev\n  docs:\n    cmd: [\"mdbook\", \"serve\"]\n    autostart: false\n",
+        )
+        .unwrap();
+        let rows = |kind| {
+            detect(&site(&dir, kind))
+                .into_iter()
+                .map(|p| (p.name, p.command, p.manual, p.source))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rows("laravel"),
+            [
+                ("web".into(), "npm run dev".into(), false, "mprocs.yaml"),
+                ("docs".into(), "mdbook serve".into(), true, "mprocs.yaml"),
+            ]
+        );
+        // dekit.yaml wins; autostart is off unless set; cwd, cmd /c and quoting.
+        fs::write(
+            dir.join("dekit.yaml"),
+            r#"# a comment
+tasks:
+  frontend:
+    cmd: ["cmd", "/c", "pnpm run dev"]
+    cwd: "./frontend"
+    autostart: true
+  backend:
+    cmd: ["dotnet", "watch", "run"]
+    cwd: ./back end
+  logs:
+    cmd: tail -f 'var/log/api server.log'
+  "bad name":
+    cmd: x
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            rows("folder"),
+            [
+                (
+                    "frontend".into(),
+                    "cd ./frontend && pnpm run dev".into(),
+                    false,
+                    "dekit.yaml"
+                ),
+                (
+                    "backend".into(),
+                    "cd \"./back end\" && dotnet watch run".into(),
+                    true,
+                    "dekit.yaml"
+                ),
+                (
+                    "logs".into(),
+                    "tail -f 'var/log/api server.log'".into(),
+                    true,
+                    "dekit.yaml"
+                ),
+            ]
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
