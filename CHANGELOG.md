@@ -7,6 +7,8 @@ contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-11-11
+
 ### Changed
 
 - An application's Settings tab lists only the PHP extensions that are on; add one with Add, as in Settings › PHP.
@@ -300,7 +302,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/n1crack/anvil/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/n1crack/anvil/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/n1crack/anvil/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/n1crack/anvil/compare/v0.3.3...v0.3.4
