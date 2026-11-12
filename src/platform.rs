@@ -766,24 +766,41 @@ pub fn kill(pid: u32, group: bool) {
 
 #[cfg(windows)]
 pub fn kill(pid: u32, group: bool) {
-    if group {
-        let mut cmd = command("taskkill");
-        cmd.args(["/F", "/T", "/PID", &pid.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        let _ = no_window(&mut cmd).status();
-        return;
-    }
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
     };
-    // SAFETY: plain Win32 calls on a handle opened and closed here.
+    // The tree found here rather than by `taskkill /T`: while Windows shuts down no new
+    // program starts (0xc0000142, in a dialog that holds the shutdown), and Anvil stops
+    // everything then.
+    // ponytail: a parent id names a process that may have ended and its id been reused,
+    // as with taskkill /T; compare creation times if that ever kills a stranger.
+    let mut tree = vec![pid];
+    if group {
+        let table = process_table();
+        let mut i = 0;
+        while i < tree.len() {
+            let kids: Vec<u32> = table
+                .iter()
+                .filter(|(c, p, ..)| *p == tree[i] && !tree.contains(c))
+                .map(|(c, ..)| *c)
+                .collect();
+            tree.extend(kids);
+            i += 1;
+        }
+    }
+    // SAFETY: plain Win32 calls on handles opened and closed here.
     unsafe {
-        let h = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
-        if !h.is_null() {
+        let handles: Vec<_> = tree
+            .iter()
+            .map(|&p| OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, p))
+            .filter(|h| !h.is_null())
+            .collect();
+        for &h in &handles {
             TerminateProcess(h, 1);
-            // Termination is asynchronous: wait (briefly) until its ports are free.
+        }
+        // Termination is asynchronous: wait (briefly) until their ports are free.
+        for &h in &handles {
             WaitForSingleObject(h, 3000);
             CloseHandle(h);
         }
@@ -924,7 +941,7 @@ pub fn orphan_leaders() -> Vec<(u32, String)> {
     vec![]
 }
 
-/// Windows: `kill` ends a whole tree (`taskkill /T`) and there are no groups to leave.
+/// Windows: `kill` ends a whole tree and there are no groups to leave.
 #[cfg(windows)]
 pub fn processes() -> Vec<(u32, u32, u32, String)> {
     vec![]

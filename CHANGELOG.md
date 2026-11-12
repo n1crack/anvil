@@ -7,6 +7,11 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows: shutting down with Anvil running no longer shows a taskkill.exe error or waits on Anvil.
+- Windows: PHP versions read as 8.5.12, not 8.5.12-1, and newer PHP patches are offered again.
+
 ## [0.4.3] - 2026-11-12
 
 ### Fixed

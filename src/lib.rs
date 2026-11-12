@@ -1407,7 +1407,14 @@ fn releases_from(index: &serde_json::Value, plat: &str) -> PhpReleases {
             if !plat.is_empty() && rel["files"][format!("fpm-{plat}")].is_null() {
                 return None;
             }
-            let version = rel["version"].as_str()?.to_string();
+            // windows.php.net counts its rebuilds after a dash, "8.5.12-1": the release is
+            // what's before it (and what `php -v` says once installed).
+            let version = rel["version"].as_str()?;
+            let version = match version.rsplit_once('-') {
+                Some((v, n)) if n.chars().all(|c| c.is_ascii_digit()) => v,
+                _ => version,
+            }
+            .to_string();
             let build = rel["build"].as_u64().map_or(1, |b| b as u32);
             Some((m.to_string(), (version, rel["preview"] == true, build)))
         })
@@ -4935,9 +4942,10 @@ mod tests {
         assert_eq!(got["8.6"], ("8.6.0RC4".into(), true, 1));
         assert_eq!(got["8.4"], ("8.4.27".into(), false, 2));
         // windows.php.net's releases.json: one build per version, no previews.
-        let win = serde_json::json!({"8.4": {"version": "8.4.27"}});
+        let win = serde_json::json!({"8.4": {"version": "8.4.27-1"}});
         assert_eq!(releases_from(&win, "")["8.4"], ("8.4.27".into(), false, 1));
         assert!(newer_patch("8.4.9", "8.4.27"));
+        assert!(newer_patch(&releases_from(&win, "")["8.4"].0, "8.4.28"));
         assert!(!newer_patch("8.4.27", "8.4.27"));
         assert!(!newer_patch("8.4.27", "8.4.9"));
         assert!(!newer_patch("8.4.27", "8.4.x"));
