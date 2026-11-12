@@ -41,6 +41,7 @@ const COMMANDS: &[&str] = &[
     "leftover_keep",
     "setup_status",
     "setup_fix",
+    "php_offered",
     "set_group",
     "set_site_ini",
     "set_secure",

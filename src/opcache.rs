@@ -263,11 +263,23 @@ pub fn prune_sources() {
 pub fn installed_full(minor: &str) -> Result<String> {
     // Settings asks for every version it lists; starting a program that isn't there
     // can take seconds on Windows, for each extension of each missing version.
+    // Asked on every snapshot: kept per binary until an install or update replaces it.
+    static SEEN: std::sync::Mutex<Vec<(std::path::PathBuf, std::time::SystemTime, String)>> =
+        std::sync::Mutex::new(Vec::new());
     let php = crate::php_bin(minor);
+    let Ok(changed) = std::fs::metadata(&php).and_then(|m| m.modified()) else {
+        bail!("PHP {minor} is not installed");
+    };
     if !php.is_file() {
         bail!("PHP {minor} is not installed");
     }
-    let out = crate::platform::command(php)
+    if let Some((.., full)) = crate::lock(&SEEN)
+        .iter()
+        .find(|(p, t, _)| *p == php && *t == changed)
+    {
+        return Ok(full.clone());
+    }
+    let out = crate::platform::command(&php)
         .args(["-n", "-r", "echo PHP_VERSION;"])
         .output()
         .with_context(|| format!("PHP {minor} is not installed"))?;
@@ -275,6 +287,9 @@ pub fn installed_full(minor: &str) -> Result<String> {
     if !out.status.success() || !full.starts_with(&format!("{minor}.")) {
         bail!("couldn't read the version of PHP {minor}");
     }
+    let mut seen = crate::lock(&SEEN);
+    seen.retain(|(p, ..)| *p != php);
+    seen.push((php, changed, full.clone()));
     Ok(full)
 }
 

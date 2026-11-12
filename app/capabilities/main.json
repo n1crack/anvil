@@ -104,6 +104,7 @@
     "allow-set-site-ini",
     "allow-settings",
     "allow-setup-fix",
+    "allow-php-offered",
     "allow-setup-status",
     "allow-share-start",
     "allow-share-stop",

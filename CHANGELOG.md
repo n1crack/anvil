@@ -7,6 +7,12 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- First run shows the steps in order: set up Anvil, install PHP, add your projects folder, each ticked once done.
+- The first PHP is 8.5 unless you pick another; 8.6 is offered as a preview. PHP version pickers show the full release, such as 8.5.1.
+- Before setup, an app's address is dimmed with a Needs setup button.
+
 ## [0.4.1] - 2026-11-11
 
 ### Added

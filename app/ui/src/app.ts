@@ -139,8 +139,49 @@ window.addEventListener(
   true,
 );
 
-/** One titlebar button for every step still missing; it opens a bubble with each step, what
- * it does and its own button, so nothing runs (or asks for a password) on that first click. */
+// The last `setup_status`, its missing steps and the one running: the titlebar button, the
+// welcome's steps and an address's "Needs setup" all read it.
+type SetupStep = [string, string, string, string]; // [step, button, while running, what it does]
+let setup: { st: any; steps: SetupStep[]; busy?: string } | null = null;
+
+/** Run one setup step; the titlebar and the welcome say it's running until it ends. */
+async function runSetup(step: string, version?: string) {
+  loadSetup(step);
+  try {
+    const after = await invoke("setup_fix", { step, version });
+    // macOS may refuse to trust the certificate system-wide without asking;
+    // the login keychain then takes it, with its own prompt.
+    if (step === "all" && after && !after.trusted) await invoke("setup_fix", { step: "trust" });
+  } catch (e) {
+    showError(String(e));
+  }
+  loadSetup();
+}
+
+/** The setup bubble at `b`: each missing step, what it does and its own button, so nothing
+ * runs (or asks for a password) on the click that opens it. */
+function setupPop(b: HTMLElement) {
+  if (setupWasOpen) return (setupWasOpen = false);
+  if (!setup?.steps.length) return;
+  const pop = el("div", "pop-confirm wide setup-pop");
+  for (const [step, name, , what] of setup.steps) {
+    const go = el("button", null, name);
+    go.disabled = !!setup.busy;
+    go.onclick = () => {
+      close();
+      runSetup(step);
+    };
+    pop.append(el("p", null, what), go);
+    // Another program holding .test or ports 80/443: said before the password, not blocking.
+    if (step === "all") for (const c of setup.st.conflicts ?? []) pop.append(el("p", "setup-conflict", c));
+  }
+  const close = popAt(b, pop, pop.querySelector("button"), "left");
+}
+
+/** Whether .test addresses answer yet: the lookups and ports 80/443 are set up. */
+export const addressesReady = () => !setup || (setup.st.resolver && setup.st.ports);
+
+/** One titlebar button for every step still missing; it opens the setup bubble. */
 async function loadSetup(busy?: string) {
   let st;
   try {
@@ -150,8 +191,7 @@ async function loadSetup(busy?: string) {
   }
   const bar = $("#setup");
   const machine = SETUP_FIELDS.some((f) => !st[f]);
-  // [step, button, while running, what it does]
-  const steps: [string, string, string, string][] = [];
+  const steps: SetupStep[] = [];
   if (machine)
     steps.push([
       "all",
@@ -176,6 +216,8 @@ async function loadSetup(busy?: string) {
       "Installing Git…",
       "Git for Windows, through winget: new apps get a repository, and worktrees work. Windows may ask once.",
     ]);
+  const was = setup && addressesReady();
+  setup = { st, steps, busy };
   bar.hidden = !steps.length;
   const running = steps.find(([step]) => step === busy);
   const label = running ? running[2] : machine ? "Set up Anvil" : steps.length > 1 ? `Finish setup (${steps.length})` : steps[0]?.[1];
@@ -183,31 +225,11 @@ async function loadSetup(busy?: string) {
   if (running) b.prepend(el("span", "spin-dot"));
   b.disabled = !!busy;
   b.setAttribute("aria-haspopup", "dialog");
-  b.onclick = () => {
-    if (setupWasOpen) return (setupWasOpen = false);
-    const pop = el("div", "pop-confirm wide setup-pop");
-    for (const [step, name, , what] of steps) {
-      const go = el("button", null, name);
-      go.onclick = async () => {
-        close();
-        loadSetup(step);
-        try {
-          const after = await invoke("setup_fix", { step });
-          // macOS may refuse to trust the certificate system-wide without asking;
-          // the login keychain then takes it, with its own prompt.
-          if (step === "all" && after && !after.trusted) await invoke("setup_fix", { step: "trust" });
-        } catch (e) {
-          showError(String(e));
-        }
-        loadSetup();
-      };
-      pop.append(el("p", null, what), go);
-      // Another program holding .test or ports 80/443: said before the password, not blocking.
-      if (step === "all") for (const c of st.conflicts ?? []) pop.append(el("p", "setup-conflict", c));
-    }
-    const close = popAt(b, pop, pop.querySelector("button"), "left");
-  };
+  b.onclick = () => setupPop(b);
   bar.replaceChildren(b);
+  if (!snap) return;
+  if (!snap.sites.length) welcome($("#site"));
+  else if (was !== addressesReady()) drawMeta();
 }
 
 export function render() {
@@ -590,26 +612,93 @@ export function filterNote(m, label) {
   return note;
 }
 
-/** First run: one clear next step instead of an empty pane. */
+let phpOffered: [string, string | null, boolean][] | null = null; // (minor, full release, preview), newest first
+let phpPick = "8.5";
+
+/** First run: the steps in order, each with its own button and a tick once done, instead
+ * of an empty pane: set up Anvil (one password), install a PHP, add the projects folder. */
 export function welcome(root) {
   const box = el("div", "welcome");
-  const icon = el("img");
-  icon.src = "icon.png";
-  icon.alt = "";
-  const add = el("button", "primary", "Add Folder of Applications…");
+  const logo = el("img");
+  logo.src = "icon.png";
+  logo.alt = "";
+  box.append(logo, el("h1", null, "Welcome to Anvil"));
+  const st = setup?.st;
+  const busy = setup?.busy;
+  const steps = el("ol", "welcome-steps");
+  const step = (n: number, done: boolean, title: string, what: string, act?: HTMLElement | null) => {
+    const li = el("li", done ? "done" : null);
+    const mark = el("span", "step-n");
+    if (done) mark.append(icon("check"));
+    else mark.textContent = String(n);
+    const text = el("div", "step-text");
+    text.append(el("strong", null, title), el("small", null, what));
+    li.append(mark, text);
+    if (act && !done) li.append(act);
+    steps.append(li);
+  };
+  const running = (name: string) => {
+    const b = el("button", "primary", setup?.steps.find(([s]) => s === busy)?.[2] ?? name);
+    b.prepend(el("span", "spin-dot"));
+    b.disabled = true;
+    return b;
+  };
+
+  const machine = !st || SETUP_FIELDS.some((f) => !st[f]);
+  let go: HTMLElement;
+  if (busy === "all") go = running("Setting up…");
+  else {
+    go = el("button", "primary", "Set Up…");
+    (go as HTMLButtonElement).disabled = !!busy;
+    go.onclick = () => runSetup("all");
+  }
+  step(
+    1,
+    !machine,
+    "Set up Anvil",
+    `.${snap.tld} addresses, ports 80 and 443, HTTPS, and php, composer and node in your terminal. Asks for your password once.`,
+    go,
+  );
+  for (const c of (machine && st?.conflicts) || []) steps.append(el("p", "setup-conflict", c));
+
+  let php: HTMLElement;
+  if (busy === "php") php = running("Installing PHP…");
+  else {
+    php = el("span", "step-act");
+    const pick = document.createElement("select");
+    pick.setAttribute("aria-label", "PHP version");
+    for (const [v, full, preview] of phpOffered ?? [[phpPick, null, false]])
+      pick.append(
+        Object.assign(document.createElement("option"), {
+          value: v,
+          textContent: `PHP ${full ?? v}${preview ? " (preview)" : ""}`,
+        }),
+      );
+    pick.value = phpPick;
+    pick.onchange = () => (phpPick = pick.value);
+    const install = el("button", "primary", "Install");
+    install.disabled = !!busy;
+    install.onclick = () => runSetup("php", phpPick);
+    php.append(pick, install);
+  }
+  step(2, !!st?.php, "Install PHP", "For PHP applications; others can be added later in Settings › PHP. No password needed.", php);
+
+  const add = el("button", "primary", "Add Folder…");
   add.onclick = addAppsFolder;
+  step(3, false, "Add your projects folder", `Each project in it gets its own .${snap.tld} address.`, add);
   const create = el("button", "link", "or create a new application");
   create.onclick = () => late.openNewApp();
-  box.append(
-    icon,
-    el("h1", null, "Welcome to Anvil"),
-    el("p", "muted", `Add the folder where your projects live. Each project in it gets its own .${snap.tld} address.`),
-    add,
-    create,
-  );
+  box.append(steps, create);
   const note = parkedNoteEl();
   if (note) box.append(note);
   root.replaceChildren(box);
+  if (!phpOffered && !st?.php)
+    invoke("php_offered")
+      .then((list) => {
+        phpOffered = list;
+        if (!snap.sites.length) welcome($("#site"));
+      })
+      .catch(() => {});
 }
 
 // What the last Add Folder of Applications… added nothing for: a folder that is one
@@ -1372,13 +1461,24 @@ export function drawMeta() {
     link.href = "#";
     link.onclick = (e) => {
       e.preventDefault();
-      if (snap.running) open("browser");
+      if (snap.running && addressesReady()) open("browser");
     };
     // A stopped server can't answer: the address looks and acts off.
-    link.classList.toggle("off", !snap.running);
-    link.title = snap.running ? keys("Open in browser (⌘O)") : "Start Anvil to open this address";
+    // Before setup the address doesn't answer: dimmed, and a button that opens the steps.
+    const ready = addressesReady();
+    link.classList.toggle("off", !snap.running || !ready);
+    link.title = !ready
+      ? "This address works once Anvil is set up"
+      : snap.running
+        ? keys("Open in browser (⌘O)")
+        : "Start Anvil to open this address";
     if (!securing.has(s.name)) addr.append(lockOf(s.secure));
     addr.append(link);
+    if (!ready) {
+      const fix = el("button", "inline-action", "Needs setup");
+      fix.onclick = () => $("#setup .setup-go")?.click();
+      addr.append(fix);
+    }
     if (securing.has(s.name)) {
       const busy = el("span", "securing", s.secure ? "Turning off HTTPS…" : "Turning on HTTPS…");
       busy.prepend(el("span", "spin-dot"));
@@ -1810,14 +1910,15 @@ export function renderSite() {
   kindSel.onchange = () => setRun(s, kindSel, "kind", "set_app", kindSel.value ? { kind: kindSel.value } : { reset: ["kind"] });
 
   const php = $("#php", root);
+  const full = (v: string) => snap.php_full?.[v] ?? v;
   // Unset follows the project's .anvil.toml when its version is installed, else the default.
   const filePhp = fromFile(s, "php");
   php.add(
     filePhp && snap.php_installed.includes(filePhp)
-      ? new Option(`From .anvil.toml (${filePhp})`, "")
-      : new Option(`Default (${snap.php_default ?? "none"})`, ""),
+      ? new Option(`From .anvil.toml (${full(filePhp)})`, "")
+      : new Option(`Default (${snap.php_default ? full(snap.php_default) : "none"})`, ""),
   );
-  for (const v of snap.php_installed) php.add(new Option(`PHP ${v}`, v));
+  for (const v of snap.php_installed) php.add(new Option(`PHP ${full(v)}`, v));
   php.value = s.php_pinned ? s.php : "";
   php.onchange = () =>
     setPhp(s, php.value || null, php.value || (filePhp && snap.php_installed.includes(filePhp) ? filePhp : snap.php_default));

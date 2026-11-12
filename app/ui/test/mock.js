@@ -889,9 +889,19 @@ const mockHandle = (cmd, a) => {
       return mockSnap;
     case "setup_status":
       return window.mockSetup ?? { resolver: true, ports: true, trusted: true, php: true, shims: true };
+    case "php_offered":
+      return [
+        ["8.6", "8.6.0RC4", true],
+        ["8.5", "8.5.1", false],
+        ["8.4", "8.4.16", false],
+        ["8.3", "8.3.29", false],
+        ["8.2", "8.2.30", false],
+        ["8.1", "8.1.34", false],
+      ];
     case "setup_fix": {
       if (a.step === "all") Object.assign(window.mockSetup, { resolver: true, ports: true, shims: true });
       if (a.step === "trust") window.mockSetup.trusted = true;
+      if (a.step === "php") window.mockSetup.php = true;
       return window.mockSetup;
     }
     case "processes":

@@ -52,6 +52,8 @@ export interface Snapshot {
   http_port: number;
   php_default: string | null;
   php_installed: string[];
+  /** Each installed version's patch release: 8.5 -> 8.5.1. */
+  php_full?: Record<string, string>;
   editor: string | null;
   terminal: string | null;
   git_client: string | null;

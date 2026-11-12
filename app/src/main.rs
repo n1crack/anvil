@@ -75,6 +75,8 @@ struct Snapshot {
     http_port: u16,
     php_default: Option<String>,
     php_installed: Vec<String>,
+    /// Each installed version's patch release, 8.5 -> 8.5.1, for the version pickers.
+    php_full: std::collections::BTreeMap<String, String>,
     editor: Option<String>,
     /// Terminal app for "Open in Terminal"; none means macOS Terminal.
     terminal: Option<String>,
@@ -525,6 +527,10 @@ fn snapshot(app: &App) -> Res<Snapshot> {
         hidden: anvil::hidden_sites(&cfg),
         php_default: cfg.php.clone(),
         php_installed: anvil::installed_php(),
+        php_full: anvil::installed_php()
+            .into_iter()
+            .filter_map(|v| Some((v.clone(), anvil::opcache::installed_full(&v).ok()?)))
+            .collect(),
         php_ext_catalog: anvil::phpext::offered().map(|e| e.name).collect(),
         php_ext_needs: anvil::phpext::offered()
             .filter_map(|e| Some((e.name, anvil::phpext::needs(e.name)?)))
@@ -2734,7 +2740,7 @@ fn create_needs(
         return Ok(None);
     };
     let (name, version) = match id {
-        "php" => ("PHP", "8.4".to_string()),
+        "php" => ("PHP", anvil::PHP_FIRST.to_string()),
         // A service: the form offers the Add service sheet, which asks for its license.
         "mysql" => (
             "MySQL",
@@ -3159,7 +3165,12 @@ fn setup_all(app: &App, cfg: &Config) -> Res<()> {
 /// Do one setup step. The resolver file needs an administrator: macOS asks for
 /// the password in its own dialog. "all" does every step still missing.
 #[tauri::command(async)]
-fn setup_fix(handle: AppHandle, app: State<App>, step: String) -> Res<anvil::Setup> {
+fn setup_fix(
+    handle: AppHandle,
+    app: State<App>,
+    step: String,
+    version: Option<String>,
+) -> Res<anvil::Setup> {
     let mut cfg = anvil::load().map_err(err)?;
     // `php_install` saves through `anvil::update` itself, after the download.
     match step.as_str() {
@@ -3191,7 +3202,8 @@ fn setup_fix(handle: AppHandle, app: State<App>, step: String) -> Res<anvil::Set
             res.map_err(err)?;
         }
         "trust" => anvil::trust().map_err(err)?,
-        "php" => anvil::php_install(&mut cfg, "8.4").map_err(err)?,
+        "php" => anvil::php_install(&mut cfg, version.as_deref().unwrap_or(anvil::PHP_FIRST))
+            .map_err(err)?,
         "git" => anvil::install_git().map_err(err)?,
         "node" => anvil::runtimes::node_lts()
             .and_then(|v| anvil::runtimes::install("node", &v))
@@ -3737,6 +3749,30 @@ fn open_url(url: String) -> Res<()> {
 
 /* ---------- Settings ---------- */
 
+/// One the source doesn't have (8.6 before its first RC) isn't offered.
+fn offered(releases: Option<&anvil::PhpReleases>, v: &str) -> bool {
+    releases.map_or(!anvil::PHP_PREVIEWS.contains(&v), |r| r.contains_key(v))
+}
+
+/// The PHP versions the welcome's Install PHP offers, newest first: (minor, full release,
+/// preview). Asks the source when no check has yet; offline, the minors alone.
+#[tauri::command(async)]
+fn php_offered() -> Vec<(&'static str, Option<String>, bool)> {
+    let mut releases = anvil::lock(&PHP_RELEASES).clone();
+    if releases.is_none() {
+        releases = anvil::php_releases().ok();
+        *anvil::lock(&PHP_RELEASES) = releases.clone();
+    }
+    anvil::PHP_VERSIONS
+        .iter()
+        .filter(|v| offered(releases.as_ref(), v))
+        .map(|v| match releases.as_ref().and_then(|r| r.get(*v)) {
+            Some((full, preview, _)) => (*v, Some(full.clone()), *preview),
+            None => (*v, None, anvil::PHP_PREVIEWS.contains(v)),
+        })
+        .collect()
+}
+
 #[derive(Serialize)]
 struct PhpVersion {
     version: &'static str,
@@ -3963,13 +3999,7 @@ fn settings(handle: AppHandle) -> Res<Settings> {
     Ok(Settings {
         php: anvil::PHP_VERSIONS
             .iter()
-            // One the source doesn't have (8.6 before its first RC) isn't offered.
-            .filter(|v| {
-                installed.iter().any(|i| i == *v)
-                    || releases
-                        .as_ref()
-                        .map_or(!anvil::PHP_PREVIEWS.contains(*v), |r| r.contains_key(**v))
-            })
+            .filter(|v| installed.iter().any(|i| i == *v) || offered(releases.as_ref(), v))
             .map(|v| PhpVersion {
                 version: v,
                 installed: installed.iter().any(|i| i == v),
@@ -5616,6 +5646,7 @@ fn main() {
             leftover_keep,
             setup_status,
             setup_fix,
+            php_offered,
             set_group,
             set_site_ini,
             set_secure,

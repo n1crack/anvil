@@ -1279,6 +1279,9 @@ pub fn php_dir(v: &str) -> PathBuf {
 /// listed only once it does (`php_releases`).
 pub const PHP_VERSIONS: [&str; 6] = ["8.6", "8.5", "8.4", "8.3", "8.2", "8.1"];
 
+/// The PHP a first install gets when none is picked: the newest release.
+pub const PHP_FIRST: &str = "8.5";
+
 /// Versions published only as previews (betas, RCs) so far: not offered until the
 /// source is known to have one.
 pub const PHP_PREVIEWS: [&str; 1] = ["8.6"];
