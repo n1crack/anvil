@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "anvil"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-app"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anvil",
  "anyhow",

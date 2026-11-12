@@ -7,6 +7,8 @@ contain breaking changes.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-12
+
 ### Fixed
 
 - The title bar's Install PHP said PHP 8.4 while installing 8.5; an app's Overview now offers PHP 8.5 too.
@@ -331,7 +333,8 @@ The first public release, a beta for macOS: a desktop app that carries the `anvi
 - Everything listens on 127.0.0.1 only; dotfiles are never served.
 - Downloads are checked against their published checksums.
 
-[Unreleased]: https://github.com/n1crack/anvil/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/n1crack/anvil/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/n1crack/anvil/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/n1crack/anvil/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/n1crack/anvil/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/n1crack/anvil/compare/v0.3.6...v0.4.0
