@@ -7,6 +7,10 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- The title bar's Install PHP said PHP 8.4 while installing 8.5; an app's Overview now offers PHP 8.5 too.
+
 ## [0.4.2] - 2026-11-12
 
 ### Changed

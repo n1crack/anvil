@@ -199,7 +199,7 @@ async function loadSetup(busy?: string) {
       "Setting up…",
       "Local .test domains, ports 80 and 443, the HTTPS certificate, and php, composer, laravel and node in your terminal. Asks for your administrator password once.",
     ]);
-  if (!st.php) steps.push(["php", "Install PHP", "Installing PHP…", "PHP 8.4, for PHP applications. No password needed."]);
+  if (!st.php) steps.push(["php", "Install PHP", "Installing PHP…", `PHP ${PHP_FIRST}, for PHP applications. No password needed.`]);
   // Only when an app needs it: a Node.js app, or a package.json (a Laravel app's Vite).
   if (st.node === false)
     steps.push([
@@ -612,8 +612,10 @@ export function filterNote(m, label) {
   return note;
 }
 
+/** The PHP a first install gets, as `anvil::PHP_FIRST`. */
+const PHP_FIRST = "8.5";
 let phpOffered: [string, string | null, boolean][] | null = null; // (minor, full release, preview), newest first
-let phpPick = "8.5";
+let phpPick = PHP_FIRST;
 
 /** First run: the steps in order, each with its own button and a tick once done, instead
  * of an empty pane: set up Anvil (one password), install a PHP, add the projects folder. */
@@ -1872,12 +1874,12 @@ export function renderSite() {
   // A plain folder runs on nothing; its path says what it is.
   if (s.kind === "folder") $('[data-field="runtime"]', root).closest(".fact")?.remove();
   if (PHP_KINDS.has(s.kind) && !s.php && !fromFile(s, "php")) {
-    const install = el("button", "inline-action", "Install PHP 8.4");
+    const install = el("button", "inline-action", `Install PHP ${PHP_FIRST}`);
     install.onclick = async () => {
       install.disabled = true;
-      install.textContent = "Installing PHP 8.4…";
+      install.textContent = `Installing PHP ${PHP_FIRST}…`;
       // Returns the Settings view, not a snapshot: refresh the state afterwards.
-      await invoke("php_install", { version: "8.4" }).catch((e) => showError(String(e)));
+      await invoke("php_install", { version: PHP_FIRST }).catch((e) => showError(String(e)));
       call("state");
     };
     $('[data-field="runtime"]', root).append(" ", install);
